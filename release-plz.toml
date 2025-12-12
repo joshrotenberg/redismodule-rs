@@ -1,0 +1,41 @@
+[workspace]
+# Enable changelog generation
+changelog_update = true
+
+# Create GitHub releases and git tags
+git_release_enable = true
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+
+# Validate semantic versioning compatibility
+semver_check = true
+
+# Publishing settings
+publish = true
+publish_timeout = "15m"
+
+# PR settings
+pr_labels = ["release"]
+
+# Main crate - creates the GitHub release
+[[package]]
+name = "redis-module"
+git_release_enable = true
+git_tag_enable = true
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+
+# Macro crates - published to crates.io but no separate releases/tags
+[[package]]
+name = "redis-module-macros"
+publish = true
+git_release_enable = false
+git_tag_enable = false
+changelog_update = false
+
+[[package]]
+name = "redis-module-macros-internals"
+publish = true
+git_release_enable = false
+git_tag_enable = false
+changelog_update = false
