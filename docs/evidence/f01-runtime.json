@@ -1,0 +1,2514 @@
+{
+  "artifacts": {
+    "debug": {
+      "build/debug/examples/libacl-d9edc55ebf03adc3.dylib": "0759adfaad24d7eb9925d90e17aec2d9aeed48a6dd033c1026900e7ce27aceef",
+      "build/debug/examples/libacl.dylib": "0759adfaad24d7eb9925d90e17aec2d9aeed48a6dd033c1026900e7ce27aceef",
+      "build/debug/examples/libblock-169a5e3b011e2bbf.dylib": "63d810dce1e0295252a1d7e12fb27aeb135b8f2f2316cc4778d2642daac3b41e",
+      "build/debug/examples/libblock.dylib": "63d810dce1e0295252a1d7e12fb27aeb135b8f2f2316cc4778d2642daac3b41e",
+      "build/debug/examples/libcall-da25f5730ea84301.dylib": "de868910a7e4e54b2c4d1f0613b1805a9cd5b7834715468916f4210e38b7a792",
+      "build/debug/examples/libcall.dylib": "de868910a7e4e54b2c4d1f0613b1805a9cd5b7834715468916f4210e38b7a792",
+      "build/debug/examples/libconfiguration-9b025b4ca6fad80f.dylib": "836af48380b1fb929bcaaf98b963081d340e91e9719f580cf841b60cbb9abcb9",
+      "build/debug/examples/libconfiguration.dylib": "836af48380b1fb929bcaaf98b963081d340e91e9719f580cf841b60cbb9abcb9",
+      "build/debug/examples/libctx_flags-74763b3e4cdca6b7.dylib": "dd199619c64ccfad6c052e5024909f8922d48123377693626025c436f92b797f",
+      "build/debug/examples/libctx_flags.dylib": "dd199619c64ccfad6c052e5024909f8922d48123377693626025c436f92b797f",
+      "build/debug/examples/libdata_type-54cfeeb9f8ec56d5.dylib": "c73180efb1e6a06b067ff1c4fe43ce2718ff1e6ef451086e2c8b3555b49c3859",
+      "build/debug/examples/libdata_type.dylib": "c73180efb1e6a06b067ff1c4fe43ce2718ff1e6ef451086e2c8b3555b49c3859",
+      "build/debug/examples/libevents-58aad3ec7c7aee9c.dylib": "896be2951915a8cc99c585c14002ea0a4bcd1e813b0243f5ebb3a70d42f69132",
+      "build/debug/examples/libevents.dylib": "896be2951915a8cc99c585c14002ea0a4bcd1e813b0243f5ebb3a70d42f69132",
+      "build/debug/examples/libexpire-6ebf880b2536e614.dylib": "d749e239c7fb3d5b0203669bd63ea4f5f83c7bfb80ffcd82bc050e5b12004d85",
+      "build/debug/examples/libexpire.dylib": "d749e239c7fb3d5b0203669bd63ea4f5f83c7bfb80ffcd82bc050e5b12004d85",
+      "build/debug/examples/libhello-1f861ef769c537d0.dylib": "16ded75dabb812f3fd822a7a896ef9a91949b90bf66f4b0897a9f54313abb663",
+      "build/debug/examples/libhello.dylib": "16ded75dabb812f3fd822a7a896ef9a91949b90bf66f4b0897a9f54313abb663",
+      "build/debug/examples/libinfo-6f86302b57722318.dylib": "7b06cd049838e553e6203f58178bd95106646750c2388f2523e4e072debf0cf1",
+      "build/debug/examples/libinfo.dylib": "7b06cd049838e553e6203f58178bd95106646750c2388f2523e4e072debf0cf1",
+      "build/debug/examples/libinfo_handler_builder-85588058686253a2.dylib": "69d6cddc49d5a5064a27db56d1975c50a11df45feb1c45573b882b10b5e7f306",
+      "build/debug/examples/libinfo_handler_builder.dylib": "69d6cddc49d5a5064a27db56d1975c50a11df45feb1c45573b882b10b5e7f306",
+      "build/debug/examples/libinfo_handler_macro-32d2f1ca1b225eb6.dylib": "6de3a6b083d7ff1b4c9a0b18d1ada1a9f354ca3f09c8a02678703a9e5bbd48c3",
+      "build/debug/examples/libinfo_handler_macro.dylib": "6de3a6b083d7ff1b4c9a0b18d1ada1a9f354ca3f09c8a02678703a9e5bbd48c3",
+      "build/debug/examples/libinfo_handler_multiple_sections-72093415ea759d3e.dylib": "d69387191c0c77339217667393e8a359f2a32660556911787d9e91854174daf7",
+      "build/debug/examples/libinfo_handler_multiple_sections.dylib": "d69387191c0c77339217667393e8a359f2a32660556911787d9e91854174daf7",
+      "build/debug/examples/libinfo_handler_struct-54be4ceba3199cff.dylib": "1addccc96f746f81d7126f3ce15beaba4628b51a47f53a49020c80b8cde4d647",
+      "build/debug/examples/libinfo_handler_struct.dylib": "1addccc96f746f81d7126f3ce15beaba4628b51a47f53a49020c80b8cde4d647",
+      "build/debug/examples/libkeys_pos-f935e9e21e65deb5.dylib": "c498ce576a4d5d5d0a60c923de6e60f705b200e44dc93512937baf0c4c0fb6f6",
+      "build/debug/examples/libkeys_pos.dylib": "c498ce576a4d5d5d0a60c923de6e60f705b200e44dc93512937baf0c4c0fb6f6",
+      "build/debug/examples/liblists-91c2e657c4af974a.dylib": "09d8a50d3681fc0e738b5c5dbdbaa450d1dba4a06035e9677c53fdc25f89069b",
+      "build/debug/examples/liblists.dylib": "09d8a50d3681fc0e738b5c5dbdbaa450d1dba4a06035e9677c53fdc25f89069b",
+      "build/debug/examples/libload_unload-f65c6c3fb41e660e.dylib": "85c2c824d1db8423ac657118521ce9d9146928c8ff79aca86e564005324232b3",
+      "build/debug/examples/libload_unload.dylib": "85c2c824d1db8423ac657118521ce9d9146928c8ff79aca86e564005324232b3",
+      "build/debug/examples/libopen_key_with_flags-e64ad6b572d83099.dylib": "8a15994c3b4e4b1d931fb58b10ae8fff30187daf8cbca2ad9b0ec8f6dc03137a",
+      "build/debug/examples/libopen_key_with_flags.dylib": "8a15994c3b4e4b1d931fb58b10ae8fff30187daf8cbca2ad9b0ec8f6dc03137a",
+      "build/debug/examples/libproc_macro_commands-0be6463e8b0ec6da.dylib": "94ff7a0e49257dc80fdcb6c931c925bde0aa7c312aa537ce6e1af1c556e257f9",
+      "build/debug/examples/libproc_macro_commands.dylib": "94ff7a0e49257dc80fdcb6c931c925bde0aa7c312aa537ce6e1af1c556e257f9",
+      "build/debug/examples/libresponse-3e04f40c646eb74f.dylib": "6cf3c84e3862c011c9836810e3bdf8bb07ffc55b8436b75243fc7887194bc84d",
+      "build/debug/examples/libresponse.dylib": "6cf3c84e3862c011c9836810e3bdf8bb07ffc55b8436b75243fc7887194bc84d",
+      "build/debug/examples/libscan_keys-c24e0214d4cb5cc7.dylib": "9dc4f5a35e7b3a96c968a5f80da19539f124354c661859f2a217811f550457db",
+      "build/debug/examples/libscan_keys.dylib": "9dc4f5a35e7b3a96c968a5f80da19539f124354c661859f2a217811f550457db",
+      "build/debug/examples/libserver_events-fbf438802b90a4a5.dylib": "d755428864d00eafbf4fb431a73df8f0517df4709ddf538dd7e803796115432e",
+      "build/debug/examples/libserver_events.dylib": "d755428864d00eafbf4fb431a73df8f0517df4709ddf538dd7e803796115432e",
+      "build/debug/examples/libstream-ef56a6d2371740a1.dylib": "6a0f2c5c164bccd07c9947a3f4efb6f36ccb2e72eab2d8cf1cda73acb93ce2cd",
+      "build/debug/examples/libstream.dylib": "6a0f2c5c164bccd07c9947a3f4efb6f36ccb2e72eab2d8cf1cda73acb93ce2cd",
+      "build/debug/examples/libstring-d065ff27b2fd0714.dylib": "bc108e08602c9f626154de9b739e480d6274c8014df13d88b4519deae97cacc5",
+      "build/debug/examples/libstring.dylib": "bc108e08602c9f626154de9b739e480d6274c8014df13d88b4519deae97cacc5",
+      "build/debug/examples/libtest_helper-0c6bcc81fa79b3f0.dylib": "ef0ddac1f1563d3f279477c30f00983ca91e87d6fa85759a2b4c6312249b7a27",
+      "build/debug/examples/libtest_helper.dylib": "ef0ddac1f1563d3f279477c30f00983ca91e87d6fa85759a2b4c6312249b7a27",
+      "build/debug/examples/libthreads-b8bacf025a5fe58a.dylib": "2ffd468a6669409645182e7da5ddf7ad58d771d0e672baa4e7c0a085d6da8098",
+      "build/debug/examples/libthreads.dylib": "2ffd468a6669409645182e7da5ddf7ad58d771d0e672baa4e7c0a085d6da8098",
+      "build/debug/examples/libtimer-a660b89eb7da2e93.dylib": "7a212e1f6435e7cc29c7838890c749e174bc412fe6d140c759478f479b48333b",
+      "build/debug/examples/libtimer.dylib": "7a212e1f6435e7cc29c7838890c749e174bc412fe6d140c759478f479b48333b"
+    },
+    "release": {
+      "build/release/examples/libacl-a65c8ed0638a2aed.dylib": "0269ecec42316f892bc94b1e6361e51e309a4c36d31313756794db74969713cd",
+      "build/release/examples/libacl.dylib": "0269ecec42316f892bc94b1e6361e51e309a4c36d31313756794db74969713cd",
+      "build/release/examples/libblock-d7364530187cbe16.dylib": "0c60f32cb12a252dc991ed025694d8461842c92d5d4c4bf7c58657603235683f",
+      "build/release/examples/libblock.dylib": "0c60f32cb12a252dc991ed025694d8461842c92d5d4c4bf7c58657603235683f",
+      "build/release/examples/libcall-f3e4d908e69ba335.dylib": "f4f3d9fa04fe83fbe70f0c845d5a046146120411a3c68aaea71e36361979df99",
+      "build/release/examples/libcall.dylib": "f4f3d9fa04fe83fbe70f0c845d5a046146120411a3c68aaea71e36361979df99",
+      "build/release/examples/libconfiguration-3e3681e4560697c2.dylib": "72cd7aee87bc3bcac03485747477737787e05948374db0a419defe279122950c",
+      "build/release/examples/libconfiguration.dylib": "72cd7aee87bc3bcac03485747477737787e05948374db0a419defe279122950c",
+      "build/release/examples/libctx_flags-fe955de17ee5422e.dylib": "bd39f2e69517039de1834c8e6719b0f1bef484514166566fb746d9658c52bd02",
+      "build/release/examples/libctx_flags.dylib": "bd39f2e69517039de1834c8e6719b0f1bef484514166566fb746d9658c52bd02",
+      "build/release/examples/libdata_type-5d6a0f817cd540af.dylib": "0d3d7b60070eb0421fb4c91fea3150b2263756545d742e9e65867e24acc201c0",
+      "build/release/examples/libdata_type.dylib": "0d3d7b60070eb0421fb4c91fea3150b2263756545d742e9e65867e24acc201c0",
+      "build/release/examples/libevents-a11c14798922c393.dylib": "61c475bcd7caf48adda766613cc0aa8b7651cc5609e6d3733846a49c360d162c",
+      "build/release/examples/libevents.dylib": "61c475bcd7caf48adda766613cc0aa8b7651cc5609e6d3733846a49c360d162c",
+      "build/release/examples/libexpire-6ba661f606768935.dylib": "ae5b96074d047e1b529aeda4ffb97d118aa69dbaf4f316835fda1c6ecc7651db",
+      "build/release/examples/libexpire.dylib": "ae5b96074d047e1b529aeda4ffb97d118aa69dbaf4f316835fda1c6ecc7651db",
+      "build/release/examples/libhello-4a96d552de07ae95.dylib": "944c558b59898f70a05ca297e6b39536abec15bbbb0593495df58964f538855a",
+      "build/release/examples/libhello.dylib": "944c558b59898f70a05ca297e6b39536abec15bbbb0593495df58964f538855a",
+      "build/release/examples/libinfo-5e0f791bce4460c9.dylib": "8367a387d1a16c526f20cef5201a2840a9bde1d3b356e4d49687d576e43a1b36",
+      "build/release/examples/libinfo.dylib": "8367a387d1a16c526f20cef5201a2840a9bde1d3b356e4d49687d576e43a1b36",
+      "build/release/examples/libinfo_handler_builder-a9c3f9a736fca9c4.dylib": "174f57bf87121ee9e6172487ba6a51a35229577c25638e8cfbef5b2ac11d2b46",
+      "build/release/examples/libinfo_handler_builder.dylib": "174f57bf87121ee9e6172487ba6a51a35229577c25638e8cfbef5b2ac11d2b46",
+      "build/release/examples/libinfo_handler_macro-3c1d5fb32fea2885.dylib": "5157a37e3179dcaf1822c5f442228100aabe8d53497da28863dcc27da926f5dc",
+      "build/release/examples/libinfo_handler_macro.dylib": "5157a37e3179dcaf1822c5f442228100aabe8d53497da28863dcc27da926f5dc",
+      "build/release/examples/libinfo_handler_multiple_sections-1add18417193f690.dylib": "016c29546b9fc3db490ad8ed024f75984ee372eeec4bdf8d5e71a376c61c98b4",
+      "build/release/examples/libinfo_handler_multiple_sections.dylib": "016c29546b9fc3db490ad8ed024f75984ee372eeec4bdf8d5e71a376c61c98b4",
+      "build/release/examples/libinfo_handler_struct-741b66d94e4f604b.dylib": "27e40ae90f80506fc11b83ff0f5d8f89b371e8a52e7de05cc13dd064b802fd4a",
+      "build/release/examples/libinfo_handler_struct.dylib": "27e40ae90f80506fc11b83ff0f5d8f89b371e8a52e7de05cc13dd064b802fd4a",
+      "build/release/examples/libkeys_pos-5ad32cea6a0204cf.dylib": "e643d53bb11894ce6d3b4654b95cfa565ebb1a030d15e9d3379c31100eaf23b8",
+      "build/release/examples/libkeys_pos.dylib": "e643d53bb11894ce6d3b4654b95cfa565ebb1a030d15e9d3379c31100eaf23b8",
+      "build/release/examples/liblists-d74227d8d800dbb2.dylib": "f9baa73134681561d3aefff48a11118f14225856a31b81c8966a07712f613b65",
+      "build/release/examples/liblists.dylib": "f9baa73134681561d3aefff48a11118f14225856a31b81c8966a07712f613b65",
+      "build/release/examples/libload_unload-8abab5fe1f84d959.dylib": "25db17e3424a7ce21e5ca5e0fa14a45f5c3284cde740ef796e8b47735035c0d1",
+      "build/release/examples/libload_unload.dylib": "25db17e3424a7ce21e5ca5e0fa14a45f5c3284cde740ef796e8b47735035c0d1",
+      "build/release/examples/libopen_key_with_flags-6d5cbc42d0c38fdf.dylib": "e14391b9fc4ba2fff943142e31be866520eef93e1fa026d77e655e504824be4c",
+      "build/release/examples/libopen_key_with_flags.dylib": "e14391b9fc4ba2fff943142e31be866520eef93e1fa026d77e655e504824be4c",
+      "build/release/examples/libproc_macro_commands-889d53f8d414f979.dylib": "d2ac2d7ea568d54fe77931d877c5da2b609b4203a14c2fe04f75daaef78e8df0",
+      "build/release/examples/libproc_macro_commands.dylib": "d2ac2d7ea568d54fe77931d877c5da2b609b4203a14c2fe04f75daaef78e8df0",
+      "build/release/examples/libresponse-0f78d711510d2bd8.dylib": "ca6a430bf506c4eb24cdc2390462977d53b70ec4147609ed96f37f9c30e853ed",
+      "build/release/examples/libresponse.dylib": "ca6a430bf506c4eb24cdc2390462977d53b70ec4147609ed96f37f9c30e853ed",
+      "build/release/examples/libscan_keys-ff049f766215d198.dylib": "c3c6a9db4079c2a9bf6b97b86665d1c7255af120263184455f79fa344ef02e6d",
+      "build/release/examples/libscan_keys.dylib": "c3c6a9db4079c2a9bf6b97b86665d1c7255af120263184455f79fa344ef02e6d",
+      "build/release/examples/libserver_events-9b9ad89b9f3bd42b.dylib": "6f91cd6a3398dd45b91877e97178a15ff0c581d7a4914fdbdb9d6cd5f2d5c22e",
+      "build/release/examples/libserver_events.dylib": "6f91cd6a3398dd45b91877e97178a15ff0c581d7a4914fdbdb9d6cd5f2d5c22e",
+      "build/release/examples/libstream-3a0aeb2aae481d6a.dylib": "60301b918adc5aaf9975881c3ab3914a4d4da162cd3e0d1d49ea81da3c5e39f4",
+      "build/release/examples/libstream.dylib": "60301b918adc5aaf9975881c3ab3914a4d4da162cd3e0d1d49ea81da3c5e39f4",
+      "build/release/examples/libstring-ca4aa72847d12aa7.dylib": "b67ab7fc1caa49db758ae8d754c0717577b920c8ad6cbd3b001b5010a6bcef41",
+      "build/release/examples/libstring.dylib": "b67ab7fc1caa49db758ae8d754c0717577b920c8ad6cbd3b001b5010a6bcef41",
+      "build/release/examples/libtest_helper-aa95c2da953b1350.dylib": "f9b88c5a2d3aa365e15d905de812a77e216c2fa3f574e67e7921240795880260",
+      "build/release/examples/libtest_helper.dylib": "f9b88c5a2d3aa365e15d905de812a77e216c2fa3f574e67e7921240795880260",
+      "build/release/examples/libthreads-ae1312d68d723baa.dylib": "24273408154f1b6a4a6e29c020bde456701657f902c9e1093580d97c9fed1fcd",
+      "build/release/examples/libthreads.dylib": "24273408154f1b6a4a6e29c020bde456701657f902c9e1093580d97c9fed1fcd",
+      "build/release/examples/libtimer-c44821ba06682375.dylib": "45193daa30f1ff1fb527da2b744e921266aafdeb5ef7c8923b00c0facfba9f20",
+      "build/release/examples/libtimer.dylib": "45193daa30f1ff1fb527da2b744e921266aafdeb5ef7c8923b00c0facfba9f20"
+    }
+  },
+  "builds": [
+    {
+      "argv": [
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--examples",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime"
+      ],
+      "exit_code": 0,
+      "log": "logs/debug-examples.log",
+      "log_sha256": "8016bdf55abd958d6359e503991e49dca688e8789087662daccf3f4a9d5168c4",
+      "seconds": 19.026,
+      "timeout": false
+    },
+    {
+      "argv": [
+        "cargo",
+        "+1.94.0",
+        "test",
+        "--test",
+        "integration",
+        "--no-run",
+        "--message-format=json",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime"
+      ],
+      "exit_code": 0,
+      "log": "logs/debug-integration.log",
+      "log_sha256": "a35346058d384762c585840f7a056866ce9fdb1a9b38ce25cfc52cc31c4670c7",
+      "seconds": 0.985,
+      "timeout": false
+    },
+    {
+      "argv": [
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--examples",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime",
+        "--release"
+      ],
+      "exit_code": 0,
+      "log": "logs/release-examples.log",
+      "log_sha256": "3bcfac81f711e55ab3dedf8641a70abc824eaf4a859efa0d4daef2ced217d92d",
+      "seconds": 19.609,
+      "timeout": false
+    },
+    {
+      "argv": [
+        "cargo",
+        "+1.94.0",
+        "test",
+        "--test",
+        "integration",
+        "--no-run",
+        "--message-format=json",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime",
+        "--release"
+      ],
+      "exit_code": 0,
+      "log": "logs/release-integration.log",
+      "log_sha256": "301678309f76e4f13ce172b9a5889853a29c918aa9194641f23982e3098d60db",
+      "seconds": 1.489,
+      "timeout": false
+    }
+  ],
+  "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+  "cases": [
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-hello.log",
+      "log_sha256": "cb39344b5eb24783a4f4c5d4a4eb48970179848dede2d90b42bddee0608ea73f",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "6a803641129983424a2a900ae3553067a9378e8017ac299fda9f2853369db66b",
+          "module": "hello",
+          "pid": "80228",
+          "server_info_sha256": "fab3b784c0a453974c4e43968bc3aaf27c166c58a0d1664bfeef05ddea108633",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.315,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_hello",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-keys_pos.log",
+      "log_sha256": "e0f7f20290bac0626b2fd14c8d8e018e86d9f5ceeee704821200a23acb745d4f",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "37c1926a15dc13ad9bf675fc664874e385e9cfccee1d70ebbfcbe8def5110891",
+          "module": "keys_pos",
+          "pid": "80230",
+          "server_info_sha256": "589876af05c13f0e142ee62b24dba6b3761bdeaf7c11792a85d94deb15c0c230",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.371,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_keys_pos",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-helper_version.log",
+      "log_sha256": "a0dcdccc2733a30f10955f5ee8a82a8225d081d941aba2f8e215d25473ef79d8",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b037476d5552e2c198e244b4830c22636b44a6909d81e884d80a4f4a519e6a65",
+          "module": "test_helper",
+          "pid": "80233",
+          "server_info_sha256": "eb20df452ff53cd1245c754bf350d04a69c31ea3534d98814d73acf45cb4d3f5",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.357,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_helper_version",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-command_name.log",
+      "log_sha256": "3c6be8655f4d574a888f7671d7b5222215787e6739342b4983570f08ffaaa02b",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "323ad6c9648943ccad4c7cec9a77c7259978459dd6e666834e92b9387f2a277b",
+          "module": "test_helper",
+          "pid": "80235",
+          "server_info_sha256": "535c61ee857f31a86057ef76896723a61a33b7238e1f1e83bd44aaf0f59083e3",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.085,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_command_name",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-helper_info.log",
+      "log_sha256": "7332d4e7d5e2baf212861d1d5d25823a8ff22a85e405f92de50171952d3c6950",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "681ad6cd49e47b21975c3f9c1f96e07fa84d7c523dc13ba017ba62fe21991606",
+          "module": "info_handler_builder",
+          "pid": "80239",
+          "server_info_sha256": "14e8628250a2ee41e81652dc571465f17eae5f9e06c8e3f3d987d9f5e79ed1fc",
+          "version": "7.2.8"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "ab303d8e6db3a20c16e2385f49772f749704cd360d6d185e49ee9d9d61a93aab",
+          "module": "info_handler_macro",
+          "pid": "80238",
+          "server_info_sha256": "892e19cad159a6f9191ac6e42f084ddd740ff59a0dcebd7fc5b351c99bb29ea0",
+          "version": "7.2.8"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "681ad6cd49e47b21975c3f9c1f96e07fa84d7c523dc13ba017ba62fe21991606",
+          "module": "info_handler_struct",
+          "pid": "80240",
+          "server_info_sha256": "aa51ee54a97d095d150f14bbee635be02e923dc37a3ba2900b1cad8dd6a0db7a",
+          "version": "7.2.8"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b037476d5552e2c198e244b4830c22636b44a6909d81e884d80a4f4a519e6a65",
+          "module": "test_helper",
+          "pid": "80237",
+          "server_info_sha256": "f608ff75eae82efaf1e8cf22394e4ea5a068b7af3e1ff29d34266ee645765ba4",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 1.004,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_helper_info",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-info_handler_multiple_sections.log",
+      "log_sha256": "87aec3256b37b7ca5d44fc3a1af7b29b35a1d8e4d2f62af095cdd9dbf4198018",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "5ca70263c985d15684f0c0aebc3acc0872e137c52fc8949e47463eaef8b5506f",
+          "module": "info_handler_multiple_sections",
+          "pid": "80242",
+          "server_info_sha256": "aba6fdffd88940239d66d7a74948d9f62ed8d02284e7d06d5c0c7a3860479588",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.306,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_info_handler_multiple_sections",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-string.log",
+      "log_sha256": "e48874e7edfaedd447fd658d313ce625cda0421b2c8379bef3d1468ecf967a31",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "7e174829bceab1bea563d235137bccd0569ff80aea9208afb25108aee6248d76",
+          "module": "string",
+          "pid": "80245",
+          "server_info_sha256": "0485c850144d6e5ab934bbe81aaac5b14c1346a4b114be7eedb36b8d797f5300",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.293,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_string",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-scan.log",
+      "log_sha256": "2ca82215581ebd206de8b969e4c1d4210da16e3e1362163c4dcc62a47cb2d5bb",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "7eae535a302dba88ac6dced7afc824f24034266b5328e1d1c6822b12320f38bc",
+          "module": "scan_keys",
+          "pid": "80247",
+          "server_info_sha256": "9b616658ed8eeab278aeb6bd32b9effc8fab6cdd466f496f9de53f847a5e9c9f",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.362,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_scan",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-scan_key.log",
+      "log_sha256": "1642cb23d6f5bfdfe10732ee37712998aaf5f9d7d426571c31ca414d5621ac63",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "6d388efb937236435fc813d0def162894dee22da88e977eb2aae30fc25fe7c7a",
+          "module": "scan_keys",
+          "pid": "80251",
+          "server_info_sha256": "138d6da588690c7a0231d0f01e123eb0b8bc9d913c32f1485fb09ad3e2def3e2",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.093,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_scan_key",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-scan_key_for_each.log",
+      "log_sha256": "6fa74aa140f4e41e1092a4bf17a5b8eb1ebd2b8357f802de424efadb856d88f7",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "de4fc4eb07fb0ff72a83d79a219cdff8f579bf960205b87f485b365bb80341ec",
+          "module": "scan_keys",
+          "pid": "80253",
+          "server_info_sha256": "76862c23c8226d462120a97f22b16e114c3967ea740c20e7fdf903e76c3cb41d",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.072,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_scan_key_for_each",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-stream_reader.log",
+      "log_sha256": "b10c64b0fac2de38504c1f582c87b0e35610cc8b4523040b0212e0f1e2a36214",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "f8404d8bbd2d0079fdbbbf9722a7b94a6f404b11de226efadd445f43afcb7dfc",
+          "module": "stream",
+          "pid": "80255",
+          "server_info_sha256": "64fef518b8c824c81ed5c3756c81a6d6c0989f17cc6b511197897838e7f8e202",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.291,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_stream_reader",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-call.log",
+      "log_sha256": "2529b8a35778db23ea96b08d055ab84bc9da8ee6a0910a12a673fd2e66fd0b29",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "3246a086d8016b2255bd3eb64d87b76a4efdd8cc296850eaf5cec5b3107afd23",
+          "module": "call",
+          "pid": "80257",
+          "server_info_sha256": "35daeaa637c1eba521077b7c8128c0fdad12e93e51117197abf4b6999896628a",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.304,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_call",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-ctx_flags.log",
+      "log_sha256": "f20f8b3b067f118a479d27bfe2ef950fd7ac66b491a88108289e5296f738982e",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "6a803641129983424a2a900ae3553067a9378e8017ac299fda9f2853369db66b",
+          "module": "ctx_flags",
+          "pid": "80260",
+          "server_info_sha256": "c83e1749b90e5b125b7f68c77ee1e1a0641610ba6084502761b3184ff2e578ae",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.357,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_ctx_flags",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-get_current_user.log",
+      "log_sha256": "c45cc32ab0780c8ce435f60a0e3ecd6481fa479aa3cb1afb21a973d67db122e3",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "4033c0462eb2c27d0f4accbdc90921a35dcf91f2538943e716b5611b504e5e2c",
+          "module": "acl",
+          "pid": "80263",
+          "server_info_sha256": "dca1de96b28fbc17d8a1e49871dc25dafcf8dfbcb0fddfc16ab224c61cb29251",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.342,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_get_current_user",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-verify_acl_on_user.log",
+      "log_sha256": "091b71f6d401935af371e2d8fe5e86a95e43bbaa1ee2479d6f8ecb2c85c50114",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "74744e552078936e1e4c442794ce1d5b1151ab38e259b64d88ee9c7364265496",
+          "module": "acl",
+          "pid": "80266",
+          "server_info_sha256": "9686b1ac5b050d70f92d677f1d66cf932a08957ae5f5a72faed766e0195d1e27",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.085,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_verify_acl_on_user",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-key_space_notifications.log",
+      "log_sha256": "13a3295f3992cf2de8dd83b4b3f50404539c196b8fff66ccf09a639c16c9b235",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b1f67a0ca36684da356d1c2367b150085738337c7eee967af9f8b664c6213fd5",
+          "module": "events",
+          "pid": "80268",
+          "server_info_sha256": "96977baa4f53dc5613b256dfd5ba90d6e10b20054ed002234b39089c8388cf78",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.35,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_key_space_notifications",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-context_mutex.log",
+      "log_sha256": "9483df462fd7be24e5f2a65b4f7bbe2fbd5a6f1821861470441678c608547bf1",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "6f2ae4820567123326d16c0a34be7c290737f721401578eb3609b2aa27a15882",
+          "module": "threads",
+          "pid": "80270",
+          "server_info_sha256": "e5e0510952371fe6ee11b262e7f0826c4d7877b73d743947df60ad1441c487df",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.344,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_context_mutex",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-server_event.log",
+      "log_sha256": "cfd212b272ba0f2b4ed5ef2472d32cf6adc8d8741079e3017fddb48ec05c6c66",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "23d18fafd59f3a85554f260df186205079c637e968327e504361705de1a2367e",
+          "module": "server_events",
+          "pid": "80272",
+          "server_info_sha256": "b412413070de9d1c36f82d5f8bad896b098c25d860fdb07b94c87610f2fbffc2",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.405,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_server_event",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-configuration.log",
+      "log_sha256": "ea1b0a0372a7777a2efbce91506005f36c5d2638e26822eb1bd2a8e26d4090e4",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "c8510cb5780ea1e2153c8085b068bd658b2717aec3e120bcf39b19babd25bd26",
+          "module": "configuration",
+          "pid": "80274",
+          "server_info_sha256": "32a01473821a1fcfdfb59bb3e021bdb4249aedc1d8b0197dd4a81065f58d815c",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.366,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_configuration",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-response.log",
+      "log_sha256": "8ad260c17e193be9ec04fffe35054618edf2fc2375adfb066607dcedf560f857",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "1eb12fba8e4766f5113230bbd7171a89344a9dc7259ce470b5235cfff7c5744b",
+          "module": "response",
+          "pid": "80277",
+          "server_info_sha256": "1f258aaa7664ac5e9fea62d985f00ef369566ab55be11b1d70edecb48bc24a52",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.309,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_response",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-call_blocking.log",
+      "log_sha256": "1b9897fa43e9c160918723c5968299a9cd9e11032b621db6538d6bd9184afded",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "01f4c37124120174f710157cbc5b6ce6e7ef5ed073ddc08f3e863779c4ade397",
+          "module": "call",
+          "pid": "80279",
+          "server_info_sha256": "152e66bcfad384b0236e2f2800dda20456384466ea2f15d4380d701ce0b61c93",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 2.109,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_call_blocking",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-open_key_with_flags.log",
+      "log_sha256": "698764b9d199fe3708b886cccfde348e58704e0df151d645c1cf9698f4ab3ee9",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "2e6f84edc8171f86cb1b0566564f327260191124d5c3b07eceb9ebedbc6adbe0",
+          "module": "open_key_with_flags",
+          "pid": "80281",
+          "server_info_sha256": "fd084c84e2a9a6db84eecd612ce3842decb2fe1808b424a8d38d4a8fb398ffc7",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 1.359,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_open_key_with_flags",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-expire.log",
+      "log_sha256": "5b05021e588638004a152e6ee836af62c5b9a5fe4e30dfb3563f8be0d6da3330",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "ef386e244f1e97a0d05575c55599afa664a6d33ecd6cd77534379b3de894cce7",
+          "module": "expire",
+          "pid": "80284",
+          "server_info_sha256": "2e701f4cf0032407b69c95feab6e279c1c8b72357c620da55e1561550e681781",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.366,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_expire",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-hello.log",
+      "log_sha256": "1891d684c47a5db17821bb9c1b7861bac461cabd9daa67f3e7b8ad0e27990a88",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "deefe82da85bea6c7d196175a61bb903d3ae15bd392942dcff2ebc77b8007a96",
+          "module": "hello",
+          "pid": "80287",
+          "server_info_sha256": "171272d6f6140c45f5c5315d8d17be60dff176f90d56076dd2026cff48dc432b",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.149,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_hello",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-keys_pos.log",
+      "log_sha256": "73e500146ef1bb62b08e4b046db1b60791500bccb415cf437e7dec3c888cb1ab",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "9e437f62de5c99f31ff58ad396df745d2d78de5bd5ad7b996d8fdfcd975c3af1",
+          "module": "keys_pos",
+          "pid": "80289",
+          "server_info_sha256": "6f68062b7c6f77c5d54bd20c4e33cd469d7058fd103b4458bb8972d14065172b",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.083,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_keys_pos",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-helper_version.log",
+      "log_sha256": "ea61fee52ce919d85d77238835bcc52d360b44239ea074b38d859b88261d91c9",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "6548911d4a15b54817d84b6a53ff0640ddb30fe9ebed38b49915b859a60337fc",
+          "module": "test_helper",
+          "pid": "80291",
+          "server_info_sha256": "fd42748dcf04f4414c97029296318c39eb7b3cc4464ceeae9cc7221ebc9c4df3",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.076,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_helper_version",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-command_name.log",
+      "log_sha256": "0b9baba4590e94281ad7aa168a6b188042cffd97acc7f82c7977773e7178b51d",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "6548911d4a15b54817d84b6a53ff0640ddb30fe9ebed38b49915b859a60337fc",
+          "module": "test_helper",
+          "pid": "80293",
+          "server_info_sha256": "4b936d1e0e6cc5dac4817b8fc8180d2390adafc8c5727b87ad85558e7eb8a931",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.089,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_command_name",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-helper_info.log",
+      "log_sha256": "ecd30f3fa8732f53124e5a4794550322daaac8743372ca5e4690fa52e38099cc",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b8bd0da4972167a2efe8ec0e309b7b67f692c7c123e3252e4dec8586108d0f62",
+          "module": "info_handler_builder",
+          "pid": "80297",
+          "server_info_sha256": "de43a9429306e5eba1c7544f7abc236b9dd1e21b24c104aa77a7c7851a60ff85",
+          "version": "8.10.2"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b8bd0da4972167a2efe8ec0e309b7b67f692c7c123e3252e4dec8586108d0f62",
+          "module": "info_handler_macro",
+          "pid": "80296",
+          "server_info_sha256": "8fd3609100dd344fc0e267a6a491cbea9ec5a9701a1edf6391feefe6c46f50c1",
+          "version": "8.10.2"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b8bd0da4972167a2efe8ec0e309b7b67f692c7c123e3252e4dec8586108d0f62",
+          "module": "info_handler_struct",
+          "pid": "80298",
+          "server_info_sha256": "3b589ca1fb80e1de8036c13772c65a6d3953d69a438a86d0229c59c2ff2a4cb0",
+          "version": "8.10.2"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "6548911d4a15b54817d84b6a53ff0640ddb30fe9ebed38b49915b859a60337fc",
+          "module": "test_helper",
+          "pid": "80295",
+          "server_info_sha256": "1bd723e35dbb130b9a72c217221244bba9688051c44508d2d0b2f9f1806739dc",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.211,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_helper_info",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-info_handler_multiple_sections.log",
+      "log_sha256": "b6522de8c0970a49dc95504f8e987f984e1f48f3c187ee9169898f153262aa3a",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "a7060bca382c18f2acb67a00bec43cf8ae22302300c3fc3f6db0e1b03eb958c0",
+          "module": "info_handler_multiple_sections",
+          "pid": "80300",
+          "server_info_sha256": "cd1dbd457bd14e31c1f351db56b8bb030f73f08de60b9697fe87747fe63be3a9",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.09,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_info_handler_multiple_sections",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-string.log",
+      "log_sha256": "416a3b62a7b5d3f6bf2a1b95d727ac54c2fb67f62fb6108cdea1aa6661167d68",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "2bff05b853c2d539212c635e653b566adcec6dc35dda3c2990aa1a8a291dce46",
+          "module": "string",
+          "pid": "80302",
+          "server_info_sha256": "d44cf7cfbe8cd03338a4c3dde02851aae48b710a912932425571901c1cd85cd0",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.092,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_string",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-scan.log",
+      "log_sha256": "dd848450de0aa1d287d18b36f8e02a0c33a9b0cecd12e4052d2e0b77469ca514",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "4f6b05f9319a538a6ed43a3cc7cb55fbe6a7b99add1aa53a666181e09711667f",
+          "module": "scan_keys",
+          "pid": "80304",
+          "server_info_sha256": "0dd35abf5d51252270cd5fc241b7fb3ea94c71c910fa0202d10727f3b815988c",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.087,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_scan",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-scan_key.log",
+      "log_sha256": "3cb9cbb1cefb588d7fbe1b42cf31dc1ce146bb9a3e04b1e385c0ad4c1e44ffba",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "4f6b05f9319a538a6ed43a3cc7cb55fbe6a7b99add1aa53a666181e09711667f",
+          "module": "scan_keys",
+          "pid": "80306",
+          "server_info_sha256": "7955d897d335cc9fce3fb39c36355a5ae4a1c28b919d1d94af5e07e6febc6d6a",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.088,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_scan_key",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-scan_key_for_each.log",
+      "log_sha256": "928d5a893bb202cd53780167ffd616c32a7043e842fe150e4374d42b04229a4d",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "4f6b05f9319a538a6ed43a3cc7cb55fbe6a7b99add1aa53a666181e09711667f",
+          "module": "scan_keys",
+          "pid": "80308",
+          "server_info_sha256": "e91d43deb9305d0ae0cae6047adb5f327b8532638f1cf05945950d4d1148c5d9",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.081,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_scan_key_for_each",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-stream_reader.log",
+      "log_sha256": "46b565ea100bb0aa3f5209113e1f8a64b59c1e63a7e77fb73ae3334d172650c8",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "52e113bf7faacd0bb166c4feb4f0f78f5ef95f435418a1970b22059160e80e11",
+          "module": "stream",
+          "pid": "80310",
+          "server_info_sha256": "787424237633398b041c513eeeb08e495c7dd1545055aff159d9846119dc54a1",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.078,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_stream_reader",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-call.log",
+      "log_sha256": "2eb31d64c93906a2c47176f41979e74594979a39c8b61dc5a893db4a83aa0661",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b84ea517408c74e4cb4d0e7d746db6868fc83e8f5d9b1bd3689279dd57e5d29b",
+          "module": "call",
+          "pid": "80312",
+          "server_info_sha256": "49418454a89477e161b647b360881c36c9f26ff538ac207c2fd5b87cec52734f",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.091,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_call",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-ctx_flags.log",
+      "log_sha256": "710de19537bafd2b7f6383f40bf08b04da09f7b2d21424854155806a12bf44e8",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "82eb151983e4b8289c4e04051d6106c4ad7e5747e5dd91d4c4e78bd641ddddff",
+          "module": "ctx_flags",
+          "pid": "80314",
+          "server_info_sha256": "f567e30a79d35b2afcb0df352d670debc3ca419c4e70b7ab0b4c316ef1d2ef3a",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.091,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_ctx_flags",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-get_current_user.log",
+      "log_sha256": "63de8341f3eca995ebed589785883a6c0501a4511d881b97839f0594b8a3fa44",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "2a0cc97ced5521fcce287ec84cfa39cce988fddd309efc058c6c5c33478c2a39",
+          "module": "acl",
+          "pid": "80316",
+          "server_info_sha256": "14488fb1232b2132d0666b99ffecb407082df2eea68eb2b2b1685d63930353d8",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.073,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_get_current_user",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-verify_acl_on_user.log",
+      "log_sha256": "1c97e323d34d87c4cc313cb2e752883e822a7395007bb539c5ad7d09d8e6e9fa",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "2a0cc97ced5521fcce287ec84cfa39cce988fddd309efc058c6c5c33478c2a39",
+          "module": "acl",
+          "pid": "80318",
+          "server_info_sha256": "555cee7d0673d7444577ebd94589d6a85a3fa9d138b55155b89c49fd966d1894",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.09,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_verify_acl_on_user",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-key_space_notifications.log",
+      "log_sha256": "cf69bb3a448a4ad05ca96059546fb93dc8d7d19fdc5c469cc8306de79c8947f1",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "9ebc836082cc5bd2811c0ce87aca010d62b1bd0823e7b20cd689f1ebfd46699f",
+          "module": "events",
+          "pid": "80320",
+          "server_info_sha256": "e9d22f24324c9e2819d471d895f3938e6734c8347935f502d4fca9810fafa41a",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.091,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_key_space_notifications",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-context_mutex.log",
+      "log_sha256": "6554d537b4c46a3bf73936e51880d9567d2936d5a1a709dde11e1118f09271e1",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "f5a58bd72505b3b99eab7147c48f48eff03502628960562563c7b5ff19ed2d44",
+          "module": "threads",
+          "pid": "80322",
+          "server_info_sha256": "b00c49ff2d1d85271925a484f2697fb0c4765d9ca1c0eaccc9991ca4ac69aebe",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.091,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_context_mutex",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-server_event.log",
+      "log_sha256": "88bb159dd198084d2ec7e0e15b88f4228524721552aaab11114d3d7fc219d8b8",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "e8a167d344141204e411fe55182032b6a1835489faaa27b28c0a4474ca4ef02d",
+          "module": "server_events",
+          "pid": "80324",
+          "server_info_sha256": "8fc1f92a7e7763e022e5a90cf982d871f4e29873051cdc17194077c1b9639486",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.083,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_server_event",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-configuration.log",
+      "log_sha256": "ca9643120df9a8ba8c405f939a815a4732534db0adef4cfe9fc2ef4836e0ffdc",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "315ad5482268539406cf5a7e76f0e68c08a52ff916fef1142dbbc589894be2b9",
+          "module": "configuration",
+          "pid": "80326",
+          "server_info_sha256": "ce906c231b825d0d1000b0cdf187ba667182a17efd53cae6153aa3d402b5c89f",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.089,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_configuration",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-response.log",
+      "log_sha256": "b007271f48ee944fc6707f495bd15dc377a58f2a1531e7dd9ecf9bed15c01e77",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "ce7089e6e10f9c977fa8f6b34ad81353234ca7e5b516787b50bfa87374a802df",
+          "module": "response",
+          "pid": "80328",
+          "server_info_sha256": "a9b333ebeea11e86793ad5dabe0ec3492b45e9b82a5546897c3cee4ce90ae37a",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.092,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_response",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-call_blocking.log",
+      "log_sha256": "4d014d55e7ffcbf3c37c86536a4cc8e4d4505638806c59fffc5150f38d8ce7b2",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b84ea517408c74e4cb4d0e7d746db6868fc83e8f5d9b1bd3689279dd57e5d29b",
+          "module": "call",
+          "pid": "80330",
+          "server_info_sha256": "449ab23809af2ce33055ebcee6ad0c6984e348d07a8240a4b8bc105dd3a823bb",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 2.139,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_call_blocking",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-open_key_with_flags.log",
+      "log_sha256": "c110ae5014ffff1cb4c06a270a3356ba08cadc8e48edfcbb4c3f4e58c0a15065",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "d3ca790e8ceaf77ced3bc38a6ae904e4a52b7b150144554b259289bc34706627",
+          "module": "open_key_with_flags",
+          "pid": "80334",
+          "server_info_sha256": "2dad46225988a87f0e63dad59e07bdf0f4cfdb026ad283ee2c979d8a1baffdfd",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 1.125,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_open_key_with_flags",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-expire.log",
+      "log_sha256": "f1de3155265763c89b937cd7bd3b64c1b0e45a7f6ca91b3c7fa206281b47ec90",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "8cf30b9e1747e52baa1bbf7a311f862f28328baa4fe06c8c78973318859b97df",
+          "module": "expire",
+          "pid": "80337",
+          "server_info_sha256": "beffb7e15e8d8e1a05efcd5c54e8ce49bc7fd72771d5d683b407fd2be9b82bb7",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "debug",
+      "seconds": 0.087,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_expire",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-hello.log",
+      "log_sha256": "3392978bda12da35393f098e311ec5a68e45b772b5abbd2d788e87c3fc882235",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "f8404d8bbd2d0079fdbbbf9722a7b94a6f404b11de226efadd445f43afcb7dfc",
+          "module": "hello",
+          "pid": "81272",
+          "server_info_sha256": "f08fab99dfe39c1d6d809cef309456c18c11b3428d56d81bb0fcecdd079f3733",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.304,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_hello",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-keys_pos.log",
+      "log_sha256": "41f391b6b4c0a8f159c1a82125d1ef6773e95bdc8066e362f39ed9fa945e1653",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "f8404d8bbd2d0079fdbbbf9722a7b94a6f404b11de226efadd445f43afcb7dfc",
+          "module": "keys_pos",
+          "pid": "81275",
+          "server_info_sha256": "41a7d25a3894496e1028a755872bb7ef884a959f42ab28c079ac56f36ee03c54",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.301,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_keys_pos",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-helper_version.log",
+      "log_sha256": "b44f065c0e0e30316ccd42ba4059b5d12dee40b7e785579612e09ce50c8c03b8",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b037476d5552e2c198e244b4830c22636b44a6909d81e884d80a4f4a519e6a65",
+          "module": "test_helper",
+          "pid": "81278",
+          "server_info_sha256": "9e469db5eb27760170d164eeb11d67997b8b1eb5cf0330064c03d37a2400071e",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.354,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_helper_version",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-command_name.log",
+      "log_sha256": "ab028083124ae0c081b42a25400207e322e5617cdd7a29ab178c8aad71efc7f6",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b037476d5552e2c198e244b4830c22636b44a6909d81e884d80a4f4a519e6a65",
+          "module": "test_helper",
+          "pid": "81280",
+          "server_info_sha256": "062e9f212461dd03cebe4301c72732451142adb36e818919deebdf184d5bdd29",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.091,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_command_name",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-helper_info.log",
+      "log_sha256": "96ee914e9132eae46f39584fd451700aca4254aa142e68143f6d2028a3f7685a",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "61b982c36b1ef666da21256952696bee19e28941040a48562e791be97ca07f97",
+          "module": "info_handler_builder",
+          "pid": "81285",
+          "server_info_sha256": "7b813d7bfeb7203a472a9a575796ff24f35d8f5231a412547d696e3799fc4708",
+          "version": "7.2.8"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "714e8c96e95fca7617cf725f737da1ceed69410b3bd2d4b6a910e09c7ab0a314",
+          "module": "info_handler_macro",
+          "pid": "81283",
+          "server_info_sha256": "59ce3d405c1a6f40a053caff70e0bdd828111849661b4b57d5a858f4a55246e7",
+          "version": "7.2.8"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "61b982c36b1ef666da21256952696bee19e28941040a48562e791be97ca07f97",
+          "module": "info_handler_struct",
+          "pid": "81288",
+          "server_info_sha256": "7ecc76f12df8f4cccacddece2a5ce1f8314f62ac7b2302b8f7b014e0afc8d9a5",
+          "version": "7.2.8"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b95e4a4bbc4d4b95592fa7607c795bdcf93fc1943dbd207a435e5d3fef4d222a",
+          "module": "test_helper",
+          "pid": "81282",
+          "server_info_sha256": "d1b942a86be46c7da84fab888cf495ff69eda727de47497ffdb5c6d651164c24",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.793,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_helper_info",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-info_handler_multiple_sections.log",
+      "log_sha256": "e3c7c9b52e7689b3136309120a368f114562b5bc1cd4cf8661cb07041c2c1e2d",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "1ed3c9a0c349271837c10540135d5618c398d4fac2ea196ded61b4d03780054e",
+          "module": "info_handler_multiple_sections",
+          "pid": "81291",
+          "server_info_sha256": "3be0425ee9e8fffdcbd2e28e6856597235556f7e0bc527fd0e8e2c94e63ffcf0",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.293,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_info_handler_multiple_sections",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-string.log",
+      "log_sha256": "2f0834a211f060d5eca02ed5a5030233ff879c0ee7ad890e0562788dbb0287ce",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "4033c0462eb2c27d0f4accbdc90921a35dcf91f2538943e716b5611b504e5e2c",
+          "module": "string",
+          "pid": "81294",
+          "server_info_sha256": "928a0fbccf1bdbceb112fd412294abc4fa16dea8ef24fccefb8758f227ccba5b",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.299,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_string",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-scan.log",
+      "log_sha256": "fe7ee620e5de1ad8d32ee529a1ad1203da0e3686a56d8b8de20d22c2ac841580",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "f268e90b04b451e2e87756ec53c1e35a2e7570ff2c6d0dd7bcbf922d4b7cb42a",
+          "module": "scan_keys",
+          "pid": "81296",
+          "server_info_sha256": "076be3d734f07b8e48fa0fb79b8e0efe2774b21917240b1e7c29725d4003b3c2",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.291,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_scan",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-scan_key.log",
+      "log_sha256": "fa73adbbe8015f285d608b776a550bb0df75470066f2adc6cee61f76129b5da9",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "f82e6aca8747c461cffa4b8816367086349c01803ee0a7fe01d999f9e16c25b0",
+          "module": "scan_keys",
+          "pid": "81301",
+          "server_info_sha256": "e6a30c52ae99017e48f303b175bbc9f47cb0a9b9197dadd4ea8a5d1c26f3bd3f",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.048,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_scan_key",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-scan_key_for_each.log",
+      "log_sha256": "437e21d98dd2b0c50ade675860363940c355989a7a3ed7a07f371820f179ddc0",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "f268e90b04b451e2e87756ec53c1e35a2e7570ff2c6d0dd7bcbf922d4b7cb42a",
+          "module": "scan_keys",
+          "pid": "81303",
+          "server_info_sha256": "4781415ed0c6d8436f0345f32becc44ba658d4cecacdc149c1924202c5fd33be",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.081,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_scan_key_for_each",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-stream_reader.log",
+      "log_sha256": "f54f84e0bf6e63b1eb8596afa7dd71472d39966134920804e732edf4aaa5b82c",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "2f084066f033c007d1768cfb967b6b0962b8dd9036cea7cc6d14873688dc2798",
+          "module": "stream",
+          "pid": "81306",
+          "server_info_sha256": "09f4cd5f5d4995fe4953917978a9e9866ee2bb4bb8bada00d9665a0acab239e0",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.292,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_stream_reader",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-call.log",
+      "log_sha256": "e961923d3615cb367192727c5e827714716505ed2b744c940218cff7e0cf3d2f",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "d99e15589dc27c070fa08a9d2d6188eebe5685d3cc6d9e1916569b08fbad7c3d",
+          "module": "call",
+          "pid": "81308",
+          "server_info_sha256": "42f2bfe3e62fa4c50d2a4af3e85a7cf4f713d9bf25e2cafbf5300b378e1dd451",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.283,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_call",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-ctx_flags.log",
+      "log_sha256": "b35409a3e361ef79b1edee4f357136d6779e62789f8f84c9ea363d3e1efb2861",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "7e14c112bfdc6377d36b3b13a1cdae7060e7eeb2bf79600f616c43417ff0230a",
+          "module": "ctx_flags",
+          "pid": "81310",
+          "server_info_sha256": "f8c62751b4c2668a2f9ac772702646f256838f413f0c9815ce6b18bbee8b978c",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.294,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_ctx_flags",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-get_current_user.log",
+      "log_sha256": "6d199e0738ca2da024bc4be22111d76d8fffc79c570b344d250c2de00cbd72ea",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "74744e552078936e1e4c442794ce1d5b1151ab38e259b64d88ee9c7364265496",
+          "module": "acl",
+          "pid": "81316",
+          "server_info_sha256": "b6faed1906f11211758c9638d2485275c7f5075354cd7303443179075048f946",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.288,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_get_current_user",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-verify_acl_on_user.log",
+      "log_sha256": "9192ce93d6c3288744ba5b699b67dc2c102f6a1f02d4fea98f4fc71645634af9",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "4033c0462eb2c27d0f4accbdc90921a35dcf91f2538943e716b5611b504e5e2c",
+          "module": "acl",
+          "pid": "81318",
+          "server_info_sha256": "2e44b2602660de7e6345892ef9779b60020dd28325ce8d391fef92bca671c536",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.072,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_verify_acl_on_user",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-key_space_notifications.log",
+      "log_sha256": "fdccb33d9a40e0ae39354f6e6e9f1b9cf96e545b44a8702e72ca54c552cd5f49",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b1f67a0ca36684da356d1c2367b150085738337c7eee967af9f8b664c6213fd5",
+          "module": "events",
+          "pid": "81320",
+          "server_info_sha256": "1af9bd36d5515abda133bd03a7981ff7cef8ec707250882083dc70ca9abefa47",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.294,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_key_space_notifications",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-context_mutex.log",
+      "log_sha256": "ff1d080ad7f5f35e123d4d0e15a9f905ae2be64dc2a1545555bf98a7757cf0ad",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "921f4599de811cde1f1e4c4879601efd42c012cead7dd64704a876551454015d",
+          "module": "threads",
+          "pid": "81322",
+          "server_info_sha256": "ce06bb55631df02dac12b5d3b87939a831e01b4659c0dc69b20843215d15a3c2",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.349,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_context_mutex",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-server_event.log",
+      "log_sha256": "84288f30cc73396b48296fcce731478dd7e40b8b92cc32b7d53c9d6c2250ffa4",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "23d18fafd59f3a85554f260df186205079c637e968327e504361705de1a2367e",
+          "module": "server_events",
+          "pid": "81324",
+          "server_info_sha256": "1bbd915cf3f56166a01bd30a86d5e427841b7a17591ff20c43160c1ca70647bd",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.3,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_server_event",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-configuration.log",
+      "log_sha256": "f2e0d2cc45d90a34066e07bd0abe312937be4549b9d1e678a8a9c1309b709efe",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "c8510cb5780ea1e2153c8085b068bd658b2717aec3e120bcf39b19babd25bd26",
+          "module": "configuration",
+          "pid": "81326",
+          "server_info_sha256": "a61848a83b547a98519315280108236cc3f39afe0e5301e7592c52192cba194e",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.299,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_configuration",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-response.log",
+      "log_sha256": "5da47e74af65a0c76af608169b138f1da600b2cfb689eb422b0b21273c5fe2d8",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "1eb12fba8e4766f5113230bbd7171a89344a9dc7259ce470b5235cfff7c5744b",
+          "module": "response",
+          "pid": "81329",
+          "server_info_sha256": "582dc0dae3d40beae3f894f70a9caa807a48b2dfa7c37605ece154033c8b48d7",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.295,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_response",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-call_blocking.log",
+      "log_sha256": "26a73100badbbb4142cf5ad573c8634ea4cd7262a4ac0379eda92b36f21cf060",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "01f4c37124120174f710157cbc5b6ce6e7ef5ed073ddc08f3e863779c4ade397",
+          "module": "call",
+          "pid": "81332",
+          "server_info_sha256": "5e3ab9fb04b1b9d9af3f6c61d7842ae151433174183a83630b8e0e45ba16e5ed",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 2.109,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_call_blocking",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-open_key_with_flags.log",
+      "log_sha256": "e4a42ba2311bd7db9e04e41b5592b208e6f874f9feb094d253bdcbb5ae8bdf77",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "95d7d6bf127345f08850f827167cabcdabde7ed210c7714c1681a8292ebb515f",
+          "module": "open_key_with_flags",
+          "pid": "81336",
+          "server_info_sha256": "b0207b3c2a3ad4e2d39d3c3a2477ce68e6afde79dd2e5f87d6078953a9e2dc1a",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 1.352,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_open_key_with_flags",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-expire.log",
+      "log_sha256": "0d534fb2db84898d1da86a75256e70bed99bc3df43ccbb3e6a3c0249b03c24e9",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "ef386e244f1e97a0d05575c55599afa664a6d33ecd6cd77534379b3de894cce7",
+          "module": "expire",
+          "pid": "81338",
+          "server_info_sha256": "1fa265f123ee3b8fcbd3dfb3ee29f49c143639f55601e0b65ef664a01b0b7c28",
+          "version": "7.2.8"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.358,
+      "server": "7.2.8",
+      "status": "passed",
+      "test": "test_expire",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-hello.log",
+      "log_sha256": "3c795b18e2538231bec22a69e36088146466434c89793ee2f946472c926f2430",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "eb709a2643d813316b001b113722dd1517e1ebe882f6b63a8f90a39546d6fcdf",
+          "module": "hello",
+          "pid": "81342",
+          "server_info_sha256": "06bca615890a86cfd96fdcb3e1691927bce1798f50a2da9c78af963b485e36a0",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.089,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_hello",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-keys_pos.log",
+      "log_sha256": "14862842d55136fc5273e9f3de1fd1e9bc3abaf63795f0ef563b3e46552ae560",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "01cf6082f342bab4fa8b7096c9217b70dc012267c1ad42c8cd34a95075e720b1",
+          "module": "keys_pos",
+          "pid": "81344",
+          "server_info_sha256": "c736d0047e3438119e1701ba663be7fa1ca5e345c7d95a6d3f6f729b6f8aa1c7",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.087,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_keys_pos",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-helper_version.log",
+      "log_sha256": "b86b00645e3cc3108b31eec0d3b8722428978e84380ed61e771122eb1ac28811",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b0bf313be3230c034e31f7b8f1e66b93b0356e616173b9395197c48093555648",
+          "module": "test_helper",
+          "pid": "81346",
+          "server_info_sha256": "6aaf94076f864e74e1a166a23fa4021d4fc9a73fd9f37b47301e359c911b3056",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.091,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_helper_version",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-command_name.log",
+      "log_sha256": "e1467e9803e78da64d5074bbf22c69671a51f5154791720e7bd94573d234cf18",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b0bf313be3230c034e31f7b8f1e66b93b0356e616173b9395197c48093555648",
+          "module": "test_helper",
+          "pid": "81348",
+          "server_info_sha256": "ce185c280b3983024e4a98aea58d7dea8a86a612e1960a8c13920767d8dc93b4",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.09,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_command_name",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-helper_info.log",
+      "log_sha256": "d4b170a757881151a859c5a64ddad4947eb83226c323070b6e650ff34dc4aaff",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "2bff614f8a370169b296c4251c62f28e80218f57b45b954525e9c9cc427b6db7",
+          "module": "info_handler_builder",
+          "pid": "81352",
+          "server_info_sha256": "096014cb5927fd292da394891ce6878314abd19bef5050b6873a565396098761",
+          "version": "8.10.2"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "2bff614f8a370169b296c4251c62f28e80218f57b45b954525e9c9cc427b6db7",
+          "module": "info_handler_macro",
+          "pid": "81351",
+          "server_info_sha256": "7d0969604a326c8e52234815fe451c931aeb9aca55ce6db2d12c4f84b69a1397",
+          "version": "8.10.2"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "2bff614f8a370169b296c4251c62f28e80218f57b45b954525e9c9cc427b6db7",
+          "module": "info_handler_struct",
+          "pid": "81353",
+          "server_info_sha256": "5a535b565c6c86fe5ee1876095213e2f5c0f879d5bfa652001f302751bb5b726",
+          "version": "8.10.2"
+        },
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b0bf313be3230c034e31f7b8f1e66b93b0356e616173b9395197c48093555648",
+          "module": "test_helper",
+          "pid": "81350",
+          "server_info_sha256": "151c736b4a1caddaa1441f07483a517641f0e3c90711ddc2b5024ec823d447b5",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.212,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_helper_info",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-info_handler_multiple_sections.log",
+      "log_sha256": "45be73220063e471214fa5d5565606e229be50f0a5acd34ce284d3b4ca671dab",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "ff84f8358a8be305b982fafadbe540d18febf627185bedfedee5d098fa6fed45",
+          "module": "info_handler_multiple_sections",
+          "pid": "81355",
+          "server_info_sha256": "cc71fdf460a611a3c8e12698d917e199285fba83326aa0e55af6a07209590643",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.085,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_info_handler_multiple_sections",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-string.log",
+      "log_sha256": "e4118ec6c95b5e63b0d0d245a91f3f785845fe42c600ecd3271085cb2976679c",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "6a8b952efa0d6ceb9356fab7e97376070ca198d30f37e6eaff5a356c35871dd9",
+          "module": "string",
+          "pid": "81357",
+          "server_info_sha256": "d22eb4e055a506a965b5c9983953d0e9c80d9c7b7d025745403af4d09fdcbdc0",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.091,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_string",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-scan.log",
+      "log_sha256": "bce70922712dc24cdd7972aff406e76a27a93b010a1866e7ef91098c8e719cd7",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "2bc0ec4d7ffac90a60ad2c500039720a9cae82bf8f33c3b428af61cef64dde04",
+          "module": "scan_keys",
+          "pid": "81359",
+          "server_info_sha256": "4ed269d3731af987c51281d9812b84d1bcdef69505d81ec37965db512503e872",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.089,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_scan",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-scan_key.log",
+      "log_sha256": "ed31d09bc70e205ce836b7e9b37840ad671a3124d2bcfe9a4bbda31adb6848c3",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "97ca549259e2470fc5820af2041a176bcc18427098f5e0bff236a98b6846a9b6",
+          "module": "scan_keys",
+          "pid": "81365",
+          "server_info_sha256": "9c439e0cf082053dd6cbd25293962a6c842e7f7f25988041969539ba8cfe94e9",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.085,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_scan_key",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-scan_key_for_each.log",
+      "log_sha256": "6c82f5743f0caef190204770c9e2de399504aaeff0b481bfa509d18e00af60e6",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "97ca549259e2470fc5820af2041a176bcc18427098f5e0bff236a98b6846a9b6",
+          "module": "scan_keys",
+          "pid": "81368",
+          "server_info_sha256": "0f105072ad80961ea0850c4e20119f69e0d2f7bbafb8ab7c444352959960dd2b",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.082,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_scan_key_for_each",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-stream_reader.log",
+      "log_sha256": "d3772b70a34a86a3e230bdde9ab01b396e36fdcbf30ed24fa23d6670cf1c6fbc",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "1f88e9374f8808e4083624345d2b154f3b741d4ca0c30a0087538a0204c29a95",
+          "module": "stream",
+          "pid": "81371",
+          "server_info_sha256": "963236fdffd6263e0547d7a15b90bd90322eea37191ae5963a261cd5252b4516",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.091,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_stream_reader",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-call.log",
+      "log_sha256": "0b453d5800824dcc96ccb81842702410c99c62f70fef83711b2903a7bce9ac76",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "d52e017aa33e6fef7063cef35e8514d6074163a53a5c3ea5b1750f649a56ba99",
+          "module": "call",
+          "pid": "81373",
+          "server_info_sha256": "5efa7bd762e5aff5aee2848368f2a51ebd2dec09195baa2544bc7c78de9c7fba",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.087,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_call",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-ctx_flags.log",
+      "log_sha256": "c35ee5b8e12f70bf3bcf8b07f111f0004e6bdfa4e2c8d9010776677b16016236",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "19237288d43c46cbae8b50c3a5071410aca8217e9557dc5f447b159870eee495",
+          "module": "ctx_flags",
+          "pid": "81375",
+          "server_info_sha256": "61296f7a9dd41e77c5ba1b9fbceac3b1aac45c0a5d5ebe53fe79d76e75915475",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.09,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_ctx_flags",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-get_current_user.log",
+      "log_sha256": "d8405759ebc73b60493b82f19db3d6623705051cd7abe943fa4de34ff41d2984",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "4b9bf1ac5d10882b915b67c41e38e2426fe971d9946400f46b97b53a3f093aba",
+          "module": "acl",
+          "pid": "81382",
+          "server_info_sha256": "840b9e5d743d09b0d5139ebda90100149c6f3693d636b6e72dffcb9cf635a07e",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.046,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_get_current_user",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-verify_acl_on_user.log",
+      "log_sha256": "3f6c97726324c0027a0f50d08acdfd8fd9a4b051b4a19e44b12f0a4477e6115c",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "4b9bf1ac5d10882b915b67c41e38e2426fe971d9946400f46b97b53a3f093aba",
+          "module": "acl",
+          "pid": "81389",
+          "server_info_sha256": "2ef4abb3ca7f9d87e5bee3a32664252ef8d1241911ab233c43df9676ce5514a0",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.049,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_verify_acl_on_user",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-key_space_notifications.log",
+      "log_sha256": "222ba33be3c509df780e536210bdcc31b2063fba03091ad52a04b4c9a469ca06",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "b3033b9cf5873940b35a90334434c53b06d37a8e9db438143db79e21968f3645",
+          "module": "events",
+          "pid": "81393",
+          "server_info_sha256": "2709d2dc91657bd0b703554553405c13bc08ea8992a85faaf29fb7a70e4881d2",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.048,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_key_space_notifications",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-context_mutex.log",
+      "log_sha256": "88af2d08783ef9e818998b0d65035bd0d5a25e128ec4b2380723d98a1a667e11",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "8eee6b5348f5a07951a38cc71fe6def0065a49ec7b04f267781fe909382b4851",
+          "module": "threads",
+          "pid": "81396",
+          "server_info_sha256": "bcf05750579068277649af438c181348f6e34f6d014cdc7b07450ab3f9fe9e7f",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.081,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_context_mutex",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-server_event.log",
+      "log_sha256": "2f9dfab7d1b29c7a78ef810346271da747c54c085a824ae73e8da804b6c08907",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "7dc23094c9d07681e5b758c46d6dcd66d69f7f3d294f7159299f99f747852895",
+          "module": "server_events",
+          "pid": "81398",
+          "server_info_sha256": "013b65769384b4a284a07651587e33c1155d40f624c28a5d4e7d4dcdc372288f",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.084,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_server_event",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-configuration.log",
+      "log_sha256": "4c2fcd96d4efa209a2999dd25576aa4ab53b91dbfe9d8101d8f38513db9539e8",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "f8b99491b538d35de11091abe884a3f61b9eeba8e12a618420693e0cedf73b10",
+          "module": "configuration",
+          "pid": "81405",
+          "server_info_sha256": "7396ab1db2a790d6d72ff145ee6d4b435d6028512ba4a7211025b0435ff69471",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.075,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_configuration",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-response.log",
+      "log_sha256": "bdf0ddf1513847d317311b1bbd47a655ed6b96be479c14156f348b0fdad2fb1b",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "cf6c8ce16d317a03b882e7c6c3e9d778592b4cd700250cd119ac5034f0541cee",
+          "module": "response",
+          "pid": "81407",
+          "server_info_sha256": "ab80e1670d74c813c3642bc192a524a1e8576b8b6f159c6b05f145aeb719b552",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.078,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_response",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-call_blocking.log",
+      "log_sha256": "eae63c880c86adafd1e80daac517fd3891e15ca6026ef22a1f1b55939fd822ee",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "d52e017aa33e6fef7063cef35e8514d6074163a53a5c3ea5b1750f649a56ba99",
+          "module": "call",
+          "pid": "81425",
+          "server_info_sha256": "2645630a60dfca8f4a85192bf62b2e23eaad1d915e9936ac0a00c20e3a1fb3be",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 2.135,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_call_blocking",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-open_key_with_flags.log",
+      "log_sha256": "47f5f28aeaee78a0f59c1931a49dbf08401dd876cea2a34dc1b67688e1183782",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "02c85ba33aeb78c1244748153d77bdd92c860cda8bcc14e396fb45ce700ea627",
+          "module": "open_key_with_flags",
+          "pid": "81507",
+          "server_info_sha256": "cf83d5c72bb8ab1f35e9b788e6ab840a898a4686ae1dc1cea330230a2dfc5a3e",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 1.108,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_open_key_with_flags",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-expire.log",
+      "log_sha256": "412c9e2665c3ac997d15cf0354669c964ccd8ba385ae0dfd31a343cc7a5f8901",
+      "owned_servers": [
+        {
+          "allocator": "libc",
+          "arch_bits": "64",
+          "memory_info_sha256": "4ff087262abf0da1dcdff2a14ca13498dfcc04ae519cc0fc9551a39e9658dc17",
+          "module": "expire",
+          "pid": "81511",
+          "server_info_sha256": "5dfaa32301caaae789dda1e8f331f0eb936d19bfe2789d13d3548b62f045a1c6",
+          "version": "8.10.2"
+        }
+      ],
+      "profile": "release",
+      "seconds": 0.127,
+      "server": "8.10.2",
+      "status": "passed",
+      "test": "test_expire",
+      "timeout": false
+    }
+  ],
+  "cc": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin25.6.0\nThread model: posix\nInstalledDir: /Library/Developer/CommandLineTools/usr/bin",
+  "date": "2026-10-08",
+  "earlier_attempts": [
+    {
+      "directory": "target/f01/runtime",
+      "reason": "Pure helper test namespace omitted from runner inventory; corrected.",
+      "report_sha256": "02e68c2500941937e77c0d0b21a1e1713c1f631843fa0014ab0eedfe6c863f6b",
+      "status": "failed before any runtime cases"
+    }
+  ],
+  "excluded": {
+    "test_call_binary_data": "Specialized binary CallReply conversion contract deferred to focused repair validation.",
+    "test_call_dump": "Specialized binary CallReply conversion contract deferred to focused repair validation.",
+    "test_command_proc_macro": "Shared example registers metadata requiring correction; archive macro consumer is compile-checked separately.",
+    "test_defrag": "The selected macOS servers use libc; active defragmentation requires a capable allocator/server cell.",
+    "test_key_space_notification_with_invalid_utf8_event_name": "Specialized event-input contract deferred from the ordinary baseline.",
+    "test_redis_value_derive": "Shared example metadata/reply contract needs correction before runtime validation.",
+    "test_set_acl_categories": "Not compiled at the selected Redis 7.2 API floor (requires 7.4/8.0).",
+    "test_set_acl_categories_commands": "Not compiled at the selected Redis 7.2 API floor (requires 8.0).",
+    "test_test_helper_err": "Uses the hello module for a nonexistent helper command; needs a meaningful replacement."
+  },
+  "executables": {
+    "debug": {
+      "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/runtime-final/build/debug/deps/integration-0ef1361fe8dba352",
+      "sha256": "664ca9e507389186763714135ce7c190ac9916ce5e3216a8668ec25563efea32"
+    },
+    "release": {
+      "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/runtime-final/build/release/deps/integration-40fbc5c292b17a29",
+      "sha256": "38ecaac780377e328b72040089e6ced152bc9a7cbb76d08d8369f5fe81f882a2"
+    }
+  },
+  "features": "min-redis-compatibility-version-7-2,bindgen-runtime",
+  "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "libclang_path": "/Library/Developer/CommandLineTools/usr/lib",
+  "libclang_sha256": "b206adf7f1c2b3f466f5ae24acb6fa787e1872981083f28d3e691c8e23830c2a",
+  "limitations": [
+    "macOS arm64 libc runtime only",
+    "API floor 7.2 selected for these runtime cells",
+    "Shared inherited proc example/archive proc fixture runtime and active defragmentation deferred",
+    "No complete inherited/application suite claim",
+    "No performance or FFI soundness claim",
+    "CI and release publication remain deferred"
+  ],
+  "owned_server_starts": 104,
+  "passed_test_executions": 92,
+  "post_run_tool_change": "Added numeric-version/duplicate-cell argument rejection; unit checked. Successful matrix execution path unchanged.",
+  "raw_evidence_directory": "target/f01/runtime-final",
+  "redis_7_2_build": {
+    "binary": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/servers/redis-7.2.8/src/redis-server",
+    "binary_sha256": "94480949fb81fb1f0d6f862e9853abfbc7e66273a06fb4d7d7feea8e234df630",
+    "command": [
+      "make",
+      "-j4",
+      "MALLOC=libc",
+      "BUILD_TLS=no",
+      "redis-server"
+    ],
+    "source_sha256": "6be4fdfcdb2e5ac91454438246d00842d2671f792673390e742dfcaf1bf01574",
+    "source_url": "https://download.redis.io/releases/redis-7.2.8.tar.gz",
+    "version": "Redis server v=7.2.8 sha=febf8cb4:1 malloc=libc bits=64 build=1a0a973037db9b88"
+  },
+  "revision": "febf8cb4dec487e0c72443b247bf1e51ea056d99",
+  "runtime_report_sha256": "093cb6ed6abf8156d5539c4a941e060a101184d6c4ca855356ac10bea0611e83",
+  "runtime_tool_sha256_as_run": "3c96510ad0e196fd2c7374f2e19f75efef89e76c8e76b1d946b1ca6626e3e2d4",
+  "runtime_tool_sha256_final": "9418afff47748bb27abeefaa2c989b50a5901669d20ea704caa1cea261dc4166",
+  "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)\nbinary: rustc\ncommit-hash: 4a4ef493e3a1488c6e321570238084b38948f6db\ncommit-date: 2026-03-02\nhost: aarch64-apple-darwin\nrelease: 1.94.0\nLLVM version: 21.1.8",
+  "schema": "fork-f01-runtime-v1",
+  "servers": [
+    {
+      "binary": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/servers/redis-7.2.8/src/redis-server",
+      "expected_version": "7.2.8",
+      "sha256": "94480949fb81fb1f0d6f862e9853abfbc7e66273a06fb4d7d7feea8e234df630",
+      "version_output": "Redis server v=7.2.8 sha=febf8cb4:1 malloc=libc bits=64 build=1a0a973037db9b88"
+    },
+    {
+      "binary": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+      "expected_version": "8.10.2",
+      "sha256": "5f7cd7e2982bca1c7f31e4e3e396cee8c369838a18e41fc53f96ece23e955ae9",
+      "version_output": "Redis server v=8.10.2 sha=00000000:1 malloc=libc bits=64 build=764b3e45065a66fb"
+    }
+  ],
+  "source_files": {
+    "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709",
+    "Cargo.toml": "d6986ff689abe27b002e322090f6065b3a2e99ff46211906d742987a3b3254df",
+    "build.rs": "519de5da3bfeb832e6299ff4059e4bb63efdd227ee8da07ee903cc28d08f1f34",
+    "crates/common/CHANGELOG.md": "ea08ef6b3f8a8370eeb05be8babcc71ca248ec80698e4d739ba29479fc45292a",
+    "crates/common/Cargo.toml": "a997415f9aa671023470d87478306808a96877517b6d1a29b4394b5465937a69",
+    "crates/common/LICENSE": "b2a9a59c434fae714382fcfadda3f347c43f43bfdc5ad52216d99581a3cbe69d",
+    "crates/common/README.md": "4f31457fb7bd59a69c229ab6c6786b938232afe042d82569db514f99050cc482",
+    "crates/common/src/lib.rs": "85ddabb2a3fe20c59e0d12c3d0587c00dd49f135be142908fd06e0f8790df354",
+    "crates/macros-internals/CHANGELOG.md": "ee68955837fb56a7614c11d51a149b0b24356a0743ea9348a75554b12355fda9",
+    "crates/macros-internals/Cargo.toml": "a9b3cb04c88047cd1b1c0a8e30ec96c75242ce278df9b603d04c56646501e7be",
+    "crates/macros-internals/LICENSE": "b2a9a59c434fae714382fcfadda3f347c43f43bfdc5ad52216d99581a3cbe69d",
+    "crates/macros-internals/README.md": "1f2a7a7f00403261c7e51b5e8e5bc72c7ab6e821af3fb829ae381c54323d427d",
+    "crates/macros-internals/src/api_versions.rs": "625a97488db3696456217be24d738b02d33ab32b8d9d15c4212462e652080eb0",
+    "crates/macros-internals/src/lib.rs": "a4fe328745c48985a99a2e3fc14f7dc75f9dbaf13b480e7b93205d9154d29d2e",
+    "crates/macros/CHANGELOG.md": "3461088119740981457e6f36a012edc64ec0a166ef4caa8fdf8de36702aa1ca7",
+    "crates/macros/Cargo.toml": "7bfc27c26deeb23d4f6b82d6e22188fe8898e242f59ef75f24ddc325c9937de2",
+    "crates/macros/LICENSE": "b2a9a59c434fae714382fcfadda3f347c43f43bfdc5ad52216d99581a3cbe69d",
+    "crates/macros/README.md": "f416ada14ae8a7ca8e53143314219dc921a37f7f8b06e48d1d633eee1d48e05c",
+    "crates/macros/src/command.rs": "a7a5aaab3339ce1cf03df772da74c77aacd9af3fc0dac2d60881a11a593b75dc",
+    "crates/macros/src/info_section.rs": "0785a8014bdec70869cbca37d7eb31398d0eb24f72651c0661dd1df690f10ff6",
+    "crates/macros/src/lib.rs": "cb0ea83ae993fef342d5c3c0254d1669bb0c20ae6b697942fccb3ef2343b4c4a",
+    "crates/macros/src/redis_value.rs": "b17f6a2632e280de5a3606a0fe28f7cb201566139429f70514386800bc16aa2e",
+    "examples/acl.rs": "e4f698429a6416d9c59916e3cdb6ecadd99937c84bdaabf57248e9b9b35c1f50",
+    "examples/block.rs": "e3f0ae600bbbaece0cb69c8fb3e03e1f17eca37fba12385630e499a83acbb0c8",
+    "examples/call.rs": "845ce858fe0245a49bc0e3f138b3c48114e457030c7900f778a5f23cf4b6e875",
+    "examples/configuration.rs": "3b4f3ff6eb6096e94837eaa7c5a61ba3c3d8e55fc1c265c533bd51b7f6bcf090",
+    "examples/ctx_flags.rs": "8522d23cdd66ff24b8dfbe92e11738d31c4c6102bb0dcdb4e98a84771e7ad367",
+    "examples/data_type.rs": "88152be56e7b90af818ea2bc856fe08720aec055a4dc41d11be24bffefa96957",
+    "examples/events.rs": "9c74618b6bc09b82ac513d0c0148a177afa272138930aa375827e30d3a7bde44",
+    "examples/expire.rs": "377d27bb86786da571052bb0d6feafd0058aedd3c6d172307dfdf0b2d7a074d3",
+    "examples/hello.rs": "1299ecf1c577c0c97cae1aaa38482fb0ba580df3905f63ff7e53af48afa99956",
+    "examples/info.rs": "9c1133bf9ae54287a9d82c85d70e18b5f4e75033d6ad9aa31a1127798517b0fe",
+    "examples/info_handler_builder.rs": "06e8029553c31de7c7a50fecb2a4e10af2d21eada3cec036d8fe215616154414",
+    "examples/info_handler_macro.rs": "c09be445b6a5e3cb8e8ce15b4a96cd4433579511cbce9515a7ac9fd033cb9527",
+    "examples/info_handler_multiple_sections.rs": "76d80beac8e3b3e9c3d6be4aa4689e0fe594f3ec7dd66fa194089716df26c9ca",
+    "examples/info_handler_struct.rs": "75f9bd9254ce65523c9cee7003e8ec4792e4d18a7a8ed7bc843a80208851c491",
+    "examples/keys_pos.rs": "1ce7f7f4a49da1bf2365d49ce9db35e91acc72337644d9ddeaee3139621ea96e",
+    "examples/lists.rs": "657cd27e91fffbb309ca0a04f7cee0d2bc2e13251ce8eea2ad0a13a34cce7c9b",
+    "examples/load_unload.rs": "d9727560c0c5baf94feec0e724db885cdeba140b7a3ed63fbc341fe53b55439b",
+    "examples/open_key_with_flags.rs": "de96d0d12fb6179a74b509938c9513e6175997b2d66408d8b23ba5eeed5e28cc",
+    "examples/proc_macro_commands.rs": "988608d890a4894aaaef8c0021bfe4b76cdfb676771c86d8b22211f91b2237e9",
+    "examples/response.rs": "2d26593a13ca0bb1c454ef9525d8fe82449877bbb0bae6d44b68c03f1900a3f8",
+    "examples/scan_keys.rs": "4c0882d7e176f83068221e9bfcd755981c6f158c26ebb12deaf99c911274e0df",
+    "examples/server_events.rs": "579d602cdb86c38593940735266603f55dd76222d9f5b7ed381f3deed076b14c",
+    "examples/stream.rs": "9df1051ac93ae3e64d86c0a332a6174116c32109b3f0efcd3dc840abb3a1d0e5",
+    "examples/string.rs": "05a9df422f4de5690c4caf38067b0cb9b41c9cf6bb817d4e92b837a916ef28ad",
+    "examples/test_helper.rs": "215521e7d0c06963606398ab7932a797c86dc7b470b5473eab6f3f74696c7655",
+    "examples/threads.rs": "6d4ffda2788c0f00b9b8e19b5e6f6b9d4dfd4247d44e8b478aea26592c63b8ec",
+    "examples/timer.rs": "eb780dc480d5a8f9156600810f18da3d1f499ccdc7d04bbe0b0dc61b49ee44a0",
+    "rust-toolchain.toml": "c3408601148e659ce09d22c41a74d71ed7e0dfa6bb239256423cc3d2b8254806",
+    "src/alloc.rs": "89311411d8d4941b91a7b7f8ca937161a64c1deea89b5e2aadbf6f8cd163dcfc",
+    "src/apierror.rs": "a04cd33eec4474d4132e6cbd8ad31485f981a9c5402481a796af60cb4f817051",
+    "src/configuration.rs": "d7f8f429014b89da21ca636a7f900218a797de8f252879a5095bab184a011e8d",
+    "src/context/blocked.rs": "65b5fedbf2f6aef13867322d3512d150b218415a9773e33b868904f5a2a2083a",
+    "src/context/call_reply.rs": "4e315e45c0536188aca4148cb08b6fcd3aa0ab15b92940700bb6aaab1f7f9428",
+    "src/context/commands.rs": "21e0664f63a36ea5df78870280bb3fce9c354b0350648dfd65024818e6740211",
+    "src/context/defrag.rs": "8f5b862d7441c4547939cffb817a0abf1a98d344199ad2a9297d50d227005add",
+    "src/context/info.rs": "375a3f87d857199fa4e633d6913edf8df886aaa2190ec348cec7eb3f32b76edc",
+    "src/context/key_cursor.rs": "8d906fab05962a3fb42513d55435d829de655b83bf5ab5ebb8b6fea3732cf9cc",
+    "src/context/keys_cursor.rs": "4bab67b2ebb6cc90d0be784849b986fa3bebfe014c7b1e2b0364c0e985a238c8",
+    "src/context/mod.rs": "0719286068015ce866e9f4a8643ad0f1b89540a70a3862385bc4f71b17ea7251",
+    "src/context/server_events.rs": "1ee11b34089649e7a19123375c3d0b635ab4851b6142419a3c909352304dce90",
+    "src/context/thread_safe.rs": "bd19e02aacf7f1eb3ec40aaf4066d1e2c052c3934d4ff2c88fbe953aec098852",
+    "src/context/timer.rs": "d6714a6a52d7ce73134882160846df77cc5d41df1aa2bf7450e5231e10a80ed1",
+    "src/error.rs": "f7fea094a79245489289156f316800c1798b61e1dbc88b33f1adb75eb4b7a393",
+    "src/include/redismodule.h": "c6bd37d49653968f3d37771477426775f2af8563d414e15730bd3debbd74c76a",
+    "src/io.rs": "0ba73b673a5757cfe9d166bb6096eea13ff42ba76ee2151142858f59236f517a",
+    "src/key.rs": "07724059dc356048e9ea6ac12df09ca856a060275641a4eb269f0363ffffe865",
+    "src/lib.rs": "9db56f3900b856e736ce57bf47b97752720d40be85732f4005cbe4ec0a29dd41",
+    "src/logging.rs": "f54c5d1bc44872063f610211f4c1681a39a1c36ee6f3eefae13e568a00984648",
+    "src/macros.rs": "d0c4b8c7e46200e4883cbe5d522257b0245c322861b012f6fc95f6fd68658288",
+    "src/native_types.rs": "9ff17729e048d9a41a7a99b973399a6cbc324239c9b132dd1b4232d95af4b940",
+    "src/raw.rs": "d31b5f3c89a8bc2a8a339266d4fcbdac025ee62f92868b389f15fad665b2e5de",
+    "src/rediserror.rs": "6e042dfcf88cf0f296e61d54ae2ec23004d64953da1b07a101fe10771cf76575",
+    "src/redismodule.c": "b48ea63f6c89889115ea4fd47b65d691dbcebcf9ab71d6185df9b33475ca6c71",
+    "src/redismodule.rs": "5c7577b9746c23249225931d5cfa2a820f290340c58a0586026844b2ae3d7d76",
+    "src/redisraw/mod.rs": "b31097f6bfeaa265560023bd794fc2a645a7deb376643a6705b836745d1d1097",
+    "src/redisvalue.rs": "5d1ad6f05342ca88c9773ef154bd2756472723fed1d3c2d136849f475f46b4d9",
+    "src/stream.rs": "7c09d98ab1291fbdf2a45ff3c5be7b06bb29321a0466d7b5aa896d6c2dbcff6a",
+    "src/utils.rs": "3ebb5f3a9c1b1de51166b3b80586b14e6b3baf0a6666b9edae0dd80f158e89e1",
+    "tests/dependency_contracts.rs": "0009b345a974dd82033e5ad593297e19e20a28c27032756c14e6cbba06d99d4b",
+    "tests/integration.rs": "402ea7efc2bcf7ac0c4c0d2c963563ae7e20ca3851fbe4dfb69e9722c0f96f17",
+    "tests/utils.rs": "75c5c9c3594452d9f94cba2db32d891bde6795e3f5f30f079f13e5a5514341ec"
+  },
+  "source_tree_sha256": "fae1684a746a7cf54601f788d357d5fddf7ea4b796c68d3eb309ffb3c5851046",
+  "status": "passed",
+  "tests_per_cell": 23,
+  "validation": {
+    "candidate_floor": {
+      "compiler": "rustc 1.88.0 (6b00bc388 2025-06-23)",
+      "log_sha256": "062bb99abfe7f0ec6ab494c5fcb19dfe77436fba9b46570d44936fdf33c40010",
+      "msrv_selected": false,
+      "scope": "locked workspace/all-targets check; API 7.2 + bindgen-runtime",
+      "status": "passed"
+    },
+    "clippy": "workspace/all-targets, API 7.2, -D warnings passed",
+    "clippy_log_sha256": "0c034211c0204c039c793d0fbc591dcca44b8021060ea9181d73e77fc3b147b7",
+    "pure_log_sha256": "ae372f7f3039660f792a8ce0c4e56a3e5d32990e95179f59696d7452611ae0d3",
+    "pure_rust_tests": 21,
+    "python_test_log_sha256": "370685c58b6e37a3dd8d979d9b6d524ea5aeca7c26848688cf1aea31462a50aa",
+    "python_tool_tests": 13,
+    "rustfmt": "passed"
+  }
+}

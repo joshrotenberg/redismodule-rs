@@ -30,7 +30,7 @@ not a substitute for fresh external consumer/package checks.
   Xcode Command Line Tools provide these. On Debian/Ubuntu, install a C toolchain
   and `libclang-dev`.
 - Redis is needed for module loading and integration tests, but not pure library
-  tests. Runtime support is a separate validation project.
+  tests. See the [local baseline](BASELINE.md) for actual tested runtime cells.
 
 If bindgen cannot locate libclang, set `LIBCLANG_PATH` to its containing directory.
 For the Command Line Tools installation used in this pass:
@@ -74,10 +74,11 @@ REDIS_MODULE_COMPATIBILITY=7-2 ./build.sh --release
 ```
 
 `./test.sh` preserves the inherited all-target test scope, including actual Redis
-integration tests. Those tests assume a server on `PATH` and example libraries
-under the normal `target/{debug,release}` layout. Their server-startup loop and
-custom-target handling still need the F01 harness work. Use the pure test command
-above for this meta pass; a completed compile is not a runtime test result.
+integration tests. Use the [F01 selected runner](BASELINE.md#reproduce-the-runtime-baseline)
+for the current runtime baseline; several inherited cases need separate corrected
+contracts or host capabilities. The test helper bounds startup and command I/O,
+infers module locations from the executable, verifies owned server identity and
+retains logs. A completed compile is not a runtime test result.
 
 The local CI draft selects the pinned development toolchain and locked graph.
 Its existing four API-floor configurations all select a Redis 7.2 host; job
@@ -102,8 +103,8 @@ resolver 3, a declared MSRV and replacement of `lazy_static` also remain separat
 
 The obsolete Docker/readies recipes were removed because they referenced missing
 setup scripts, Makefiles and a nonexistent submodule checkout. This repository
-currently offers the Cargo workflow above. Container validation will get one
-working, documented path in F01 rather than inheriting those broken recipes.
+currently offers the Cargo workflow above. F01 records native macOS cells;
+container execution and its CI integration remain explicitly deferred.
 
 Cargo references: [workspace inheritance](https://doc.rust-lang.org/cargo/reference/workspaces.html)
 and [manifest versus lockfile](https://doc.rust-lang.org/cargo/guide/cargo-toml-vs-cargo-lock.html).

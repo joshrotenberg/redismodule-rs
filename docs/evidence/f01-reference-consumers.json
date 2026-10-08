@@ -1,0 +1,863 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-08",
+  "sdk_revision": "febf8cb4dec487e0c72443b247bf1e51ea056d99",
+  "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)\nbinary: rustc\ncommit-hash: 4a4ef493e3a1488c6e321570238084b38948f6db\ncommit-date: 2026-03-02\nhost: aarch64-apple-darwin\nrelease: 1.94.0\nLLVM version: 21.1.8",
+  "scope": "Four isolated local module consumers: compile/load plus selected ordinary behavior; not a complete module/host/support certificate.",
+  "consumers": [
+    {
+      "name": "jmespath",
+      "package": "redis-jmespath",
+      "source_revision": "0e70ab55dd08823029552faa495b22fd43b2f977",
+      "source_status": "",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_tree_sha256": "32b0b9874e61072e4496c62378be9ea17fbbcc3b22caf5b7f03cc1bd0e6c2c03",
+      "original_lock_sha256": "aa7a322d6b0e7a943cf2de1202812f80ec419ff3cd8bd44781f051add6a2c742",
+      "migrations": [
+        "Select this fork's facade and public macros by path; explicitly enable bindgen-runtime alongside the existing Redis 7.2 API floor.",
+        "Add an empty workspace table to detach the snapshot from the enclosing SDK workspace (harness only)."
+      ],
+      "commands": [
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "metadata",
+            "--format-version=1"
+          ],
+          "exit_code": 0,
+          "seconds": 5.075,
+          "stdout": "target/f01/references/jmespath/metadata.stdout",
+          "stderr": "target/f01/references/jmespath/metadata.stderr",
+          "stdout_sha256": "9fa70b80aeab263232007a50376c01f4f6021b37b424b7b3f69a7908b63833b4",
+          "stderr_sha256": "67e40bada52c4fe16b84c3e764745aab697b0ed1a54c6e31c187da61e146bd35"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "build",
+            "--locked",
+            "-p",
+            "redis-jmespath",
+            "--lib",
+            "--release"
+          ],
+          "exit_code": 0,
+          "seconds": 34.652,
+          "stdout": "target/f01/references/jmespath/build-release.stdout",
+          "stderr": "target/f01/references/jmespath/build-release.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "902ace5105fb4b4ba8d39647d8b237e78029add5bc9a87680848f7306ee03f0e"
+        }
+      ],
+      "sdk_graph": [
+        {
+          "name": "redis-module",
+          "version": "2.0.8",
+          "manifest_path": "Cargo.toml",
+          "source": null,
+          "features": [
+            "bindgen-runtime",
+            "min-redis-compatibility-version-7-2"
+          ]
+        },
+        {
+          "name": "redis-module-common",
+          "version": "0.1.1",
+          "manifest_path": "crates/common/Cargo.toml",
+          "source": null,
+          "features": []
+        },
+        {
+          "name": "redis-module-macros",
+          "version": "2.0.8",
+          "manifest_path": "crates/macros/Cargo.toml",
+          "source": null,
+          "features": []
+        },
+        {
+          "name": "redis-module-macros-internals",
+          "version": "2.0.8",
+          "manifest_path": "crates/macros-internals/Cargo.toml",
+          "source": null,
+          "features": []
+        }
+      ],
+      "adapted_lock_sha256": "b40c33f69d09987740247b868376705b9281329ccf33eafcb34193806eea0d3c",
+      "adapted_manifests": {
+        "Cargo.toml": "19bc94a22ce107a9e4b54f793ca938c98a02708a8a7ea4db34c44319d35af6b2",
+        "examples/mcp-server/Cargo.toml": "17f1583226b54bedc88a291329cf61f72ebe5e4af26bf2e39d6ae9afc4e78174"
+      },
+      "runtime": {
+        "artifact_sha256": "b00ab74e519e9e70791ea7ebae5c4a8caf94ad75bcbc8047d3206bfcd0cd26d9",
+        "server_binary": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+        "server_binary_sha256": "5f7cd7e2982bca1c7f31e4e3e396cee8c369838a18e41fc53f96ece23e955ae9",
+        "checks": [
+          "module loaded in an owned loopback server; INFO process ID matched child",
+          "JMESPATH.EVAL filter/projection exact JSON",
+          "JMESPATH.QUERY on a Redis String exact sorted JSON"
+        ],
+        "redis_version": "8.10.2",
+        "owned_pid_verified": true,
+        "arch_bits": "64",
+        "os": "Darwin 25.6.0 arm64",
+        "optional_hosts": "RedisJSON/Search/TimeSeries integration not exercised",
+        "status": "passed"
+      },
+      "source_directory": "redis-jmespath-module",
+      "source_file_count": 48,
+      "source_unchanged_after_checks": true,
+      "sdk_revision": "febf8cb4dec487e0c72443b247bf1e51ea056d99",
+      "source_tree_digest_algorithm": "SHA-256 of json.dumps({relative_file: sha256}, sort_keys=True). UTF-8; selected snapshot source files before adaptation.",
+      "source_file_hashes": {
+        "Cargo.lock": "aa7a322d6b0e7a943cf2de1202812f80ec419ff3cd8bd44781f051add6a2c742",
+        "Cargo.toml": "d6c9dbb8cae6941d255b734036aebb6f0fb937c4169c161c84d8b29daf6d6fb0",
+        "LICENSE": "4477e163f03d000e1b3e4aebfc8bc56a32ef9de0f8d04cce883c066885882699",
+        "LICENSE-APACHE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "LICENSE-MIT": "25b21d18fe6b3564c726b18f1d03e1f2b3e2f724c855268cb2a7bb388cf5339e",
+        "README.md": "4a7bbfcde047069080960c58c5f75cc98d20860b7053641e6213231348f5fb4b",
+        "benches/experimental/prefetch_analysis.rs": "c1b1764ad0516ab60f735496fd132059a5ded2256cf96a4fa4ace688fa7e2e9d",
+        "benches/experimental/prefetch_simple.rs": "8b5a798f7644f7e056b7f606f7c32d8f5a44ac9a6b7966616e326341003f1bee",
+        "benches/jmespath_bench.rs": "0733c475941dce6cebd517290bf1016e0ce77af2519893688194e3e7f0f6ea65",
+        "benches/redis_comparison.rs": "27f89993bc12d86199ed1e1e71b44a636f4424c7b2b587c46dc1a842665bc5d9",
+        "examples/mcp-server/.dockerignore": "b53ee26e6ff1da219b0563333a76d2c9ec19eec713d6ee54e11a1edacb0e9f3d",
+        "examples/mcp-server/.gitignore": "b53ee26e6ff1da219b0563333a76d2c9ec19eec713d6ee54e11a1edacb0e9f3d",
+        "examples/mcp-server/Cargo.lock": "94bc8a10e91ae6f07b0596bb7fb83d90b3545543b883359632017d647291413c",
+        "examples/mcp-server/Cargo.toml": "17f1583226b54bedc88a291329cf61f72ebe5e4af26bf2e39d6ae9afc4e78174",
+        "examples/mcp-server/Dockerfile": "dee8f66adca859d791700c562afd2761bfcbd4d524a3f3e7d94aba34ae97c834",
+        "examples/mcp-server/README.md": "c543f217cc45043c8cf08e157e440298901343131f4ad14fe1af031606a19600",
+        "examples/mcp-server/src/main.rs": "d6f85c94e63d144000595b082e6fbf25309de6d1972e673a7f9cf42f58ed935a",
+        "examples/redis/run.sh": "5af868a36d01673b5a1cfa0d51570890a8ac84ac2b5f98e0482cb0334a80043d",
+        "src/ast.rs": "95aa26c696837fa51d462e35290b73aa82c6ad6df12f93947f972f8a591f3574",
+        "src/command.rs": "bd5d197c2a88a61b769263a26c35582517ccc8a9735fc28992b406e7e056c6cb",
+        "src/config.rs": "e50c593c43b86d4adbdbd930ec5f9a5c3b8e0aa39dbc25f32c50e1e50e6189c5",
+        "src/diff.rs": "c02b4b27a1233a4c327d571be0f44e191cb64c4a9766f92b1fd812251b165f69",
+        "src/error.rs": "9054fc011f55106a0f190fe82211f5f5ea60b6b9ed4019f709127b204937f29f",
+        "src/format.rs": "26b40a02e410df995a488db1cfafa28466a7483b34322638a8905cd3ffd74df8",
+        "src/lib.rs": "259f1dd9bf4a91a0f16dab953bff7a24211268d78d5cdfa7dcc0005f740c2e76",
+        "src/notify.rs": "4dfce1449b42f75d7f0dd2244c3b7e11f98e18df75f77a618dd872cc281b45b0",
+        "src/runtime.rs": "1b485849131f7bd2fa244988b7d776176c230b7737762991b874942551c56a63",
+        "src/search.rs": "1ee471c5c01df5964dc94db773e3b033880232ff2c21684c9b2688cbae85159a",
+        "src/stats.rs": "90bb01fe70d660be2bdc2f004051e7f2d7a5116e982af5dd81ba1b421fb5a569",
+        "src/streams.rs": "f7079484f2c0a88fd28299f7fc4061aaae180a12615b8c50f8f9d565bba15504",
+        "src/timeseries.rs": "e7600df6a00c6851bf0f9517939d7a28377f4abd3eda6e81292cd52e4aa3c526",
+        "tests/integration.rs": "6db63b962e30098d2c87991ec136f2b0a2e55bfcc0150d864fcde994bc2d54d4",
+        "tests/integration/diff.rs": "baf80d665b16b5c8dcb0671967769bcb68c06a49546c8a80cc3e5419b6b603b5",
+        "tests/integration/edge_cases.rs": "a373d06f8281e16be2497512da5a01af7c328a1d46152e06527829d5126afd35",
+        "tests/integration/eval.rs": "b2c28876244992c74239d91e000c9373cc07b2209aff0e8fe6396a864584afee",
+        "tests/integration/formatting.rs": "78d3f8435cc9d8ed143307e777e52eb347dcdd1061eddc8ff3657d2514e976b5",
+        "tests/integration/functions.rs": "27ab798419a4f9bab6bc58994b68365138d4150e72a8cb8dd7fcbbe1325616a3",
+        "tests/integration/mquery.rs": "080186853519bd265be9bf8f48d5476b0cdb51a340fc3abdc6fac11ec8a3bae4",
+        "tests/integration/patch.rs": "af6bec990638ca322e162fc5955b190eff796da641c0b7c215e43acfd4c96c65",
+        "tests/integration/pipelines.rs": "fe9e489ea5d7fec95264b4363af5996447262e4a0375bc6dcfb570bb3ed6da76",
+        "tests/integration/query.rs": "e8de6c597a5439d61071bbccc22a2a0a6bc186ff333577aaf07a64769ae77b79",
+        "tests/integration/redisearch.rs": "7b05f9661e0b1faea72614f0451c8684d9c335c9efa6feebcaec5732c171de31",
+        "tests/integration/stats.rs": "ed3df02e048c47dabf3bab0b81308863c1bcd21819c6094bf147f610648fea01",
+        "tests/integration/streams.rs": "9c9d43b62e1a85e35fcae89de8a0e561695d558370e68b7ac714d82e328b59f2",
+        "tests/integration/timeseries.rs": "0378ef0c25cabb158dcf7193f77f95565b9e6c28e457096daf8838b1b9912ff8",
+        "tests/integration/utility.rs": "dc6093e3cc61f790b75019fac530cb32afcef2ab9d0fc4bdc0af0a68c16cd516",
+        "tests/integration/view.rs": "f59fc4a75dbe1aeffecfb668476c05d8d1f9d52f3fef4c1411e6e4bbe5d772df",
+        "tests/test_harness.rs": "5c9f39db7800ed3b0b0438edf350d884b3ac1d1e08555c4fd40fc7cdc26a7592"
+      },
+      "final_artifact_matches_owned_load": true,
+      "metadata_sha256": "9fa70b80aeab263232007a50376c01f4f6021b37b424b7b3f69a7908b63833b4"
+    },
+    {
+      "name": "eventstream",
+      "package": "redis-event-stream-module",
+      "source_revision": "93022f60502a828a087c6ef8aff935443dcc1823",
+      "source_status": "",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_tree_sha256": "01383df808ff252ff44a479855ed72860d95a0b7764cf587903702b6883a204a",
+      "original_lock_sha256": "27dc33a771e3859b84600c2729d052a883725ee02409d0e2a1efa84c47a7982b",
+      "migrations": [
+        "Select this fork's facade and public macros by path; explicitly enable bindgen-runtime alongside the existing Redis 7.2 API floor."
+      ],
+      "commands": [
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "metadata",
+            "--format-version=1"
+          ],
+          "exit_code": 0,
+          "seconds": 2.329,
+          "stdout": "target/f01/references/eventstream/metadata.stdout",
+          "stderr": "target/f01/references/eventstream/metadata.stderr",
+          "stdout_sha256": "b745b5f2d2db0779b92c4d2a5fb13a226b9769aff19940e0105b962b2da8221c",
+          "stderr_sha256": "4978f32b1ac5eadc249fa10064384c047cdde74678fc6a6e940a1f55ef9c400a"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "build",
+            "--locked",
+            "-p",
+            "redis-event-stream-module",
+            "--lib",
+            "--release"
+          ],
+          "exit_code": 0,
+          "seconds": 18.104,
+          "stdout": "target/f01/references/eventstream/build-release.stdout",
+          "stderr": "target/f01/references/eventstream/build-release.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "567476a03a812c83a49168a74c81eddf93cef01111cc625d8599e10a4f45348a"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "test",
+            "--locked",
+            "--release",
+            "-p",
+            "redis-event-stream-module",
+            "--test",
+            "entry_format",
+            "default_format_is_fixed_and_byte_identical",
+            "--",
+            "--exact",
+            "--test-threads=1"
+          ],
+          "exit_code": 0,
+          "seconds": 35.577,
+          "stdout": "target/f01/references/eventstream/test-default_format_is_fixed_and_byte_identical.stdout",
+          "stderr": "target/f01/references/eventstream/test-default_format_is_fixed_and_byte_identical.stderr",
+          "stdout_sha256": "5befc7cc30bdc0c63985b3ecca9bb4d00521cadeba130ec0a7de6d6b060077a8",
+          "stderr_sha256": "0c7408e69291a2d4be4439e8fb03a94e9976313888dae9ecc5d4cf0122b89e9d"
+        }
+      ],
+      "sdk_graph": [
+        {
+          "name": "redis-module",
+          "version": "2.0.8",
+          "manifest_path": "Cargo.toml",
+          "source": null,
+          "features": [
+            "bindgen-runtime",
+            "min-redis-compatibility-version-7-2"
+          ]
+        },
+        {
+          "name": "redis-module-common",
+          "version": "0.1.1",
+          "manifest_path": "crates/common/Cargo.toml",
+          "source": null,
+          "features": []
+        },
+        {
+          "name": "redis-module-macros",
+          "version": "2.0.8",
+          "manifest_path": "crates/macros/Cargo.toml",
+          "source": null,
+          "features": []
+        },
+        {
+          "name": "redis-module-macros-internals",
+          "version": "2.0.8",
+          "manifest_path": "crates/macros-internals/Cargo.toml",
+          "source": null,
+          "features": []
+        }
+      ],
+      "adapted_lock_sha256": "eaf3cd817cbe09730b0b0e1c45a902e602af3baec0380e05c98763bdd2416c1e",
+      "adapted_manifests": {
+        "Cargo.toml": "cc22374e4fdfea3372ef0ad9cbe57e955669ab33cd0c78f0c0228537e7fe3847",
+        "examples/webhook-sink/Cargo.toml": "ac3afdf32904dd6c180ae8aa5bc15c31138241d9b41212d2e18f9e4daf67b8d5",
+        "crates/eventstream-client/Cargo.toml": "19e0ad3e69f8be2723b9dd6f5ad3966bef3bc78198fa157a890be0d34a776c0e"
+      },
+      "runtime": {
+        "artifact_sha256": "8fe54ed92dffd4e46abf68558c3c67dd3efa72585f9d186efe443eaed5bd60cb",
+        "server_binary": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+        "server_binary_sha256": "5f7cd7e2982bca1c7f31e4e3e396cee8c369838a18e41fc53f96ece23e955ae9",
+        "checks": [
+          "module loaded in an owned loopback server; INFO process ID matched child"
+        ],
+        "redis_version": "8.10.2",
+        "owned_pid_verified": true,
+        "arch_bits": "64",
+        "os": "Darwin 25.6.0 arm64",
+        "status": "passed"
+      },
+      "runtime_harness_adaptations": {
+        "path": "tests/common/mod.rs",
+        "before_sha256": "b1892eae1fcd53e8f21612e531d66d131959266a2524bceebb78ef5edb4d7d85",
+        "after_sha256": "0bed2bc5ae713b989bf0efa35280fc26974076623b7ad1cd8a22a98fc7fabef6",
+        "patch": "docs/evidence/f01-reference-eventstream-harness.patch",
+        "purpose": "Lock and scope nested builds; Carolina additionally honors shared CARGO_TARGET_DIR and the pinned server binary."
+      },
+      "selected_tests": [
+        {
+          "test": "default_format_is_fixed_and_byte_identical",
+          "passed": true
+        }
+      ],
+      "source_directory": "redis-event-stream-module",
+      "source_file_count": 57,
+      "source_unchanged_after_checks": true,
+      "sdk_revision": "febf8cb4dec487e0c72443b247bf1e51ea056d99",
+      "source_tree_digest_algorithm": "SHA-256 of json.dumps({relative_file: sha256}, sort_keys=True). UTF-8; selected snapshot source files before adaptation.",
+      "source_file_hashes": {
+        "Cargo.lock": "27dc33a771e3859b84600c2729d052a883725ee02409d0e2a1efa84c47a7982b",
+        "Cargo.toml": "9a0615b81db4b26bb4745b483309a27648cc2bd69414aa2dc36f19f19fac3da5",
+        "LICENSE-APACHE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "LICENSE-MIT": "61115517cbb679e70cbecbb46c1ab95b8adb8acb04945cc723dc2c5b7d6c0146",
+        "README.md": "471535c463b27808427e6ddf0e16c006fa40f0dd8919ef3580d21b458beec02a",
+        "crates/eventstream-client/Cargo.toml": "19e0ad3e69f8be2723b9dd6f5ad3966bef3bc78198fa157a890be0d34a776c0e",
+        "crates/eventstream-client/src/lib.rs": "5c5549e79aa5cb67c9557ce83d4ab73c9bc9bc8607b1226bab8feb169f84189d",
+        "crates/eventstream-client/src/main.rs": "f4c5742922d6a1e928d0b0a374f6c1d2e26bc1f4bd9a78453ad031c12fd68a91",
+        "examples/go/README.md": "223c9cb5d3e7be1f9afb123a823efafe7f6a7ac2394ee6caeeda67d2d1e814a9",
+        "examples/go/consumer.go": "bfd36d698035a82f4c9046429baeae19667d8017b609b54944ee986e753bf835",
+        "examples/go/go.mod": "91b9acf680004dcea09416f835277f6a56b76d153112bd995eade66d984b62b8",
+        "examples/go/go.sum": "20b32a79d23b98851ffb8aad43c1ada98624ad90e1a6a899539f0f6d3ad368d1",
+        "examples/node/.gitignore": "88b6b09796bc021a6f46b5964be1cbe30ef7a25d613ee43f868e720ee4d15587",
+        "examples/node/README.md": "7f988d2fbedb0af7c44a756b61ca51ae7104092d521d9e24e8bb087eaccc48f7",
+        "examples/node/consumer.js": "0632cd16409ac58c98944810e2d47cd6ac08c5b3ebadff5e929ba66995873d03",
+        "examples/node/package.json": "4209bb1b1508a32638ec39f0507705730ba6a30d7e77e0bdbcd40b604e66f136",
+        "examples/notifytest.rs": "08bcd851e5cdf947d9505d4d440445c604c7401ab9600e21903b881703478a74",
+        "examples/python/.gitignore": "862263fa1f46c20f0d1e4dac5ffcc75abd55c08211b2c3864c5f8764b9d87793",
+        "examples/python/README.md": "70f269562312578738df269cf2e15b159d83cde00674e0d9f4cb919e8a43d54f",
+        "examples/python/consumer.py": "23593d9e60983d65bd820d78270b3642a630df81735e3983471313f0d903c1dc",
+        "examples/python/requirements.txt": "8892bae3caccdb7fcb66b574425f96f77941e72846dbf6ceb6c9971f8d93e600",
+        "examples/tests/.gitignore": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b",
+        "examples/tests/README.md": "56785ddb5e996a3e22968205396cedb15216f3dd5f7c0531eab5f9a285673e26",
+        "examples/tests/test_consumers.py": "5ea33679a5f9add805031e306e38168c161c7eed53c1372315ad9f9076a001c7",
+        "examples/webhook-sink/Cargo.lock": "1a905cef7fd82bf1bbf03626db5cf7de1dd71141f58d051b5a5d54a4fc59776f",
+        "examples/webhook-sink/Cargo.toml": "ac3afdf32904dd6c180ae8aa5bc15c31138241d9b41212d2e18f9e4daf67b8d5",
+        "examples/webhook-sink/README.md": "b0f9cd80b52d5e3943182655a8305df0d3cd2744a5398dec297e66328eea51ef",
+        "examples/webhook-sink/src/lib.rs": "00734b2e78d893bd11c37f2a5d8cb5f8895bf72ee4f7c38081c61efc29e6f810",
+        "examples/webhook-sink/src/main.rs": "13dce0508243a405355c9d4784565e8addbfebbc31d5f97064e1b23054d20066",
+        "src/capture.rs": "6c584b2fb80fae88cba088fd995e35da22eb8bd62354092fe9bfed59265101a8",
+        "src/cluster.rs": "3b247a7136d872cc2b5edc5403d737b098ad2ec527fb9f16aa40c8eeb6a63b59",
+        "src/commands.rs": "b032dd176ef6f8152190d60a9023370e531cbb40f90e3dd0a0191229fba2e960",
+        "src/config.rs": "a9b56f5d9e3b961e8377cead6a3d90afcb3a381aa8b24c6c9a795df13e7561d3",
+        "src/dispatch.rs": "100086d74564d8d468c4c35fde999200df6cd6f39e405e071a5bc8f24c53a5a6",
+        "src/lib.rs": "8a49d6571a78cf3d9625696b77fd3388c6b16d2bf52d1605e28483544d12c01b",
+        "src/markers.rs": "26ba35070861aab37bf7422254c682cd6f7c0da9f7adb2c4c46ed280ccda4ca7",
+        "src/stats.rs": "7ba6288b089ebb63fc265d4c8f07d851048270464e489740ff47907c9f596dae",
+        "tests/acl.rs": "58990f497db0fc20816401dad0866ede74283179be7562a52a4a55d198311c24",
+        "tests/async_dispatch.rs": "2c09a28477e33b42d5b02627a6388e5d65f14bcc39c53b6074db61367bd30734",
+        "tests/auto_group.rs": "e1a53c13215cd8be2ae536b5168f997fcafbe9b546f52e19ca6691dbd08b3515",
+        "tests/capture.rs": "4a09b5c3d49289d1eb05c9f665d9a0e6f010217f909384669c1f97c33b97afaa",
+        "tests/client.rs": "e5eedacff5d965125b195e80aeafe080142338d860d7791c5eaebfd808bc8911",
+        "tests/cluster.rs": "ea744f608162143dfe65c7b33daaef8c08265ded04f778d93dc58dd68a052e65",
+        "tests/commands.rs": "41b765cc8d427d707ab38ea4ab7c08f5adbf2275f54f916dca131cc0ff683c33",
+        "tests/common/mod.rs": "b1892eae1fcd53e8f21612e531d66d131959266a2524bceebb78ef5edb4d7d85",
+        "tests/entry_format.rs": "43f056d139dcd779a545f9d12d091299a2750d1e3f4e7a1cbcdcd902f4618dda",
+        "tests/event_classes.rs": "1fd6aeb0c10c45b2f025bf63cf38ef6065a3ff268a53f15eceb281cdd35fc952",
+        "tests/filters.rs": "e1100983ba75729a8c01e63752821ee2245b0f74de8ecffbecc42d9c2f5d45c9",
+        "tests/firehose.rs": "f103f9e0d5769572d8e353705685cb54a4586d19d0ae7b9db1b44e51c5ca388e",
+        "tests/hash_field_expiry.rs": "2e8a67a926776df3c3795bbc225ca5a44d1477b1b5a3d10fc5120b7eb1277118",
+        "tests/markers.rs": "f3cefc3e235c4c8385318f1b9bb905404fca4761ffaab95594e5644621470e84",
+        "tests/module_events.rs": "08b67495fe612e5c1aef00d6a5aeb1aee9d39d50ccfc78f297a72d31cff63194",
+        "tests/observability.rs": "30f18890b9e9f82b07301142163015c3a8966a243c0343c10571582936a6c871",
+        "tests/replication.rs": "c1224ed8577d4efe02228528a3bfbd761ce8309b44439d2d6ac816f5b986dfca",
+        "tests/retention.rs": "49a9f008048a7598e604534d03d64a3c2ed7c7317d67018a1d232232595bba73",
+        "tests/upgrade.rs": "c538fbe10324d908fd819f244d3a8eb313f76b9b0d5a87d0eef984a8c764a226",
+        "tests/version_gate.rs": "89ff035cbadaf59f30087b52bb18a7ecf89567daf7162e64f8e0f2d35088087b"
+      },
+      "final_artifact_matches_owned_load": true,
+      "metadata_sha256": "b745b5f2d2db0779b92c4d2a5fb13a226b9769aff19940e0105b962b2da8221c"
+    },
+    {
+      "name": "streamfilter",
+      "package": "redis-stream-filter-module",
+      "source_revision": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+      "source_status": "",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_tree_sha256": "58fb6daccdc11c32aa6764a391a8336468f7655b036dba75066afd7e752205ee",
+      "original_lock_sha256": "bbcd1572745f15f20d6bd08d8626698509f359b7f1ee4540bce433c6f8cd3c25",
+      "migrations": [
+        "Select this fork's facade and public macros by path; explicitly enable bindgen-runtime alongside the existing Redis 7.2 API floor."
+      ],
+      "commands": [
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "metadata",
+            "--format-version=1"
+          ],
+          "exit_code": 0,
+          "seconds": 0.977,
+          "stdout": "target/f01/references/streamfilter/metadata.stdout",
+          "stderr": "target/f01/references/streamfilter/metadata.stderr",
+          "stdout_sha256": "e744757e9efed88e8000c48145d59acc1f4c3639bfb19b1b2090dfe659a47d85",
+          "stderr_sha256": "f1518746108cdfa8fe5a4faabe0c019425eb4902df666ee99fc546178bf61c98"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "build",
+            "--locked",
+            "-p",
+            "redis-stream-filter-module",
+            "--lib",
+            "--release"
+          ],
+          "exit_code": 0,
+          "seconds": 18.752,
+          "stdout": "target/f01/references/streamfilter/build-release.stdout",
+          "stderr": "target/f01/references/streamfilter/build-release.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "674d9e308f3ef5fd8a25b819ead30a78e55c36f154015db7f053a2bd02154b1e"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "test",
+            "--locked",
+            "--release",
+            "-p",
+            "redis-stream-filter-module",
+            "--test",
+            "equivalence",
+            "filtered_groups_match_client_side_filtering",
+            "--",
+            "--exact",
+            "--test-threads=1"
+          ],
+          "exit_code": 101,
+          "seconds": 14.155,
+          "stdout": "target/f01/references/streamfilter/test-filtered_groups_match_client_side_filtering.stdout",
+          "stderr": "target/f01/references/streamfilter/test-filtered_groups_match_client_side_filtering.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "8b31b3340e3806fd497afb8893ce5108835b8137a8376b272f0444bd627874fe"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "test",
+            "--locked",
+            "--release",
+            "-p",
+            "redis-stream-filter-module",
+            "--test",
+            "equivalence",
+            "filtered_groups_match_client_side_filtering",
+            "--",
+            "--exact",
+            "--test-threads=1"
+          ],
+          "exit_code": 0,
+          "seconds": 36.745,
+          "stdout": "target/f01/references/streamfilter/test-filtered_groups_match_client_side_filtering-1.stdout",
+          "stderr": "target/f01/references/streamfilter/test-filtered_groups_match_client_side_filtering-1.stderr",
+          "stdout_sha256": "6c6d7032cfc907ceea1fb0cd81c6ef7a4c3822eb5277a1999a59b8961cf88d47",
+          "stderr_sha256": "a3b0d590fcd8dcc8e542b16787a945f996086919528ed9fc05766640a07eeb1a"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "test",
+            "--locked",
+            "--release",
+            "-p",
+            "redis-stream-filter-module",
+            "--test",
+            "equivalence",
+            "else_group_is_the_complement_of_its_siblings",
+            "--",
+            "--exact",
+            "--test-threads=1"
+          ],
+          "exit_code": 0,
+          "seconds": 18.492,
+          "stdout": "target/f01/references/streamfilter/test-else_group_is_the_complement_of_its_siblings.stdout",
+          "stderr": "target/f01/references/streamfilter/test-else_group_is_the_complement_of_its_siblings.stderr",
+          "stdout_sha256": "38bf89e93074466a2886e9088fbe893708b44c660430acf2a57aed385c495d09",
+          "stderr_sha256": "4ac218eeed4177e21d36ea44ae5e547f884f10011baf6049c8a99ba233a3ae48"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "test",
+            "--locked",
+            "--release",
+            "-p",
+            "redis-stream-filter-module",
+            "--test",
+            "equivalence",
+            "filtered_groups_match_client_side_filtering",
+            "--",
+            "--exact",
+            "--test-threads=1"
+          ],
+          "exit_code": 0,
+          "seconds": 14.331,
+          "stdout": "target/f01/references/streamfilter/test-filtered_groups_match_client_side_filtering-2.stdout",
+          "stderr": "target/f01/references/streamfilter/test-filtered_groups_match_client_side_filtering-2.stderr",
+          "stdout_sha256": "f82ca99f39f3d5549ec9c4e850a85e51beeab02936aec9cb2ac67761cd5eddba",
+          "stderr_sha256": "5eb3bd128be9524b76546cb81745c4c9a647a4234c10ab97c0694fe63baf9269"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "test",
+            "--locked",
+            "--release",
+            "-p",
+            "redis-stream-filter-module",
+            "--test",
+            "equivalence",
+            "else_group_is_the_complement_of_its_siblings",
+            "--",
+            "--exact",
+            "--test-threads=1"
+          ],
+          "exit_code": 0,
+          "seconds": 1.742,
+          "stdout": "target/f01/references/streamfilter/test-else_group_is_the_complement_of_its_siblings-1.stdout",
+          "stderr": "target/f01/references/streamfilter/test-else_group_is_the_complement_of_its_siblings-1.stderr",
+          "stdout_sha256": "591277ab0786036dadcb670cc2117f26b0bbdd1f730ce745d74aebf79e3c3270",
+          "stderr_sha256": "a3aedda65960da479c03876f58821682f3bcbe2329a294b4d46d670777b06721"
+        }
+      ],
+      "sdk_graph": [
+        {
+          "name": "redis-module",
+          "version": "2.0.8",
+          "manifest_path": "Cargo.toml",
+          "source": null,
+          "features": [
+            "bindgen-runtime",
+            "min-redis-compatibility-version-7-2"
+          ]
+        },
+        {
+          "name": "redis-module-common",
+          "version": "0.1.1",
+          "manifest_path": "crates/common/Cargo.toml",
+          "source": null,
+          "features": []
+        },
+        {
+          "name": "redis-module-macros",
+          "version": "2.0.8",
+          "manifest_path": "crates/macros/Cargo.toml",
+          "source": null,
+          "features": []
+        },
+        {
+          "name": "redis-module-macros-internals",
+          "version": "2.0.8",
+          "manifest_path": "crates/macros-internals/Cargo.toml",
+          "source": null,
+          "features": []
+        }
+      ],
+      "adapted_lock_sha256": "c6717e4e0eaf6260e9050444fcd1455fb598a3722cf7bce1840d9894f9339f9c",
+      "adapted_manifests": {
+        "Cargo.toml": "1d68e16febc2f3171b90d3fd757c5d7221f7c8af1b6613fa3991ac0d36d5520f",
+        "crates/sf-bench/Cargo.toml": "203019d05d2e9946c25df352d2bc8cd1ed2728bac168c7089d64d05179748e67",
+        "crates/sf-filter/Cargo.toml": "50bebaaf9e9ddd91d078ad56ebe038399004ff0db53fd019965fded53128baeb"
+      },
+      "runtime": {
+        "artifact_sha256": "c685f91e1731d079a43954569f56c8399e091a9b900c51e9bcf2cc2dd910300c",
+        "server_binary": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+        "server_binary_sha256": "5f7cd7e2982bca1c7f31e4e3e396cee8c369838a18e41fc53f96ece23e955ae9",
+        "checks": [
+          "module loaded in an owned loopback server; INFO process ID matched child"
+        ],
+        "redis_version": "8.10.2",
+        "owned_pid_verified": true,
+        "arch_bits": "64",
+        "os": "Darwin 25.6.0 arm64",
+        "status": "passed"
+      },
+      "selected_tests": [
+        {
+          "test": "filtered_groups_match_client_side_filtering",
+          "passed": true
+        },
+        {
+          "test": "else_group_is_the_complement_of_its_siblings",
+          "passed": true
+        }
+      ],
+      "snapshot_repairs": [
+        "Include functions/sf.lua: the shared existing test helper embeds it at compile time, even when the selected test does not use the Redis Function path. The first test compile failed before any test ran; no module source change."
+      ],
+      "source_directory": "redis-stream-filter-module",
+      "source_file_count": 48,
+      "source_unchanged_after_checks": true,
+      "sdk_revision": "febf8cb4dec487e0c72443b247bf1e51ea056d99",
+      "source_tree_digest_algorithm": "SHA-256 of json.dumps({relative_file: sha256}, sort_keys=True). UTF-8; selected snapshot source files before adaptation.",
+      "source_file_hashes": {
+        "Cargo.lock": "bbcd1572745f15f20d6bd08d8626698509f359b7f1ee4540bce433c6f8cd3c25",
+        "Cargo.toml": "594136c1429fddd3d1bd8513601641d4be27be62dcc87a799278ab639734c13a",
+        "LICENSE-APACHE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "LICENSE-MIT": "61115517cbb679e70cbecbb46c1ab95b8adb8acb04945cc723dc2c5b7d6c0146",
+        "README.md": "803d31883d390ce01935e2d24194163a950fc62c134e177faf70f004bf526a87",
+        "crates/sf-bench/Cargo.toml": "203019d05d2e9946c25df352d2bc8cd1ed2728bac168c7089d64d05179748e67",
+        "crates/sf-bench/src/main.rs": "fecc2a677f521aa3e26a315cc140bc52c4d2908d806fd4aec84b66cd1ed140a0",
+        "crates/sf-filter/Cargo.toml": "50bebaaf9e9ddd91d078ad56ebe038399004ff0db53fd019965fded53128baeb",
+        "crates/sf-filter/src/ast.rs": "3786f1b7bdb5ef7779225f256c9472c8609934f7ae5c3489661b759288e6924e",
+        "crates/sf-filter/src/eval.rs": "268cfff2217b713f70d73db46b6a61d753e620c70c1aa7a80bdb4698ff8148aa",
+        "crates/sf-filter/src/lexer.rs": "f52ca363268539c6b823b5443e67b064a99d0cf89d5c95eded518d9aee57014a",
+        "crates/sf-filter/src/lib.rs": "43670cf497e4b4802741a356b84525ca0a74454bd33cbc27a25cc57c3eaf3055",
+        "crates/sf-filter/src/parser.rs": "fcdda079e03c99e5f70c44588d84e9b10294331eecc66d877ff301f43b4caead",
+        "crates/sf-filter/tests/grammar.rs": "70d240adf28c2382553dd02d0b8c26ea9c56481968befa02520ccefe7b745a1a",
+        "src/blocking.rs": "6eb981f8d13fc7f5d86d9c69bd3bd66d73807968e965eec0cf22f120e5621420",
+        "src/commands/debug.rs": "ac358ba25ac31de0fbedfa2ccb38e7fad1f46c8668794dfc430940452e522eae",
+        "src/commands/mod.rs": "46cb301f5c0a99f10c2daecab44d487e082a4a2e254a79fc9f1aa96fa1810c76",
+        "src/commands/stateless.rs": "0189d548a50de90dbfdcb1988bc3419662301a6634729dcf4a809937f56f1742",
+        "src/commands/xgroup.rs": "ce4044a37cd9b4d4da5b731747343ecc2abdb1c7e9c35ea80c5692dd3f6bbfe0",
+        "src/commands/xgroup_registration.rs": "65b3630bf34a8e6a76b4f0e36b80ab05d9fb42f2442d911dc877afbe8992d301",
+        "src/commands/xreadgroup.rs": "823b97c4dfe71503be8a1b509614f2d574c1df6e1fc621eb56683905eb9c4242",
+        "src/config.rs": "fea5907e63f7092519b48e9cd21c5b3fdb6968c585b2738e7e5a0c7b1703dfef",
+        "src/iter.rs": "efe08ac190f012e8352f2da8689e32fde6f57ee008940064daab2541e7a202f0",
+        "src/lib.rs": "e3e2c4737620a6e56a51245bc9a3d2e8be288a3ab30480360bd859e0b03f5e52",
+        "src/lifecycle.rs": "2c9498e0c93d25162749c04a5aeaef086e11ac86fea2bc4197ad087ffff7ba77",
+        "src/native.rs": "152b2fc86ee82a5582d5280c568cdb2ecbfdaffb18a6fd9a5cd3330d85a47bfa",
+        "src/read.rs": "01b6bf13f530cedc3393a90479ba2e31d8f86cba3d1a614ca5cd1533ccb809eb",
+        "src/registry.rs": "035a1ca5e42779dadc0bded7d6ef109abfcdfe24ee48bc0861af996ad763ef87",
+        "src/reply.rs": "fc2908425030baa5ec2a3d779465a352970e37dfa719e0fad5117ba8b5c10868",
+        "src/stats.rs": "bae75b7461f3d8637601c8d3bd3f1b34a48d5f04519884e8f481eb3ad12fec54",
+        "tests/block_timeouts.rs": "ea46bd12400c4c0aa0597ec6889829e4be49137639ae465815883dfbff9c30c5",
+        "tests/blocking.rs": "c20b8b959d0d833cdb6e64c82bfa39f745b19f26f7c0e78f00aea14e340ddf28",
+        "tests/common/mod.rs": "a8d0963a12d76446f016bd9616cb7de82f4796d6399f6ba5440a757e8ae770ec",
+        "tests/create_errors.rs": "08d8908f2c03e4a1fcf36ae6bfa836b823a045a7aabcbdec113937157b00fd61",
+        "tests/engines.rs": "bc0a995e377b8668c9c04b21d30ea793510e65709b49b0d9bdb36931ac2ca6cb",
+        "tests/equivalence.rs": "33a02cd91309dfac24c2e6da72adb92c9718c7916995e65a0d02dd9991b0687e",
+        "tests/function_baseline.rs": "223f99ede0e6034a118504811603bba76c0abcf4461775dd8693e2491def9e3f",
+        "tests/read_errors.rs": "ffdc5053a92820069ea55dcce1f8ae10477798857d358a60b446ef09ae91b172",
+        "tests/registry_lifecycle.rs": "7a2d0ebe2a98184d03206560e9f4c518cef27a9ba6cc1001773a6ebd8b6be8f0",
+        "tests/registry_swapdb.rs": "07169b204155cea82c6a200eed5185a2ebb5cc54a05846893358b14cbcab3581",
+        "tests/resp3.rs": "70576c9581a5c08311427551bcaff9047d59fd8b9bfcb5dcf1fcfd67c0a82014",
+        "tests/resp3_contexts.rs": "c641076d6e074fb24083f1e1ef2f840be96da7b432fa52c2709fbe50ca4d4112",
+        "tests/stateless.rs": "2a7ecd570114c9fc1e8f12e4edf0282a9c7bb4cdf1a9b69b9939f3301739c65e",
+        "tests/unload.rs": "80a82f1416006d8720f9aa332dd6020e081949f647c84eadb0472ae169200cf2",
+        "tests/xgroup.rs": "47c6484f1a70060849f22a602058808ef881da1482ca7f0ac00a6238af45128b",
+        "tests/xgroup_acl.rs": "f28d57c1e2c28c25e6a72f4b81362e09619a66d12c6786ea79b1ec0eacf656b8",
+        "tests/xreadgroup.rs": "6aecad17d0b47993119a3f836a301a7d46e4094ece9c9c602b2b236a3d684ffb",
+        "functions/sf.lua": "4c456f0d99c3ef863b9f3e4f8b1c69855f44ccd322b0a3b956cc9e17132102e2"
+      },
+      "final_artifact_matches_owned_load": true,
+      "metadata_sha256": "e744757e9efed88e8000c48145d59acc1f4c3639bfb19b1b2090dfe659a47d85",
+      "selected_tests_artifact_sha256": "c685f91e1731d079a43954569f56c8399e091a9b900c51e9bcf2cc2dd910300c",
+      "runtime_harness_adaptations": {
+        "path": "tests/common/mod.rs",
+        "before_sha256": "a8d0963a12d76446f016bd9616cb7de82f4796d6399f6ba5440a757e8ae770ec",
+        "after_sha256": "9c0f9008c01271c61d0f749e667a51cc8916e95be31b331ee2b1cd4c1e3cd593",
+        "patch": "docs/evidence/f01-reference-streamfilter-harness.patch",
+        "purpose": "Lock and scope nested builds; Carolina additionally honors shared CARGO_TARGET_DIR and the pinned server binary."
+      }
+    },
+    {
+      "name": "carolina",
+      "package": "klog-module",
+      "source_revision": "0191175bb18ecf371d49d8b264a514f2c662099c",
+      "source_status": "",
+      "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "source_tree_sha256": "2c890f2d8e675dff86d9abfd03e7d9974599eb078adceb334c7c6da2b71ad1ba",
+      "original_lock_sha256": "2c987d8913f0084ae4f1f298fd1129f5968307d2ce73a018d97e8561e6cac2eb",
+      "migrations": [
+        "Select this fork's facade and public macros by path; explicitly enable bindgen-runtime alongside the existing Redis 7.2 API floor.",
+        "Restrict the snapshot workspace to klog-module; broker/client/benchmark crates are outside this SDK adoption check (harness only)."
+      ],
+      "commands": [
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "metadata",
+            "--format-version=1"
+          ],
+          "exit_code": 0,
+          "seconds": 0.556,
+          "stdout": "target/f01/references/carolina/metadata.stdout",
+          "stderr": "target/f01/references/carolina/metadata.stderr",
+          "stdout_sha256": "93806be0c9710bf68afec5dedc3fe0e98cf02bccf0ffc709e7ddcdb5cca1606b",
+          "stderr_sha256": "3de8e03129ff0caf2ba057e8cee249dc00deb37b08c2259515a1816676792144"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "build",
+            "--locked",
+            "-p",
+            "klog-module",
+            "--lib",
+            "--release"
+          ],
+          "exit_code": 0,
+          "seconds": 14.64,
+          "stdout": "target/f01/references/carolina/build-release.stdout",
+          "stderr": "target/f01/references/carolina/build-release.stderr",
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "54232ce77ae55d1cce5a1b92d3e32ca8c3b0df1e71fc29680d269bdb4af29ff8"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "test",
+            "--locked",
+            "--release",
+            "-p",
+            "klog-module",
+            "--test",
+            "live",
+            "live_round_trip_and_rdb_restart",
+            "--",
+            "--exact",
+            "--test-threads=1"
+          ],
+          "exit_code": 0,
+          "seconds": 33.598,
+          "stdout": "target/f01/references/carolina/test-live_round_trip_and_rdb_restart.stdout",
+          "stderr": "target/f01/references/carolina/test-live_round_trip_and_rdb_restart.stderr",
+          "stdout_sha256": "a97299d8c13f0940a84f5533db8141246eda5166f88b653aac8fc3105e8264d7",
+          "stderr_sha256": "307b223769f0a1bfb3b60240fbf78185446b3ef6ef2ae9632aa72c631e5a6882"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "test",
+            "--locked",
+            "--release",
+            "-p",
+            "klog-module",
+            "--test",
+            "live",
+            "blocking_fetch_wakes_when_append_makes_data_visible",
+            "--",
+            "--exact",
+            "--test-threads=1"
+          ],
+          "exit_code": 0,
+          "seconds": 43.618,
+          "stdout": "target/f01/references/carolina/test-blocking_fetch_wakes_when_append_makes_data_visible.stdout",
+          "stderr": "target/f01/references/carolina/test-blocking_fetch_wakes_when_append_makes_data_visible.stderr",
+          "stdout_sha256": "f7d720159794e4d35dec4ebeb206488e7587d970f6b80239c8415ea06fb81b1c",
+          "stderr_sha256": "b754cdd959b360172bbdfd69ced44e5370976051168598902c8d5d5ab4b2895e"
+        },
+        {
+          "argv": [
+            "cargo",
+            "+1.94.0",
+            "test",
+            "--locked",
+            "--release",
+            "-p",
+            "klog-module",
+            "--test",
+            "live",
+            "aof_rewrite_emits_restorable_native_value",
+            "--",
+            "--exact",
+            "--test-threads=1"
+          ],
+          "exit_code": 0,
+          "seconds": 24.858,
+          "stdout": "target/f01/references/carolina/test-aof_rewrite_emits_restorable_native_value.stdout",
+          "stderr": "target/f01/references/carolina/test-aof_rewrite_emits_restorable_native_value.stderr",
+          "stdout_sha256": "62d657b1f058b88d3a2f292825969d6de312eeba86b1962311586657eaa001a7",
+          "stderr_sha256": "1dbf705f22a7f3a8e51dd2130156965940f0dd4944fd3ae7cd77d4b279ae85df"
+        }
+      ],
+      "sdk_graph": [
+        {
+          "name": "redis-module",
+          "version": "2.0.8",
+          "manifest_path": "Cargo.toml",
+          "source": null,
+          "features": [
+            "bindgen-runtime",
+            "min-redis-compatibility-version-7-2"
+          ]
+        },
+        {
+          "name": "redis-module-common",
+          "version": "0.1.1",
+          "manifest_path": "crates/common/Cargo.toml",
+          "source": null,
+          "features": []
+        },
+        {
+          "name": "redis-module-macros",
+          "version": "2.0.8",
+          "manifest_path": "crates/macros/Cargo.toml",
+          "source": null,
+          "features": []
+        },
+        {
+          "name": "redis-module-macros-internals",
+          "version": "2.0.8",
+          "manifest_path": "crates/macros-internals/Cargo.toml",
+          "source": null,
+          "features": []
+        }
+      ],
+      "adapted_lock_sha256": "da9c6b44248d44b3f56e1b7f2fa4f180d57b50d7ded602a75b87bacb22500014",
+      "adapted_manifests": {
+        "Cargo.toml": "9c7cbba2fc3bfe9569bd911a35dea6d56cbb05f11fdb45f5dc0ce5243460dbe8",
+        "crates/klog-module/Cargo.toml": "37a7e2692e4ba9550c74391ea008d734e7d0c031e18b0ab2963f37af49964985"
+      },
+      "runtime": {
+        "artifact_sha256": "a15dc9b59339dde057f5989d5f094fc51a3e3bb63562dba6d31d0390dfb262b5",
+        "server_binary": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+        "server_binary_sha256": "5f7cd7e2982bca1c7f31e4e3e396cee8c369838a18e41fc53f96ece23e955ae9",
+        "checks": [
+          "module loaded in an owned loopback server; INFO process ID matched child"
+        ],
+        "redis_version": "8.10.2",
+        "owned_pid_verified": true,
+        "arch_bits": "64",
+        "os": "Darwin 25.6.0 arm64",
+        "status": "passed"
+      },
+      "runtime_harness_adaptations": {
+        "path": "crates/klog-module/tests/live.rs",
+        "before_sha256": "5f8a1ae1f017ee0196886ce900169d1ebf49537cd0ff3a94c32e0021f7875c4e",
+        "after_sha256": "9706f5ff5147a9ffa71f666a2005a0ff2d4ca382c36c67f98625227c9f24b687",
+        "patch": "docs/evidence/f01-reference-carolina-harness.patch",
+        "purpose": "Lock and scope nested builds; Carolina additionally honors shared CARGO_TARGET_DIR and the pinned server binary."
+      },
+      "selected_tests": [
+        {
+          "test": "live_round_trip_and_rdb_restart",
+          "passed": true
+        },
+        {
+          "test": "blocking_fetch_wakes_when_append_makes_data_visible",
+          "passed": true
+        },
+        {
+          "test": "aof_rewrite_emits_restorable_native_value",
+          "passed": true
+        }
+      ],
+      "source_directory": "carolina",
+      "source_file_count": 7,
+      "source_unchanged_after_checks": true,
+      "sdk_revision": "febf8cb4dec487e0c72443b247bf1e51ea056d99",
+      "source_tree_digest_algorithm": "SHA-256 of json.dumps({relative_file: sha256}, sort_keys=True). UTF-8; selected snapshot source files before adaptation.",
+      "source_file_hashes": {
+        "Cargo.lock": "2c987d8913f0084ae4f1f298fd1129f5968307d2ce73a018d97e8561e6cac2eb",
+        "Cargo.toml": "028f3e0edb71bed88eb9d951758ae1821f1b4ff75c4efd1d36d8d87f391d91c5",
+        "crates/klog-module/Cargo.toml": "a2ef7d04e5f0c65f9f494ab3d0ab3b2b2d6ba85cd5a6565ef63f572a519d21e1",
+        "crates/klog-module/src/batch.rs": "de9b20d00d0ba679b70f33c306c03f29d739b72cf741791b053c8183ba195c78",
+        "crates/klog-module/src/lib.rs": "002e5e3b939aa2b9dc892372f51712bf2df7ea2e4929f9359bfb240c48299e09",
+        "crates/klog-module/src/model.rs": "9eec11f5a20a764a429a6c5b91576089a7be60b3321dfb3f68f655f4d44187cd",
+        "crates/klog-module/tests/live.rs": "5f8a1ae1f017ee0196886ce900169d1ebf49537cd0ff3a94c32e0021f7875c4e"
+      },
+      "final_artifact_matches_owned_load": true,
+      "metadata_sha256": "93806be0c9710bf68afec5dedc3fe0e98cf02bccf0ffc709e7ddcdb5cca1606b"
+    }
+  ],
+  "runner_sha256": "bbacb22925c212ed9095adc7e8f2548726a3999ec08652c1aef02712fe70e20b"
+}
