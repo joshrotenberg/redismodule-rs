@@ -1,0 +1,11 @@
+--- tests/common/mod.rs
++++ tests/common/mod.rs
+@@ -28,7 +28,7 @@
+     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+     BUILD.call_once(|| {
+         let status = std::process::Command::new("cargo")
+-            .args(["build", "--release", "--lib"])
++            .args(["build", "--locked", "--release", "--lib", "-p", "redis-stream-filter-module"])
+             .current_dir(&manifest)
+             .status()
+             .expect("failed to run cargo build");

@@ -7,6 +7,8 @@ Current changes are local and unpublished. Package names/versions still match
 the inherited graph; [upstream registry documentation](https://docs.rs/redis-module)
 does not describe these fork changes. See [development instructions](docs/DEVELOPMENT.md)
 for the workspace, dependencies and checks, and [status](STATUS.md) for current work.
+The [local baseline](docs/BASELINE.md) records verified package consumption,
+actual Redis runtime cells and remaining coverage gaps.
 
 The goal is a Rust-friendly SDK for external authors, retaining useful existing
 conveniences while improving correctness, ownership and testing. Existing

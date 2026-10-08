@@ -1,0 +1,17 @@
+--- crates/klog-module/tests/live.rs
++++ crates/klog-module/tests/live.rs
+@@ -102 +102 @@
+-            .args(["build", "--release", "-p", "klog-module"])
++            .args(["build", "--locked", "--release", "-p", "klog-module"])
+@@ -113,2 +113,4 @@
+-    manifest
+-        .join("../../target/release")
++    std::env::var("CARGO_TARGET_DIR")
++        .map(PathBuf::from)
++        .unwrap_or_else(|_| manifest.join("../../target"))
++        .join("release")
+@@ -119,0 +122 @@
++        .redis_server_bin(std::env::var("TEST_REDIS_SERVER_BIN").expect("pinned F01 server"))
+@@ -134 +137 @@
+-            .redis_server_bin("redis-server")
++            .redis_server_bin(std::env::var("TEST_REDIS_SERVER_BIN").expect("pinned F01 server"))

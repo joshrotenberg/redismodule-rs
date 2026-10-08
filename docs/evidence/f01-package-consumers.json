@@ -1,0 +1,347 @@
+{
+  "archives": {
+    "redis-module": {
+      "file_count": 89,
+      "manifest_sha256": "c13124ac9994c5ccb97b3af89cad5723814c9c30277967328143c6e9d4a210e7",
+      "original_manifest_sha256": "d6986ff689abe27b002e322090f6065b3a2e99ff46211906d742987a3b3254df",
+      "path": "target/f01/packages/registry/archives/redis-module-2.0.8.crate",
+      "sha256": "c50b7352cfbcbae8005cd50d215a1f459b7c18052df8d1cf120000cb35810a57",
+      "version": "2.0.8"
+    },
+    "redis-module-common": {
+      "file_count": 8,
+      "manifest_sha256": "4ac58603915f454041f941533e3f839feef5b63f8e30a1d7acabec63a048b88f",
+      "original_manifest_sha256": "a997415f9aa671023470d87478306808a96877517b6d1a29b4394b5465937a69",
+      "path": "target/f01/packages/registry/archives/redis-module-common-0.1.1.crate",
+      "sha256": "069b871f5b9c6d993b9d2efe2e77a7f1b2391d81aebb32ec7cee06a071360afb",
+      "version": "0.1.1"
+    },
+    "redis-module-macros": {
+      "file_count": 11,
+      "manifest_sha256": "c5279138dc8a10cfa2fbb4237ae514402005459660d27b0aff6b10195e1040f5",
+      "original_manifest_sha256": "7bfc27c26deeb23d4f6b82d6e22188fe8898e242f59ef75f24ddc325c9937de2",
+      "path": "target/f01/packages/registry/archives/redis-module-macros-2.0.8.crate",
+      "sha256": "5709478e512f814b13ac49c4ee6a7d366df9ac0a4420898ccd7cae5963f153eb",
+      "version": "2.0.8"
+    },
+    "redis-module-macros-internals": {
+      "file_count": 9,
+      "manifest_sha256": "b3d5250ef7fe3c4cb939d13770b1836a441125b3bb2b68450681e5655b16b782",
+      "original_manifest_sha256": "a9b3cb04c88047cd1b1c0a8e30ec96c75242ce278df9b603d04c56646501e7be",
+      "path": "target/f01/packages/registry/archives/redis-module-macros-internals-2.0.8.crate",
+      "sha256": "4152e1980f410b36e74bd341c83df5451fa46af238e967269529f9744ccfd9e6",
+      "version": "2.0.8"
+    }
+  },
+  "checks": {
+    "bounded_commands_passed": 26,
+    "builds_passed": 8,
+    "command_failures": 0,
+    "fixture_rustfmt": "passed",
+    "provenance": [
+      "Each candidate package has the expected version and current local-registry source in cargo metadata.",
+      "Consumer Cargo.lock has one matching candidate package with exact source, version and archive checksum.",
+      "Cargo cached archive digest matches the packaged archive.",
+      "Every extracted candidate file matches its archived file digest.",
+      "Same-version upstream registry metadata is rejected by a negative unit test.",
+      "Runtime INFO verifies the owned process ID, expected executable version and allocator before fixture commands."
+    ],
+    "python_test_scope": "7 registry/provenance checks plus 3 server identity checks",
+    "python_tests_passed": 10
+  },
+  "consumers": [
+    {
+      "candidate_packages": [
+        "redis-module",
+        "redis-module-common",
+        "redis-module-macros-internals"
+      ],
+      "compiler": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+      "kind": "manual",
+      "lock": {
+        "path": "target/f01/packages/consumers/1.94.0-manual/Cargo.lock",
+        "sha256": "60ef604e3491b3c7d2e5265a3022f40f2895c4c74d3b0fb30673e7de47308358"
+      },
+      "manifest": {
+        "path": "target/f01/packages/consumers/1.94.0-manual/Cargo.toml",
+        "sha256": "ec5cfb4e52b632eee333dbb04f0b0adfee5c2fa8f63e762be11821f06c5ef0c8"
+      },
+      "metadata": {
+        "path": "target/f01/packages/consumers/1.94.0-manual/metadata.json",
+        "sha256": "a3ed518da423b7c5b6b3e8219a3d16943b67ac6a58b72503fd09905399dff2df"
+      },
+      "profiles": [
+        "debug",
+        "release"
+      ],
+      "result": "passed",
+      "source": {
+        "path": "target/f01/packages/consumers/1.94.0-manual/src/lib.rs",
+        "sha256": "9897591d4cc2e443040ba64c36362d45948bff7f0a3065763c60255fa19b5171"
+      },
+      "toolchain": "1.94.0"
+    },
+    {
+      "candidate_packages": [
+        "redis-module",
+        "redis-module-common",
+        "redis-module-macros",
+        "redis-module-macros-internals"
+      ],
+      "compiler": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+      "kind": "proc",
+      "lock": {
+        "path": "target/f01/packages/consumers/1.94.0-proc/Cargo.lock",
+        "sha256": "6c1ce8582de3c922bfdb570b4ec5397587c55a28191cc90ba16ab8d96cd0ed7e"
+      },
+      "manifest": {
+        "path": "target/f01/packages/consumers/1.94.0-proc/Cargo.toml",
+        "sha256": "12b813b53bcad3b8993c9411455e8511f42461de7cd7bcc71a1b653f4b7b8a93"
+      },
+      "metadata": {
+        "path": "target/f01/packages/consumers/1.94.0-proc/metadata.json",
+        "sha256": "9aea51aca61847740599bf9d398409b8ca3f8c8dfb4f689f1fe929c3a10db18e"
+      },
+      "profiles": [
+        "debug",
+        "release"
+      ],
+      "result": "passed",
+      "source": {
+        "path": "target/f01/packages/consumers/1.94.0-proc/src/lib.rs",
+        "sha256": "58e76c279903f08171742b32b23b814b0a851f878ce3c81d7591c4988813588f"
+      },
+      "toolchain": "1.94.0"
+    },
+    {
+      "candidate_packages": [
+        "redis-module",
+        "redis-module-common",
+        "redis-module-macros-internals"
+      ],
+      "compiler": "rustc 1.98.1 (48a229cea 2026-09-01)",
+      "kind": "manual",
+      "lock": {
+        "path": "target/f01/packages/consumers/stable-manual/Cargo.lock",
+        "sha256": "60ef604e3491b3c7d2e5265a3022f40f2895c4c74d3b0fb30673e7de47308358"
+      },
+      "manifest": {
+        "path": "target/f01/packages/consumers/stable-manual/Cargo.toml",
+        "sha256": "ec5cfb4e52b632eee333dbb04f0b0adfee5c2fa8f63e762be11821f06c5ef0c8"
+      },
+      "metadata": {
+        "path": "target/f01/packages/consumers/stable-manual/metadata.json",
+        "sha256": "d152ae691c847b7d03980a276962a5bef3ffc3323f0fb0e129c786acda523c47"
+      },
+      "profiles": [
+        "debug",
+        "release"
+      ],
+      "result": "passed",
+      "source": {
+        "path": "target/f01/packages/consumers/stable-manual/src/lib.rs",
+        "sha256": "9897591d4cc2e443040ba64c36362d45948bff7f0a3065763c60255fa19b5171"
+      },
+      "toolchain": "stable"
+    },
+    {
+      "candidate_packages": [
+        "redis-module",
+        "redis-module-common",
+        "redis-module-macros",
+        "redis-module-macros-internals"
+      ],
+      "compiler": "rustc 1.98.1 (48a229cea 2026-09-01)",
+      "kind": "proc",
+      "lock": {
+        "path": "target/f01/packages/consumers/stable-proc/Cargo.lock",
+        "sha256": "6c1ce8582de3c922bfdb570b4ec5397587c55a28191cc90ba16ab8d96cd0ed7e"
+      },
+      "manifest": {
+        "path": "target/f01/packages/consumers/stable-proc/Cargo.toml",
+        "sha256": "12b813b53bcad3b8993c9411455e8511f42461de7cd7bcc71a1b653f4b7b8a93"
+      },
+      "metadata": {
+        "path": "target/f01/packages/consumers/stable-proc/metadata.json",
+        "sha256": "7e7a65ed525ac7e25c457f2bf27e6590fcc526d3ea59ae89fb989623ee0772d7"
+      },
+      "profiles": [
+        "debug",
+        "release"
+      ],
+      "result": "passed",
+      "source": {
+        "path": "target/f01/packages/consumers/stable-proc/src/lib.rs",
+        "sha256": "58e76c279903f08171742b32b23b814b0a851f878ce3c81d7591c4988813588f"
+      },
+      "toolchain": "stable"
+    }
+  ],
+  "date": "2026-10-08",
+  "features": {
+    "default_features": false,
+    "proc_consumer_additional_dependency": "linkme = \"0.3\"",
+    "selected": [
+      "min-redis-compatibility-version-7-2",
+      "bindgen-runtime"
+    ]
+  },
+  "host": {
+    "architecture": "aarch64",
+    "os": "macOS"
+  },
+  "input_evidence": {
+    "build_harness_sha256": "a4a1faad1caa148c7a9375ff92e527b556feefe291ca31bbe267249d0378f82a",
+    "command_log": {
+      "path": "target/f01/packages/commands.json",
+      "sha256": "87f885817930b7d8b64d21f1d5c78a8c80f92b5078fbc998507be0bd1391922e"
+    },
+    "harness_tests": {
+      "path": "tools/test_package_baseline.py",
+      "sha256": "c694af395343d646251cdd6a20c8eea8375147d6336e776f32840798c0ab4352"
+    },
+    "package_report": {
+      "path": "target/f01/packages/report.json",
+      "sha256": "7ab8368bb4f52a5facf8165ef97a18229bb7acaabcb13db73f367f9bc852fa4a"
+    },
+    "validated_runtime_harness": {
+      "path": "tools/package_baseline.py",
+      "sha256": "a80ee3c2651db298f562211e78098e646bf8f0fa5b3a4ef219e9b87359c23714"
+    },
+    "workspace_lock_sha256_from_facade_archive": "100b2550844ac8def53e7d6e41a1e3c5a1cd058f6e11a0ba1e42fc78b25cf4c8"
+  },
+  "limitations": [
+    "Public command attribute and derived reply consumer compile only; its runtime registration is deferred.",
+    "Manual runtime checks cover command registration and binary echo only; not persistence, replication, lifecycle completeness or general FFI soundness.",
+    "Both selected servers are local macOS aarch64 builds using libc; no Linux/jemalloc/CI-runner coverage is implied.",
+    "Rust 1.94.0 and the then-installed stable 1.98.1 are observed compilers, not an MSRV promise.",
+    "Package names and versions are inherited; this run does not establish publication readiness.",
+    "Archives, full locks and raw logs remain in ignored target/f01/packages; this tracked summary retains their identities rather than their complete bytes."
+  ],
+  "registry": {
+    "fresh_cargo_home": true,
+    "lifetime": "ephemeral; stopped after the package run",
+    "source": "sparse+http://127.0.0.1:53258/index/",
+    "source_checkout_patches": false,
+    "third_party_index": "https://github.com/rust-lang/crates.io-index"
+  },
+  "result": "passed",
+  "runtime_evidence_note": "The three verified-runtime sidecars supersede the original PING-only runtime entries in report.json and runtime-7.2.8-manual/report.json. Existing release binaries were reused; no additional builds or changes to the archived SDK code.",
+  "schema_version": 1,
+  "source": {
+    "head": "febf8cb4dec487e0c72443b247bf1e51ea056d99",
+    "note": "Archives were built from the local in-progress F01 working tree; HEAD alone does not identify their contents. Archive digests identify the tested packages.",
+    "worktree_status_at_package_start": [
+      " M tests/utils.rs",
+      "?? fixtures/",
+      "?? tools/"
+    ]
+  },
+  "verified_runtime_reruns": [
+    {
+      "actual_redis_version": "8.10.2",
+      "allocator": "libc",
+      "binary_sha256": "f121bd60eacf6695fddf206c650ead8b0aef83b03d7d1536f9bc18e7dc322254",
+      "build_reused": true,
+      "cases": [
+        "empty",
+        "ascii",
+        "nul-non-utf8-crlf",
+        "all-256-byte-values"
+      ],
+      "expected_redis_version": "8.10.2",
+      "log": {
+        "path": "target/f01/packages/verified-runtime/8.10.2-1.94.0/redis.log",
+        "sha256": "39ad33ece8e323342195d0e2543936675fa397615a8b9863c4071c93c8a10a30"
+      },
+      "memory_info": {
+        "path": "target/f01/packages/verified-runtime/8.10.2-1.94.0/memory-info.txt",
+        "sha256": "fffea7f6e986b2fbbde3d68726ce43cbbc19cb9d90c0e8468cd47446448d1a78"
+      },
+      "process_id": 81621,
+      "redis_binary_sha256": "5f7cd7e2982bca1c7f31e4e3e396cee8c369838a18e41fc53f96ece23e955ae9",
+      "redis_version": "Redis server v=8.10.2 sha=00000000:1 malloc=libc bits=64 build=764b3e45065a66fb",
+      "report": {
+        "path": "target/f01/packages/verified-runtime/8.10.2-1.94.0/report.json",
+        "sha256": "82fa0941f84c35e001cd07d15383fba6869c5fcc7051e22efec758361d05f3c2"
+      },
+      "result": "passed",
+      "runtime_harness_sha256": "a80ee3c2651db298f562211e78098e646bf8f0fa5b3a4ef219e9b87359c23714",
+      "server_info": {
+        "path": "target/f01/packages/verified-runtime/8.10.2-1.94.0/server-info.txt",
+        "sha256": "e41dc9abe09fef71f85372aff58c66827796a4422793eb4deb2dd9543c5abfbd"
+      },
+      "toolchain": "1.94.0"
+    },
+    {
+      "actual_redis_version": "8.10.2",
+      "allocator": "libc",
+      "binary_sha256": "ec50dd2811f3d18a884f2c0c5c7c4f0efd42f2b18721bbd2d73f7237085dd5c8",
+      "build_reused": true,
+      "cases": [
+        "empty",
+        "ascii",
+        "nul-non-utf8-crlf",
+        "all-256-byte-values"
+      ],
+      "expected_redis_version": "8.10.2",
+      "log": {
+        "path": "target/f01/packages/verified-runtime/8.10.2-stable/redis.log",
+        "sha256": "f600f986765c2eb8c219291f29767c7097cfd43b0db5cafb3c157d9e7ffdddf9"
+      },
+      "memory_info": {
+        "path": "target/f01/packages/verified-runtime/8.10.2-stable/memory-info.txt",
+        "sha256": "fffea7f6e986b2fbbde3d68726ce43cbbc19cb9d90c0e8468cd47446448d1a78"
+      },
+      "process_id": 81623,
+      "redis_binary_sha256": "5f7cd7e2982bca1c7f31e4e3e396cee8c369838a18e41fc53f96ece23e955ae9",
+      "redis_version": "Redis server v=8.10.2 sha=00000000:1 malloc=libc bits=64 build=764b3e45065a66fb",
+      "report": {
+        "path": "target/f01/packages/verified-runtime/8.10.2-stable/report.json",
+        "sha256": "bd6402ae76a079b864a22be9c5ad55d13ade81a3cef802490c983ec4eba7de0c"
+      },
+      "result": "passed",
+      "runtime_harness_sha256": "a80ee3c2651db298f562211e78098e646bf8f0fa5b3a4ef219e9b87359c23714",
+      "server_info": {
+        "path": "target/f01/packages/verified-runtime/8.10.2-stable/server-info.txt",
+        "sha256": "0520464546fe6ee5255b9283de2e582332601630756a807254d4a925210597ec"
+      },
+      "toolchain": "stable"
+    },
+    {
+      "actual_redis_version": "7.2.8",
+      "allocator": "libc",
+      "binary_sha256": "f121bd60eacf6695fddf206c650ead8b0aef83b03d7d1536f9bc18e7dc322254",
+      "build_reused": true,
+      "cases": [
+        "empty",
+        "ascii",
+        "nul-non-utf8-crlf",
+        "all-256-byte-values"
+      ],
+      "expected_redis_version": "7.2.8",
+      "log": {
+        "path": "target/f01/packages/verified-runtime/7.2.8-1.94.0/redis.log",
+        "sha256": "c6b5fbd2028ec236ca7ceb2a56fd81c955ac5cdba1a8b1416071893963fac813"
+      },
+      "memory_info": {
+        "path": "target/f01/packages/verified-runtime/7.2.8-1.94.0/memory-info.txt",
+        "sha256": "d63764e7e46c73ba4eb3428346cdd4c1de189d3a800e0e568eb579ae8da1a754"
+      },
+      "process_id": 81625,
+      "redis_binary_sha256": "94480949fb81fb1f0d6f862e9853abfbc7e66273a06fb4d7d7feea8e234df630",
+      "redis_version": "Redis server v=7.2.8 sha=febf8cb4:1 malloc=libc bits=64 build=1a0a973037db9b88",
+      "report": {
+        "path": "target/f01/packages/verified-runtime/7.2.8-1.94.0/report.json",
+        "sha256": "1f9e3c37f1de2db4e8edb15b59478db43ae09aeea5ceefe49e08de5015d28886"
+      },
+      "result": "passed",
+      "runtime_harness_sha256": "a80ee3c2651db298f562211e78098e646bf8f0fa5b3a4ef219e9b87359c23714",
+      "server_info": {
+        "path": "target/f01/packages/verified-runtime/7.2.8-1.94.0/server-info.txt",
+        "sha256": "3df893a22a0cbf8bce3f48951738f161af4cd1af372c5fb1d25075713cd7277e"
+      },
+      "toolchain": "1.94.0"
+    }
+  ]
+}

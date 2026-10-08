@@ -10,10 +10,17 @@ separate contracts. The from-scratch SDK remains paused.
 
 ## Current local process
 
-The user's 2026-10-08 instruction selects local work with good branching before
-pushing. This supersedes the earlier draft-PR-before-implementation requirement
-for this phase. Do not push, open PRs, change GitHub settings or publish unless
-the user requests that transition. The automatic publisher is disabled remotely.
+The user selected local work with good branching before pushing. Issue-independent
+baseline work stays local: do not push, open PRs, change GitHub settings or publish
+for that work. The automatic publisher is disabled remotely.
+
+The user's newer session-provided issue-visibility instructions apply before
+implementation of tracked issues: check open PRs for overlapping scope, create
+a dedicated branch with an empty kickoff commit, push it and open a draft PR
+listing every scoped issue and the planned work. Do not implement until the draft
+exists; if GitHub access is blocked, stop and report it. Keep it draft until the
+intended implementation and validation finish. This issue-specific workflow
+takes precedence over the local-only default. Publication remains unauthorized.
 
 CI modernization is a separate deferred workstream. Existing workflow edits are
 local and provisional; local command results do not validate GitHub runner jobs.
@@ -23,7 +30,7 @@ Wait for the user to resume that work or request remote verification.
 2. Start each bounded chunk from clean local `master` on a descriptive branch.
 3. Implement and validate the changed contract; preserve unrelated user work.
 4. Record actual results, limitations and decisions in the same branch.
-5. Commit and merge with `git merge --no-ff` once ready, delete the merged branch,
+5. For local-only chunks, commit and merge with `git merge --no-ff` once ready, delete the merged branch,
    and leave local `master` clean. Do not merge incomplete work to finish a report.
 6. Report **Done / Next / Blockers / Decisions** after every chunk.
 
