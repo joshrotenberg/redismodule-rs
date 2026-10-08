@@ -1,18 +1,22 @@
-[![license](https://img.shields.io/github/license/RedisLabsModules/redismodule-rs.svg)](https://github.com/RedisLabsModules/redismodule-rs/blob/master/LICENSE)
-[![Releases](https://img.shields.io/github/release/RedisLabsModules/redismodule-rs.svg)](https://github.com/RedisLabsModules/redismodule-rs/releases/latest)
-[![crates.io](https://img.shields.io/crates/v/redis-module.svg)](https://crates.io/crates/redis-module)
-[![docs](https://docs.rs/redis-module/badge.svg)](https://docs.rs/redis-module)
-
 # redismodule-rs
 
-This crate provides an idiomatic Rust API for the [Redis Modules API](https://redis.io/topics/modules-intro).
-It allows writing Redis modules in Rust, without needing to use raw pointers or unsafe code. See [here](https://docs.rs/redis-module/latest) for the most recent API documentation.
+Rust bindings and higher-level APIs for writing Redis modules.
+
+**Development fork of [RedisLabsModules/redismodule-rs](https://github.com/RedisLabsModules/redismodule-rs).**
+Current changes are local and unpublished. Package names/versions still match
+the inherited graph; [upstream registry documentation](https://docs.rs/redis-module)
+does not describe these fork changes. See [development instructions](docs/DEVELOPMENT.md)
+for the workspace, dependencies and checks, and [status](STATUS.md) for current work.
+
+The goal is a Rust-friendly SDK for external authors, retaining useful existing
+conveniences while improving correctness, ownership and testing. Existing
+BSD-3-Clause notices and contributor history are retained; see [LICENSE](LICENSE).
 
 # Running the example module
 
-1. [Install Rust](https://www.rust-lang.org/tools/install)
-2. [Install Redis](https://redis.io/download), most likely using your favorite package manager (Homebrew on Mac, APT or YUM on Linux)
-3. Run `cargo build --example hello`
+1. [Install Rust](https://www.rust-lang.org/tools/install); this checkout selects its development toolchain through `rust-toolchain.toml`.
+2. Install a C compiler, libclang and [Redis](https://redis.io/download). See the [prerequisites](docs/DEVELOPMENT.md#prerequisites).
+3. Run `cargo build --locked --example hello`
 4. Start a redis server with the `hello` module
    * Linux: `redis-server --loadmodule ./target/debug/examples/libhello.so`
    * Mac: `redis-server --loadmodule ./target/debug/examples/libhello.dylib`

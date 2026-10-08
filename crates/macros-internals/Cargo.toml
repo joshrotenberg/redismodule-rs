@@ -1,0 +1,19 @@
+[package]
+name = "redis-module-macros-internals"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+authors = ["Meir Shpilraien <meir@redis.com>"]
+description = "Internal API compatibility macros for redis-module"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+lazy_static.workspace = true
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["extra-traits"] }

@@ -1,11 +1,45 @@
 [workspace]
-members = [".", "redismodule-rs-macros", "redismodule-rs-macros-internals"]
+members = [".", "crates/common", "crates/macros", "crates/macros-internals"]
+resolver = "2"
 
 [workspace.package]
 version = "2.0.8"
 license = "BSD-3-Clause"
 edition = "2021"
-repository = "https://github.com/RedisLabsModules/redismodule-rs"
+repository = "https://github.com/joshrotenberg/redismodule-rs"
+keywords = ["redis", "plugin"]
+categories = ["database", "api-bindings"]
+
+[workspace.dependencies]
+# Shared versions and internal package paths are maintained here. Package-specific
+# features belong in each member manifest.
+anyhow = "1"
+backtrace = "0.3"
+bindgen = { version = "0.72.1", default-features = false, features = ["logging", "prettyplease"] }
+bitflags = "2"
+cc = "1"
+cfg-if = "1"
+# Newer releases add TryFrom impls that conflict with existing public From impls.
+enum-primitive-derive = "0.1"
+lazy_static = "1"
+libc = "0.2"
+linkme = "0.3"
+log = "0.4"
+nix = { version = "0.26", default-features = false }
+num-traits = "0.2"
+proc-macro2 = "1"
+quote = "1"
+redis = "0.23"
+regex = "1"
+serde = "1"
+serde_syn = "0.1"
+strum_macros = "0.28"
+syn = { version = "1", features = ["full"] }
+
+# `common` retains its existing Rust dependency alias and independent version.
+common = { package = "redis-module-common", path = "crates/common", version = "0.1.1" }
+redis-module-macros = { path = "crates/macros", version = "2.0.8" }
+redis-module-macros-internals = { path = "crates/macros-internals", version = "2.0.8" }
 
 [package]
 name = "redis-module"
@@ -13,12 +47,58 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 authors = ["Gavrie Philipson <gavrie@redis.com>", "Guy Korland <guy.korland@redis.com>"]
-build = "build.rs"
 description = "A toolkit for building Redis modules in Rust"
 readme = "README.md"
-keywords = ["redis", "plugin"]
-categories = ["database", "api-bindings"]
+
+[dependencies]
+backtrace.workspace = true
+bitflags.workspace = true
+cfg-if.workspace = true
+common.workspace = true
+enum-primitive-derive.workspace = true
+libc.workspace = true
+linkme.workspace = true
+log.workspace = true
+nix.workspace = true
+num-traits.workspace = true
+redis-module-macros-internals.workspace = true
+regex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+strum_macros.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+lazy_static.workspace = true
+redis.workspace = true
+redis-module-macros.workspace = true
+# Preserve the inherited example/test feature-forwarding contract for now.
+redis-module = { path = ".", default-features = false }
+
+[build-dependencies]
+bindgen.workspace = true
+cc.workspace = true
+
+[features]
+default = ["min-redis-compatibility-version-6-0", "bindgen-runtime"]
+
+# xor having minimum compatibility version
+min-redis-compatibility-version-8-0 = ["redis-module/min-redis-compatibility-version-8-0"]
+min-redis-compatibility-version-7-4 = ["redis-module/min-redis-compatibility-version-7-4"]
+min-redis-compatibility-version-7-2 = ["redis-module/min-redis-compatibility-version-7-2"]
+min-redis-compatibility-version-7-0 = ["redis-module/min-redis-compatibility-version-7-0"]
+min-redis-compatibility-version-6-2 = ["redis-module/min-redis-compatibility-version-6-2"]
+min-redis-compatibility-version-6-0 = ["redis-module/min-redis-compatibility-version-6-0"]
+
+# Enable static linking to libclang in bindgen (incompatible with `bindgen-runtime`)
+bindgen-static = ["bindgen/static"]
+# Enable dynamic linking to libclang in bindgen (default, incompatible with `bindgen-static`)
+bindgen-runtime = ["bindgen/runtime"]
+
+# List all features here, that are not in a exclusive or relationship
+all-features-but-xor = []
 
 [[example]]
 name = "hello"
@@ -128,49 +208,3 @@ crate-type = ["cdylib"]
 [[example]]
 name = "expire"
 crate-type = ["cdylib"]
-
-[dependencies]
-bitflags = "2"
-libc = "0.2"
-enum-primitive-derive = "^0.1"
-num-traits = "^0.2"
-regex = "1"
-strum_macros = "0.24"
-backtrace = "0.3"
-linkme = "0.3"
-serde = { version = "1", features = ["derive"] }
-nix = { version = "0.26", default-features = false }
-cfg-if = "1"
-redis-module-macros-internals = { path = "./redismodule-rs-macros-internals", version = "2.0.8" }
-log = "0.4"
-common = { path = "./common", package = "redis-module-common", version = "0.1.1" }
-
-[dev-dependencies]
-anyhow = "1"
-redis = "0.23"
-lazy_static = "1"
-redis-module-macros = { path = "./redismodule-rs-macros" }
-redis-module = { path = "./", default-features = false }
-
-[build-dependencies]
-bindgen = { version = "0.72.1", default-features = false, features = ["logging", "prettyplease"]}
-cc = "1"
-
-[features]
-default = ["min-redis-compatibility-version-6-0", "bindgen-runtime"]
-
-# xor having minimum compatibility version
-min-redis-compatibility-version-8-0 = ["redis-module/min-redis-compatibility-version-8-0"]
-min-redis-compatibility-version-7-4 = ["redis-module/min-redis-compatibility-version-7-4"]
-min-redis-compatibility-version-7-2 = ["redis-module/min-redis-compatibility-version-7-2"]
-min-redis-compatibility-version-7-0 = ["redis-module/min-redis-compatibility-version-7-0"]
-min-redis-compatibility-version-6-2 = ["redis-module/min-redis-compatibility-version-6-2"]
-min-redis-compatibility-version-6-0 = ["redis-module/min-redis-compatibility-version-6-0"]
-
-# Enable static linking to libclang in bindgen (incompatible with `bindgen-runtime`)
-bindgen-static = ["bindgen/static"]
-# Enable dynamic linking to libclang in bindgen (default, incompatible with `bindgen-static`)
-bindgen-runtime = ["bindgen/runtime"]
-
-# List all features here, that are not in a exclusive or relationship
-all-features-but-xor = []

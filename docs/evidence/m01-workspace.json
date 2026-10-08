@@ -1,0 +1,360 @@
+{
+  "schema": "fork-m01-workspace-v1",
+  "date": "2026-10-08",
+  "base_revision": "a808377ffde496d2cb8bcf26ee76a52080da9d89",
+  "scope": "Local metadata, layout, dependency and tooling modernization; no runtime support or publication claim.",
+  "compiler": "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+  "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+  "platform": "Darwin arm64",
+  "clang": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+  "libclang_path": "/Library/Developer/CommandLineTools/usr/lib",
+  "input_sha256": {
+    "Cargo.toml": "d6986ff689abe27b002e322090f6065b3a2e99ff46211906d742987a3b3254df",
+    "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709",
+    "rust-toolchain.toml": "c3408601148e659ce09d22c41a74d71ed7e0dfa6bb239256423cc3d2b8254806",
+    "crates/common/Cargo.toml": "a997415f9aa671023470d87478306808a96877517b6d1a29b4394b5465937a69",
+    "crates/macros/Cargo.toml": "7bfc27c26deeb23d4f6b82d6e22188fe8898e242f59ef75f24ddc325c9937de2",
+    "crates/macros-internals/Cargo.toml": "a9b3cb04c88047cd1b1c0a8e30ec96c75242ce278df9b603d04c56646501e7be",
+    "tests/dependency_contracts.rs": "0009b345a974dd82033e5ad593297e19e20a28c27032756c14e6cbba06d99d4b",
+    "build.sh": "c932d670c933e7c17c1236e29947d8566ee754d9f142d62fe892ea3dd507112b",
+    "test.sh": "f91208ddf287537239d5135828602497378875fefd53d02fcd74d3b2e67d1cc4",
+    ".github/workflows/ci.yml": "4cd1b7e3839be08f240eed8f96977748a89aea2d1f9dd7a0356d780068490d36"
+  },
+  "lockfile_delta": {
+    "before_packages_including_workspace": 101,
+    "after_packages_including_workspace": 100,
+    "removed": [
+      [
+        "heck",
+        "0.4.1"
+      ],
+      [
+        "rustversion",
+        "1.0.23"
+      ],
+      [
+        "strum_macros",
+        "0.24.3"
+      ]
+    ],
+    "added": [
+      [
+        "heck",
+        "0.5.0"
+      ],
+      [
+        "strum_macros",
+        "0.28.0"
+      ]
+    ]
+  },
+  "pure_tests": {
+    "baseline_passed": 12,
+    "candidate_passed": 12,
+    "breakdown": "6 inherited RedisValue unit tests + 6 pure numeric/log-string contract tests"
+  },
+  "example_libraries": {
+    "debug": 27,
+    "release": 27,
+    "loaded_into_redis": false,
+    "debug_note": "26 via build.sh API8.0, call separately with its required API7.2 feature; all release examples at7.2"
+  },
+  "checks": [
+    {
+      "name": "format",
+      "command": [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      "started_at": "2026-10-08T18:56:39.982556+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/format.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "pure-tests",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--workspace",
+        "--lib",
+        "--test",
+        "dependency_contracts"
+      ],
+      "started_at": "2026-10-08T18:56:40.366383+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/pure-tests.log",
+      "log_sha256": "dde3c0d6122993e4049285f799a7c0c2ec3d0179cd87ec5cdd36cf4a418413eb"
+    },
+    {
+      "name": "check-6-0",
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-6-0,bindgen-runtime"
+      ],
+      "started_at": "2026-10-08T18:56:45.014016+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/check-6-0.log",
+      "log_sha256": "0250b167740dcfdd572f3d17a942858ff49a53a74062eb654d943d450f259d22"
+    },
+    {
+      "name": "check-6-2",
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-6-2,bindgen-runtime"
+      ],
+      "started_at": "2026-10-08T18:56:54.205509+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/check-6-2.log",
+      "log_sha256": "4f428d0d0401cebf11452c7b344d2e1fdd1e88dcdf26734c354003c2602a4de3"
+    },
+    {
+      "name": "check-7-0",
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-0,bindgen-runtime"
+      ],
+      "started_at": "2026-10-08T18:56:57.625758+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/check-7-0.log",
+      "log_sha256": "e000b1b5350b84fcf820a46470917175674e4fb037e612458b71d4cbeb4c0b6d"
+    },
+    {
+      "name": "check-7-2",
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime"
+      ],
+      "started_at": "2026-10-08T18:57:01.033671+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/check-7-2.log",
+      "log_sha256": "74d65110b16ed6a6646e28e817463372d2480ff71cb471fb161d174f0e021f82"
+    },
+    {
+      "name": "check-7-4",
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-4,bindgen-runtime"
+      ],
+      "started_at": "2026-10-08T18:57:04.365523+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/check-7-4.log",
+      "log_sha256": "376918328d7cac2b43a62c04d2807e8cfad0ebfb2575c1c4b461a8612543f67a"
+    },
+    {
+      "name": "check-8-0",
+      "command": [
+        "cargo",
+        "check",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-8-0,bindgen-runtime"
+      ],
+      "started_at": "2026-10-08T18:57:08.074796+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/check-8-0.log",
+      "log_sha256": "ce427bac8d63ea4ab5851464933c6300d9c97f1fe0b5b0ab4b93a9cca921fae3"
+    },
+    {
+      "name": "build-script-from-tmp",
+      "command": [
+        "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/build.sh"
+      ],
+      "started_at": "2026-10-08T18:57:11.397554+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/build-script-from-tmp.log",
+      "log_sha256": "ef775a3f7b168ed7f41da54b6e093322cfd3a3ed8e57ab0825eac2cb72d84862"
+    },
+    {
+      "name": "release-examples",
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--release",
+        "--examples",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime"
+      ],
+      "started_at": "2026-10-08T18:57:18.493177+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/release-examples.log",
+      "log_sha256": "f862df4ddd9b7ae8e3446e72f901482bd00297c0ba7deaea8d878df53d2de7a7"
+    },
+    {
+      "name": "clippy",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime"
+      ],
+      "started_at": "2026-10-08T18:57:38.587483+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/clippy.log",
+      "log_sha256": "009a621f7d58e103b04056ffa650c810f974f7975dbef001adb52e4135f60310"
+    },
+    {
+      "name": "documentation",
+      "command": [
+        "cargo",
+        "doc",
+        "--locked",
+        "--workspace",
+        "--no-deps",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime"
+      ],
+      "started_at": "2026-10-08T18:57:44.078088+00:00",
+      "exit_code": 0,
+      "log": "target/meta-pass/documentation.log",
+      "log_sha256": "1ecae52b079e45204615411343b59d878716c6fa74a4803cd31bd1c618c5af7b"
+    },
+    {
+      "name": "debug-call-example",
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--example",
+        "call",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime"
+      ],
+      "exit_code": 0,
+      "log": "target/meta-pass/debug-call-example.log",
+      "log_sha256": "a5bb69c4dfe4e9518967d45c334e3a8a81d441e5a7058ebe1a56b0e54bbdc0b2"
+    },
+    {
+      "name": "baseline-doc",
+      "command": [
+        "cargo",
+        "doc",
+        "--manifest-path",
+        "target/meta-pass/baseline/Cargo.toml",
+        "--locked",
+        "--workspace",
+        "--no-deps",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime"
+      ],
+      "exit_code": 0,
+      "log": "target/meta-pass/baseline-doc.log",
+      "log_sha256": "7974604dc1ae9e938025a03f70168b45b985645b925d6d7a512bb826102b0216"
+    },
+    {
+      "name": "baseline-check-8-0",
+      "command": [
+        "cargo",
+        "check",
+        "--manifest-path",
+        "target/meta-pass/baseline/Cargo.toml",
+        "--locked",
+        "--workspace",
+        "--all-targets",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-8-0,bindgen-runtime"
+      ],
+      "exit_code": 0,
+      "log": "target/meta-pass/baseline-check-8-0.log",
+      "log_sha256": "0a45f67e0aa710ec2a323931e52c6dc21462e0a8594870f6cbfcef27e9f32ee2"
+    }
+  ],
+  "packages": [
+    {
+      "name": "redis-module-common",
+      "version": "0.1.1",
+      "readme_and_license_present": true,
+      "normalized_internal_dependencies_inspected": true,
+      "fresh_external_consumers_validated": false
+    },
+    {
+      "name": "redis-module-macros-internals",
+      "version": "2.0.8",
+      "readme_and_license_present": true,
+      "normalized_internal_dependencies_inspected": true,
+      "fresh_external_consumers_validated": false
+    },
+    {
+      "name": "redis-module-macros",
+      "version": "2.0.8",
+      "readme_and_license_present": true,
+      "normalized_internal_dependencies_inspected": true,
+      "fresh_external_consumers_validated": false
+    },
+    {
+      "name": "redis-module",
+      "version": "2.0.8",
+      "readme_and_license_present": true,
+      "normalized_internal_dependencies_inspected": true,
+      "fresh_external_consumers_validated": false
+    }
+  ],
+  "warnings": {
+    "rustdoc_before": 32,
+    "rustdoc_after": 32,
+    "same_warning_messages_and_counts": true,
+    "api8_unused_options_field": "Also present in baseline",
+    "clippy_warnings": 0
+  },
+  "rejected_trial": {
+    "dependency": "enum-primitive-derive",
+    "version": "0.3.0",
+    "outcome": "Compilation rejected overlapping TryFrom<i32> impls for three existing public enum conversions; reverted.0.2.2 source review shows same conflict.",
+    "retained": "0.1.2"
+  },
+  "limitations": [
+    "No Redis runtime integration",
+    "No Linux/static-libclang matrix",
+    "No fresh archive consumer validation",
+    "No new MSRV certification",
+    "GitHub CI not executed",
+    "Detailed logs remain local under ignored target/meta-pass"
+  ]
+}
