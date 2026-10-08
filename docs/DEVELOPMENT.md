@@ -79,9 +79,12 @@ under the normal `target/{debug,release}` layout. Their server-startup loop and
 custom-target handling still need the F01 harness work. Use the pure test command
 above for this meta pass; a completed compile is not a runtime test result.
 
-CI follows the pinned development toolchain and locked graph. Its existing four
-API-floor configurations all run a Redis 7.2 host; job labels now say so. The
-runtime suite and a truthful support matrix are F01 work, not new claims here.
+The local CI draft selects the pinned development toolchain and locked graph.
+Its existing four API-floor configurations all select a Redis 7.2 host; job
+labels now say so. These edits have not been pushed or verified on GitHub runners.
+The user deferred the broader CI redesign and validation as a separate workstream.
+F01 can establish the local runtime/package baseline independently; turning those
+checks into reliable CI and confirming runner behavior remain later work.
 
 ## Dependency and layout policy
 

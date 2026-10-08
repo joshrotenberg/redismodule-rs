@@ -4,6 +4,12 @@ Updated 2026-10-08. Direction: improve the original SDK with justified Rust API
 changes. Work is local; automatic publication remains disabled. Package names
 and versions are inherited, not a new fork release.
 
+**CI follow-up:** the user deferred the broader CI pass. Existing workflow edits
+remain local and provisional; GitHub jobs have not been run to validate them.
+Continue the local baseline independently. Revisit actual server/platform
+coverage, package-consumer jobs, failure handling and retained evidence when
+the CI workstream resumes.
+
 ## M01 — Workspace and dependency foundations: complete
 
 | Status | Report |
