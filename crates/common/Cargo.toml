@@ -1,0 +1,12 @@
+[package]
+name = "redis-module-common"
+version = "0.1.1"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Shared command metadata types for the redis-module workspace"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
