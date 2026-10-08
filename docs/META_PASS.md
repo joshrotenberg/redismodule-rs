@@ -84,6 +84,7 @@ they are local evidence, not a durable release artifact service.
 | Area | Decision / next gate |
 |---|---|
 | Work visibility | Local branch/check/merge now; map to issues/PRs when remote work is requested |
+| CI modernization | Deferred by the user as a separate workstream. Current workflow edits are local and provisional; GitHub runner execution, actual support coverage, package-consumer jobs and artifact retention remain to verify later |
 | Public API and feature behavior | Preserve existing contracts in this meta pass, including default features and facade self dev-dependency |
 | Edition, resolver and compiler floor | Keep edition 2021, explicit resolver 2 and developer pin 1.94; select actual MSRV separately |
 | `enum-primitive-derive` | Upgrade requires an intentional conversion-contract decision or replacement implementation |

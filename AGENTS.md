@@ -15,6 +15,10 @@ pushing. This supersedes the earlier draft-PR-before-implementation requirement
 for this phase. Do not push, open PRs, change GitHub settings or publish unless
 the user requests that transition. The automatic publisher is disabled remotely.
 
+CI modernization is a separate deferred workstream. Existing workflow edits are
+local and provisional; local command results do not validate GitHub runner jobs.
+Wait for the user to resume that work or request remote verification.
+
 1. Read `STATUS.md` and the relevant plan before starting.
 2. Start each bounded chunk from clean local `master` on a descriptive branch.
 3. Implement and validate the changed contract; preserve unrelated user work.
