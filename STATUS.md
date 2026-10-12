@@ -1,6 +1,6 @@
 # Fork status
 
-Updated 2026-10-08. Direction: improve the original SDK with justified Rust API
+Updated 2026-10-12. Direction: improve the original SDK with justified Rust API
 changes. Work is local; automatic publication remains disabled. Package names
 and versions are inherited, not a new fork release.
 
@@ -9,6 +9,17 @@ remain local and provisional; GitHub jobs have not been run to validate them.
 Continue the local baseline independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
+
+## October 12 — Due review checkpoint
+
+| Status | Report |
+|---|---|
+| **Done** | Due/Claude performed a bounded read-only F01 review. Exit 0; structured answer and all 174 trace records independently validate; no worker edits. Caller re-ran 13 Python tests successfully. Sanitized feedback published as Due issue 15. |
+| **Next** | Small local reference-runner follow-up: record selected-test host identity and live SDK inputs, strengthen leftover cleanup. Keep this separate from F02 logging and its draft-PR prerequisite. |
+| **Blockers** | None for the Due trial. Review found evidence/cleanup limitations, not failed historical runtime cases. No SDK implementation or CI work started. |
+| **Decisions** | Delegated model work uses Due; PM owns the schedule. A/B deferred for this first bounded review. MSRV, package names, support, publication and broader migration choices remain open. |
+
+Details and caller-verified findings: [Due trial](docs/DUE_TRIAL.md).
 
 ## F01 — Local runtime, package and consumer baseline: complete
 
