@@ -1,0 +1,100 @@
+{
+  "artifacts": {
+    "answer.schema.json": "71447087a794ff339e2c2b61afad2f752e4ee0c244ca77c69e1fae1cf937985d",
+    "final-effects.json": "2cfe5a98dd9eda4091d53f09c6bba448a4f11158781d13f7c228bcc41a5aedcd",
+    "identity.json": "c7e0f4b9c9406c2b9f976e559e2242474dcc6c60e56926260f8bb594c89568ff",
+    "process.json": "d26139d9d049589c11da686924891212775e206ab941a4b07eb73963e9a55318",
+    "result.json": "555806934ab80e3525ead299abb8728c55938751ff5c363e0120c5367125912b",
+    "task.txt": "c48c5dd212583e22cff1433c51db9fae356c5c2194940523d3d6d90a88567ffa",
+    "trace-summary.json": "366bffa101193c7b7d7a0bf23e4bd7a75e1450e0e4cc3087c0b1a4831a5526d7",
+    "trace.jsonl": "87e9573070c7053896b9efb05971cf474c9cca1804a7c4cce0d95c56941d36e9",
+    "validation.json": "067a3b16387a0659db5bf9873735fba1fed00d9f77b8012f7d4700b8b91ab069"
+  },
+  "caller_python_tests": {
+    "exit_code": 0,
+    "log_sha256": "728f9a545446ee4f7a09fbe5e3c91fda546a3ec802c611122859ec43485b398e",
+    "passed": 13
+  },
+  "date": "2026-10-12",
+  "feedback_url": "https://github.com/joshrotenberg/due/issues/15",
+  "findings": [
+    {
+      "disposition": "Reporting gap confirmed; wrong/unpinned-host inference not accepted. Retained eventstream and streamfilter helpers already honor TEST_REDIS_SERVER_BIN.",
+      "id": "reference-selected-host-evidence",
+      "source": "tools/reference_baseline.py:293"
+    },
+    {
+      "disposition": "Confirmed runner records live SDK HEAD but not tree inputs. No SDK implementation/dependency diff from febf8cb to reviewed HEAD. Historical passes not invalidated.",
+      "id": "reference-sdk-input-provenance",
+      "source": "tools/reference_baseline.py:85"
+    },
+    {
+      "disposition": "Confirmed best-effort SIGTERM after normal parent exit; no leaked process observed or reproduced.",
+      "id": "reference-normal-exit-group-cleanup",
+      "source": "tools/reference_baseline.py:144"
+    }
+  ],
+  "identity": {
+    "ab_comparison": "Deferred for this first permission/provenance calibration run; one complementary review of the existing checkpoint, not a model comparison.",
+    "compiled_source_revision": "unknown; source revision and binary digest recorded separately",
+    "date": "2026-10-12",
+    "due_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "due_source_revision": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "due_source_status": "?? due/\n",
+    "due_version": "due 0.1.0",
+    "host": "Codex desktop",
+    "platform": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "provider_version": "2.1.296 (Claude Code)",
+    "requested_effort": null,
+    "requested_model": null,
+    "requested_provider": "claude"
+  },
+  "implementation_started": false,
+  "input_hashes": {
+    "AGENTS.md": "90338cab83326507a5b56a0e8c50386b51b4fd411f691286700420f4fcddd443",
+    "STATUS.md": "84029f8f4c15e7154a49096d80f69e15635bdbafff21361a7593eed8b5d003ea",
+    "docs/BASELINE.md": "be197ed49cc81b3d072ea1bb1b2f478f3121980aac2d8b1a4ce157aea19d712e",
+    "tests/utils.rs": "75c5c9c3594452d9f94cba2db32d891bde6795e3f5f30f079f13e5a5514341ec",
+    "tools/package_baseline.py": "a80ee3c2651db298f562211e78098e646bf8f0fa5b3a4ef219e9b87359c23714",
+    "tools/reference_baseline.py": "bbacb22925c212ed9095adc7e8f2548726a3999ec08652c1aef02712fe70e20b",
+    "tools/runtime_baseline.py": "9418afff47748bb27abeefaa2c989b50a5901669d20ea704caa1cea261dc4166"
+  },
+  "kind": "Due Claude static review; no implementation",
+  "new_schedule_created": false,
+  "permissions": "Read/search-only worker; native delegation disabled; no shell or MCP; no permission bypass or fallback",
+  "raw_artifact_directory": "target/due-trials/20261012T183609Z",
+  "remote_sdk_writes": false,
+  "reviewed_checkpoint": "70815526e97cf054cd9cbc761f8907793e867b2b",
+  "schema_version": 1,
+  "usage": {
+    "cache_write_input_tokens": 77312,
+    "cached_input_tokens": 282739,
+    "input_tokens": 194,
+    "output_tokens": 19876,
+    "reasoning_output_tokens": null,
+    "total_tokens": null
+  },
+  "validation": {
+    "cost_usd": 2.61266475,
+    "duration_ms": 262636,
+    "envelope_valid": true,
+    "git_status_unchanged": true,
+    "inputs_unchanged": true,
+    "result_sha256": "555806934ab80e3525ead299abb8728c55938751ff5c363e0120c5367125912b",
+    "schema_valid": true,
+    "tool_counts": {
+      "Glob": 2,
+      "Grep": 14,
+      "Read": 14,
+      "StructuredOutput": 1
+    },
+    "trace": {
+      "dropped_records": 0,
+      "incomplete": false
+    },
+    "trace_records": 174,
+    "trace_records_valid": true,
+    "trace_summary_valid": true,
+    "verdict": "concerns"
+  }
+}

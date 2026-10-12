@@ -59,3 +59,27 @@ upstream references from fork references.
 Keep inherited BSD notices and source provenance. Package names, release versions,
 MSRV and server support must be chosen from evidence, not inferred from a toolchain
 pin or compatibility-feature name.
+
+## Due delegation trial
+
+Josh's October 12 direction enables the Due caller-policy trial in this project.
+Use the installed `due:delegate` plugin and local CLI for delegated model work;
+do not substitute native agents, other delegation tools or direct provider runs.
+The owning caller may work directly. Read installed help, the plugin skill and
+Due's run/contracts/observe guides. Follow Due's
+[caller policy](https://github.com/joshrotenberg/due/blob/main/docs/caller-policy.md)
+and [reporting guide](https://github.com/joshrotenberg/due/blob/main/docs/dogfooding.md).
+
+Carry exact scope, permissions, instructions, deliverable and stopping condition
+through stdin. Use JSON results and fresh traces; disable recursive/native agent
+delegation where supported. Preserve native permissions and inspect partial
+effects before follow-up. Independently validate answers and actual changes/checks.
+Use the other provider for implementation review when available; unavailable
+review stays pending, without silent fallback or permission bypass.
+
+The outer caller records positive/negative outcomes and publishes only sanitized
+Due feedback after checking existing issues. Workers do not publish or start
+experiments. Consider fair bounded two-arm comparisons occasionally and record
+deferrals. The PM owns scheduling. This trial grants no additional SDK push,
+merge, release, credential, settings or cross-project authority. See the current
+[trial checkpoint](docs/DUE_TRIAL.md).
