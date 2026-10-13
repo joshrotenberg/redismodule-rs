@@ -29,12 +29,11 @@ CASES = (
     "context_mutex", "server_event", "configuration", "response",
     "call_blocking", "open_key_with_flags", "expire",
     "logging_message_text", "logging_io_message_text",
+    "command_proc_macro", "redis_value_derive",
 )
 EXCLUDED = {
     "test_test_helper_err": "Uses the hello module for a nonexistent helper command; needs a meaningful replacement.",
     "test_key_space_notification_with_invalid_utf8_event_name": "Specialized event-input contract deferred from the ordinary baseline.",
-    "test_command_proc_macro": "Shared example registers metadata requiring correction; archive macro consumer is compile-checked separately.",
-    "test_redis_value_derive": "Shared example metadata/reply contract needs correction before runtime validation.",
     "test_call_dump": "Specialized binary CallReply conversion contract deferred to focused repair validation.",
     "test_call_binary_data": "Specialized binary CallReply conversion contract deferred to focused repair validation.",
     "test_defrag": "The selected macOS servers use libc; active defragmentation requires a capable allocator/server cell.",

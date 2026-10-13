@@ -1,6 +1,7 @@
 """Checks for the provenance gate, independent of Cargo and a Redis process."""
 
 import hashlib
+import io
 from pathlib import Path
 import tempfile
 import unittest
@@ -46,6 +47,47 @@ class RegistryTests(unittest.TestCase):
         self.assertFalse(dependencies["serde"]["default_features"])
         self.assertEqual(dependencies["cc"]["kind"], "build")
         self.assertEqual(dependencies["cc"]["target"], "cfg(unix)")
+
+
+class Resp2Tests(unittest.TestCase):
+    def test_nested_typed_reply_preserves_bytes_and_null(self):
+        raw = b"*4\r\n$5\r\ncount\r\n:-7\r\n*2\r\n$3\r\na\x00b\r\n$-1\r\n+OK\r\n"
+        self.assertEqual(baseline.read_resp2(io.BytesIO(raw)), [b"count", -7, [b"a\x00b", None], b"OK"])
+
+    def test_truncated_reply_and_error_are_rejected(self):
+        for raw in (b"*1\r\n", b"$4\r\nab\r\n", b"+incomplete"):
+            with self.subTest(raw=raw), self.assertRaisesRegex(baseline.BaselineError, "Truncated"):
+                baseline.read_resp2(io.BytesIO(raw))
+        with self.assertRaisesRegex(baseline.BaselineError, "Redis error: ERR invalid integer"):
+            baseline.read_resp2(io.BytesIO(b"-ERR invalid integer\r\n"))
+
+
+class ProcRuntimeTests(unittest.TestCase):
+    @staticmethod
+    def query(*args):
+        if args[:2] == (b"COMMAND", b"INFO"):
+            return [[b"archive.typed", 2, [b"readonly", b"module"], 0, 0, 0, [], [], []]]
+        if args[:2] == (b"COMMAND", b"DOCS"):
+            return [b"archive.typed", [b"summary", b"Return the parsed integer and a fixed message."]]
+        if len(args) != 2:
+            raise baseline.BaselineError("Redis error: wrong number of arguments")
+        if args[1] == b"not-an-integer":
+            raise baseline.BaselineError("Redis error: Couldn't parse as integer")
+        return [b"count", int(args[1]), b"message", b"packaged macros"]
+
+    def test_typed_contract_includes_success_and_error_recovery(self):
+        cases = baseline.proc_runtime_cases(self.query)
+        self.assertIn("typed-i64-replies", cases)
+        self.assertIn("valid-command-after-errors", cases)
+
+    def test_wrong_typed_reply_is_rejected(self):
+        def query(*args):
+            result = self.query(*args)
+            if args == (b"archive.typed", b"7"):
+                result[1] = b"7"  # Numeric-looking text is not an integer reply.
+            return result
+        with self.assertRaisesRegex(baseline.BaselineError, "changed its derived reply"):
+            baseline.proc_runtime_cases(query)
 
 
 class ServerIdentityTests(unittest.TestCase):

@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F04 — Proc-command runtime fixtures: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | Corrected keyless example metadata and module name; runtime assertions cover command metadata/key discovery and all derived reply fields/nesting/flattening/enum branch. Eight example tests pass on Redis 7.2.8/8.10.2, debug/release. Eight fresh archive proc flows pass across both hosts/profiles and Rust 1.94/1.98.1, including i64 endpoints, ordinary arity/parse errors and later valid commands. Four archives, 12 consumer builds, four registration tests, 19 Python tests, targeted builds, fmt and Clippy with warnings denied pass. Due/Claude approves; complete result/trace evidence is retained and independently validated. |
+| **Next** | F05: one focused Rust API/ergonomics slice with before/after examples and measured evidence, informed by the four reference modules. |
+| **Blockers** | None for F04. The first archive attempt exposed the string-only RESP2 harness limitation; the required decoder and its tests are corrected, and a fresh package run passes. Full 27-case baseline, RESP3, Cluster, persistence/replication and CI remain outside this chunk's evidence. |
+| **Decisions** | Issue-independent local branch/no-ff merge, no push/publication. No production SDK API/dependency changes. Archive recovery checks use fresh connections; same-connection behavior is only claimed where tested. No MSRV/package/support commitments. |
+
+Details: [F04 runtime contracts and limits](docs/F04_PROC_RUNTIME.md),
+[compact evidence](docs/evidence/f04-proc-runtime.json).
+
 ## F03 — Public macro dependency hygiene: validated locally
 
 | Status | Report |
