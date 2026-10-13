@@ -33,6 +33,10 @@ pub struct TestConnection {
 }
 
 impl TestConnection {
+    pub fn server_log(&self) -> io::Result<String> {
+        fs::read_to_string(&self._guard.log_path)
+    }
+
     pub fn new(module_name: &str) -> Self {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .expect("Reserved an available local test port");

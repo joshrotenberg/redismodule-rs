@@ -77,9 +77,16 @@ effects before follow-up. Independently validate answers and actual changes/chec
 Use the other provider for implementation review when available; unavailable
 review stays pending, without silent fallback or permission bypass.
 
-The outer caller records positive/negative outcomes and publishes only sanitized
-Due feedback after checking existing issues. Workers do not publish or start
-experiments. Consider fair bounded two-arm comparisons occasionally and record
-deferrals. The PM owns scheduling. This trial grants no additional SDK push,
+Josh's October 13 direction routes both positive and negative Due feedback through
+the existing `due-expert` chat (thread `01a13585-db9c-79b1-b0e6-60810ec05310`, local).
+The outer caller sends sanitized aggregate observations there; due-expert owns
+duplicate checks, classification and Due issue publication. Do not directly file
+or comment on Due issues from this project. Workers return observations without
+publication or recursive delegation. Consider fair bounded comparisons when
+useful and record deferrals. Josh set a two-hour cadence: one bounded chunk per
+run, followed by Done / Next / Blockers / Decisions, a relevant snippet and an
+actual Pacific finish timestamp. Resume unfinished work rather than duplicating
+it. The current SDK queue is F02 logging, macro dependency hygiene, meaningful
+proc-command fixtures, then one focused ergonomics slice. This trial grants no additional SDK push,
 merge, release, credential, settings or cross-project authority. See the current
 [trial checkpoint](docs/DUE_TRIAL.md).
