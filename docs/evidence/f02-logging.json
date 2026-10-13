@@ -1,0 +1,373 @@
+{
+  "artifacts": {
+    "debug": {
+      "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f02/build/debug/examples/liblog.dylib",
+      "sha256": "d720b9f35d49853ae531aa33b3b293e4bc14f96850d5101f6eff27df900870fe",
+      "test_executable": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f02/build/debug/deps/integration-0ef1361fe8dba352",
+      "test_sha256": "3fd70e59db714f9911edcae4b22f94505d91803e2a1491df389b83c8399fa25a"
+    },
+    "release": {
+      "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f02/build/release/examples/liblog.dylib",
+      "sha256": "237be2e3f069cd30940817c4ba20ce000b05a78917b5c354dbd0e83de9747fce",
+      "test_executable": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f02/build/release/deps/integration-40fbc5c292b17a29",
+      "test_sha256": "d677cd5874d67befeadaf09621d8a3645796771ee7e3bdb4930d3d9ea595e22b"
+    }
+  },
+  "builds": [
+    {
+      "argv": [
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--examples",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime"
+      ],
+      "exit_code": 0,
+      "log": "logs/debug-examples.log",
+      "seconds": 4.548,
+      "timeout": false
+    },
+    {
+      "argv": [
+        "cargo",
+        "+1.94.0",
+        "test",
+        "--test",
+        "integration",
+        "--no-run",
+        "--message-format=json",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime"
+      ],
+      "exit_code": 0,
+      "log": "logs/debug-integration.log",
+      "seconds": 0.768,
+      "timeout": false
+    },
+    {
+      "argv": [
+        "cargo",
+        "+1.94.0",
+        "build",
+        "--examples",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime",
+        "--release"
+      ],
+      "exit_code": 0,
+      "log": "logs/release-examples.log",
+      "seconds": 6.004,
+      "timeout": false
+    },
+    {
+      "argv": [
+        "cargo",
+        "+1.94.0",
+        "test",
+        "--test",
+        "integration",
+        "--no-run",
+        "--message-format=json",
+        "--locked",
+        "--no-default-features",
+        "--features",
+        "min-redis-compatibility-version-7-2,bindgen-runtime",
+        "--release"
+      ],
+      "exit_code": 0,
+      "log": "logs/release-integration.log",
+      "seconds": 1.71,
+      "timeout": false
+    }
+  ],
+  "cargo": "cargo 1.94.0 (85eff7c80 2026-01-15)",
+  "checks": {
+    "clippy_workspace_all_targets": "passed",
+    "diff_whitespace": "passed",
+    "example_profiles": [
+      "debug",
+      "release"
+    ],
+    "example_targets": 28,
+    "format": "passed",
+    "python_tooling_tests": 13,
+    "runtime_executions": 8,
+    "rust_breakdown": {
+      "dependency_contracts": 6,
+      "harness": 9,
+      "library": 11
+    },
+    "rust_pure_tests": 26
+  },
+  "chunk": "F02",
+  "date": "2026-10-13",
+  "features": "min-redis-compatibility-version-7-2,bindgen-runtime",
+  "fork_pr": 1,
+  "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+  "independent_review": {
+    "complete": true,
+    "dropped_records": 0,
+    "duration_ms": 219865,
+    "effort": null,
+    "exit_code": 0,
+    "follow_ups": "Two nonblocking test/lint suggestions applied and caller checks rerun; no second model review.",
+    "independent_schema_validation": "passed",
+    "model": null,
+    "provider": "claude",
+    "reported_cost_usd": 1.9586335,
+    "result_sha256": "0c104c5fd957985becf78784893903e6aa06af2e46c31f5697e1eed7593bea23",
+    "reviewed_files_unchanged_during_review": true,
+    "trace_records": 144,
+    "validation_sha256": "9ee2345e7e34ee631290fcc4e1cae0254c523d31125a5daa6c0a49344a94c7a2",
+    "verdict": "approve"
+  },
+  "inputs_unchanged_during_runtime_validation": true,
+  "limitations": [
+    "macOS ARM64/libc only; no new Linux/jemalloc certificate",
+    "corrected logging paths only; no historical invalid-path reproduction",
+    "static review is separate from caller test execution",
+    "existing logger/context ownership and threading remain separate",
+    "Redis log-length limits, allocation failure, uninitialized APIs, module reload and full persistence/application suites not certified"
+  ],
+  "local_artifacts": {
+    "clippy_log": "target/f02/clippy-final.log",
+    "clippy_log_sha256": "0f64529841f9ea737960d06bb7cf568cbb0e76a808b89138a85ce9a751449199",
+    "initial_fixture_failure_report": "target/f02/validation-20261013T160803Z/report.json",
+    "initial_fixture_failure_report_sha256": "a1bf572980653b210555c2015c0f63c7f7ab2be4356606b9a9b9b56676293ffd",
+    "pure_log": "target/f02/pure-tests-final.log",
+    "pure_log_sha256": "adef69329919fdc1073845eb77952b97f543812d6e972a54753042b1603120d8",
+    "runtime_report": "target/f02/validation-20261013T161912Z/report.json",
+    "runtime_report_sha256": "5d51607c25f96fcaf2bdd63cf5c0359f5fa8d3aac5e9feb42602262a0719c274"
+  },
+  "remote_ci": "Four Test-step failures on zero-content kickoff 26e15fb before F02 code. Deferred CI; no claim of remote green checks or release readiness. PR remains draft.",
+  "review_base": "3ddbc62a2453e03a73bd74c01352cf7b2564b2b3",
+  "runtime_cases": [
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-test_logging_message_text.log",
+      "log_sha256": "a6e7d3738d35d2fdf75007bde8bca055c4119c5286d0abdef5b216a35a027bb6",
+      "passed": true,
+      "profile": "debug",
+      "seconds": 0.925,
+      "server": "7.2.8",
+      "server_log_digests": {
+        "servers/debug-7.2.8-test_logging_message_text/log-88015-0/redis-server.log": "be02d16986c458d8c1a9e1f0924457414d552bf8f0bf55da06c985b23107f5db"
+      },
+      "test": "test_logging_message_text",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-7.2.8-test_logging_io_message_text.log",
+      "log_sha256": "23e9656f5dd4d89237f132e5fe54615e82b5171d144c7e210d444f763234972d",
+      "passed": true,
+      "profile": "debug",
+      "seconds": 0.078,
+      "server": "7.2.8",
+      "server_log_digests": {
+        "servers/debug-7.2.8-test_logging_io_message_text/log-88018-0/redis-server.log": "616ebe3ac879a286b40265e31cde7da1c4269a94104d27bc13b4cd7a210d07be"
+      },
+      "test": "test_logging_io_message_text",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-test_logging_message_text.log",
+      "log_sha256": "159f2e787df8973d067a0775f1ed48b28be24dff83a2bc757559a03392bab75e",
+      "passed": true,
+      "profile": "debug",
+      "seconds": 0.069,
+      "server": "8.10.2",
+      "server_log_digests": {
+        "servers/debug-8.10.2-test_logging_message_text/log-88022-0/redis-server.log": "fa1bc4a4ce49a0a5fa34ac1c26a6774e65e30e60fcd12471a54839094f682115"
+      },
+      "test": "test_logging_message_text",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/debug-8.10.2-test_logging_io_message_text.log",
+      "log_sha256": "9cedad6f8a12e66da49b205562344ead9142a8278d1a186126c72e1c3138d99f",
+      "passed": true,
+      "profile": "debug",
+      "seconds": 0.073,
+      "server": "8.10.2",
+      "server_log_digests": {
+        "servers/debug-8.10.2-test_logging_io_message_text/log-88024-0/redis-server.log": "96709151cfc790c13be61da24e2103610857dc2e27a5271a04ae026bcc5ec053"
+      },
+      "test": "test_logging_io_message_text",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-test_logging_message_text.log",
+      "log_sha256": "412690d92bfc35321a425cd7b3fe4161f489be92b6a685f03e968664e96ab582",
+      "passed": true,
+      "profile": "release",
+      "seconds": 0.658,
+      "server": "7.2.8",
+      "server_log_digests": {
+        "servers/release-7.2.8-test_logging_message_text/log-88373-0/redis-server.log": "40475db8b061cb019e0d9721736d6fc34d4769488c0fa424ba8fb4b0e2bd5a74"
+      },
+      "test": "test_logging_message_text",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-7.2.8-test_logging_io_message_text.log",
+      "log_sha256": "c7ec3778c80087f7bff0fe4ab1c537495104e8bcf124c34c65504034e635a60d",
+      "passed": true,
+      "profile": "release",
+      "seconds": 0.072,
+      "server": "7.2.8",
+      "server_log_digests": {
+        "servers/release-7.2.8-test_logging_io_message_text/log-88377-0/redis-server.log": "5474ef263fad3f14de367965f93152663f2b60bac035d9c5053226556a34d415"
+      },
+      "test": "test_logging_io_message_text",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-test_logging_message_text.log",
+      "log_sha256": "a25210b01490271e7689d15fb9a7c822434496e13c80fb525b84e23fb8950d55",
+      "passed": true,
+      "profile": "release",
+      "seconds": 0.076,
+      "server": "8.10.2",
+      "server_log_digests": {
+        "servers/release-8.10.2-test_logging_message_text/log-88381-0/redis-server.log": "5812366a18e892dbb0890ba574ddaefe6038400d5ad11050f9f300cb406bf4ba"
+      },
+      "test": "test_logging_message_text",
+      "timeout": false
+    },
+    {
+      "exit_code": 0,
+      "log": "logs/release-8.10.2-test_logging_io_message_text.log",
+      "log_sha256": "ed653ce04488a96d42a80b8954b9afa50875344a0033ea227e5ff75d070f35ec",
+      "passed": true,
+      "profile": "release",
+      "seconds": 0.076,
+      "server": "8.10.2",
+      "server_log_digests": {
+        "servers/release-8.10.2-test_logging_io_message_text/log-88389-0/redis-server.log": "ca6064a8663a1fa1e6630a29fb8abbce32f01df8ab2ed41385bd16328d01c863"
+      },
+      "test": "test_logging_io_message_text",
+      "timeout": false
+    }
+  ],
+  "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)\nbinary: rustc\ncommit-hash: 4a4ef493e3a1488c6e321570238084b38948f6db\ncommit-date: 2026-03-02\nhost: aarch64-apple-darwin\nrelease: 1.94.0\nLLVM version: 21.1.8",
+  "servers": [
+    {
+      "binary": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/servers/redis-7.2.8/src/redis-server",
+      "sha256": "94480949fb81fb1f0d6f862e9853abfbc7e66273a06fb4d7d7feea8e234df630",
+      "version": "7.2.8",
+      "version_output": "Redis server v=7.2.8 sha=febf8cb4:1 malloc=libc bits=64 build=1a0a973037db9b88"
+    },
+    {
+      "binary": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+      "sha256": "5f7cd7e2982bca1c7f31e4e3e396cee8c369838a18e41fc53f96ece23e955ae9",
+      "version": "8.10.2",
+      "version_output": "Redis server v=8.10.2 sha=00000000:1 malloc=libc bits=64 build=764b3e45065a66fb"
+    }
+  ],
+  "source_contribution": {
+    "head": "437bf22b933c31d04573943b692542032edd9538",
+    "issue": 473,
+    "pull_request": 476,
+    "repo": "RedisLabsModules/redismodule-rs"
+  },
+  "source_files": {
+    "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709",
+    "Cargo.toml": "3e2844d7134e88a1c1347d777411e3aefc46d569ea44c33bdcf29a6288d6018a",
+    "build.rs": "519de5da3bfeb832e6299ff4059e4bb63efdd227ee8da07ee903cc28d08f1f34",
+    "crates/common/CHANGELOG.md": "ea08ef6b3f8a8370eeb05be8babcc71ca248ec80698e4d739ba29479fc45292a",
+    "crates/common/Cargo.toml": "a997415f9aa671023470d87478306808a96877517b6d1a29b4394b5465937a69",
+    "crates/common/LICENSE": "b2a9a59c434fae714382fcfadda3f347c43f43bfdc5ad52216d99581a3cbe69d",
+    "crates/common/README.md": "4f31457fb7bd59a69c229ab6c6786b938232afe042d82569db514f99050cc482",
+    "crates/common/src/lib.rs": "85ddabb2a3fe20c59e0d12c3d0587c00dd49f135be142908fd06e0f8790df354",
+    "crates/macros-internals/CHANGELOG.md": "ee68955837fb56a7614c11d51a149b0b24356a0743ea9348a75554b12355fda9",
+    "crates/macros-internals/Cargo.toml": "a9b3cb04c88047cd1b1c0a8e30ec96c75242ce278df9b603d04c56646501e7be",
+    "crates/macros-internals/LICENSE": "b2a9a59c434fae714382fcfadda3f347c43f43bfdc5ad52216d99581a3cbe69d",
+    "crates/macros-internals/README.md": "1f2a7a7f00403261c7e51b5e8e5bc72c7ab6e821af3fb829ae381c54323d427d",
+    "crates/macros-internals/src/api_versions.rs": "625a97488db3696456217be24d738b02d33ab32b8d9d15c4212462e652080eb0",
+    "crates/macros-internals/src/lib.rs": "a4fe328745c48985a99a2e3fc14f7dc75f9dbaf13b480e7b93205d9154d29d2e",
+    "crates/macros/CHANGELOG.md": "3461088119740981457e6f36a012edc64ec0a166ef4caa8fdf8de36702aa1ca7",
+    "crates/macros/Cargo.toml": "7bfc27c26deeb23d4f6b82d6e22188fe8898e242f59ef75f24ddc325c9937de2",
+    "crates/macros/LICENSE": "b2a9a59c434fae714382fcfadda3f347c43f43bfdc5ad52216d99581a3cbe69d",
+    "crates/macros/README.md": "f416ada14ae8a7ca8e53143314219dc921a37f7f8b06e48d1d633eee1d48e05c",
+    "crates/macros/src/command.rs": "a7a5aaab3339ce1cf03df772da74c77aacd9af3fc0dac2d60881a11a593b75dc",
+    "crates/macros/src/info_section.rs": "0785a8014bdec70869cbca37d7eb31398d0eb24f72651c0661dd1df690f10ff6",
+    "crates/macros/src/lib.rs": "cb0ea83ae993fef342d5c3c0254d1669bb0c20ae6b697942fccb3ef2343b4c4a",
+    "crates/macros/src/redis_value.rs": "b17f6a2632e280de5a3606a0fe28f7cb201566139429f70514386800bc16aa2e",
+    "examples/acl.rs": "e4f698429a6416d9c59916e3cdb6ecadd99937c84bdaabf57248e9b9b35c1f50",
+    "examples/block.rs": "e3f0ae600bbbaece0cb69c8fb3e03e1f17eca37fba12385630e499a83acbb0c8",
+    "examples/call.rs": "845ce858fe0245a49bc0e3f138b3c48114e457030c7900f778a5f23cf4b6e875",
+    "examples/configuration.rs": "3b4f3ff6eb6096e94837eaa7c5a61ba3c3d8e55fc1c265c533bd51b7f6bcf090",
+    "examples/ctx_flags.rs": "8522d23cdd66ff24b8dfbe92e11738d31c4c6102bb0dcdb4e98a84771e7ad367",
+    "examples/data_type.rs": "88152be56e7b90af818ea2bc856fe08720aec055a4dc41d11be24bffefa96957",
+    "examples/events.rs": "9c74618b6bc09b82ac513d0c0148a177afa272138930aa375827e30d3a7bde44",
+    "examples/expire.rs": "377d27bb86786da571052bb0d6feafd0058aedd3c6d172307dfdf0b2d7a074d3",
+    "examples/hello.rs": "1299ecf1c577c0c97cae1aaa38482fb0ba580df3905f63ff7e53af48afa99956",
+    "examples/info.rs": "9c1133bf9ae54287a9d82c85d70e18b5f4e75033d6ad9aa31a1127798517b0fe",
+    "examples/info_handler_builder.rs": "06e8029553c31de7c7a50fecb2a4e10af2d21eada3cec036d8fe215616154414",
+    "examples/info_handler_macro.rs": "c09be445b6a5e3cb8e8ce15b4a96cd4433579511cbce9515a7ac9fd033cb9527",
+    "examples/info_handler_multiple_sections.rs": "76d80beac8e3b3e9c3d6be4aa4689e0fe594f3ec7dd66fa194089716df26c9ca",
+    "examples/info_handler_struct.rs": "75f9bd9254ce65523c9cee7003e8ec4792e4d18a7a8ed7bc843a80208851c491",
+    "examples/keys_pos.rs": "1ce7f7f4a49da1bf2365d49ce9db35e91acc72337644d9ddeaee3139621ea96e",
+    "examples/lists.rs": "657cd27e91fffbb309ca0a04f7cee0d2bc2e13251ce8eea2ad0a13a34cce7c9b",
+    "examples/load_unload.rs": "d9727560c0c5baf94feec0e724db885cdeba140b7a3ed63fbc341fe53b55439b",
+    "examples/log.rs": "86d9a0bd7ea102dfc99a3372becdd38ed65a15edd6718ffc049c331e3f449d34",
+    "examples/open_key_with_flags.rs": "de96d0d12fb6179a74b509938c9513e6175997b2d66408d8b23ba5eeed5e28cc",
+    "examples/proc_macro_commands.rs": "988608d890a4894aaaef8c0021bfe4b76cdfb676771c86d8b22211f91b2237e9",
+    "examples/response.rs": "2d26593a13ca0bb1c454ef9525d8fe82449877bbb0bae6d44b68c03f1900a3f8",
+    "examples/scan_keys.rs": "4c0882d7e176f83068221e9bfcd755981c6f158c26ebb12deaf99c911274e0df",
+    "examples/server_events.rs": "579d602cdb86c38593940735266603f55dd76222d9f5b7ed381f3deed076b14c",
+    "examples/stream.rs": "9df1051ac93ae3e64d86c0a332a6174116c32109b3f0efcd3dc840abb3a1d0e5",
+    "examples/string.rs": "05a9df422f4de5690c4caf38067b0cb9b41c9cf6bb817d4e92b837a916ef28ad",
+    "examples/test_helper.rs": "215521e7d0c06963606398ab7932a797c86dc7b470b5473eab6f3f74696c7655",
+    "examples/threads.rs": "6d4ffda2788c0f00b9b8e19b5e6f6b9d4dfd4247d44e8b478aea26592c63b8ec",
+    "examples/timer.rs": "eb780dc480d5a8f9156600810f18da3d1f499ccdc7d04bbe0b0dc61b49ee44a0",
+    "rust-toolchain.toml": "c3408601148e659ce09d22c41a74d71ed7e0dfa6bb239256423cc3d2b8254806",
+    "src/alloc.rs": "89311411d8d4941b91a7b7f8ca937161a64c1deea89b5e2aadbf6f8cd163dcfc",
+    "src/apierror.rs": "a04cd33eec4474d4132e6cbd8ad31485f981a9c5402481a796af60cb4f817051",
+    "src/configuration.rs": "d7f8f429014b89da21ca636a7f900218a797de8f252879a5095bab184a011e8d",
+    "src/context/blocked.rs": "65b5fedbf2f6aef13867322d3512d150b218415a9773e33b868904f5a2a2083a",
+    "src/context/call_reply.rs": "4e315e45c0536188aca4148cb08b6fcd3aa0ab15b92940700bb6aaab1f7f9428",
+    "src/context/commands.rs": "21e0664f63a36ea5df78870280bb3fce9c354b0350648dfd65024818e6740211",
+    "src/context/defrag.rs": "8f5b862d7441c4547939cffb817a0abf1a98d344199ad2a9297d50d227005add",
+    "src/context/info.rs": "375a3f87d857199fa4e633d6913edf8df886aaa2190ec348cec7eb3f32b76edc",
+    "src/context/key_cursor.rs": "8d906fab05962a3fb42513d55435d829de655b83bf5ab5ebb8b6fea3732cf9cc",
+    "src/context/keys_cursor.rs": "4bab67b2ebb6cc90d0be784849b986fa3bebfe014c7b1e2b0364c0e985a238c8",
+    "src/context/mod.rs": "0719286068015ce866e9f4a8643ad0f1b89540a70a3862385bc4f71b17ea7251",
+    "src/context/server_events.rs": "1ee11b34089649e7a19123375c3d0b635ab4851b6142419a3c909352304dce90",
+    "src/context/thread_safe.rs": "bd19e02aacf7f1eb3ec40aaf4066d1e2c052c3934d4ff2c88fbe953aec098852",
+    "src/context/timer.rs": "d6714a6a52d7ce73134882160846df77cc5d41df1aa2bf7450e5231e10a80ed1",
+    "src/error.rs": "f7fea094a79245489289156f316800c1798b61e1dbc88b33f1adb75eb4b7a393",
+    "src/include/redismodule.h": "c6bd37d49653968f3d37771477426775f2af8563d414e15730bd3debbd74c76a",
+    "src/io.rs": "0ba73b673a5757cfe9d166bb6096eea13ff42ba76ee2151142858f59236f517a",
+    "src/key.rs": "07724059dc356048e9ea6ac12df09ca856a060275641a4eb269f0363ffffe865",
+    "src/lib.rs": "9db56f3900b856e736ce57bf47b97752720d40be85732f4005cbe4ec0a29dd41",
+    "src/logging.rs": "9154d8f5896cf244ec59810bb3ecb761b05e6e43aacec269f4527b5443b771a6",
+    "src/macros.rs": "d0c4b8c7e46200e4883cbe5d522257b0245c322861b012f6fc95f6fd68658288",
+    "src/native_types.rs": "9ff17729e048d9a41a7a99b973399a6cbc324239c9b132dd1b4232d95af4b940",
+    "src/raw.rs": "be81fd3f05d3719d69a979361cd62681b546bf03a3034da58b2a534e0d7ea590",
+    "src/rediserror.rs": "6e042dfcf88cf0f296e61d54ae2ec23004d64953da1b07a101fe10771cf76575",
+    "src/redismodule.c": "b48ea63f6c89889115ea4fd47b65d691dbcebcf9ab71d6185df9b33475ca6c71",
+    "src/redismodule.rs": "5c7577b9746c23249225931d5cfa2a820f290340c58a0586026844b2ae3d7d76",
+    "src/redisraw/mod.rs": "b31097f6bfeaa265560023bd794fc2a645a7deb376643a6705b836745d1d1097",
+    "src/redisvalue.rs": "5d1ad6f05342ca88c9773ef154bd2756472723fed1d3c2d136849f475f46b4d9",
+    "src/stream.rs": "7c09d98ab1291fbdf2a45ff3c5be7b06bb29321a0466d7b5aa896d6c2dbcff6a",
+    "src/utils.rs": "3ebb5f3a9c1b1de51166b3b80586b14e6b3baf0a6666b9edae0dd80f158e89e1",
+    "tests/dependency_contracts.rs": "0009b345a974dd82033e5ad593297e19e20a28c27032756c14e6cbba06d99d4b",
+    "tests/integration.rs": "0bdb628f2e072332813a3cc127e6f3d69446a8f9ffc789af9ccc71eb6fa6c415",
+    "tests/utils.rs": "927a02e0a7e3291f53dd7cfb1c2b859df77e56c876b0be476af4dc9f54ae05c6"
+  },
+  "tested_source_head": "26e15fb08b4cb03a1e9abc7f9fadba24411a0364"
+}

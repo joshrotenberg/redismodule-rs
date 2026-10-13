@@ -28,6 +28,7 @@ CASES = (
     "get_current_user", "verify_acl_on_user", "key_space_notifications",
     "context_mutex", "server_event", "configuration", "response",
     "call_blocking", "open_key_with_flags", "expire",
+    "logging_message_text", "logging_io_message_text",
 )
 EXCLUDED = {
     "test_test_helper_err": "Uses the hello module for a nonexistent helper command; needs a meaningful replacement.",

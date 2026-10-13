@@ -1,6 +1,6 @@
 # Fork status
 
-Updated 2026-10-12. Direction: improve the original SDK with justified Rust API
+Updated 2026-10-13. Direction: improve the original SDK with justified Rust API
 changes. Work is local; automatic publication remains disabled. Package names
 and versions are inherited, not a new fork release.
 
@@ -9,6 +9,19 @@ remain local and provisional; GitHub jobs have not been run to validate them.
 Continue the local baseline independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
+
+## F02 — Logging correctness: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | Shared NUL-to-visible-text conversion, literal message arguments at the C boundary, static C level strings and raw notice delegation. Five new pure tests; 26 Rust pure/harness tests and 13 Python tests pass. All 28 examples build debug/release. Both focused logging tests pass on Redis 7.2.8 and 8.10.2 in both profiles (eight executions), including real IO callbacks and exact retained log text. Due/Claude independently approved the implementation; its two nonblocking suggestions were applied and the affected checks rerun. Formatting and Clippy pass. |
+| **Next** | F03: public macro dependency hygiene. Keep meaningful proc-command fixtures and one focused Rust ergonomics slice as subsequent chunks. The reference-runner evidence follow-up remains bounded and deferred unless selected validation needs it. |
+| **Blockers** | Remote CI is not certified. Four of eight jobs failed in their Test step on the zero-content kickoff, before F02 code was pushed. CI modernization remains deferred; PR 1 stays draft pending remote failure triage. This limits the remote handoff, not the completed local logging checks. |
+| **Decisions** | Preserve public signatures and upstream attribution. Use the existing local merge process for validated code; retain the remote draft for Josh's review and merge authority. SDK logger/context ownership remains a separate follow-up. Due feedback now goes to due-expert; one SDK chunk per two-hour interval, with a snippet and actual Pacific finish timestamp. No package/MSRV/support decision made. |
+
+Details: [F02 implementation and evidence](docs/F02_LOGGING.md),
+[compact validation](docs/evidence/f02-logging.json),
+[fork draft PR 1](https://github.com/joshrotenberg/redismodule-rs/pull/1).
 
 ## October 12 — Due review checkpoint
 

@@ -987,11 +987,6 @@ pub fn is_io_error(rdb: *mut RedisModuleIO) -> bool {
     unsafe { RedisModule_IsIOError.unwrap()(rdb) != 0 }
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn redis_log(ctx: *mut RedisModuleCtx, msg: &str) {
-    let level = CString::new("notice").unwrap(); // FIXME reuse this
-    let msg = CString::new(msg).unwrap();
-    unsafe {
-        RedisModule_Log.unwrap()(ctx, level.as_ptr(), msg.as_ptr());
-    }
+    crate::logging::log_internal(ctx, crate::logging::RedisLogLevel::Notice, msg);
 }
