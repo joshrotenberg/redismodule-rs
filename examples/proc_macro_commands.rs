@@ -35,16 +35,10 @@ enum RedisValueEnum {
 
 #[command(
     {
-        flags: [ReadOnly, NoMandatoryKeys],
+        flags: [ReadOnly],
         arity: -1,
-        key_spec: [
-            {
-                notes: "test redis value derive macro",
-                flags: [ReadOnly, Access],
-                begin_search: Index({ index : 0 }),
-                find_keys: Range({ last_key : 0, steps : 0, limit : 0 }),
-            }
-        ]
+        summary: "Return a structured reply or select the string variant.",
+        key_spec: []
     }
 )]
 fn redis_value_derive(
@@ -130,7 +124,7 @@ fn num_keys(_ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
 }
 
 redis_module! {
-    name: "server_events",
+    name: "proc_macro_commands",
     version: 1,
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],

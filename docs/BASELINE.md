@@ -84,7 +84,7 @@ runner for review.
 
 | Deferred area or finding | Disposition |
 |---|---|
-| Shared proc-command example metadata and derived replies | Correct registration/reply contracts before exercising those runtime paths. Public macro and derive compilation is proven by archive consumers. |
+| F01 deferred shared proc-command example metadata and derived replies | [F04](F04_PROC_RUNTIME.md) corrects keyless metadata and verifies field/reply, key-discovery and typed archive runtime contracts on selected hosts/profiles. Historical F01 exclusions remain recorded. |
 | Specialized binary CallReply and event-input cases | Validate the corrected contracts in focused follow-up work; no full inherited-suite claim here. |
 | `test_test_helper_err` uses a nonexistent helper command on the hello module | Replace with a meaningful test in the relevant repair. Its current error result would not establish the intended behavior. |
 | Active defragmentation | Needs a server/allocator cell that supports it. A libc skip is not a pass. |

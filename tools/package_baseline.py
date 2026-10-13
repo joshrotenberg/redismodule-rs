@@ -224,23 +224,39 @@ def verify_metadata(metadata, lock, registry, archives, cargo_home: Path, expect
     return sorted(found, key=lambda package: package["name"])
 
 
+def read_resp2(reader):
+    line = reader.readline()
+    if not line.endswith(b"\r\n"):
+        raise BaselineError("Truncated Redis response header")
+    if line.startswith(b"+"):
+        return line[1:-2]
+    if line.startswith(b"-"):
+        raise BaselineError("Redis error: " + line[1:-2].decode("utf-8", "replace"))
+    if line.startswith(b":"):
+        return int(line[1:-2])
+    if line.startswith((b"$", b"*")):
+        size = int(line[1:-2])
+        if size == -1:
+            return None
+        if size < 0:
+            raise BaselineError("Invalid Redis response length")
+        if line.startswith(b"*"):
+            return [read_resp2(reader) for _ in range(size)]
+        result = reader.read(size)
+        if len(result) != size or reader.read(2) != b"\r\n":
+            raise BaselineError("Truncated Redis bulk response")
+        return result
+    raise BaselineError(f"Unexpected Redis response: {line!r}")
+
+
 def redis_command(port: int, *args: bytes):
     request = b"*" + str(len(args)).encode() + b"\r\n"
     for arg in args:
         request += b"$" + str(len(arg)).encode() + b"\r\n" + arg + b"\r\n"
     with socket.create_connection(("127.0.0.1", port), timeout=2) as connection:
         connection.sendall(request)
-        reader = connection.makefile("rb")
-        line = reader.readline()
-        if line.startswith(b"$"):
-            size = int(line[1:-2])
-            result = reader.read(size)
-            if reader.read(2) != b"\r\n":
-                raise BaselineError("Truncated Redis bulk response")
-            return result
-        if line.startswith(b"+"):
-            return line[1:-2]
-        raise BaselineError(f"Unexpected Redis response: {line!r}")
+        with connection.makefile("rb") as reader:
+            return read_resp2(reader)
 
 
 def info_fields(raw: bytes) -> dict[str, str]:
@@ -257,7 +273,43 @@ def verify_server_info(raw: bytes, process_id: int, expected_version: str) -> di
     return fields
 
 
-def runtime_manual(binary: Path, redis: str, output: Path, env: dict) -> dict:
+def proc_runtime_cases(query) -> list[str]:
+    """Validate RESP2 behavior; queries use fresh connections, not session recovery."""
+    entry = query(b"COMMAND", b"INFO", b"archive.typed")[0]
+    if entry[0:2] != [b"archive.typed", 2] or b"readonly" not in entry[2]:
+        raise BaselineError("Archived typed command name/arity/flags differ")
+    if entry[3:6] != [0, 0, 0] or entry[8] != []:
+        raise BaselineError("Archived typed command must have no key specs")
+    docs_reply = query(b"COMMAND", b"DOCS", b"archive.typed")
+    docs = dict(zip(docs_reply[::2], docs_reply[1::2]))
+    details_reply = docs[b"archive.typed"]
+    details = dict(zip(details_reply[::2], details_reply[1::2]))
+    if details.get(b"summary") != b"Return the parsed integer and a fixed message.":
+        raise BaselineError("Archived typed command summary differs")
+    for number in (0, -1, 7, -(2 ** 63), 2 ** 63 - 1):
+        if query(b"archive.typed", str(number).encode()) != [
+            b"count", number, b"message", b"packaged macros"
+        ]:
+            raise BaselineError("Archived typed command changed its derived reply")
+    for args, expected in [
+        ((b"archive.typed",), "wrong number of arguments"),
+        ((b"archive.typed", b"1", b"extra"), "wrong number of arguments"),
+        ((b"archive.typed", b"not-an-integer"), "Couldn't parse as integer"),
+    ]:
+        try:
+            query(*args)
+        except BaselineError as error:
+            if expected not in str(error):
+                raise
+        else:
+            raise BaselineError("Archived typed command accepted invalid arguments")
+        if query(b"archive.typed", b"7") != [b"count", 7, b"message", b"packaged macros"]:
+            raise BaselineError("Archived typed command did not recover after an argument error")
+    return ["command-info", "command-docs", "typed-i64-replies", "arity-errors",
+            "integer-error", "valid-command-after-errors"]
+
+
+def runtime_manual(binary: Path, redis: str, output: Path, env: dict, *, kind="manual") -> dict:
     """Exercise ordinary command behavior only; clean up on every exit path."""
     executable = shutil.which(redis, path=env.get("PATH"))
     if executable is None:
@@ -304,15 +356,20 @@ def runtime_manual(binary: Path, redis: str, output: Path, env: dict) -> dict:
                 raise BaselineError(f"Redis allocator differs from executable identity: {allocator}")
             if time.monotonic() >= deadline or process.poll() is not None:
                 raise BaselineError(f"Owned Redis did not become ready before the deadline; see {log}")
-            samples = [b"", b"hello", b"a\x00b\xff\r\n", bytes(range(256))]
-            for sample in samples:
-                if redis_command(port, b"archive.echo", sample) != sample:
-                    raise BaselineError("Archived module changed binary response bytes")
+            if kind == "proc":
+                cases = proc_runtime_cases(lambda *args: redis_command(port, *args))
+            elif kind == "manual":
+                samples = [b"", b"hello", b"a\x00b\xff\r\n", bytes(range(256))]
+                for sample in samples:
+                    if redis_command(port, b"archive.echo", sample) != sample:
+                        raise BaselineError("Archived module changed binary response bytes")
+                cases = ["empty", "ascii", "nul-non-utf8-crlf", "all-256-byte-values"]
+            else:
+                raise BaselineError(f"No runtime contract for {kind}")
             if redis_command(port, b"PING") != b"PONG":
                 raise BaselineError("Redis did not respond after commands")
             return {"result": "passed", "argv": command, "binary_sha256": sha256(binary),
-                    "cases": ["empty", "ascii", "nul-non-utf8-crlf", "all-256-byte-values"],
-                    "log": str(log), "proc_runtime": "deferred; compile coverage only",
+                    "cases": cases, "kind": kind, "log": str(log),
                     "redis_version": version, "redis_binary_sha256": sha256(Path(executable)),
                     "expected_redis_version": expected.group(1), "actual_redis_version": identity["redis_version"],
                     "process_id": process.pid, "allocator": allocator,
@@ -345,7 +402,7 @@ def main():
     env.setdefault("CARGO_NET_RETRY", "2")
     runner = Runner(output, env, options.command_timeout)
     report = {"result": "incomplete", "archives": {}, "consumers": [],
-              "limitations": ["proc command runtime deferred", "no MSRV declaration",
+              "limitations": ["selected RESP2 module flows only", "no MSRV declaration",
                               "no GitHub runner verification", "no release publication"]}
     try:
         report["source_head"] = runner.run(["git", "rev-parse", "HEAD"], root, "source-head").strip()
@@ -412,6 +469,15 @@ def main():
                         extension = "dylib" if sys.platform == "darwin" else "so"
                         item["runtime"] = runtime_manual(target / "release" / f"libarchive_manual.{extension}",
                                                           options.redis_server, consumer, env)
+                    if kind == "proc" and not options.skip_runtime:
+                        extension = "dylib" if sys.platform == "darwin" else "so"
+                        item["runtime"] = {}
+                        for profile in ("debug", "release"):
+                            run_dir = consumer / ("runtime-" + profile)
+                            run_dir.mkdir()
+                            item["runtime"][profile] = runtime_manual(
+                                target / profile / f"libarchive_proc.{extension}",
+                                options.redis_server, run_dir, env, kind="proc")
                     report["consumers"].append(item)
                     write_json(output / "report.json", report)
         report["result"] = "passed"

@@ -1,0 +1,102 @@
+{
+  "chunk": "F04",
+  "state": "validated, ready for local no-ff merge",
+  "sdk_base": "eea0ce6e8ab4fc61693fa407b54ae5089b2e0659",
+  "production_sdk_changed": false,
+  "code_inputs": {
+    "examples/proc_macro_commands.rs": "72d05070fa2fc6dc172ac3e420af14e0a5b519e851e8acc734a8d51d5d17dead",
+    "fixtures/package-consumers/proc/src/lib.rs": "4e32f7b81983e8e89ce7d60624f4a99dc64e0afa13cc609f8bcd19d2aba65a25",
+    "tests/integration.rs": "c818bea76a23f0d97f22a2bf18eaa9c7294541471fb6c80a3a0416d002851b64",
+    "tools/package_baseline.py": "60cb65e4e7825fd4aea72e48f5ce2d571073e3234b609658f8ce61e6c24ba0e5",
+    "tools/runtime_baseline.py": "8b6eb8e145d2b2c93d507462e163d9657093dd0627b57a3079c6e5eae36c560a",
+    "tools/test_package_baseline.py": "654bb88aa89c82fae4f16f5d0d0cadd92c8457fa22b83a65c5c5154050a8c5ed"
+  },
+  "example_runtime": {
+    "executions": 8,
+    "tests": [
+      "test_command_proc_macro",
+      "test_redis_value_derive"
+    ],
+    "profiles": [
+      "debug",
+      "release"
+    ],
+    "hosts": [
+      "7.2.8",
+      "8.10.2"
+    ],
+    "report": "target/f04/runtime/report.json",
+    "producer": "target/f04/run-runtime.py",
+    "build_directory": "target/f02/build reused owned output",
+    "full_runner_executed": false,
+    "inventory": "target/f04/inventory.json: 27 selected, missing/unknown empty"
+  },
+  "archive_runtime": {
+    "proc_executions": 8,
+    "compilers": [
+      "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+      "rustc 1.98.1 (48a229cea 2026-09-01)"
+    ],
+    "profiles": [
+      "debug",
+      "release"
+    ],
+    "hosts": [
+      "7.2.8",
+      "8.10.2"
+    ],
+    "reports": [
+      "target/f04/packages-validated/report.json",
+      "target/f04/archive-8.10.2-final/report.json"
+    ],
+    "producer_8_10": "target/f04/run-archive-final.py",
+    "scope": "INFO/DOCS, exact typed replies/i64 endpoints, ordinary arity/parse errors and later valid command; fresh connection per query"
+  },
+  "package_checks": {
+    "archives": 4,
+    "builds": 12,
+    "registration_tests": 4,
+    "direct_linkme": "absent",
+    "provenance": "archive/cache/extracted files verified",
+    "archive_sha256": {
+      "redis-module": "cd415e5df6d0f1f3b98d46908491f7b33e958e7ceada30c4adc3c4f90ffae40f",
+      "redis-module-common": "2482400a783f74d0550503626f51438ddac4cf5776faad219cbfae191289e0f2",
+      "redis-module-macros": "07147e05794d45f5e64aaf9f0a3b6a1819c769c166068a14227de2c029f96a11",
+      "redis-module-macros-internals": "9e97e5c9e49d542f3acdf31451588eb03129c357f3a23a561facd7bf0f6aef62"
+    }
+  },
+  "checks": {
+    "python_tests": 19,
+    "clippy": "workspace/all-targets, -D warnings, passed",
+    "fmt": "passed",
+    "whitespace": "passed",
+    "targeted_builds": "example + integration debug/release, pinned locked API floor7.2, passed"
+  },
+  "review": {
+    "provider": "claude",
+    "actual_exit": 0,
+    "result": "succeeded",
+    "verdict": "approve",
+    "schemas": "request/result/answer/trace/summary independently pass",
+    "full_receipt_retained": true,
+    "duration_ms": 229680,
+    "reported_cost_usd": 3.849821,
+    "trace_records": 179,
+    "activities": 33,
+    "failed_native_activities": 1,
+    "gaps": 0,
+    "drops": 0,
+    "source_depth": "fixture changes read; unchanged SDK supporting grep only",
+    "post_review": "docstring/evidence/producer/inventory and retained checks updated; no second model review"
+  },
+  "partial_run": {
+    "report": "target/f04/packages/report.json",
+    "result": "stopped at prior string-only RESP2 decoder; no SDK assertion failure",
+    "recovery": "array/integer/error decoder and pure tests added, fresh archive run passed"
+  },
+  "limits": [
+    "native macOS arm64/libc, API floor7.2, RESP2",
+    "no full inherited-suite rerun, Cluster/persistence/replication/RESP3/CI/general FFI soundness claim",
+    "no package/MSRV/support commitments"
+  ]
+}

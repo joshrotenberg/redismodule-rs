@@ -44,16 +44,23 @@ also run in both profiles. Successful package assembly alone is not treated as
 successful consumption. The linked-list assertions run in a Rust test executable;
 the proc consumer separately checks compilation/linking of a real module cdylib.
 
-Only the manual release consumer is loaded into a loopback Redis process. It
+The manual release consumer and proc debug/release consumers are loaded into
+separate loopback Redis processes. Each run
 verifies the owned process ID, server version and allocator using retained
 `INFO server` and `INFO memory` responses before exercising module commands.
 The expected version and allocator come from the exact executable's `--version`;
-the executable and loaded library hashes are retained. It checks empty, ASCII,
+the executable and loaded library hashes are retained. The manual consumer checks empty, ASCII,
 NUL/non-UTF-8/CRLF and all-256-byte payloads and verifies that
-the server still responds. Startup has a 15-second deadline, every Cargo command
-has a deadline, and subprocesses are cleaned up on success and failure. Proc
-command registration remains a separate runtime gate; this harness does not
-load that fixture. Compiler or host success here does not establish an MSRV,
+the server still responds. The proc consumer checks command name/arity/flags,
+no-key metadata, the declared summary, exact integer/string reply types, ordinary
+arity/parse errors and a successful command after each error. Its signed i64
+samples include both endpoints. The test transport decodes RESP2 arrays,
+integers, strings and null; this is not RESP3 coverage.
+
+Startup has a 15-second deadline, every Cargo command has a deadline, and
+subprocesses are cleaned up on success and failure. The selected proc fixture
+is now exercised at runtime; broader proc-command, persistence and replication
+behavior remain separate. Compiler or host success here does not establish an MSRV,
 general Redis support, CI runner correctness, or publication readiness.
 
 Registry entries follow the [Cargo index format](https://doc.rust-lang.org/cargo/reference/registry-index.html)
