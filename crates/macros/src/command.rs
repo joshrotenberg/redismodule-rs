@@ -487,6 +487,8 @@ pub(crate) fn redis_command(attr: TokenStream, item: TokenStream) -> TokenStream
         quote! { None }
     };
 
+    let registration =
+        crate::registration::attributes(syn::parse_quote!(::redis_module::commands::COMMANDS_LIST));
     let gen = quote! {
         #func
 
@@ -502,7 +504,7 @@ pub(crate) fn redis_command(attr: TokenStream, item: TokenStream) -> TokenStream
             context.reply(response.map(|v| v.into())) as i32
         }
 
-        #[linkme::distributed_slice(redis_module::commands::COMMANDS_LIST)]
+        #registration
         fn #get_command_info_function_name() -> Result<redis_module::commands::CommandInfo, redis_module::RedisError> {
             let key_spec = vec![
                 #(

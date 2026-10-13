@@ -173,13 +173,24 @@ def registry_server(directory: Path):
 
 def consumer_manifest(kind: str, versions: dict) -> str:
     macros = (f'redis-module-macros = {{ version = "={versions["redis-module-macros"]}", '
-              'registry = "candidate" }\nlinkme = "0.3"\n') if kind == "proc" else ""
+              'registry = "candidate" }\n') if kind != "manual" else ""
+    crate_type = "rlib" if kind == "registration" else "cdylib"
     return (f'[package]\nname = "archive-{kind}"\nversion = "0.0.0"\nedition = "2021"\n'
-            'publish = false\n\n[workspace]\n\n[lib]\ncrate-type = ["cdylib"]\n\n'
+            f'publish = false\n\n[workspace]\n\n[lib]\ncrate-type = ["{crate_type}"]\n\n'
             '[dependencies]\n'
             f'redis-module = {{ version = "={versions["redis-module"]}", registry = "candidate", '
             'default-features = false, features = ["min-redis-compatibility-version-7-2", '
             '"bindgen-runtime"] }\n' + macros)
+
+
+def verify_consumer_dependencies(metadata, kind: str) -> list[str]:
+    root_id = metadata["resolve"]["root"]
+    package = next((p for p in metadata["packages"] if p["id"] == root_id), None)
+    expected = {"redis-module"} if kind == "manual" else {"redis-module", "redis-module-macros"}
+    actual = {dependency["name"] for dependency in package["dependencies"]} if package else set()
+    if actual != expected:
+        raise BaselineError(f"Unexpected direct dependencies for {kind}: {sorted(actual)}")
+    return sorted(actual)
 
 
 def verify_metadata(metadata, lock, registry, archives, cargo_home: Path, expected_names: set[str]) -> list[dict]:
@@ -367,7 +378,7 @@ def main():
             report["registry"] = index
             for toolchain in options.toolchains:
                 compiler = runner.run(["rustc", "+" + toolchain, "--version"], root, f"compiler-{toolchain}").strip()
-                for kind in ("manual", "proc"):
+                for kind in ("manual", "proc", "registration"):
                     label = toolchain + "-" + kind
                     consumer = output / "consumers" / label
                     shutil.copytree(root / "fixtures/package-consumers" / kind, consumer)
@@ -382,14 +393,21 @@ def main():
                     # Cargo diagnostics share the log, but metadata JSON is one final line.
                     data = json.loads(next(line for line in metadata_text.splitlines() if line.startswith('{"packages":')))
                     write_json(consumer / "metadata.json", data)
+                    direct_dependencies = verify_consumer_dependencies(data, kind)
                     lock = tomllib.loads((consumer / "Cargo.lock").read_text())
-                    expected = set(PACKAGES) if kind == "proc" else set(PACKAGES) - {"redis-module-macros"}
+                    expected = set(PACKAGES) - {"redis-module-macros"} if kind == "manual" else set(PACKAGES)
                     graph = verify_metadata(data, lock, index, report["archives"], cargo_home, expected)
                     runner.run(args + ["build", "--locked", "--target-dir", str(target)], consumer, label + "-build")
                     runner.run(args + ["build", "--locked", "--release", "--target-dir", str(target)], consumer, label + "-release")
                     item = {"kind": kind, "toolchain": toolchain, "compiler": compiler, "result": "passed",
-                            "graph": graph, "lock_sha256": sha256(consumer / "Cargo.lock"),
+                            "graph": graph, "direct_dependencies": direct_dependencies,
+                            "lock_sha256": sha256(consumer / "Cargo.lock"),
                             "manifest_sha256": sha256(consumer / "Cargo.toml"), "profiles": ["debug", "release"]}
+                    if kind == "registration":
+                        for profile in ([], ["--release"]):
+                            runner.run(args + ["test", "--lib", "--locked", "--target-dir", str(target)] + profile,
+                                       consumer, label + "-test" + ("-release" if profile else ""))
+                        item["registration_tests"] = ["debug", "release"]
                     if kind == "manual" and not options.skip_runtime:
                         extension = "dylib" if sys.platform == "darwin" else "so"
                         item["runtime"] = runtime_manual(target / "release" / f"libarchive_manual.{extension}",

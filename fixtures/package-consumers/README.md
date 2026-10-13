@@ -2,9 +2,15 @@
 
 These are ordinary external module-author fixtures. `manual` uses `redis_module!`
 and `NextArg` to echo an arbitrary byte string. `proc` uses the public `command`
-attribute, a typed integer parser and the `RedisValue` derive.
-The command attribute currently requires an explicit downstream `linkme`
-dependency; the generated proc-consumer manifest includes it.
+attribute, a typed integer parser and the `RedisValue` derive. `registration`
+checks all 11 registration attributes and asserts that each linked list contains
+exactly its one contribution. Its pure tests use Rust's normal allocator and do
+not invoke callbacks or initialize Redis.
+
+The macro consumers declare only `redis-module` and `redis-module-macros`.
+Registration uses the facade's `linkme` dependency; authors do not need to add it
+to their manifests. Use the conventional SDK crate names; dependency renaming
+and facade re-exports of the macro crate remain separate work.
 
 Run from the repository root with Python 3.11+, the development compiler,
 installed stable Rust, libclang and Redis on `PATH`:
@@ -32,9 +38,11 @@ command logs and runtime logs under the chosen output directory.
 The metadata and lock checks reject an upstream registry package with the same
 name/version. Every extracted candidate source file must also match its archive.
 The manual consumer needs the facade, internals and common packages; the proc
-consumer additionally proves use of the public macro archive. Both consumers
-build in debug and release with each selected compiler. Successful package
-assembly alone is not treated as successful consumption.
+and registration consumers also prove use of the public macro archive. All three consumers
+build in debug and release with each selected compiler; the registration tests
+also run in both profiles. Successful package assembly alone is not treated as
+successful consumption. The linked-list assertions run in a Rust test executable;
+the proc consumer separately checks compilation/linking of a real module cdylib.
 
 Only the manual release consumer is loaded into a loopback Redis process. It
 verifies the owned process ID, server version and allocator using retained

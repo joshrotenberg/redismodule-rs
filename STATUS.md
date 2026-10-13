@@ -4,11 +4,23 @@ Updated 2026-10-13. Direction: improve the original SDK with justified Rust API
 changes. Work is local; automatic publication remains disabled. Package names
 and versions are inherited, not a new fork release.
 
-**CI follow-up:** the user deferred the broader CI pass. Existing workflow edits
-remain local and provisional; GitHub jobs have not been run to validate them.
-Continue the local baseline independently. Revisit actual server/platform
+**CI follow-up:** the user deferred the broader CI pass. Workflow work remains
+provisional; F02 draft jobs ran with failures, so remote CI is not certified.
+Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
+
+## F03 — Public macro dependency hygiene: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | All 11 registration macros use the SDK's linkme dependency through a shared ordered emitter. Authors declare only the facade and macro crate. The formerly failing no-linkme consumer and direct-linkme control pass; 11 linked-list assertions pass in four fresh archive compiler/profile cells. Four archives, six consumers and 12 builds pass on Rust 1.94.0/1.98.1. The 26 Rust and 15 Python tests, all 28 debug/release examples, formatting and Clippy pass. Due/Claude reads SDK source and approves the implementation; full result/trace evidence is retained. |
+| **Next** | F04: meaningful proc-command runtime fixtures, then one focused Rust ergonomics slice informed by the four reference modules. |
+| **Blockers** | Caller checkout writes and independent SDK source reads now work after Josh restored access. No F03 permission blocker remains. F03 checks compile/link behavior on native macOS arm64; Redis runtime is deliberately not rerun. F02 remote draft CI remains a separate deferred blocker. |
+| **Decisions** | Issue-independent local branch and validated no-ff merge; no SDK push/publication. Preserve the two-crate public interface and conventional names. Alias resolution, legacy INFO branch and CI remain separate. No MSRV/package/support commitment. |
+
+Details: [F03 implementation and limits](docs/F03_MACROS.md),
+[compact evidence](docs/evidence/f03-macros.json).
 
 ## F02 — Logging correctness: validated locally
 
