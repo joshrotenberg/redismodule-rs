@@ -1,0 +1,113 @@
+{
+  "chunk": "F03",
+  "sdk_base": "3d43cfd34a8ba6c03ae49ff87c14ad1d6e008e79",
+  "state": "validated locally, ready for no-ff merge",
+  "code_inputs": {
+    "Cargo.toml": "3e2844d7134e88a1c1347d777411e3aefc46d569ea44c33bdcf29a6288d6018a",
+    "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709",
+    "src/lib.rs": "24413aa6d9e3a0c02c061c7a782083924f224d300f1d8107c3893403aaaa53ad",
+    "crates/macros/src/lib.rs": "5ac02bf82abb128a0239dc68d0d81741e649e867336b5d7984419359b25149c3",
+    "crates/macros/src/command.rs": "cc82710e7c8d227f1d86dc3d6ea65171949fa337a1ad3a8c74f748b61ab387f2",
+    "crates/macros/src/registration.rs": "3ce0300a466443c1b021c28d9f8cce0f6ed43ea88728d6332fa01657b3cd08e8",
+    "fixtures/package-consumers/registration/src/lib.rs": "8ef62af1e8eb000b23486af947b84730240e0dcc91a1d2ed371bf32331aa1123",
+    "tools/package_baseline.py": "70f659a185daef61e8beebcf3fdf1da77ae4d0d652da9f83c24698991f9d035e",
+    "tools/test_package_baseline.py": "c4583e466d1dd100e2e5d8c7813f7b62e932f4998816cba6e85e45efa0eda411"
+  },
+  "author_contract": {
+    "direct_dependencies_before": [
+      "redis-module",
+      "redis-module-macros",
+      "linkme"
+    ],
+    "direct_dependencies_after": [
+      "redis-module",
+      "redis-module-macros"
+    ],
+    "registration_attributes": 11,
+    "underlying_dependency_retained": true,
+    "names": "conventional SDK crate names; aliases deferred"
+  },
+  "checks": {
+    "rust_pure_harness_tests": 26,
+    "python_tests": 15,
+    "example_targets": 28,
+    "example_profiles": [
+      "debug",
+      "release"
+    ],
+    "example_api_floor": "7.2",
+    "compiler": "1.94.0",
+    "fmt": "passed",
+    "clippy_workspace_all_targets": "passed",
+    "whitespace": "passed"
+  },
+  "archive_checks": {
+    "report": "target/f03/packages-recovered/report.json",
+    "archives": 4,
+    "consumer_kinds": [
+      "manual",
+      "proc",
+      "registration"
+    ],
+    "compilers": [
+      "rustc 1.94.0 (4a4ef493e 2026-03-02)",
+      "rustc 1.98.1 (48a229cea 2026-09-01)"
+    ],
+    "builds": 12,
+    "registration_test_executions": 4,
+    "exact_one_assertions_per_test": 11,
+    "direct_dependencies_checked_in_Cargo_metadata": true,
+    "archive_source_and_checksum_validation": "passed",
+    "archive_sha256": {
+      "redis-module": "c4ab0e432dde77a1dc9ca89ce5de8dbb43a9f3528f2c5c11e006841b3d51c27c",
+      "redis-module-common": "6b9a71e667fdf02950fb1ca2c10c8c2b5c2d4b468a89cc99fa73949631c793be",
+      "redis-module-macros": "51ed9dda4ba7bccc50165d5013f292c5b6933c3130e2b69d8345bfa1daa6233e",
+      "redis-module-macros-internals": "d4279e8c142a1d6af0eb5018ac08d6f09e612454641d39eb4a61bbb572b10e80"
+    },
+    "runtime": "skipped with --skip-runtime; no Redis host loaded"
+  },
+  "path_checks": {
+    "no_direct_linkme": "check/test passed, previously 11 E0433 errors",
+    "direct_linkme_control": "test passed",
+    "report": "target/f03/path-consumers/report.json"
+  },
+  "review": {
+    "provider": "claude",
+    "status": "succeeded",
+    "verdict": "approve",
+    "sdk_source_read": true,
+    "actual_exit": 0,
+    "duration_ms": 229115,
+    "reported_cost_usd": 2.8849547499999995,
+    "schemas": "request/result/answer/trace/summary independently pass",
+    "trace_records": 186,
+    "activities": 38,
+    "failed_activities": 0,
+    "gaps": 0,
+    "drops": 0,
+    "full_receipt_retained": true,
+    "report": "target/f03/review/result.json",
+    "post_review_changes": "documentation and metadata direct-dependency gate with two Python tests; affected checks repeated; no second model review"
+  },
+  "permissions": "caller write/read probe succeeded; independent SDK source reads succeeded after user restored access and review ran with SDK cwd",
+  "linkme_hint_lower_bound": {
+    "url": "https://static.crates.io/crates/linkme-impl/linkme-impl-0.3.0.crate",
+    "archive_sha256": "0289997a403cb54131d93cb2686d5f23981b8d8a11c134cd1607efe891d3d01b",
+    "attr_sha256": "d76f04c8c2b1f49050a24de7a4172f3a5bf626ec74d35bfeb1b49b8163cfad61",
+    "validation": "source inspection only; no minimum-version runtime/build claim",
+    "collection_note": "Python local CA lookup failed; curl with ordinary TLS verification succeeded; no TLS or settings changes"
+  },
+  "partial_run": {
+    "report": "target/f03/packages-final/report.json",
+    "outcome": "failed: OS error 28, no space",
+    "recovery": "removed only F03 generated compilation directories; retained archives/source/locks/metadata/logs and 13 binaries; fresh run passed",
+    "cleanup": "target/f03/disk-cleanup.json"
+  },
+  "limits": [
+    "macOS arm64 compile/link evidence",
+    "no F03 Redis runtime or CI certificate",
+    "no performance/allocation savings claim",
+    "dependency aliases and legacy INFO path deferred",
+    "no package/MSRV/support commitments"
+  ]
+}

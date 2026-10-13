@@ -9,6 +9,26 @@ import package_baseline as baseline
 
 
 class RegistryTests(unittest.TestCase):
+    def test_consumer_declares_only_its_sdk_dependencies(self):
+        for kind in ("manual", "proc", "registration"):
+            with self.subTest(kind=kind):
+                expected = ["redis-module"] if kind == "manual" else ["redis-module", "redis-module-macros"]
+                metadata = {"resolve": {"root": "consumer"}, "packages": [
+                    {"id": "consumer", "dependencies": [{"name": name} for name in expected]},
+                    {"id": "facade", "dependencies": [{"name": "linkme"}]},
+                ]}
+                self.assertEqual(baseline.verify_consumer_dependencies(metadata, kind), expected)
+
+    def test_direct_linkme_dependency_is_rejected_even_when_renamed(self):
+        metadata = {"resolve": {"root": "consumer"}, "packages": [
+            {"id": "consumer", "dependencies": [
+                {"name": "redis-module"}, {"name": "redis-module-macros"},
+                {"name": "linkme", "rename": "registrations"},
+            ]},
+        ]}
+        with self.assertRaisesRegex(baseline.BaselineError, "Unexpected direct dependencies"):
+            baseline.verify_consumer_dependencies(metadata, "proc")
+
     def test_dependency_alias_and_registry_routing(self):
         manifest = {
             "package": {"name": "redis-module", "version": "2.0.8"},

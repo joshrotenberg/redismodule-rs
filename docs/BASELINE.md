@@ -89,7 +89,7 @@ runner for review.
 | `test_test_helper_err` uses a nonexistent helper command on the hello module | Replace with a meaningful test in the relevant repair. Its current error result would not establish the intended behavior. |
 | Active defragmentation | Needs a server/allocator cell that supports it. A libc skip is not a pass. |
 | 7.4/8.0-only ACL category tests | Not compiled in the selected 7.2 API-floor matrix; later cells must select the relevant floor. |
-| Public `#[command]` expansion requires the consumer's own `linkme` dependency | Confirmed external-author ergonomics issue. The fixture declares it openly; schedule macro hygiene/API work separately. |
+| F01 found public registration macros required the consumer's own `linkme` dependency | [F03](F03_MACROS.md) removes this requirement for all 11 registration attributes, with fresh archive consumers and linked-list tests. Historical F01 evidence retains its original manifests. |
 | Linux, jemalloc, Redis 6.x/7.0, static libclang | Explicitly untested here. Container/CI execution is a later workstream. |
 | Optional Search/JSON/TimeSeries and replication | Require separate reference acceptance cells; ordinary module flows do not certify them. |
 
