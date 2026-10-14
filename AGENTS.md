@@ -88,9 +88,10 @@ run, followed by Done / Next / Blockers / Decisions, a relevant snippet and an
 actual Pacific finish timestamp. Resume unfinished work rather than duplicating
 it. F02 logging, F03 macro dependency hygiene, F04 proc-command fixtures and
 F05 borrowed cursor, F06 string-view scope and F07 owner-bound string views are
-complete; F08's ownership specification is independently reviewed. Follow
-STATUS.md and docs/F08_STRING_OWNERSHIP.md for F09's bounded ownership repair,
-with the tracked-issue draft prerequisite before implementation. Do not expand
+complete; F08's ownership specification and F09's selected repair are reviewed
+and validated locally. Read STATUS.md/docs/F09_STRING_OWNERSHIP.md. Next is F10
+scoping only for the existing string-configuration getter release contract,
+with overlap inventory and corrected-code criteria before later implementation. Do not expand
 into a general FFI audit or execute historical invalid native paths. This trial grants no additional SDK push,
 merge, release, credential, settings or cross-project authority. See the current
 [trial checkpoint](docs/DUE_TRIAL.md).

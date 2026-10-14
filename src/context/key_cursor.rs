@@ -1,12 +1,9 @@
-use std::{
-    ffi::c_void,
-    mem,
-    ptr::{self},
-};
+use std::{ffi::c_void, mem::ManuallyDrop, ptr::NonNull};
 
 use crate::{key::RedisKey, raw, RedisString};
 
-/// A cursor to scan field/value pairs of a (hash) key.
+/// A cursor to scan hash/set/sorted-set entries. Set callbacks have no value;
+/// hash and sorted-set callbacks provide Some(value).
 ///
 /// It provides access via a closure given to [`ScanKeyCursor::for_each`] or if you need more control, you can use [`ScanKeyCursor::scan`]
 /// and implement your own loop, e.g. to allow an early stop.
@@ -30,7 +27,7 @@ use crate::{key::RedisKey, raw, RedisString};
 ///    cursor.for_each(|_key, field, value| {
 ///        let mut res = res.borrow_mut();
 ///        res.push(RedisValue::BulkRedisString(field.clone()));
-///        res.push(RedisValue::BulkRedisString(value.clone()));
+///        res.push(value.map_or(RedisValue::Null, |v| RedisValue::BulkRedisString(v.clone())));
 ///    });
 ///
 ///    Ok(RedisValue::Array(res.take()))
@@ -77,38 +74,45 @@ impl ScanKeyCursor {
     /// }) {
     ///   // do something between scans if needed, like an early stop
     /// }
-    pub fn scan<F: FnMut(&RedisKey, &RedisString, &RedisString)>(&self, f: F) -> bool {
-        unsafe extern "C" fn scan_callback<F: FnMut(&RedisKey, &RedisString, &RedisString)>(
+    pub fn scan<F: FnMut(&RedisKey, &RedisString, Option<&RedisString>)>(&self, mut f: F) -> bool {
+        struct CallbackData<F> {
+            ctx: *mut raw::RedisModuleCtx,
+            callback: F,
+        }
+        unsafe extern "C" fn scan_callback<
+            F: FnMut(&RedisKey, &RedisString, Option<&RedisString>),
+        >(
             key: *mut raw::RedisModuleKey,
             field: *mut raw::RedisModuleString,
             value: *mut raw::RedisModuleString,
             data: *mut c_void,
         ) {
-            let ctx = ptr::null_mut();
-            let key = RedisKey::from_raw_parts(ctx, key);
-
-            let field = RedisString::from_redis_module_string(ctx, field);
-            let value = RedisString::from_redis_module_string(ctx, value);
-
-            let callback = unsafe { &mut *(data.cast::<F>()) };
-            callback(&key, &field, &value);
-
-            // We don't own any of the passed in pointers, so we must ensure we don't run their destructors here
-            mem::forget(field);
-            mem::forget(value);
-            mem::forget(key);
+            // SAFETY: scan passes an exclusive local CallbackData during this
+            // synchronous invocation; ctx is the key's actual opening context.
+            let data = unsafe { &mut *data.cast::<CallbackData<F>>() };
+            let key = ManuallyDrop::new(unsafe { RedisKey::from_raw_parts(data.ctx, key) });
+            let field =
+                unsafe { RedisString::retain_from_ptr(NonNull::new(field).expect("scan field")) };
+            let value = NonNull::new(value).map(|p| unsafe { RedisString::retain_from_ptr(p) });
+            (data.callback)(&key, &field, value.as_ref());
+            // Release just our retained references. The borrowed key belongs to
+            // Redis; set callbacks legally have no value string.
         }
 
         // Safety: The c-side initialized the function ptr and it is is never changed,
         // i.e. after module initialization the function pointers stay valid till the end of the program.
         let scan_key = unsafe { raw::RedisModule_ScanKey.unwrap() };
 
+        let mut data = CallbackData {
+            ctx: self.key.ctx,
+            callback: &mut f,
+        };
         let res = unsafe {
             scan_key(
                 self.key.key_inner,
                 self.inner_cursor,
-                Some(scan_callback::<F>),
-                &f as *const F as *mut c_void,
+                Some(scan_callback::<&mut F>),
+                &mut data as *mut CallbackData<&mut F> as *mut c_void,
             )
         };
 
@@ -117,7 +121,7 @@ impl ScanKeyCursor {
 
     /// Implements a callback based for_each loop over all fields and values in the hash key.
     /// If you need more control, e.g. stopping after a scan invocation, then use [`ScanKeyCursor::scan`] directly.
-    pub fn for_each<F: FnMut(&RedisKey, &RedisString, &RedisString)>(&self, mut f: F) {
+    pub fn for_each<F: FnMut(&RedisKey, &RedisString, Option<&RedisString>)>(&self, mut f: F) {
         while self.scan(&mut f) {
             // do nothing, the callback does the work
         }

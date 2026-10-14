@@ -284,7 +284,11 @@ extern "C" fn string_configuration_set<T: ConfigurationValue<RedisString> + 'sta
     privdata: *mut c_void,
     err: *mut *mut raw::RedisModuleString,
 ) -> c_int {
-    let new_val = RedisString::new(None, val);
+    let new_val = unsafe {
+        RedisString::retain_from_ptr(
+            std::ptr::NonNull::new(val).expect("non-null configuration input"),
+        )
+    };
     let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<RedisString, T>) };
     private_data.set_val(name, new_val, err)
 }

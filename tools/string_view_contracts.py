@@ -64,6 +64,20 @@ pub fn register(ctx: *mut redis_module::raw::RedisModuleCtx) -> c_int {
     # Pinned rustc reports the macro's local-context borrow as E0716. A compiler
     # change must recheck the diagnostic; a different failure is not a pass.
     cases.append(("callback-requires-static", callback.replace("_: &[u8]", "_: &'static [u8]"), "E0716"))
+    owner_prelude = "use redis_module::{RedisString, Context, decode_args, raw}; use std::ptr::NonNull;\n"
+    ownership_cases = [
+        ("private-inner-read", "fn f(s: &RedisString) { let _ = s.inner; }", "E0616"),
+        ("private-inner-write", "fn f(s: &mut RedisString, p: NonNull<raw::RedisModuleString>) { s.inner = p; }", "E0616"),
+        ("private-inner-construct", "fn f(p: NonNull<raw::RedisModuleString>) { let _ = RedisString { inner: p }; }", "E0451"),
+        ("raw-new-unsafe", "fn f(p: *mut raw::RedisModuleString) { let _ = RedisString::new(None,p); }", "E0133"),
+        ("raw-adoption-unsafe", "fn f(p: *mut raw::RedisModuleString) { let _ = RedisString::from_redis_module_string(std::ptr::null_mut(),p); }", "E0133"),
+        ("explicit-adoption-unsafe", "fn f(p: NonNull<raw::RedisModuleString>) { let _ = RedisString::from_owned_ptr(None,p); }", "E0133"),
+        ("explicit-retain-unsafe", "fn f(p: NonNull<raw::RedisModuleString>) { let _ = RedisString::retain_from_ptr(p); }", "E0133"),
+        ("decoder-unsafe", "fn f(ctx: *mut raw::RedisModuleCtx, p: *mut *mut raw::RedisModuleString) { let _ = decode_args(ctx,p,1); }", "E0133"),
+        ("safe-binary-pointer-current-user", "fn f(s: &RedisString, c: &Context) { let _ = s.as_ptr(); let _ = RedisString::from_bytes(b\"a\\0b\"); let _: Option<RedisString> = c.get_current_user(); }", None),
+        ("raw-migrated", "unsafe fn f(p: NonNull<raw::RedisModuleString>, argv: *mut *mut raw::RedisModuleString) { let _ = unsafe { RedisString::retain_from_ptr(p) }; let _ = unsafe { decode_args(std::ptr::null_mut(),argv,1) }; }", None),
+    ]
+    cases.extend((label, owner_prelude + code, expected) for label, code, expected in ownership_cases)
     report = {"compiler": subprocess.check_output(["rustup", "run", "1.94.0", "rustc", "-Vv"], text=True),
               "library": str(library), "library_sha256": digest(library),
               "source_files": {p: digest(root / p) for p in ("src/redismodule.rs", "src/args.rs", "src/macros.rs")},
@@ -73,7 +87,7 @@ pub fn register(ctx: *mut redis_module::raw::RedisModuleCtx) -> c_int {
         source.write_text(code)
         command = ["rustup", "run", "1.94.0", "rustc", "--edition=2021", "--crate-type=lib",
                    "--emit=metadata", "--error-format=json", "--extern", f"redis_module={library}",
-                   "-L", "dependency=" + str(library.parent), "--out-dir", str(args.output), str(source)]
+                   "-L", "dependency=" + str(library.parent if library.parent.name == "deps" else library.parent / "deps"), "--out-dir", str(args.output), str(source)]
         result = subprocess.run(command, capture_output=True, text=True)
         (args.output / f"case-{index}.diagnostics.jsonl").write_text(result.stderr)
         messages = [json.loads(line) for line in result.stderr.splitlines() if line.startswith("{")]

@@ -175,3 +175,33 @@ refresh. A two-arm comparison was considered/deferred because equivalent native
 read-only tool/permission settings are not established; SDK specification delivery
 remains primary. Sanitized aggregate evidence routes to due-expert; no direct Due
 issue publication from this project. See [F08 evidence](evidence/f08-string-ownership.json).
+
+## October 14 — F09 ownership repair
+
+The caller implemented the reviewed string ownership contract. Two independent
+read-only Due/Claude runs approve; actual exits are 0, answer contracts and
+complete traces are independently validated. Initial review source-identified
+an existing string-configuration getter release gap; caller confirms both native
+sources and records it as a separate scoped follow-up. Fixture error handling,
+provenance and lint findings are applied or explicitly bounded. No worker edits,
+external publication, recursive delegation, provider retry or expanded grants.
+
+Due 0.1.0/source 76d33d410319d860425a2dd3609863a4ba5ca565 (clean), binary SHA256
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b;
+Claude Code 2.1.296. Requested native model/effort omitted, observed values and
+compiled binary source identity unknown. Core: 743992 ms, 456 trace records,
+91 matched activities, USD 7.42270625. Delta: 359676 ms, 236 records, 42 matched
+activities, USD 4.97235175. Both traces report zero drops/gaps/failed activities.
+These are source-review events/costs, not proof of tests or side effects.
+
+Caller separately validates selected native/compiler/archive/reference effects;
+failed harness attempts and a disk-full package build remain retained. Only
+generated SDK target/debug cache was reclaimed before a fresh package run.
+Source-only review is expensive and initially relied on a stale fixture hash;
+final affected rechecks/provenance resolve that. No wrapper defect or model
+ranking is inferred. A/B deferred: equivalent native permission/tool setup is
+not established, and SDK delivery takes priority. Sanitized aggregate feedback
+is routed once to due-expert; raw prompts/provider logs stay local and ignored.
+
+See [F09 evidence](evidence/f09-string-ownership.json) and retained target/f09/
+review/result, trace, summary, validation, provenance and focused delta records.

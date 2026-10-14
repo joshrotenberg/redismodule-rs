@@ -3,7 +3,7 @@ use crate::key::RedisKey;
 use crate::raw;
 use crate::redismodule::RedisString;
 use std::ffi::c_void;
-use std::mem;
+use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
 pub struct KeysCursor {
@@ -17,21 +17,23 @@ extern "C" fn scan_callback<C: FnMut(&Context, &RedisString, Option<&RedisKey>)>
     private_data: *mut ::std::os::raw::c_void,
 ) {
     let context = Context::new(ctx);
-    let key_name = RedisString::new(NonNull::new(ctx), key_name);
+    // SAFETY: this synchronous native callback supplies a retainable borrowed name.
+    let key_name =
+        unsafe { RedisString::retain_from_ptr(NonNull::new(key_name).expect("scan key name")) };
     let redis_key = if key.is_null() {
         None
     } else {
         // Safety: The returned `RedisKey` does not outlive this callbacks and so by necessity
         // the pointers passed in as parameters are valid for its entire lifetime.
-        Some(unsafe { RedisKey::from_raw_parts(ctx, key) })
+        Some(ManuallyDrop::new(unsafe {
+            RedisKey::from_raw_parts(ctx, key)
+        }))
     };
     let callback = unsafe { &mut *(private_data.cast::<C>()) };
-    callback(&context, &key_name, redis_key.as_ref());
+    callback(&context, &key_name, redis_key.as_deref());
 
-    // We don't own any of the passed in pointers and have just created "temporary RAII types".
-    // We must ensure we don't run their destructors here.
-    mem::forget(redis_key);
-    mem::forget(key_name);
+    // key_name releases our acquired reference; ManuallyDrop leaves the native
+    // callback's borrowed key handle for its original owner to close.
 }
 
 impl KeysCursor {
@@ -43,14 +45,14 @@ impl KeysCursor {
     pub fn scan<F: FnMut(&Context, &RedisString, Option<&RedisKey>)>(
         &self,
         ctx: &Context,
-        callback: &F,
+        callback: &mut F,
     ) -> bool {
         let res = unsafe {
             raw::RedisModule_Scan.unwrap()(
                 ctx.ctx,
                 self.inner_cursor,
                 Some(scan_callback::<F>),
-                callback as *const F as *mut c_void,
+                callback as *mut F as *mut c_void,
             )
         };
         res != 0

@@ -1,6 +1,6 @@
 # Fork status
 
-Updated 2026-10-13. Direction: improve the original SDK with justified Rust API
+Updated 2026-10-14. Direction: improve the original SDK with justified Rust API
 changes. Work is local; automatic publication remains disabled. Package names
 and versions are inherited, not a new fork release.
 
@@ -9,6 +9,19 @@ provisional; F02 draft jobs ran with failures, so remote CI is not certified.
 Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
+
+## F09 — Independent native string ownership: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | Private NonNull RedisString owner with no cached context; explicit unsafe acquisition/adoption, actual producer AM detachment, independent binary creation, unsafe raw decoder/adapters, balanced direct producer/scan reference handling, current-user Option and consuming transfer/defrag boundary. Two Due/Claude source reviews approve. 28 compiler controls, 28 pure/harness tests, 14 docs, 22 Python tests, 31 examples in both profiles, 68 unique native host/profile cases plus 16 final affected fixture rechecks pass. Eight isolated reference builds/eight selected flows and four fresh archives/six consumers/12 builds pass on 1.94.0/1.98.1. Production archive bytes independently match current sources; Clippy/fmt pass. |
+| **Next** | F10 scoping only: investigate the source-verified string-configuration getter return/release contract, inventory overlaps and affected uses, and write corrected-code validation criteria before implementation. |
+| **Blockers** | None for local F09. Native no-user cell and 8.10 template hash modes remain explicitly untested. Existing configuration getter release leak is preserved as a separate follow-up; its behavior tests do not certify ownership balance. Archive disk-full failure was resolved by reclaiming generated cache; failed/partial attempts are retained. Remote CI remains deferred and PR 3 stays draft. |
+| **Decisions** | Justified source breaks and native append policy correction; command handler shapes, selected protocols/UTF-8/numeric/stored-format policy remain. One pointer/8-byte owner on tested arm64, no throughput/global safety claim. Leaves upstream issue 358 open; exact PR 487/488 attribution retained. Baseline upload includes F07 merge/F08 history; fork master/GitHub merges/releases remain untouched. Original references unchanged; no MSRV/package/support commitment. |
+
+Details: [F09 implementation, migrations and limits](docs/F09_STRING_OWNERSHIP.md),
+[compact evidence](docs/evidence/f09-string-ownership.json),
+[fork draft PR 3](https://github.com/joshrotenberg/redismodule-rs/pull/3).
 
 ## F08 — RedisString ownership specification: reviewed locally
 

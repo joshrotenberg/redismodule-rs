@@ -220,3 +220,7 @@ crate-type = ["cdylib"]
 [[example]]
 name = "expire"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "string_ownership"
+crate-type = ["cdylib"]

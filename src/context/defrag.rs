@@ -158,21 +158,23 @@ impl DefragContext {
 
     /// Defrag a [RedisString]
     ///
-    /// NOTE: It is only possible to defrag strings that have a single reference.
-    /// Typically this means strings that was copy/cloned using [RedisString::safe_clone]
-    /// or created using [RedisString::new] will not be defrag and will be returned as is.
-    pub fn defrag_redis_string(&self, mut s: RedisString) -> RedisString {
+    /// Only strings with one native reference can move. A retained alias from
+    /// [RedisString::safe_clone] keeps the object shared while both owners live;
+    /// deep [Clone] and correctly adopted results need not be shared. No general
+    /// buffer/alias/thread stability guarantee follows from this operation.
+    pub fn defrag_redis_string(&self, s: RedisString) -> RedisString {
         let new_inner = unsafe {
             RedisModule_DefragRedisModuleString
                 .expect("RedisModule_DefragRedisModuleString should be available.")(
                 self.defrag_ctx.as_ptr(),
-                s.inner,
+                s.as_ptr(),
             )
         };
-        if !new_inner.is_null() {
-            s.inner = new_inner;
+        match NonNull::new(new_inner) {
+            // SAFETY: defrag transferred this owner's reference to the new object.
+            Some(p) => unsafe { s.replace_ptr(p) },
+            None => s,
         }
-        s
     }
 }
 
