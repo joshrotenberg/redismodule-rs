@@ -87,7 +87,9 @@ useful and record deferrals. Josh set a two-hour cadence: one bounded chunk per
 run, followed by Done / Next / Blockers / Decisions, a relevant snippet and an
 actual Pacific finish timestamp. Resume unfinished work rather than duplicating
 it. F02 logging, F03 macro dependency hygiene, F04 proc-command fixtures and
-F05 borrowed cursor are complete. F06 scopes the legacy string-view repair;
-follow STATUS.md and its reviewed specification for the next bounded chunk. This trial grants no additional SDK push,
+F05 borrowed cursor, F06 string-view scope and F07 owner-bound string views are
+complete. Follow STATUS.md for the next bounded chunk: scope RedisString's
+constructor/ownership/public-inner boundaries before further implementation,
+without expanding into a general FFI audit. This trial grants no additional SDK push,
 merge, release, credential, settings or cross-project authority. See the current
 [trial checkpoint](docs/DUE_TRIAL.md).

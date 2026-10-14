@@ -1,0 +1,207 @@
+{
+  "chunk": "F07",
+  "state": "validated_and_independently_reviewed",
+  "base_commit": "d59f80b1d5219e9664a28e58478f762a2dd76172",
+  "kickoff": "9255606bf65112c130790dc83aab4c3b394316d1",
+  "branch": "fix/f07-string-view-lifetimes",
+  "draft": "https://github.com/joshrotenberg/redismodule-rs/pull/2",
+  "issue": "Partial relationship to upstream issue 358; leaves upstream issue 358 open",
+  "sources": {
+    "src/redismodule.rs": "0e8bfb6a3728e5c0bd4e7522f0c968b9d1b8a5384a3457ad817253e498699b7d",
+    "src/macros.rs": "12b1cc11752ed51e31f96f77616b859d23c55cc9770be5ef037873cc4df0c309",
+    "src/args.rs": "d615f26d6e4fa996e67bd180c22517211f249f06c8a67b78fd7ddd75422fbaa8",
+    "examples/info.rs": "5aabd50f1a7045b92315b5b714e2f1f4f71e5336177ee1bebb8a5e07067d8fac",
+    "examples/threads.rs": "d039c76d1eb69615a7dccac6ee5ccdd0aa334e4c2f9674223faa1d2d5afa493d",
+    "examples/string_views.rs": "9e4d1a07db3cecf9040ea95a7bfb933aab36a290c930f0097730f127e1aa3e79",
+    "tests/integration.rs": "63127b95e802ca3b77261e48f4b314ae8edcc136c8834bb69dff1186038497e8",
+    "Cargo.toml": "bf6fa0fccb1a324f950a81df5d02761098a1683bb61594c9e1feac2dbfeb688d",
+    "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709",
+    "fixtures/package-consumers/manual/src/lib.rs": "176f61e644b0d55461a3cbe169485fbafaba31ee9c4c3adb150c46ec51469ff2",
+    "tools/package_baseline.py": "a44f00d4013d88c9413965f4c2b6e2db61c7e5d175753a3313c4fab9fdcf6be3",
+    "tools/string_view_contracts.py": "b242d3993f3accbfd9ea3ec8be9b2453a3d0004cd23e97d745f09bf8779ca876",
+    "tools/test_package_baseline.py": "a1898b3277d47a9249c246c3dd3e0f25f21de2d650d5246051ed07656a6858a4",
+    "fixtures/package-consumers/README.md": "e623bd7588f27b1c6a5108912fd6ee995a2e02acacdea8579ac3e0b9cfdbc84a"
+  },
+  "validation": {
+    "compiler": "Rust1.94.0",
+    "platform": "macOS arm64/libc",
+    "all_examples": 30,
+    "profiles": [
+      "debug",
+      "release"
+    ],
+    "hosts": [
+      "Redis7.2.8",
+      "Redis8.10.2"
+    ],
+    "pure_harness_tests": 26,
+    "python_tests": 22,
+    "doc_tests": 14,
+    "metadata_compiler_cases": 18,
+    "positive_controls": 7,
+    "negative_controls": 11,
+    "expected_diagnostics": [
+      "E0133",
+      "E0407",
+      "E0502",
+      "E0505",
+      "E0515",
+      "E0599",
+      "E0716"
+    ],
+    "focused_integration_executions": 32,
+    "archives": 4,
+    "fresh_consumer_builds": 6,
+    "registration_tests": 2,
+    "archive_runtime_cells": 8,
+    "isolated_reference_builds": 4,
+    "reference_runtime_cells": 8,
+    "clippy": "workspace/all-targets -D warnings passed",
+    "fmt": "passed"
+  },
+  "references": [
+    {
+      "name": "jmespath",
+      "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+      "status": "isolated-build-and-selected-runtime-pass",
+      "original_sources_unchanged": true,
+      "migrated_source_sha256": "233ad5b08531f6cdb405aad8fc0f972916b81aae84e0f64acaabf4ad822457ff",
+      "attempts": [
+        {
+          "label": "metadata",
+          "actual_exit": 0,
+          "sdk_inputs_observed_unchanged": true
+        },
+        {
+          "label": "build-debug",
+          "actual_exit": 0,
+          "sdk_inputs_observed_unchanged": true
+        },
+        {
+          "label": "build-release",
+          "actual_exit": 0,
+          "sdk_inputs_observed_unchanged": true
+        }
+      ]
+    },
+    {
+      "name": "eventstream",
+      "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+      "status": "isolated-build-and-selected-runtime-pass",
+      "original_sources_unchanged": true,
+      "migrated_source_sha256": "932adbac5fcce8c69b91e51e353746cfb1a4c57c99b6b1dc886075465aa42234",
+      "attempts": [
+        {
+          "label": "metadata",
+          "actual_exit": 0,
+          "sdk_inputs_observed_unchanged": true
+        },
+        {
+          "label": "build-debug",
+          "actual_exit": 0,
+          "sdk_inputs_observed_unchanged": true
+        },
+        {
+          "label": "build-release",
+          "actual_exit": 0,
+          "sdk_inputs_observed_unchanged": true
+        }
+      ]
+    }
+  ],
+  "retained": {
+    "visibility": "target/f07/visibility.json",
+    "runtime": "target/f07/runtime-final/report.json",
+    "contracts": "target/f07/contracts-context-final/report.json",
+    "initial_contract_parser_failure": "target/f07/contracts/report.json",
+    "checks": "target/f07/review-checks-context/report.json",
+    "builds": "target/f07/review-checks-context/report.json",
+    "initial_client_arg_compile_failure": "target/f07/builds.json",
+    "packages": "target/f07/packages-final/report.json",
+    "extra_archive_cells": "target/f07/archive-matrix-final/report.json",
+    "reference_builds": "target/f07/references-final/report.json",
+    "reference_runtime": "target/f07/reference-runtime-final/report.json",
+    "initial_reference_setup_failure": "target/f07/reference-runtime/report.json",
+    "archive_current_code": "target/f07/archive-final-current-code.json",
+    "core_16_contracts": "target/f07/contracts-corrected/report.json",
+    "callback_registration_control_correction": "target/f07/contracts-final/report.json",
+    "callback_diagnostic_prediction_correction": "target/f07/contracts-context/report.json",
+    "pre_delta_archive_build_cleanup": "target/f07/retained-core-archive-binaries/cleanup.json"
+  },
+  "review": {
+    "status": "core_and_delta_approved; findings applied",
+    "runs": [
+      {
+        "provider": "Claude via Due",
+        "run_id": "0b396995-f4c2-4f31-b2da-d6f90ec83d72",
+        "verdict": "approve",
+        "actual_process_exit": 0,
+        "result_status": "succeeded",
+        "duration_ms": 192047,
+        "reported_cost_usd": 2.555963,
+        "trace_records": 141,
+        "trace_complete": true,
+        "dropped_records": 0,
+        "activities": 24,
+        "failed_activities": 1,
+        "source_inputs_unchanged": true,
+        "result": "target/f07/review/result.json",
+        "validation": "target/f07/review/validation.json"
+      },
+      {
+        "provider": "Claude via Due",
+        "run_id": "77ba6baa-97ef-4273-a4c9-45e88a357fa9",
+        "verdict": "approve",
+        "actual_process_exit": 0,
+        "result_status": "succeeded",
+        "duration_ms": 298448,
+        "reported_cost_usd": 3.39145625,
+        "trace_records": 161,
+        "trace_complete": true,
+        "dropped_records": 0,
+        "activities": 25,
+        "failed_activities": 0,
+        "source_inputs_unchanged": true,
+        "result": "target/f07/review-delta/result.json",
+        "validation": "target/f07/review-delta/validation.json"
+      }
+    ],
+    "provenance": "target/f07/review/provenance.json",
+    "reviewer_limits": "Read/search only; no independent execution or hash validation; caller checks establish effects",
+    "core_failed_grep": "cause unknown in metadata trace; reviewer reported no denied reads",
+    "caller_invalid_invocation": {
+      "exit": 2,
+      "kind": "invalid_input",
+      "reason": "--request expects FILE|-, not an inline JSON value",
+      "provider_started": false,
+      "trace_created": false,
+      "receipt": "target/f07/review-delta/invalid-input-process-receipt.json",
+      "disposition": "no provider effects observed; corrected file invocation after inspection, without automatic retry or permission change"
+    }
+  },
+  "limits": [
+    "Rust owner relationship only; pub inner/raw constructors/context/native aliases remain separate",
+    "No historical invalid native path executed",
+    "Compiler controls never execute native APIs",
+    "Source boundary hashes cannot detect edit-and-revert within commands",
+    "Selected reference flows use fresh connections; no full application suites or optional product integrations",
+    "No broad FFI/thread/callback/persistence/replication/Cluster/Linux/jemalloc certification",
+    "No new allocation throughput/total-memory claim; F05 parser regression remains passing",
+    "CI deferred; no MSRV/package/support/release commitments"
+  ],
+  "comparison": "Considered/deferred: equivalent native read-only permission/tool settings are not established; SDK delivery prioritized",
+  "remote": {
+    "draft": true,
+    "ci_empty_kickoff": {
+      "head": "9255606bf65112c130790dc83aab4c3b394316d1",
+      "jobs": 8,
+      "failed": 4,
+      "evidence": "target/f07/remote-before-push.json"
+    },
+    "ci_modernization": "deferred",
+    "baseline_upload": "includes earlier local F03\u2013F06 history",
+    "fork_master_pushed": false,
+    "github_merge": false,
+    "release": false
+  }
+}

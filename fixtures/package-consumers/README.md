@@ -1,7 +1,8 @@
 # Archive consumers
 
 These are ordinary external module-author fixtures. `manual` uses `redis_module!`
-and `NextArg` to echo an arbitrary byte string. `proc` uses the public `command`
+and `NextArg` to echo an arbitrary byte string, compare owner/raw text pointer
+identity, and copy key bytes through an isolated notification callback. `proc` uses the public `command`
 attribute, a typed integer parser and the `RedisValue` derive. `registration`
 checks all 11 registration attributes and asserts that each linked list contains
 exactly its one contribution. Its pure tests use Rust's normal allocator and do
@@ -51,7 +52,9 @@ verifies the owned process ID, server version and allocator using retained
 The expected version and allocator come from the exact executable's `--version`;
 the executable and loaded library hashes are retained. The manual consumer checks empty, ASCII,
 NUL/non-UTF-8/CRLF and all-256-byte payloads and verifies that
-the server still responds. The proc consumer checks command name/arity/flags,
+the server still responds. Strict text rejects invalid UTF-8; raw/owner views
+have identical pointers. Callback cases send a nonempty key before an empty
+one so a missing empty-key callback is observable. The proc consumer checks command name/arity/flags,
 no-key metadata, the declared summary, exact integer/string reply types, ordinary
 arity/parse errors and a successful command after each error. Its signed i64
 samples include both endpoints. The test transport decodes RESP2 arrays,

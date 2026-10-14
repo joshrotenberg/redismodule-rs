@@ -309,6 +309,30 @@ def proc_runtime_cases(query) -> list[str]:
             "integer-error", "valid-command-after-errors"]
 
 
+def manual_view_runtime_cases(query) -> list[str]:
+    """Validate corrected owner views and this fixture's isolated callback."""
+    for sample in (b"", "café 日本語".encode(), b"a\x00b"):
+        if query(b"archive.view", sample) != [sample, 1]:
+            raise BaselineError("Archived owner/raw text views differ")
+    # Seed a nonempty key so a missing empty-key callback cannot match initial state.
+    for sample in (b"a\x00b\xff\r\n", b"", bytes(range(256))):
+        if query(b"archive.notify", sample) != sample:
+            raise BaselineError("Archived callback changed binary key bytes")
+    for args in ((b"archive.view", b"\xff"), (b"archive.view",),
+                 (b"archive.view", b"one", b"extra")):
+        try:
+            query(*args)
+        except BaselineError as error:
+            expected = "UTF-8" if len(args) == 2 else "wrong number of arguments"
+            if expected not in str(error):
+                raise BaselineError("Unexpected archived view error") from error
+        else:
+            raise BaselineError("Archived view accepted an invalid argument contract")
+        if query(b"archive.view", b"valid") != [b"valid", 1]:
+            raise BaselineError("Archived view did not recover after an ordinary error")
+    return ["owner-raw-text-identity", "isolated-binary-callback", "view-errors-and-recovery"]
+
+
 def runtime_manual(binary: Path, redis: str, output: Path, env: dict, *, kind="manual") -> dict:
     """Exercise ordinary command behavior only; clean up on every exit path."""
     executable = shutil.which(redis, path=env.get("PATH"))
@@ -364,6 +388,7 @@ def runtime_manual(binary: Path, redis: str, output: Path, env: dict, *, kind="m
                     if redis_command(port, b"archive.echo", sample) != sample:
                         raise BaselineError("Archived module changed binary response bytes")
                 cases = ["empty", "ascii", "nul-non-utf8-crlf", "all-256-byte-values"]
+                cases.extend(manual_view_runtime_cases(lambda *args: redis_command(port, *args)))
             else:
                 raise BaselineError(f"No runtime contract for {kind}")
             if redis_command(port, b"PING") != b"PONG":

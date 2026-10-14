@@ -12,6 +12,118 @@ use redis_module::RedisValue;
 mod utils;
 
 #[test]
+fn test_string_view_contracts() -> Result<()> {
+    let mut con = TestConnection::new("string_views");
+    for text in ["", "café 日本語", "a\0b"] {
+        let reply: (Vec<u8>, i64) = redis::cmd("views.text").arg(text).query(&mut con)?;
+        assert_eq!(reply, (text.as_bytes().to_vec(), 1));
+    }
+    // A nonempty key first makes the later empty-key notification observable.
+    for bytes in [b"a\0\xff\r\n".to_vec(), vec![], (0..=255).collect()] {
+        let reply: (Vec<u8>, i64) = redis::cmd("views.bytes").arg(&bytes).query(&mut con)?;
+        assert_eq!(reply, (bytes.clone(), 1));
+        let notified: Vec<u8> = redis::cmd("views.notify").arg(&bytes).query(&mut con)?;
+        assert_eq!(notified, bytes);
+    }
+    let error = redis::cmd("views.text")
+        .arg(b"\xff".as_slice())
+        .query::<Value>(&mut con)
+        .unwrap_err();
+    assert!(error
+        .detail()
+        .unwrap_or_default()
+        .contains("parse as UTF-8 string"));
+    for command in ["views.text", "views.bytes", "views.notify"] {
+        for args in [vec![], vec!["one", "extra"]] {
+            let error = redis::cmd(command)
+                .arg(args)
+                .query::<Value>(&mut con)
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("wrong number of arguments"),
+                "{error}"
+            );
+        }
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_info_string_view_migration() -> Result<()> {
+    let mut con = TestConnection::new("info");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let expected = info
+        .lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .context("native INFO includes redis_version")?;
+    for args in [
+        vec!["server", "redis_version"],
+        vec!["server", "redis_version", "extra"],
+    ] {
+        let reply: String = redis::cmd("infoex").arg(args).query(&mut con)?;
+        assert_eq!(reply, expected);
+    }
+    let absent: Option<String> = redis::cmd("infoex")
+        .arg(&["server", "field_that_does_not_exist"][..])
+        .query(&mut con)?;
+    assert_eq!(absent, None);
+    let error = redis::cmd("infoex")
+        .arg("server")
+        .query::<Value>(&mut con)
+        .unwrap_err();
+    assert!(error.to_string().contains("wrong number of arguments"));
+    let error = redis::cmd("infoex")
+        .arg(b"\xff".as_slice())
+        .arg("redis_version")
+        .query::<Value>(&mut con)
+        .unwrap_err();
+    assert!(error
+        .detail()
+        .unwrap_or_default()
+        .contains("parse as UTF-8 string"));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_static_data_string_view_migration() -> Result<()> {
+    let mut con = TestConnection::new("threads");
+    for text in ["", "café 日本語", "a\0b"] {
+        let reply: String = redis::cmd("set_static_data").arg(text).query(&mut con)?;
+        assert_eq!(reply, "OK");
+        assert_eq!(
+            redis::cmd("get_static_data").query::<String>(&mut con)?,
+            text
+        );
+    }
+    let error = redis::cmd("set_static_data")
+        .arg(b"\xff".as_slice())
+        .query::<Value>(&mut con)
+        .unwrap_err();
+    assert!(error
+        .detail()
+        .unwrap_or_default()
+        .contains("parse as UTF-8 string"));
+    assert_eq!(
+        redis::cmd("get_static_data").query::<String>(&mut con)?,
+        "a\0b"
+    );
+    assert!(redis::cmd("set_static_data")
+        .query::<Value>(&mut con)
+        .is_err());
+    let reply: String = redis::cmd("set_static_data")
+        .arg(&["valid", "extra"][..])
+        .query(&mut con)?;
+    assert_eq!(reply, "OK");
+    assert_eq!(
+        redis::cmd("get_static_data").query::<String>(&mut con)?,
+        "valid"
+    );
+    Ok(())
+}
+
+#[test]
 fn test_borrowed_arguments() -> Result<()> {
     let mut con = TestConnection::new("args");
     for text in ["", "café 日本語", "text\0with NUL"] {

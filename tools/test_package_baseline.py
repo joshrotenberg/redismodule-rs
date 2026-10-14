@@ -62,6 +62,48 @@ class Resp2Tests(unittest.TestCase):
             baseline.read_resp2(io.BytesIO(b"-ERR invalid integer\r\n"))
 
 
+class ManualViewRuntimeTests(unittest.TestCase):
+    @staticmethod
+    def query(*args):
+        if args[0] == b"archive.notify":
+            return args[1]
+        if len(args) != 2:
+            raise baseline.BaselineError("Redis error: wrong number of arguments")
+        if args[1] == b"\xff":
+            raise baseline.BaselineError("Redis error: Couldn't parse as UTF-8 string")
+        return [args[1], 1]
+
+    def test_views_require_typed_identity_flag_and_preserved_key(self):
+        self.assertEqual(len(baseline.manual_view_runtime_cases(self.query)), 3)
+        def textual_flag(*args):
+            result = self.query(*args)
+            return [result[0], b"1"] if args[0] == b"archive.view" else result
+        with self.assertRaisesRegex(baseline.BaselineError, "text views differ"):
+            baseline.manual_view_runtime_cases(textual_flag)
+        def altered_key(*args):
+            return b"changed" if args[0] == b"archive.notify" else self.query(*args)
+        with self.assertRaisesRegex(baseline.BaselineError, "key bytes"):
+            baseline.manual_view_runtime_cases(altered_key)
+
+    def test_view_errors_cannot_silently_succeed(self):
+        def accepts_bad_text(*args):
+            return [b"replacement", 1] if args == (b"archive.view", b"\xff") else self.query(*args)
+        with self.assertRaisesRegex(baseline.BaselineError, "accepted an invalid"):
+            baseline.manual_view_runtime_cases(accepts_bad_text)
+
+    def test_empty_key_requires_a_callback_after_nonempty_key(self):
+        last_key = b""
+        def drops_empty_callback(*args):
+            nonlocal last_key
+            if args[0] == b"archive.notify":
+                if args[1]:
+                    last_key = args[1]
+                return last_key
+            return self.query(*args)
+        with self.assertRaisesRegex(baseline.BaselineError, "key bytes"):
+            baseline.manual_view_runtime_cases(drops_empty_callback)
+
+
 class ProcRuntimeTests(unittest.TestCase):
     @staticmethod
     def query(*args):

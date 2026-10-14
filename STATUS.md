@@ -10,6 +10,19 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F07 — Owner-bound string views: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | try_as_str borrows its RedisString owner; consuming NextArg::next_str is removed; raw text/byte helpers require unsafe with explicit lifetime/access obligations. The notification adapter anchors its view to the local Context. SDK examples and isolated JMESPath/event-stream snapshots migrate without command changes. Final checks pass: 18 compiler controls, 14 docs, 26 pure/harness tests, 22 Python tests, all 30 examples in both profiles, 32 native SDK executions, eight archive cells and eight selected reference flows. Fresh archives/consumer builds, Clippy and fmt pass. Due/Claude core and delta source reviews approve; findings are applied and actual effects independently checked. |
+| **Next** | F08: one scoping chunk for RedisString construction/ownership/public-inner boundaries, native alias obligations and migration choices. Specify corrected-code checks before implementation; stay within this type family. |
+| **Blockers** | No local F07 implementation blocker. Empty-kickoff GitHub CI failed four of eight jobs; CI is deferred and fork PR 2 stays draft for the remote handoff. Native constructors/context/aliases remain separate unresolved contracts, not certified by these borrow checks. |
+| **Decisions** | Deliberate Rust source break; strict UTF-8, numeric and existing command behavior remain unchanged. Leaves upstream issue 358 open. Required review baseline/kickoff uploads include earlier local F03–F06 history; fork master, release settings and original module directories remain untouched. Local validated merge follows the existing process; GitHub merge/release remain human-owned. No MSRV/package/support commitment. |
+
+Details: [F07 implementation and migration](docs/F07_STRING_VIEWS.md),
+[compact evidence](docs/evidence/f07-string-views.json),
+[fork draft PR 2](https://github.com/joshrotenberg/redismodule-rs/pull/2).
+
 ## F06 — Legacy string-view repair scope: reviewed locally
 
 | Status | Report |
