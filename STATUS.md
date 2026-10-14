@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F06 — Legacy string-view repair scope: reviewed locally
+
+| Status | Report |
+|---|---|
+| **Done** | Inventoried 208 tracked Rust files across SDK/four references; nine consuming text calls (three SDK, six JMESPath), direct owner-backed views and one external raw callback. Specified owner-bound try_as_str, removal of consuming NextArg::next_str and explicit unsafe raw views, with migration choices and corrected-code acceptance criteria. Reconciled 55 upstream issues/45 PRs and selected overlap patches. Due/Claude approves the specification; eight doc suggestions applied. One compiler-only consumer confirms custom NextArg implementations remain a migration concern, correcting a reviewer overstatement. |
+| **Next** | F07: refresh overlap, publish the required dedicated baseline/zero-content kickoff and scoped draft for the partial issue-358 relationship, then implement and validate the reviewed narrow contract. |
+| **Blockers** | None for F06. F07 implementation is gated on draft visibility; required baseline upload includes local ancestor chunks and must remain within issue-work authorization. CI remains deferred. Proposed APIs and migrations have not been compiled or runtime-tested. |
+| **Decisions** | Recommend a deliberate Rust API break over warning-only deprecation or silent text copies. Preserve strict UTF-8 and command behavior; leaves upstream issue 358 open. No implementation, original module edits, pushes or GitHub changes in F06. No MSRV/package/support/release commitments. |
+
+Details: [F06 scope and migration](docs/F06_STRING_LIFETIMES.md),
+[compact evidence](docs/evidence/f06-string-lifetimes.json).
+
 ## F05 — Borrowed argument cursor: validated locally
 
 | Status | Report |

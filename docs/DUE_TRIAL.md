@@ -96,3 +96,23 @@ A two-arm comparison was considered and deferred because equivalent native
 read-only permissions/tools are not established and SDK delivery has priority.
 Sanitized aggregate findings route through due-expert; raw prompts/logs remain
 local. See [F05 results](evidence/f05-arguments.json) for checked effects and limits.
+
+## October 13 — F06 specification review
+
+Due/Claude approves a documentation-only string-view repair specification.
+Actual exit 0, 214,524 ms, provider-reported USD 2.37925025. Complete request,
+result, answer, all 167 trace records and summary independently validate; 34
+matched activities, no failures/drops/gaps/unmatched. Reviewed SDK/source/spec
+hashes stayed unchanged. Existing native permission scopes worked; no timeout,
+retry, recursive delegation or policy update. Model/effort/compiled source remain
+unknown; exact source/binary/provider provenance is retained locally.
+
+Caller applied eight nonblocking doc refinements and corrected one model
+review overstatement: a pure metadata-only consumer (exit 0) shows a local
+non-Iterator type can implement NextArg despite its blanket Iterator impl.
+This is a model analysis limitation, not evidence of a Due CLI defect. No proposed
+API was compiled or executed, no original module code changed, and no runtime
+or invalid native path was run. Source/effect checks remain separate from review
+approval. A two-arm comparison was considered/deferred pending equivalent native
+read-only permission/tool settings; SDK delivery remained primary. Sanitized
+positive/negative observations route to due-expert. See [F06 evidence](evidence/f06-string-lifetimes.json).
