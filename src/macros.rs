@@ -124,7 +124,18 @@ macro_rules! redis_event_handler {
         ) -> c_int {
             let context = $crate::Context::new(ctx);
 
-            let redis_key = $crate::RedisString::string_as_slice(key);
+            fn borrow_key<'key>(_: &'key $crate::Context, key: &'key [u8]) -> &'key [u8] {
+                key
+            }
+            // SAFETY: Redis supplies a live, read-only key for this synchronous
+            // callback. The local anchor bounds this view to the invocation,
+            // including handlers which would otherwise request 'static. It
+            // must not be retained or invalidated through a native alias.
+            // In particular, LOADED-event keys cannot be retained. Do not turn
+            // this borrowed pointer into an owning RedisString.
+            let redis_key = borrow_key(&context, unsafe {
+                $crate::RedisString::string_as_slice(key)
+            });
             let event_str = unsafe { CStr::from_ptr(event) };
             $event_handler(
                 &context,

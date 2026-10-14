@@ -116,3 +116,35 @@ or invalid native path was run. Source/effect checks remain separate from review
 approval. A two-arm comparison was considered/deferred pending equivalent native
 read-only permission/tool settings; SDK delivery remained primary. Sanitized
 positive/negative observations route to due-expert. See [F06 evidence](evidence/f06-string-lifetimes.json).
+
+## October 13 — F07 implementation and delta reviews
+
+Due/Claude approves the core repair (192,047 ms, reported USD 2.555963) and a
+focused callback-anchor/assertion delta (298,448 ms, USD 3.39145625). Both true
+process exits are zero; complete requests/results/answers, 141 and 161 trace
+records and summaries independently validate. Input hashes stayed unchanged
+during each review. All 49 activities match; the core review marks one Grep
+failed, with cause unknown in the metadata-only trace. Neither reviewer reports
+denied reads. Model/effort/compiled-source identity remain unknown; available
+source/binary/provider provenance is retained unchanged from this batch.
+
+The caller applied the reviewers' concrete findings, checked diagnostic/source
+claims and revalidated final source through compiler, native, archive and
+isolated-reference tests. Reviewers only read/searched; no tests or hash checks
+were performed by them. A new static-handler negative control reports E0716
+on the pinned compiler, with an otherwise identical borrowed-handler positive
+control. Missing evidence links/hashes and historical counts were corrected.
+
+One caller CLI invocation passed inline JSON where --request requires FILE|-.
+Due rejected it as invalid_input, true exit 2, before starting a provider or
+creating a trace. After inspecting the absence of effects, the caller corrected
+the file invocation with a fresh trace. This is caller misuse, not a Due defect.
+There was no automatic retry, fallback, recursive delegation, deadline, provider
+permission change or binary/plugin refresh. SDK disk pressure was handled only
+by removing owned rebuildable caches and retaining evidence/binaries.
+
+A two-arm comparison was considered/deferred because equivalent native tool and
+permission settings are not established and SDK delivery remains primary.
+Sanitized aggregate positive/negative observations route to due-expert; prompts,
+code and raw provider output remain local. See [F07 evidence](evidence/f07-string-views.json)
+for actual effects and limitations.
