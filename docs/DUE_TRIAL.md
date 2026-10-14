@@ -269,3 +269,38 @@ under target/f11; outer caller sends sanitized positive/negative batch metadata
 to due-expert. No private prompts/code/answers/raw logs are feedback attachments.
 
 See [compact F11 evidence](evidence/f11-configuration-ownership.json).
+
+## F12 — Source-only configuration registration proposal
+
+One independent read-only Due/Claude review approves, actual exit 0/status
+succeeded, duration 189,240 ms and reported USD 2.339982. Caller independently
+validated request/result/answer/all 140 trace records/summary schemas. The trace
+is complete with zero drops/gaps, one terminal record and 24 balanced successful
+activities; no denied reads or permission changes. Review success is source
+evidence only. No SDK implementation, proposed API compilation or native execution.
+
+Five nonblocking findings were checked and applied: resolve availability before
+transferring callback private data, distinguish raw/formatted per-call metrics,
+record RedisError's blanket conversion/coherence limit, retain complete selected
+reference excerpts and keep factory names provisional. Caller additionally tied
+load-error gates to actual macro order and isolated ignored-Result compiler
+validation from JMESPath's existing warning suppression. These are doc/evidence
+clarifications after approval; no unchanged model review was repeated.
+
+The same 214 tracked Rust hashes/four native source hashes and original reference
+heads/status remain unchanged. Source/format measurement is 57 to 39 nonempty
+lines, with no compiled/runtime/throughput/allocation claim. Reviewed inputs were
+immutable through completion and checked before refinements; original reviewed
+specification/comparison/excerpts remain under target/f12/review.
+
+Installed Due 0.1.0/source 76d33d410319d860425a2dd3609863a4ba5ca565 clean, binary
+SHA-256 11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b; Claude
+2.1.296, macOS arm64. Model/effort omitted; observed settings/compiled source
+identity unknown. Read/Grep/Glob only, no shell/MCP/Agent/recursion/retry or
+arbitrary deadline. Requested answer brevity was approximate (775 whitespace
+tokens across JSON serialization, not a token-usage metric). Comparison deferred:
+equivalent provider permission/tool setup is unestablished; SDK delivery first.
+Sanitized aggregate positive/negative observations route only to due-expert;
+private prompts/code/answers/raw logs remain local.
+
+See [compact F12 evidence](evidence/f12-configuration-api.json).

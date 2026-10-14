@@ -89,13 +89,17 @@ actual Pacific finish timestamp. Resume unfinished work rather than duplicating
 it. F02 logging, F03 macro dependency hygiene, F04 proc-command fixtures and
 F05 borrowed cursor, F06 string-view scope and F07 owner-bound string views are
 complete; F08's ownership specification, F09's repair, F10's getter scope and
-F11's selected getter/lifecycle repair are reviewed and validated locally. Read
-STATUS.md/docs/F11_CONFIGURATION_OWNERSHIP.md and compact evidence. F11 leaves
-fork PR4 draft for deferred CI/remote handoff. Next focus is F12 scoping of a
-configuration API ergonomics slice unless Josh steers elsewhere; no F12 code
-in that scoping activation and no automatic CI resumption. Keep real reference
-patterns/before-after examples/validation criteria; originals remain untouched.
-Do not duplicate completed F11 reviews/tests without new changes.
+F11's selected getter/lifecycle repair are reviewed and validated locally. F12's
+source-only registration ergonomics specification is reviewed; no proposed API
+has been compiled/implemented. Read STATUS.md/docs/F12_CONFIGURATION_API.md and
+compact evidence. F11 leaves fork PR4 draft for deferred CI/remote handoff.
+Next is only F13's uniform fallible numeric/bool/enum registration, rejected
+private-data cleanup, macro error propagation and selected isolated direct-caller
+migrations. Builders are a later bounded chunk; preserve tuples, custom traits,
+successful defaults/commands/LoadConfigs policy and F11 string lifecycle.
+Refresh overlaps and follow local issue-independent process unless mapped to
+tracked issues, which requires draft visibility before code. CI stays deferred;
+originals remain untouched. Do not repeat completed F11/F12 checks without changes.
 Do not expand
 into a general FFI audit or execute historical invalid native paths. This trial grants no additional SDK push,
 merge, release, credential, settings or cross-project authority. See the current

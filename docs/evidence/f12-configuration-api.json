@@ -1,0 +1,253 @@
+{
+  "chunk": "F12",
+  "kind": "source-only specification",
+  "sdk_baseline": "890abece76643252197b883bcf441a9b8e845e88",
+  "implementation": false,
+  "proposed_apis_compiled": false,
+  "native_execution": false,
+  "inventory": {
+    "method": "tracked Rust hashes and selected non-comment literal syntax; not AST/exhaustive resolution",
+    "tracked_rust_files": 214,
+    "repos": [
+      {
+        "name": "sdk",
+        "head": "890abece76643252197b883bcf441a9b8e845e88",
+        "rust_files": 79
+      },
+      {
+        "name": "carolina",
+        "head": "0191175bb18ecf371d49d8b264a514f2c662099c",
+        "rust_files": 23
+      },
+      {
+        "name": "eventstream",
+        "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+        "rust_files": 37
+      },
+      {
+        "name": "jmespath",
+        "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+        "rust_files": 35
+      },
+      {
+        "name": "streamfilter",
+        "head": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+        "rust_files": 40
+      }
+    ]
+  },
+  "overlap": {
+    "fork_drafts": 4,
+    "upstream_prs": 45,
+    "upstream_issues": 55,
+    "matching_selected_registration_issue_found": false,
+    "excluded": [
+      358,
+      471
+    ],
+    "limitations": "selected title/body and source review; not exhaustive downstream scope"
+  },
+  "comparison": {
+    "baseline": "F11 isolated streamfilter snapshot; same parser/storage/default expressions, original directory unchanged",
+    "proposed_not_compiled": true,
+    "formatter": "rustfmt 1.94.0 defaults, edition2021; format-only unresolved illustration fn, no API/typecheck/implementation",
+    "calls": [
+      {
+        "kind": "i64",
+        "before": "    register_i64_configuration(\n        ctx,\n        \"default-maxscan\",\n        &DEFAULT_MAXSCAN,\n        int_default(\"default-maxscan\", 10_000)?,\n        0,\n        i64::MAX,\n        ConfigurationFlags::DEFAULT,\n        None,\n    );",
+        "proposed": "    config::i64(\"default-maxscan\", &DEFAULT_MAXSCAN, int_default(\"default-maxscan\", 10_000)?, 0..=i64::MAX)\n        .register(ctx)\n        .map_err(|error| error.to_string())?;",
+        "raw_before_nonempty_lines": 10,
+        "formatted_before_nonempty_lines": 10,
+        "raw_proposed_nonempty_lines": 3,
+        "formatted_proposed_nonempty_lines": 8
+      },
+      {
+        "kind": "i64",
+        "before": "    register_i64_configuration(\n        ctx,\n        \"scan-batch\",\n        &SCAN_BATCH,\n        int_default(\"scan-batch\", 512)?,\n        1,\n        1_000_000,\n        ConfigurationFlags::DEFAULT,\n        None,\n    );",
+        "proposed": "    config::i64(\"scan-batch\", &SCAN_BATCH, int_default(\"scan-batch\", 512)?, 1..=1_000_000)\n        .register(ctx)\n        .map_err(|error| error.to_string())?;",
+        "raw_before_nonempty_lines": 10,
+        "formatted_before_nonempty_lines": 10,
+        "raw_proposed_nonempty_lines": 3,
+        "formatted_proposed_nonempty_lines": 8
+      },
+      {
+        "kind": "i64",
+        "before": "    register_i64_configuration(\n        ctx,\n        \"max-expr-len\",\n        &MAX_EXPR_LEN,\n        int_default(\"max-expr-len\", 4096)?,\n        1,\n        1_048_576,\n        ConfigurationFlags::DEFAULT,\n        None,\n    );",
+        "proposed": "    config::i64(\"max-expr-len\", &MAX_EXPR_LEN, int_default(\"max-expr-len\", 4096)?, 1..=1_048_576)\n        .register(ctx)\n        .map_err(|error| error.to_string())?;",
+        "raw_before_nonempty_lines": 10,
+        "formatted_before_nonempty_lines": 10,
+        "raw_proposed_nonempty_lines": 3,
+        "formatted_proposed_nonempty_lines": 8
+      },
+      {
+        "kind": "i64",
+        "before": "    register_i64_configuration(\n        ctx,\n        \"max-in-members\",\n        &MAX_IN_MEMBERS,\n        int_default(\"max-in-members\", 10_000)?,\n        1,\n        10_000_000,\n        ConfigurationFlags::DEFAULT,\n        None,\n    );",
+        "proposed": "    config::i64(\"max-in-members\", &MAX_IN_MEMBERS, int_default(\"max-in-members\", 10_000)?, 1..=10_000_000)\n        .register(ctx)\n        .map_err(|error| error.to_string())?;",
+        "raw_before_nonempty_lines": 10,
+        "formatted_before_nonempty_lines": 10,
+        "raw_proposed_nonempty_lines": 3,
+        "formatted_proposed_nonempty_lines": 8
+      },
+      {
+        "kind": "bool",
+        "before": "    register_bool_configuration(\n        ctx,\n        \"use-iterator\",\n        &USE_ITERATOR,\n        use_iterator,\n        ConfigurationFlags::DEFAULT,\n        None,\n    );",
+        "proposed": "    config::boolean(\"use-iterator\", &USE_ITERATOR, use_iterator)\n        .register(ctx)\n        .map_err(|error| error.to_string())?;",
+        "raw_before_nonempty_lines": 8,
+        "formatted_before_nonempty_lines": 8,
+        "raw_proposed_nonempty_lines": 3,
+        "formatted_proposed_nonempty_lines": 3
+      },
+      {
+        "kind": "string",
+        "before": "    register_string_configuration(\n        ctx,\n        \"sidecar-prefix\",\n        &SIDECAR_PREFIX,\n        &prefix,\n        ConfigurationFlags::IMMUTABLE,\n        None,\n    ).map_err(|error| error.to_string())?;",
+        "proposed": "    config::string(\"sidecar-prefix\", &SIDECAR_PREFIX, &prefix)\n        .flags(ConfigurationFlags::IMMUTABLE)\n        .register(ctx)\n        .map_err(|error| error.to_string())?;",
+        "raw_before_nonempty_lines": 8,
+        "formatted_before_nonempty_lines": 9,
+        "raw_proposed_nonempty_lines": 4,
+        "formatted_proposed_nonempty_lines": 4
+      }
+    ],
+    "before_lines": 57,
+    "proposed_lines": 39,
+    "ignored_registration_status_before": 5,
+    "ignored_registration_status_proposed": 0,
+    "error_conversion_sites_proposed": 6,
+    "limitations": [
+      "success path equivalent by source intent only; new native failure propagation is deliberately changed",
+      "no performance/allocation claim; not runtime or complete-helper LOC evidence",
+      "builder names/types/API resolution not validated"
+    ],
+    "raw_preliminary_before_lines": 56,
+    "raw_preliminary_proposed_lines": 19,
+    "per_call_counts": "formatted_* counts use the same rustfmt body method as headline totals; raw_* are preliminary and not comparable"
+  },
+  "native_inputs": {
+    "target/f01/servers/redis-7.2.8/src/module.c": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+    "target/f01/servers/redis-7.2.8/src/config.c": "5ca98ff62ddc3a19b80b73e67d7149230fa74463b5a90bb4821d3c9d28bdcd32",
+    "target/f08/native-8.10.2/module.c": "bcfad92db0a7be63df49ed981b4ad224b31ab4ff0fdf9752d60b6d0a519d3329",
+    "target/f10/config-8.10.2.c": "a600d92c78d1c9afb4fc89ffbc2c5307fc6b4c3ae588a93273071b9b5e3050c4"
+  },
+  "review": {
+    "status": "approve",
+    "provider": "claude through Due",
+    "actual_process_exit": 0,
+    "result_status": "succeeded",
+    "duration_ms": 189240,
+    "reported_cost_usd": 2.339982,
+    "trace_records": 140,
+    "trace_complete": true,
+    "dropped_records": 0,
+    "activities": {
+      "started": 24,
+      "completed": 24,
+      "failed": 0,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "succeeded": 24
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 24,
+          "completed": 24,
+          "completion_status_counts": {
+            "succeeded": 24
+          }
+        }
+      }
+    },
+    "contracts": {
+      "actual_exit": 0,
+      "verdict": "approve",
+      "result_request_answer_trace_summary_valid": true,
+      "trace_records": 140,
+      "activities_started": 24,
+      "activities_completed": 24,
+      "activities_failed": 0,
+      "review_inputs_unchanged_until_completion": true,
+      "answer_word_count": 775,
+      "source_only_review": true
+    },
+    "findings": [
+      {
+        "priority": "nonblocking",
+        "disposition": "availability resolved before pointer transfer; named locals required"
+      },
+      {
+        "priority": "nonblocking",
+        "disposition": "formatted per-call counts added, raw counts explicitly prefixed and retained"
+      },
+      {
+        "priority": "nonblocking",
+        "disposition": "blanket Error conversion/coherence limitation documented"
+      },
+      {
+        "priority": "nonblocking",
+        "disposition": "caller checked/retained all seven string impls and JMESPath macro without changing originals"
+      },
+      {
+        "priority": "nonblocking",
+        "disposition": "factory names provisional; consistency decision deferred until builder stage"
+      }
+    ],
+    "post_review_caller_refinements": [
+      "warning fixture isolated from existing JMESPath allow(unused_must_use)",
+      "load-error integration follows actual macro order: numeric before strings; boolean/enum after strings"
+    ],
+    "limits": [
+      "Source-only review: nothing was compiled, type-checked, or run; proposed signatures and builder snippets remain unvalidated by rustc.",
+      "Native host reads were limited to the cited line ranges; I did not trace createModuleConfig, addModule*Config internals, or LoadConfigs behavior beyond what the spec asserts.",
+      "Retained hashes in the evidence JSON were not recomputed (no Bash); file identity was taken on trust.",
+      "Only the formatted before/after files were read; raw target/f12/before.rs and proposed.rs were not opened.",
+      "Original module directories (eventstream, jmespath, carolina, streamfilter originals) were not read; author-pattern claims were checked only against target/f12/reference-excerpts.md and the F11 streamfilter snapshot.",
+      "No reads were denied."
+    ],
+    "artifact_directory": "target/f12/review",
+    "provenance": {
+      "sdk_head": "890abece76643252197b883bcf441a9b8e845e88",
+      "sdk_dirty": "?? docs/F12_CONFIGURATION_API.md",
+      "sdk_branch": "docs/f12-configuration-api-scope",
+      "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+      "due_source_status": "",
+      "due_version": "due 0.1.0",
+      "due_binary": "/Users/josh.rotenberg/.cargo/bin/due",
+      "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+      "provider_version": "2.1.296 (Claude Code)",
+      "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+      "model_requested": null,
+      "effort_requested": null,
+      "model_observed": "unknown",
+      "effort_observed": "unknown",
+      "compiled_source_identity": "unknown",
+      "comparison_deferred": "equivalent provider permission/tool setup unestablished; source-only SDK delivery priority"
+    }
+  },
+  "validation": {
+    "status": "passed source/doc checks",
+    "contracts_independently_checked": true,
+    "comparison_recount": {
+      "before": 57,
+      "proposed": 39
+    },
+    "tracked_rust_hashes_checked": 214,
+    "native_hashes_checked": 4,
+    "original_reference_heads_status_unchanged": true,
+    "sdk_reference_source_unchanged": true,
+    "production_or_runtime_checks": "not run; docs-only chunk",
+    "new_apis_typechecked": false,
+    "review_source_inputs_immutable_during_run": true,
+    "post_review_changes": "nonblocking doc/evidence clarifications checked by caller; no repeated model review",
+    "doc_json_links_fences_whitespace": "pass",
+    "source_diff_scope": "only AGENTS/STATUS/DUE_TRIAL/F12 specification and evidence"
+  },
+  "decisions": [
+    "F13 uniform fallible scalar registration only",
+    "builders additive later stage",
+    "keep compact tuples and custom ConfigurationValue",
+    "accepted metadata and CI deferred",
+    "no original module migration/push/PR/publication"
+  ]
+}
