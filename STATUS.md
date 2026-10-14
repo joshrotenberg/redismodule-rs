@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F12 — Configuration registration ergonomics: reviewed locally
+
+| Status | Report |
+|---|---|
+| **Done** | Source-only specification from 214 tracked Rust files/four references, current SDK/native registration contracts and fresh 4-fork/45-upstream-PR/55-issue overlap snapshots. Due/Claude approves; caller checked contracts, hashes and findings. Proposed direct-call comparison is 57 to 39 consistently formatted nonempty lines across six stream-filter calls, including five new error conversions; APIs remain uncompiled. |
+| **Next** | F13: only uniform fallible numeric/bool/enum registration, rejected-private-data cleanup, macro error propagation and selected isolated direct-caller migrations. Read F12 gates, refresh overlaps and apply the appropriate local/issue visibility process before implementation. Builders follow in a later bounded chunk. |
+| **Blockers** | None for F12 scoping. No proposed API/compiler/native runtime validation occurred; those are F13/future gates. CI remains deferred, drafts 1–4 stay open; accepted userdata cleanup and broader native safety remain outside the claim. |
+| **Decisions** | Preserve tuple DSL, ConfigurationValue traits, successful command/default/parser/LoadConfigs behavior. Registration failures intentionally become visible. Scalar Result is a source-contract change; additive typed builders come later, spelling provisional. Original references unchanged; F12 stays local with no push/PR/publication or MSRV/package/support commitments. |
+
+Details: [F12 registration proposal](docs/F12_CONFIGURATION_API.md),
+[compact evidence](docs/evidence/f12-configuration-api.json).
+
 ## F11 — String-configuration reply ownership: validated locally
 
 | Status | Report |
