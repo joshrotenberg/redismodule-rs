@@ -105,6 +105,10 @@ name = "hello"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "args"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "log"
 crate-type = ["cdylib"]
 

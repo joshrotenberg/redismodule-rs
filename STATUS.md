@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F05 — Borrowed argument cursor: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | New additive ArgCursor borrows strings/text/bytes from an explicit slice, retains native numeric parsing and provides exact-arity/tail handling. Synthetic comparison: three Rust allocations become zero (11/42/4106 requested bytes avoided); 360 paired parses across Redis 7.2.8/8.10.2 debug/release. Eight focused runtime executions, 26 pure/harness tests, four docs, expected E0515/E0505/E0502 diagnostics, Clippy with warnings denied, fmt and package listing pass. Independent Due/Claude source review approves; observed measurement reporting was improved and affected checks rerun. |
+| **Next** | F06: scope a narrow legacy string-borrow lifetime repair, inventory affected uses and overlapping issues/PRs, and document required Rust API changes and migration/validation choices before implementation. |
+| **Blockers** | None for F05. CI remains a deferred workstream. Native aliases/raw pointers and legacy borrowed text APIs are not certified; fresh archives and full reference-module suites were not rerun for this addition. |
+| **Decisions** | Additive local API; strict UTF-8 is opt-in, binary bytes remain available, and u64 retains the existing i64::MAX limit. Original module directories stay untouched. No push/publication or MSRV/package/support commitment. Keep the next interval bounded to F06 scoping, with implementation as a later chunk. |
+
+Details: [F05 API, before/after and limits](docs/F05_ARGUMENTS.md),
+[compact evidence](docs/evidence/f05-arguments.json).
+
 ## F04 — Proc-command runtime fixtures: validated locally
 
 | Status | Report |

@@ -12,6 +12,130 @@ use redis_module::RedisValue;
 mod utils;
 
 #[test]
+fn test_borrowed_arguments() -> Result<()> {
+    let mut con = TestConnection::new("args");
+    for text in ["", "café 日本語", "text\0with NUL"] {
+        let bytes = b"binary\0\xff";
+        let reply: (i64, i64, i64, i64, i64, Vec<u8>) = redis::cmd("args.inspect")
+            .arg(b"key\0\xff".as_slice())
+            .arg(text)
+            .arg(bytes.as_slice())
+            .query(&mut con)?;
+        assert_eq!(reply, (3, 1, 1, 1, 1, bytes.to_vec()));
+    }
+    let tail: Vec<i64> = redis::cmd("args.tail")
+        .arg("first")
+        .arg("second")
+        .arg("third")
+        .query(&mut con)?;
+    assert_eq!(tail, [5, 1, 2]); // done() reports extras without consuming them.
+    let tail: Vec<i64> = redis::cmd("args.tail").arg("first").query(&mut con)?;
+    assert_eq!(tail, [5, 0, 0]);
+
+    for signed in [i64::MIN, 0, i64::MAX] {
+        for unsigned in [0, i64::MAX] {
+            let reply: (i64, i64, f64) = redis::cmd("args.numbers")
+                .arg(signed)
+                .arg(unsigned)
+                .arg("-1.25")
+                .query(&mut con)?;
+            assert_eq!(reply, (signed, unsigned, -1.25));
+        }
+    }
+    for (signed, unsigned, float, message) in [
+        ("9223372036854775808", "0", "1", "parse as integer"),
+        ("0", "-1", "1", "parse negative number"),
+        ("0", "18446744073709551615", "1", "parse as integer"),
+        ("0", "0", "word", "parse as float"),
+    ] {
+        let error = redis::cmd("args.numbers")
+            .arg(signed)
+            .arg(unsigned)
+            .arg(float)
+            .query::<Value>(&mut con)
+            .unwrap_err();
+        assert!(
+            error.detail().unwrap_or_default().contains(message),
+            "{error}"
+        );
+    }
+    for command in ["args.borrowed", "args.inspect", "args.numbers", "args.tail"] {
+        let error = redis::cmd(command).query::<Value>(&mut con).unwrap_err();
+        assert!(
+            error.to_string().contains("wrong number of arguments"),
+            "{error}"
+        );
+    }
+    for values in [
+        vec![b"expression".as_slice()],
+        vec![b"expression", b"COUNT", b"1", b"extra"],
+    ] {
+        let error = redis::cmd("args.borrowed")
+            .arg(values)
+            .query::<Value>(&mut con)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("wrong number of arguments"),
+            "{error}"
+        );
+    }
+    let error = redis::cmd("args.borrowed")
+        .arg(b"\xff".as_slice())
+        .arg("COUNT")
+        .arg(1)
+        .query::<Value>(&mut con)
+        .unwrap_err();
+    assert!(error
+        .detail()
+        .unwrap_or_default()
+        .contains("parse as UTF-8 string"));
+    let error = redis::cmd("args.borrowed")
+        .arg("expression")
+        .arg("OTHER")
+        .arg(1)
+        .query::<Value>(&mut con)
+        .unwrap_err();
+    assert!(error.to_string().contains("expected COUNT"));
+    // Ordinary errors leave the same connection usable for a valid command.
+    let reply: Vec<i64> = redis::cmd("args.borrowed")
+        .arg("expression")
+        .arg("count")
+        .arg(2)
+        .query(&mut con)?;
+    assert_eq!(reply, [10, 2, 0, 0]);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_argument_parser_allocations() -> Result<()> {
+    let mut con = TestConnection::new("args");
+    for length in [1, 32, 4096] {
+        let expression = "x".repeat(length);
+        let mut observed = [(0, 0); 2];
+        for _ in 0..10 {
+            for option in ["COUNT", "count", "CoUnT"] {
+                for (index, (command, allocations, bytes)) in
+                    [("args.owned", 3, length + 10), ("args.borrowed", 0, 0)]
+                        .into_iter()
+                        .enumerate()
+                {
+                    let reply: Vec<i64> = redis::cmd(command)
+                        .arg(&expression)
+                        .arg(option)
+                        .arg(12)
+                        .query(&mut con)?;
+                    assert_eq!(reply, [length as i64, 12, allocations, bytes as i64]);
+                    observed[index] = (reply[2], reply[3]);
+                }
+            }
+        }
+        println!("F05 parser expression_bytes={length} owned_allocations={} owned_requested_bytes={} borrowed_allocations={} borrowed_requested_bytes={} repetitions=30", observed[0].0, observed[0].1, observed[1].0, observed[1].1);
+    }
+    Ok(())
+}
+
+#[test]
 fn test_logging_message_text() -> Result<()> {
     let mut con = TestConnection::new("log");
     for (message, expected) in [

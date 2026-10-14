@@ -1,0 +1,164 @@
+{
+  "chunk": "F05",
+  "status": "validated_locally",
+  "base_commit": "bc147e5e27eb25acc99d20487c2b0e165da1377f",
+  "branch": "feat/f05-borrowed-arguments",
+  "scope": "Borrowed argument cursor, corrected example and focused tests; issue-independent local work",
+  "sources": {
+    "src/args.rs": "d615f26d6e4fa996e67bd180c22517211f249f06c8a67b78fd7ddd75422fbaa8",
+    "src/lib.rs": "30a01ed23a48246b9255c6807aed2dbdafb2e4b8cb8ffde424060a2486706222",
+    "examples/args.rs": "e0e51637c8030559f3f27b1939c04031310bce4386910dd862b47496598e543c",
+    "tests/integration.rs": "37070c9d6c72905d5c564e8432efc777f58424950f87f6ca12141a7fe37541fa",
+    "Cargo.toml": "b14a260073588a2aac553cba74445fb65f4bb8f3d55b411e618d7dc89fdfd809",
+    "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709"
+  },
+  "validation": {
+    "compiler": "Rust 1.94.0",
+    "platform": "macOS arm64",
+    "allocator": "libc; Rust example wraps RedisAlloc",
+    "rust_pure_harness_tests": 26,
+    "doc_tests": 4,
+    "lifetime_contracts": [
+      {
+        "expected_error": null,
+        "actual_exit": 0,
+        "observed_codes": [
+          "dead_code"
+        ],
+        "passed": true
+      },
+      {
+        "expected_error": "E0515",
+        "actual_exit": 1,
+        "observed_codes": [
+          "E0515"
+        ],
+        "passed": true
+      },
+      {
+        "expected_error": "E0505",
+        "actual_exit": 1,
+        "observed_codes": [
+          "E0505"
+        ],
+        "passed": true
+      },
+      {
+        "expected_error": "E0502",
+        "actual_exit": 1,
+        "observed_codes": [
+          "E0502"
+        ],
+        "passed": true
+      }
+    ],
+    "focused_runtime_executions": 8,
+    "hosts": [
+      "Redis 7.2.8",
+      "Redis 8.10.2"
+    ],
+    "profiles": [
+      "debug",
+      "release"
+    ],
+    "measurements": {
+      "paired_parses": 360,
+      "ascii_expression_lengths": [
+        1,
+        32,
+        4096
+      ],
+      "keyword_spellings": [
+        "COUNT",
+        "count",
+        "CoUnT"
+      ],
+      "owned_requests_per_parse": 3,
+      "owned_requested_bytes": "expression length + 10",
+      "borrowed_requests_per_parse": 0,
+      "borrowed_requested_bytes": 0,
+      "boundary": "Rust allocations only, inside callback; decoding and replies excluded"
+    },
+    "clippy": "locked workspace/all-targets -D warnings passed",
+    "formatting": "passed",
+    "package_file_listing": "new source and example included; no fresh archive builds",
+    "targeted_example_builds": "debug/release passed"
+  },
+  "reference_modules": {
+    "carolina": {
+      "source_relative": "crates/klog-module/src/lib.rs",
+      "sha256": "002e5e3b939aa2b9dc892372f51712bf2df7ea2e4929f9359bfb240c48299e09",
+      "head": "0191175bb18ecf371d49d8b264a514f2c662099c",
+      "dirty": false,
+      "working_directory_edits": false
+    },
+    "redis-jmespath-module": {
+      "source_relative": "src/command.rs",
+      "sha256": "bd5d197c2a88a61b769263a26c35582517ccc8a9735fc28992b406e7e056c6cb",
+      "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+      "dirty": false,
+      "working_directory_edits": false
+    },
+    "redis-stream-filter-module": {
+      "source_relative": "src/commands/xreadgroup.rs",
+      "sha256": "823b97c4dfe71503be8a1b509614f2d574c1df6e1fc621eb56683905eb9c4242",
+      "head": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+      "dirty": false,
+      "working_directory_edits": false
+    },
+    "redis-event-stream-module": {
+      "source_relative": "src/commands.rs",
+      "sha256": "b032dd176ef6f8152190d60a9023370e531cbb40f90e3dd0a0191229fba2e960",
+      "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+      "dirty": false,
+      "working_directory_edits": false
+    }
+  },
+  "review": {
+    "status": "succeeded",
+    "actual_exit": 0,
+    "verdict": "approve",
+    "provider": "Claude via Due",
+    "sdk_source_read": true,
+    "duration_ms": 181991,
+    "cost_usd": 2.44096925,
+    "trace_records": 146,
+    "trace_dropped_records": 0,
+    "trace_sequence_gaps": 0,
+    "source_inputs_unchanged_during_review": true,
+    "independent_schema_validation": "request/result/answer/trace/summary passed",
+    "post_review_followup": "Print observed allocation reply fields; final debug/release integration builds, all eight focused executions, Clippy -D warnings and fmt pass. One caller replacement missed an enumerate loop; compiler rejected it; explicitly patched and revalidated. Legacy lifetime tightening and optional double-ended iteration remain followups. No second model review.",
+    "limitations": [
+      "Read/Grep/Glob only: no tests, builds, doc tests or Clippy were rerun; pass/fail status is taken from the caller's report JSON and logs were not opened.",
+      "SHA-256 hashes in inputs.json, runtime-validated/report.json and lifetimes/report.json were not recomputed; on-disk src/args.rs and tests/integration.rs were read and match the diff, docs/F05_ARGUMENTS.md was spot-checked by grep only.",
+      "redis-rs 0.23 error code/detail splitting (first word as code) was assumed from the passing test report rather than read from the client crate source.",
+      "Redis C semantics of RedisModule_StringPtrLen, RetainString refcounting and StringAppendBuffer on shared objects were not examined; native aliasing remains outside this review per scope.",
+      "The four reference modules were not read; only target/f05/references.json metadata was reviewed.",
+      "Fresh archive-consumer builds of the packaged crate were not performed by the caller and were not assessed here."
+    ]
+  },
+  "retained_evidence": {
+    "runtime": "target/f05/runtime-final/report.json",
+    "initial_runtime_failure": "target/f05/runtime/report.json",
+    "measurements": "target/f05/measurements-final.json",
+    "lifetimes": "target/f05/lifetimes/report.json",
+    "checks": "target/f05/checks-corrected.json",
+    "builds": "target/f05/builds-corrected.json",
+    "reference_sources": "target/f05/references.json",
+    "disk_cleanup": "target/f05/disk-cleanup.json",
+    "review": "target/f05/review",
+    "checks_after_reporting_change": "target/f05/checks-final.json",
+    "builds_after_reporting_change": "target/f05/builds-final.json",
+    "reporting_change_compiler_failure": "target/f05/reporting-fix-checkpoint.json"
+  },
+  "limits": [
+    "Existing callback argument vector/native retains remain",
+    "Legacy NextArg/string text lifetimes and native alias/raw-pointer contracts remain separate",
+    "Unsigned parser intentionally retains i64::MAX upper limit",
+    "Synthetic parser allocation requests are not throughput, total memory or full-module savings",
+    "Native C allocations are not measured",
+    "No reference-module migration, fresh archives, full runtime suite, persistence/replication, Cluster or CI certification",
+    "No MSRV/package identity/support/release/publication commitment"
+  ],
+  "due_comparison": "Deferred; equivalent cross-provider native permission/tool setup is not established, and SDK delivery has priority."
+}
