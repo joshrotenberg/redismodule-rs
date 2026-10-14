@@ -15,7 +15,7 @@ fn text(_: &Context, argv: Vec<RedisString>) -> RedisResult {
     let text = owner.try_as_str()?;
     // SAFETY: owner is live, retained and unchanged during this command. Redis
     // APIs are initialized and this read stays on the command's server thread.
-    let raw_text = unsafe { RedisString::from_ptr(owner.inner) }?;
+    let raw_text = unsafe { RedisString::from_ptr(owner.as_ptr()) }?;
     Ok(RedisValue::Array(vec![
         RedisValue::StringBuffer(text.as_bytes().to_vec()),
         i64::from(text.as_ptr() == raw_text.as_ptr()).into(),
@@ -29,7 +29,7 @@ fn bytes(_: &Context, argv: Vec<RedisString>) -> RedisResult {
     let bytes = owner.as_slice();
     // SAFETY: the same live command-owned string/buffer guarantee as above;
     // no mutation or native alias invalidation occurs while either view is used.
-    let raw_bytes = unsafe { RedisString::string_as_slice(owner.inner) };
+    let raw_bytes = unsafe { RedisString::string_as_slice(owner.as_ptr()) };
     Ok(RedisValue::Array(vec![
         RedisValue::StringBuffer(bytes.to_vec()),
         i64::from(bytes.as_ptr() == raw_bytes.as_ptr()).into(),

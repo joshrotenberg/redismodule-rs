@@ -20,7 +20,7 @@ fn text(_: &Context, args: Vec<RedisString>) -> RedisResult {
     let text = owner.try_as_str()?;
     // SAFETY: this live command-owned string remains unchanged for both views,
     // with initialized APIs and legal Redis server-thread access.
-    let raw = unsafe { RedisString::from_ptr(owner.inner) }?;
+    let raw = unsafe { RedisString::from_ptr(owner.as_ptr()) }?;
     Ok(RedisValue::Array(vec![
         RedisValue::StringBuffer(text.as_bytes().to_vec()),
         i64::from(text.as_ptr() == raw.as_ptr()).into(),

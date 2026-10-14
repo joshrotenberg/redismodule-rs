@@ -85,8 +85,8 @@ impl<'key> Iterator for StreamIterator<'key> {
             }
         {
             fields.push((
-                RedisString::from_redis_module_string(ptr::null_mut(), field_name),
-                RedisString::from_redis_module_string(ptr::null_mut(), field_val),
+                unsafe { RedisString::from_redis_module_string(self.key.ctx, field_name) },
+                unsafe { RedisString::from_redis_module_string(self.key.ctx, field_val) },
             ));
         }
         Some(StreamRecord { id, fields })

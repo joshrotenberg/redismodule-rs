@@ -17,11 +17,11 @@ fn scan_keys(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
     let cursor = KeysCursor::new();
     let mut res = Vec::new();
 
-    let scan_callback = |ctx: &Context, key_name: &RedisString, _key: Option<&RedisKey>| {
+    let mut scan_callback = |ctx: &Context, key_name: &RedisString, _key: Option<&RedisKey>| {
         res.push(RedisValue::BulkRedisString(key_name.safe_clone(ctx)));
     };
 
-    while cursor.scan(ctx, &scan_callback) {
+    while cursor.scan(ctx, &mut scan_callback) {
         // do nothing
     }
     Ok(RedisValue::Array(res))
@@ -43,7 +43,7 @@ fn scan_key(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut res = Vec::new();
     while cursor.scan(|_key, field, value| {
         res.push(RedisValue::BulkRedisString(field.clone()));
-        res.push(RedisValue::BulkRedisString(value.clone()));
+        res.push(value.map_or(RedisValue::Null, |v| RedisValue::BulkRedisString(v.clone())));
     }) {
         // here we could do something between scans if needed, like an early stop
     }
@@ -69,7 +69,7 @@ fn scan_key_for_each(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut res = Vec::new();
     cursor.for_each(|_key, field, value| {
         res.push(RedisValue::BulkRedisString(field.clone()));
-        res.push(RedisValue::BulkRedisString(value.clone()));
+        res.push(value.map_or(RedisValue::Null, |v| RedisValue::BulkRedisString(v.clone())));
     });
 
     Ok(RedisValue::Array(res))

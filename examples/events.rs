@@ -66,7 +66,7 @@ fn event_send_invalid_utf8(ctx: &Context, args: Vec<RedisString>) -> RedisResult
     // SAFETY: `RedisModule_NotifyKeyspaceEvent` is set by Redis before any
     // command handler runs, so the `unwrap` cannot fail. `ctx.ctx` is the
     // valid context passed to this command invocation, `event` is a
-    // NUL-terminated C string that outlives the call, and `key_name.inner`
+    // NUL-terminated C string that outlives the call, and `key_name.as_ptr()`
     // is a valid `RedisModuleString` owned by `key_name` for the duration
     // of the call.
     let status: Status = unsafe {
@@ -74,7 +74,7 @@ fn event_send_invalid_utf8(ctx: &Context, args: Vec<RedisString>) -> RedisResult
             ctx.ctx,
             NotifyEvent::GENERIC.bits(),
             event.as_ptr(),
-            key_name.inner,
+            key_name.as_ptr(),
         )
     }
     .into();
