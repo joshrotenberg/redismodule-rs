@@ -88,8 +88,9 @@ run, followed by Done / Next / Blockers / Decisions, a relevant snippet and an
 actual Pacific finish timestamp. Resume unfinished work rather than duplicating
 it. F02 logging, F03 macro dependency hygiene, F04 proc-command fixtures and
 F05 borrowed cursor, F06 string-view scope and F07 owner-bound string views are
-complete. Follow STATUS.md for the next bounded chunk: scope RedisString's
-constructor/ownership/public-inner boundaries before further implementation,
-without expanding into a general FFI audit. This trial grants no additional SDK push,
+complete; F08's ownership specification is independently reviewed. Follow
+STATUS.md and docs/F08_STRING_OWNERSHIP.md for F09's bounded ownership repair,
+with the tracked-issue draft prerequisite before implementation. Do not expand
+into a general FFI audit or execute historical invalid native paths. This trial grants no additional SDK push,
 merge, release, credential, settings or cross-project authority. See the current
 [trial checkpoint](docs/DUE_TRIAL.md).

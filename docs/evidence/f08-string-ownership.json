@@ -1,0 +1,448 @@
+{
+  "chunk": "F08",
+  "state": "specification_independently_reviewed",
+  "base_commit": "e53e632b0c8e87fb4b6887323329f12ee29c0c3f",
+  "branch": "docs/f08-string-ownership-scope",
+  "methodology": "tracked .rs files; non-line-comment literal calls; raw_field candidates only in files mentioning RedisString. Syntactic inventory, not type resolution or exhaustive alias/clone inference.",
+  "tracked_rust_files": 209,
+  "sdk": {
+    "head": "e53e632b0c8e87fb4b6887323329f12ee29c0c3f",
+    "rust_files": 74,
+    "counts": {
+      "raw_retain_constructor": 6,
+      "raw_adopt_constructor": 9,
+      "copy_create": 12,
+      "raw_context_copy": 1,
+      "raw_byte_copy": 0,
+      "retain_alias": 1,
+      "argument_decoder": 4,
+      "raw_field_candidate": 43
+    },
+    "production_source_files": {
+      "build.rs": "519de5da3bfeb832e6299ff4059e4bb63efdd227ee8da07ee903cc28d08f1f34",
+      "crates/common/src/lib.rs": "85ddabb2a3fe20c59e0d12c3d0587c00dd49f135be142908fd06e0f8790df354",
+      "crates/macros-internals/src/api_versions.rs": "625a97488db3696456217be24d738b02d33ab32b8d9d15c4212462e652080eb0",
+      "crates/macros-internals/src/lib.rs": "a4fe328745c48985a99a2e3fc14f7dc75f9dbaf13b480e7b93205d9154d29d2e",
+      "crates/macros/src/command.rs": "cc82710e7c8d227f1d86dc3d6ea65171949fa337a1ad3a8c74f748b61ab387f2",
+      "crates/macros/src/info_section.rs": "0785a8014bdec70869cbca37d7eb31398d0eb24f72651c0661dd1df690f10ff6",
+      "crates/macros/src/lib.rs": "5ac02bf82abb128a0239dc68d0d81741e649e867336b5d7984419359b25149c3",
+      "crates/macros/src/redis_value.rs": "b17f6a2632e280de5a3606a0fe28f7cb201566139429f70514386800bc16aa2e",
+      "crates/macros/src/registration.rs": "3ce0300a466443c1b021c28d9f8cce0f6ed43ea88728d6332fa01657b3cd08e8",
+      "examples/acl.rs": "e4f698429a6416d9c59916e3cdb6ecadd99937c84bdaabf57248e9b9b35c1f50",
+      "examples/args.rs": "e0e51637c8030559f3f27b1939c04031310bce4386910dd862b47496598e543c",
+      "examples/block.rs": "e3f0ae600bbbaece0cb69c8fb3e03e1f17eca37fba12385630e499a83acbb0c8",
+      "examples/call.rs": "845ce858fe0245a49bc0e3f138b3c48114e457030c7900f778a5f23cf4b6e875",
+      "examples/configuration.rs": "3b4f3ff6eb6096e94837eaa7c5a61ba3c3d8e55fc1c265c533bd51b7f6bcf090",
+      "examples/ctx_flags.rs": "8522d23cdd66ff24b8dfbe92e11738d31c4c6102bb0dcdb4e98a84771e7ad367",
+      "examples/data_type.rs": "88152be56e7b90af818ea2bc856fe08720aec055a4dc41d11be24bffefa96957",
+      "examples/events.rs": "9c74618b6bc09b82ac513d0c0148a177afa272138930aa375827e30d3a7bde44",
+      "examples/expire.rs": "377d27bb86786da571052bb0d6feafd0058aedd3c6d172307dfdf0b2d7a074d3",
+      "examples/hello.rs": "1299ecf1c577c0c97cae1aaa38482fb0ba580df3905f63ff7e53af48afa99956",
+      "examples/info.rs": "5aabd50f1a7045b92315b5b714e2f1f4f71e5336177ee1bebb8a5e07067d8fac",
+      "examples/info_handler_builder.rs": "06e8029553c31de7c7a50fecb2a4e10af2d21eada3cec036d8fe215616154414",
+      "examples/info_handler_macro.rs": "c09be445b6a5e3cb8e8ce15b4a96cd4433579511cbce9515a7ac9fd033cb9527",
+      "examples/info_handler_multiple_sections.rs": "76d80beac8e3b3e9c3d6be4aa4689e0fe594f3ec7dd66fa194089716df26c9ca",
+      "examples/info_handler_struct.rs": "75f9bd9254ce65523c9cee7003e8ec4792e4d18a7a8ed7bc843a80208851c491",
+      "examples/keys_pos.rs": "1ce7f7f4a49da1bf2365d49ce9db35e91acc72337644d9ddeaee3139621ea96e",
+      "examples/lists.rs": "657cd27e91fffbb309ca0a04f7cee0d2bc2e13251ce8eea2ad0a13a34cce7c9b",
+      "examples/load_unload.rs": "d9727560c0c5baf94feec0e724db885cdeba140b7a3ed63fbc341fe53b55439b",
+      "examples/log.rs": "86d9a0bd7ea102dfc99a3372becdd38ed65a15edd6718ffc049c331e3f449d34",
+      "examples/open_key_with_flags.rs": "de96d0d12fb6179a74b509938c9513e6175997b2d66408d8b23ba5eeed5e28cc",
+      "examples/proc_macro_commands.rs": "72d05070fa2fc6dc172ac3e420af14e0a5b519e851e8acc734a8d51d5d17dead",
+      "examples/response.rs": "2d26593a13ca0bb1c454ef9525d8fe82449877bbb0bae6d44b68c03f1900a3f8",
+      "examples/scan_keys.rs": "4c0882d7e176f83068221e9bfcd755981c6f158c26ebb12deaf99c911274e0df",
+      "examples/server_events.rs": "579d602cdb86c38593940735266603f55dd76222d9f5b7ed381f3deed076b14c",
+      "examples/stream.rs": "9df1051ac93ae3e64d86c0a332a6174116c32109b3f0efcd3dc840abb3a1d0e5",
+      "examples/string.rs": "05a9df422f4de5690c4caf38067b0cb9b41c9cf6bb817d4e92b837a916ef28ad",
+      "examples/string_views.rs": "9e4d1a07db3cecf9040ea95a7bfb933aab36a290c930f0097730f127e1aa3e79",
+      "examples/test_helper.rs": "215521e7d0c06963606398ab7932a797c86dc7b470b5473eab6f3f74696c7655",
+      "examples/threads.rs": "d039c76d1eb69615a7dccac6ee5ccdd0aa334e4c2f9674223faa1d2d5afa493d",
+      "examples/timer.rs": "eb780dc480d5a8f9156600810f18da3d1f499ccdc7d04bbe0b0dc61b49ee44a0",
+      "fixtures/package-consumers/manual/src/lib.rs": "176f61e644b0d55461a3cbe169485fbafaba31ee9c4c3adb150c46ec51469ff2",
+      "fixtures/package-consumers/proc/src/lib.rs": "4e32f7b81983e8e89ce7d60624f4a99dc64e0afa13cc609f8bcd19d2aba65a25",
+      "fixtures/package-consumers/registration/src/lib.rs": "8ef62af1e8eb000b23486af947b84730240e0dcc91a1d2ed371bf32331aa1123",
+      "src/alloc.rs": "89311411d8d4941b91a7b7f8ca937161a64c1deea89b5e2aadbf6f8cd163dcfc",
+      "src/apierror.rs": "a04cd33eec4474d4132e6cbd8ad31485f981a9c5402481a796af60cb4f817051",
+      "src/args.rs": "d615f26d6e4fa996e67bd180c22517211f249f06c8a67b78fd7ddd75422fbaa8",
+      "src/configuration.rs": "d7f8f429014b89da21ca636a7f900218a797de8f252879a5095bab184a011e8d",
+      "src/context/blocked.rs": "65b5fedbf2f6aef13867322d3512d150b218415a9773e33b868904f5a2a2083a",
+      "src/context/call_reply.rs": "4e315e45c0536188aca4148cb08b6fcd3aa0ab15b92940700bb6aaab1f7f9428",
+      "src/context/commands.rs": "21e0664f63a36ea5df78870280bb3fce9c354b0350648dfd65024818e6740211",
+      "src/context/defrag.rs": "8f5b862d7441c4547939cffb817a0abf1a98d344199ad2a9297d50d227005add",
+      "src/context/info.rs": "375a3f87d857199fa4e633d6913edf8df886aaa2190ec348cec7eb3f32b76edc",
+      "src/context/key_cursor.rs": "8d906fab05962a3fb42513d55435d829de655b83bf5ab5ebb8b6fea3732cf9cc",
+      "src/context/keys_cursor.rs": "4bab67b2ebb6cc90d0be784849b986fa3bebfe014c7b1e2b0364c0e985a238c8",
+      "src/context/mod.rs": "0719286068015ce866e9f4a8643ad0f1b89540a70a3862385bc4f71b17ea7251",
+      "src/context/server_events.rs": "1ee11b34089649e7a19123375c3d0b635ab4851b6142419a3c909352304dce90",
+      "src/context/thread_safe.rs": "bd19e02aacf7f1eb3ec40aaf4066d1e2c052c3934d4ff2c88fbe953aec098852",
+      "src/context/timer.rs": "d6714a6a52d7ce73134882160846df77cc5d41df1aa2bf7450e5231e10a80ed1",
+      "src/error.rs": "f7fea094a79245489289156f316800c1798b61e1dbc88b33f1adb75eb4b7a393",
+      "src/io.rs": "0ba73b673a5757cfe9d166bb6096eea13ff42ba76ee2151142858f59236f517a",
+      "src/key.rs": "07724059dc356048e9ea6ac12df09ca856a060275641a4eb269f0363ffffe865",
+      "src/lib.rs": "30a01ed23a48246b9255c6807aed2dbdafb2e4b8cb8ffde424060a2486706222",
+      "src/logging.rs": "9154d8f5896cf244ec59810bb3ecb761b05e6e43aacec269f4527b5443b771a6",
+      "src/macros.rs": "12b1cc11752ed51e31f96f77616b859d23c55cc9770be5ef037873cc4df0c309",
+      "src/native_types.rs": "9ff17729e048d9a41a7a99b973399a6cbc324239c9b132dd1b4232d95af4b940",
+      "src/raw.rs": "be81fd3f05d3719d69a979361cd62681b546bf03a3034da58b2a534e0d7ea590",
+      "src/rediserror.rs": "6e042dfcf88cf0f296e61d54ae2ec23004d64953da1b07a101fe10771cf76575",
+      "src/redismodule.rs": "0e8bfb6a3728e5c0bd4e7522f0c968b9d1b8a5384a3457ad817253e498699b7d",
+      "src/redisraw/mod.rs": "b31097f6bfeaa265560023bd794fc2a645a7deb376643a6705b836745d1d1097",
+      "src/redisvalue.rs": "5d1ad6f05342ca88c9773ef154bd2756472723fed1d3c2d136849f475f46b4d9",
+      "src/stream.rs": "7c09d98ab1291fbdf2a45ff3c5be7b06bb29321a0466d7b5aa896d6c2dbcff6a",
+      "src/utils.rs": "3ebb5f3a9c1b1de51166b3b80586b14e6b3baf0a6666b9edae0dd80f158e89e1",
+      "tests/dependency_contracts.rs": "0009b345a974dd82033e5ad593297e19e20a28c27032756c14e6cbba06d99d4b",
+      "tests/integration.rs": "63127b95e802ca3b77261e48f4b314ae8edcc136c8834bb69dff1186038497e8",
+      "tests/utils.rs": "927a02e0a7e3291f53dd7cfb1c2b859df77e56c876b0be476af4dc9f54ae05c6"
+    }
+  },
+  "references": [
+    {
+      "repo": "carolina",
+      "head": "0191175bb18ecf371d49d8b264a514f2c662099c",
+      "dirty": false,
+      "status": [],
+      "rust_files": 23,
+      "counts": {
+        "raw_retain_constructor": 0,
+        "raw_adopt_constructor": 0,
+        "copy_create": 0,
+        "raw_context_copy": 0,
+        "raw_byte_copy": 0,
+        "retain_alias": 0,
+        "argument_decoder": 2,
+        "raw_field_candidate": 2
+      },
+      "selected_sites": [
+        {
+          "file": "crates/klog-module/src/lib.rs",
+          "line": 2401,
+          "category": "raw_field_candidate"
+        },
+        {
+          "file": "crates/klog-module/src/lib.rs",
+          "line": 2423,
+          "category": "raw_field_candidate"
+        },
+        {
+          "file": "crates/klog-module/src/lib.rs",
+          "line": 2462,
+          "category": "argument_decoder"
+        },
+        {
+          "file": "crates/klog-module/src/lib.rs",
+          "line": 2484,
+          "category": "argument_decoder"
+        }
+      ]
+    },
+    {
+      "repo": "redis-event-stream-module",
+      "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+      "dirty": false,
+      "status": [],
+      "rust_files": 37,
+      "counts": {
+        "raw_retain_constructor": 0,
+        "raw_adopt_constructor": 0,
+        "copy_create": 7,
+        "raw_context_copy": 0,
+        "raw_byte_copy": 0,
+        "retain_alias": 0,
+        "argument_decoder": 0,
+        "raw_field_candidate": 1
+      },
+      "selected_sites": [
+        {
+          "file": "examples/notifytest.rs",
+          "line": 31,
+          "category": "raw_field_candidate"
+        },
+        {
+          "file": "src/config.rs",
+          "line": 437,
+          "category": "copy_create"
+        },
+        {
+          "file": "src/config.rs",
+          "line": 637,
+          "category": "copy_create"
+        },
+        {
+          "file": "src/config.rs",
+          "line": 704,
+          "category": "copy_create"
+        },
+        {
+          "file": "src/config.rs",
+          "line": 781,
+          "category": "copy_create"
+        },
+        {
+          "file": "src/config.rs",
+          "line": 815,
+          "category": "copy_create"
+        },
+        {
+          "file": "src/config.rs",
+          "line": 841,
+          "category": "copy_create"
+        },
+        {
+          "file": "src/config.rs",
+          "line": 911,
+          "category": "copy_create"
+        }
+      ]
+    },
+    {
+      "repo": "redis-jmespath-module",
+      "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+      "dirty": false,
+      "status": [],
+      "rust_files": 35,
+      "counts": {
+        "raw_retain_constructor": 0,
+        "raw_adopt_constructor": 0,
+        "copy_create": 3,
+        "raw_context_copy": 0,
+        "raw_byte_copy": 0,
+        "retain_alias": 0,
+        "argument_decoder": 0,
+        "raw_field_candidate": 0
+      },
+      "selected_sites": [
+        {
+          "file": "src/command.rs",
+          "line": 50,
+          "category": "copy_create"
+        },
+        {
+          "file": "src/command.rs",
+          "line": 58,
+          "category": "copy_create"
+        },
+        {
+          "file": "src/command.rs",
+          "line": 76,
+          "category": "copy_create"
+        }
+      ]
+    },
+    {
+      "repo": "redis-stream-filter-module",
+      "head": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+      "dirty": false,
+      "status": [],
+      "rust_files": 40,
+      "counts": {
+        "raw_retain_constructor": 0,
+        "raw_adopt_constructor": 2,
+        "copy_create": 0,
+        "raw_context_copy": 1,
+        "raw_byte_copy": 0,
+        "retain_alias": 0,
+        "argument_decoder": 1,
+        "raw_field_candidate": 4
+      },
+      "selected_sites": [
+        {
+          "file": "src/blocking.rs",
+          "line": 87,
+          "category": "raw_field_candidate"
+        },
+        {
+          "file": "src/commands/xgroup_registration.rs",
+          "line": 64,
+          "category": "argument_decoder"
+        },
+        {
+          "file": "src/iter.rs",
+          "line": 91,
+          "category": "raw_field_candidate"
+        },
+        {
+          "file": "src/iter.rs",
+          "line": 188,
+          "category": "raw_context_copy"
+        },
+        {
+          "file": "src/iter.rs",
+          "line": 270,
+          "category": "raw_field_candidate"
+        },
+        {
+          "file": "src/iter.rs",
+          "line": 319,
+          "category": "raw_adopt_constructor"
+        },
+        {
+          "file": "src/iter.rs",
+          "line": 320,
+          "category": "raw_adopt_constructor"
+        },
+        {
+          "file": "src/reply.rs",
+          "line": 419,
+          "category": "raw_field_candidate"
+        }
+      ]
+    }
+  ],
+  "native_sources": [
+    {
+      "version": "7.2.8",
+      "method": "source inspection only; no native execution",
+      "files": {
+        "target/f01/servers/redis-7.2.8/src/module.c": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+        "target/f01/servers/redis-7.2.8/src/object.c": "6245cdc22667c615dcdabe64bebee734a5e5939f45f2c1ba7890ea3526fb7e2a",
+        "target/f01/servers/redis-7.2.8/src/defrag.c": "9522687bb84ef8d1e3025d1da1924700ef86c35dfbb4fb334dc36cdc79372da1"
+      }
+    },
+    {
+      "version": "8.10.2",
+      "method": "source inspection only; no native execution",
+      "files": {
+        "target/f08/native-8.10.2/module.c": "bcfad92db0a7be63df49ed981b4ad224b31ab4ff0fdf9752d60b6d0a519d3329",
+        "target/f08/native-8.10.2/object.c": "98bd017770c4fcc1e273977f36b2a5ac630487eb87368acbc36874b7cc43cd21",
+        "target/f08/native-8.10.2/defrag.c": "8ad145774616a24532134fe373153dc4568786a1ecb3e957a57cf25126a699e0"
+      }
+    }
+  ],
+  "native_8_10_provenance": "target/f08/native-8.10.2/provenance.json",
+  "github": {
+    "open_upstream_issues": 55,
+    "open_upstream_prs": 45,
+    "fork_open_prs": 2,
+    "issue_358": "partial ownership/context relationship; leaves upstream issue 358 open",
+    "pr_487": {
+      "head": "c7ca18e4a6fce2f2f32e390f39abef4d67e1c9c6",
+      "author": "jonnyomerredis",
+      "url": "https://github.com/RedisLabsModules/redismodule-rs/pull/487",
+      "state": "OPEN",
+      "relationship": "owned INFO result vs borrowed retain; AM-enabled/registered distinction must be preserved; attribution required if adapted"
+    },
+    "related_deferred_issues": [
+      134,
+      221
+    ],
+    "fork_pr_2": {
+      "head": "13e375d50c1c5d79c3eac4c64cf5426cebbf7db4",
+      "draft": true,
+      "ci_completed": 8,
+      "ci_failed": 3,
+      "ci_success": 5,
+      "scope": "F07 source locally complete; CI deferred"
+    }
+  },
+  "proposed_scope": [
+    "private NonNull string pointer and no stored context",
+    "explicit unsafe acquisition/adoption with ledger-specific AM detachment",
+    "safe pointer getter with no ownership/lifetime extension",
+    "context-free byte recipe; legacy creation source compatibility and CString policy preserved",
+    "unsafe raw argv decoder and direct declarative/procedural adapters",
+    "owned string producers and outbound transfers",
+    "scan string temporary ownership/optional value and two adjacent FnMut pointer origins only",
+    "get_current_user returns Option for native8.10 nullable result; older unsupported contexts excluded",
+    "true opening-context propagation in direct scan callback metadata for string producers"
+  ],
+  "scope_exclusions": [
+    "implementation in F08",
+    "original module migrations",
+    "general Context/key/thread/panic/raw-FFI audit",
+    "legacy invalid native path execution or historical leak sampler",
+    "CI modernization",
+    "package/MSRV/support/license/release commitments",
+    "changing legacy serde/NUL/UTF-8/numeric/stored-format contracts"
+  ],
+  "alternatives": [
+    "raw boundary only with cached context (insufficient for selected repair)",
+    "context lifetime parameter with much broader migration",
+    "independent owner (recommended)",
+    "copy every input (unnecessary copies/behavior changes)"
+  ],
+  "validation_this_chunk": {
+    "implemented_api": false,
+    "proposed_api_compiled": false,
+    "native_functions_executed": false,
+    "source_and_primary_api_inspection": true,
+    "original_sources_unchanged": true,
+    "runtime_tests": "not run; F07 evidence remains historical",
+    "verified_source_files": 209
+  },
+  "review": {
+    "status": "revised specification approved; findings source-verified and applied",
+    "provider": "Claude via Due",
+    "initial_result": "target/f08/review/result.json",
+    "initial_validation": "target/f08/review/validation.json",
+    "source_verified_dispositions": [
+      "GetCurrentUserName8.10NULL -> proposedOption; no fake/missing-client7.2 execution; nativeNULLcell onlyiflegalhostfixture",
+      "true nativekey producercontext carried with exclusive callbackdata, preserving borrowed no-Drop key behavior",
+      "retainargvowner acrosscommands, derive fresh byte/textview; rawobjectpointer vs buffer distinct",
+      "Context::new/dummy advisoryGILargument explicitlynotproof",
+      "common scanencodingcoverage+record otherhostmodes/gaps",
+      "known uncounted Self::from_redis_module_string Clone site",
+      "evidence/status finalization after review"
+    ],
+    "additional_caller_clarification": "removing accidental extra retains may change append success; preserve native policy and selected command protocols, not accidental refcount bugs",
+    "runs": [
+      {
+        "provider": "Claude via Due",
+        "run_id": "9efbcd6b-ac0c-44f6-9b1f-5c5c120a75ef",
+        "actual_process_exit": 0,
+        "result_status": "succeeded",
+        "verdict": "needs_changes",
+        "duration_ms": 359140,
+        "reported_cost_usd": 4.75023175,
+        "trace_records": 288,
+        "activities": 62,
+        "failed_activities": 0,
+        "trace_complete": true,
+        "dropped_records": 0,
+        "all_contracts_valid": true,
+        "source_inputs_unchanged": true,
+        "result": "target/f08/review/result.json",
+        "validation": "target/f08/review/validation.json"
+      },
+      {
+        "provider": "Claude via Due",
+        "run_id": "9f9b6e2a-0174-4ba7-b2e2-b5ff39e78b4f",
+        "actual_process_exit": 0,
+        "result_status": "succeeded",
+        "verdict": "approve",
+        "duration_ms": 144678,
+        "reported_cost_usd": 1.6711555000000002,
+        "trace_records": 132,
+        "activities": 27,
+        "failed_activities": 0,
+        "trace_complete": true,
+        "dropped_records": 0,
+        "all_contracts_valid": true,
+        "source_inputs_unchanged": true,
+        "result": "target/f08/review-delta/result.json",
+        "validation": "target/f08/review-delta/validation.json"
+      }
+    ],
+    "provenance": "target/f08/review/provenance.json",
+    "reviewer_limits": "Read/search only; source-only proposal review, no hash recomputation, tests, native execution or proposed-API compilation"
+  },
+  "retained": {
+    "inventory": "target/f08/inventory.json",
+    "upstream_issues": "target/f08/issue-open.json",
+    "upstream_prs": "target/f08/pr-open.json",
+    "fork_prs": "target/f08/fork-pr-open.json",
+    "native_hashes": "target/f08/native-inputs.json",
+    "pr_487": "target/f08/pr-487.json",
+    "pr_487_patch": "target/f08/pr-487.patch",
+    "sdk_before": "target/f08/sdk-inputs-before.json",
+    "source_verification": "target/f08/verification-before-review-finish.json"
+  },
+  "next_prerequisite": {
+    "baseline": "review/f09-baseline",
+    "branch": "fix/f09-string-ownership",
+    "required": "overlap refresh, authorized baseline/history upload, zero-content kickoff push and scoped draft before implementation",
+    "history_consequence": "baseline includes F07 local merge and F08 spec history; no fork master push",
+    "issue_scope": "Partial upstream issue 358; upstream PR 487 overlap/dependency with exact credit; leaves upstream issue 358 open"
+  },
+  "comparison": "Considered/deferred: equivalent native permission/tool settings are not established for a fair second arm; specification delivery primary.",
+  "final_spec_sha256": "899101e9fe759fb2669172f4cf77035b03b6131d23058cf5bb9cc762dff7343b"
+}

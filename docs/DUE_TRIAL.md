@@ -148,3 +148,30 @@ permission settings are not established and SDK delivery remains primary.
 Sanitized aggregate positive/negative observations route to due-expert; prompts,
 code and raw provider output remain local. See [F07 evidence](evidence/f07-string-views.json)
 for actual effects and limitations.
+
+## October 13 — F08 ownership specification review
+
+Two Due/Claude source-only reviews completed with true exit 0 and valid results.
+The first returned needs_changes (359,140 ms, reported USD 4.75023175): it found
+a missing native nullable-result case in the proposed ownership ledger. The
+caller verified both native versions, revised the Option/phase/migration criteria
+and related source-grounded details, then received approve on a focused delta
+review (144,678 ms, USD 1.6711555). These are model review verdicts, not CLI errors
+or implementation/runtime outcomes.
+
+All request/result/answer contracts, 288 and 132 trace records and summaries
+independently validate. There are 89 matched activities, no failures, drops,
+gaps or unmatched starts. Reviewed inputs stayed unchanged during each worker.
+All 209 production/reference Rust source files and six native source files are
+unchanged after the caller's doc refinements. No proposed API was implemented or
+compiled, and no native function/historical invalid path was executed. Reviewers
+read/search source only; native/hash/Git effects checks remain caller-owned.
+
+Available Due source is clean 76d33d410319d860425a2dd3609863a4ba5ca565; binary SHA
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b; Due 0.1.0 and
+Claude Code 2.1.296. Compiled-source/model/effort identities remain unknown. No
+retry, deadline, recursive delegation, permission expansion or binary/plugin
+refresh. A two-arm comparison was considered/deferred because equivalent native
+read-only tool/permission settings are not established; SDK specification delivery
+remains primary. Sanitized aggregate evidence routes to due-expert; no direct Due
+issue publication from this project. See [F08 evidence](evidence/f08-string-ownership.json).

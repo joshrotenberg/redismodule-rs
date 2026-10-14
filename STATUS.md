@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F08 — RedisString ownership specification: reviewed locally
+
+| Status | Report |
+|---|---|
+| **Done** | Inventoried 209 tracked Rust files across SDK/four references; classified acquisition, adoption, copying, AM detachment and outbound transfer. Compared retained Redis 7.2.8 and exact 8.10.2 native source with hashes. Specified an independent private non-null owner, no cached context, explicit unsafe raw ingress and corrected producer/scan migrations. Independent Due/Claude review identified an omitted nullable current-user result; source-verified Option mapping and other refinements were added, and focused re-review approves. All production/reference/native inputs remain unchanged. |
+| **Next** | F09: implement the reviewed bounded ownership repair after fresh overlap/history checks and the required dedicated baseline/empty kickoff/scoped draft. Read the F08 ledger and validation criteria first; carry this one chunk forward if unfinished. |
+| **Blockers** | None for F08 scoping. No proposed API was implemented, compiled or runtime-tested. F09 is gated on draft visibility. F07 remote CI finished five successes/three failures; CI remains deferred and PR 2 stays draft. Legal native no-user coverage is 8.10.2-only and must not be invented through a fake context. |
+| **Decisions** | Recommend independent native ownership with no stored Context pointer; preserve useful creation/command interfaces and native append policy while correcting ownership accounting. Explicit source breaks include private inner, unsafe raw decoder/constructors, non-const adoption, current-user Option, optional scan value and mutable FnMut origins. Pass the real scan producer context. Leaves upstream issue 358 and related 134/221 open; preserve PR 487 author/revision attribution. F08 stays local, original directories untouched; no package/MSRV/support/release or general FFI audit. |
+
+Details: [F08 repair specification](docs/F08_STRING_OWNERSHIP.md),
+[compact evidence](docs/evidence/f08-string-ownership.json).
+
 ## F07 — Owner-bound string views: validated locally
 
 | Status | Report |
