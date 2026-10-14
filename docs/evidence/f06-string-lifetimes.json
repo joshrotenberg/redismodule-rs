@@ -1,0 +1,174 @@
+{
+  "base_commit": "f066bb1f9a4320f75a3353a0f66901f7732bdab2",
+  "branch": "docs/f06-string-lifetime-scope",
+  "state": "specification_reviewed_no_implementation",
+  "methodology": "Tracked Rust source textual call-site search, not name-resolution/AST proof. Match .next_str/.try_as_str and RedisString/Self::from_ptr/string_as_slice across whitespace; include docs but label them. Exclude ignored/untracked targets and original directories unchanged.",
+  "sdk": {
+    "files_scanned": 73,
+    "legacy_next_str_calls": [
+      {
+        "file": "examples/info.rs",
+        "line": 12,
+        "method": "next_str",
+        "text": "let section = args.next_str()?;",
+        "doc": false
+      },
+      {
+        "file": "examples/info.rs",
+        "line": 13,
+        "method": "next_str",
+        "text": "let field = args.next_str()?;",
+        "doc": false
+      },
+      {
+        "file": "examples/threads.rs",
+        "line": 37,
+        "method": "next_str",
+        "text": "let val = args.next_str()?;",
+        "doc": false
+      }
+    ],
+    "existing_ArgCursor_calls": 2,
+    "try_as_str_calls": 12,
+    "raw_helper_calls": {
+      "from_ptr": 1,
+      "string_as_slice": 3
+    }
+  },
+  "reference_modules": [
+    {
+      "repo": "carolina",
+      "head": "0191175bb18ecf371d49d8b264a514f2c662099c",
+      "dirty": false,
+      "tracked_rust_files_scanned": 23,
+      "matching_source_files": {},
+      "counts": {
+        "next_str": 0,
+        "try_as_str": 0,
+        "from_ptr": 0,
+        "string_as_slice": 0
+      }
+    },
+    {
+      "repo": "redis-event-stream-module",
+      "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+      "dirty": false,
+      "tracked_rust_files_scanned": 37,
+      "matching_source_files": {
+        "src/capture.rs": "6c584b2fb80fae88cba088fd995e35da22eb8bd62354092fe9bfed59265101a8",
+        "src/commands.rs": "b032dd176ef6f8152190d60a9023370e531cbb40f90e3dd0a0191229fba2e960",
+        "src/config.rs": "a9b56f5d9e3b961e8377cead6a3d90afcb3a381aa8b24c6c9a795df13e7561d3"
+      },
+      "counts": {
+        "next_str": 0,
+        "try_as_str": 8,
+        "from_ptr": 0,
+        "string_as_slice": 1
+      }
+    },
+    {
+      "repo": "redis-jmespath-module",
+      "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+      "dirty": false,
+      "tracked_rust_files_scanned": 35,
+      "matching_source_files": {
+        "src/command.rs": "bd5d197c2a88a61b769263a26c35582517ccc8a9735fc28992b406e7e056c6cb",
+        "src/timeseries.rs": "e7600df6a00c6851bf0f9517939d7a28377f4abd3eda6e81292cd52e4aa3c526"
+      },
+      "counts": {
+        "next_str": 6,
+        "try_as_str": 4,
+        "from_ptr": 0,
+        "string_as_slice": 0
+      }
+    },
+    {
+      "repo": "redis-stream-filter-module",
+      "head": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+      "dirty": false,
+      "tracked_rust_files_scanned": 40,
+      "matching_source_files": {},
+      "counts": {
+        "next_str": 0,
+        "try_as_str": 0,
+        "from_ptr": 0,
+        "string_as_slice": 0
+      }
+    }
+  ],
+  "github": {
+    "retrieved_utc": "2026-10-14T01:52:38.545546+00:00",
+    "upstream_open_issues": 55,
+    "upstream_open_prs": 45,
+    "fork_open_issues": 0,
+    "fork_open_prs": 1,
+    "related_issue": 358,
+    "issue_disposition": "Narrow owner-bound string views only; leaves upstream issue 358 open",
+    "selected_prs": [
+      {
+        "number": 375,
+        "head": "68a0705b7f3d95a893eda19390e4dff51d3a4263",
+        "updated_at": "2023-11-27T10:50:25Z",
+        "scope": "status/import/native-call refactor; shared files but no selected lifetime signature repair"
+      },
+      {
+        "number": 487,
+        "head": "c7ca18e4a6fce2f2f32e390f39abef4d67e1c9c6",
+        "updated_at": "2026-10-13T13:24:06Z",
+        "scope": "ServerInfo null-context owned-string leak; separate ownership fix"
+      },
+      {
+        "number": 427,
+        "head": "40c57a632c8d8cd4f63c5c95334742af0b7e0cf9",
+        "updated_at": "2025-09-23T23:35:16Z",
+        "scope": "allocator macro doc comments; separate macro hunk"
+      }
+    ]
+  },
+  "native_source": {
+    "path": "target/f01/servers/redis-7.2.8/src/module.c",
+    "sha256": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+    "scope": "StringPtrLen read-only buffer, StringAppendBuffer single-reference requirement, synchronous notification callbacks; source inspection only"
+  },
+  "implementation_baseline_paths": 93,
+  "proposed_scope": [
+    "Owner-bound RedisString::try_as_str",
+    "Remove only consuming NextArg::next_str",
+    "Explicit unsafe raw text/byte view helpers with contracts",
+    "Affected SDK examples/callback wrapper; original modules untouched"
+  ],
+  "legacy_consuming_next_str_total_sites": 9,
+  "validation_this_chunk": "Static inventory/source/selected-PR review, JSON/link/effect checks and one compile-only custom NextArg consumer against unchanged SDK (exit0); no proposed API or runtime test",
+  "review": {
+    "provider": "Claude via Due",
+    "status": "succeeded",
+    "actual_exit": 0,
+    "verdict": "approve",
+    "scope": "Specification only",
+    "sdk_source_read": true,
+    "duration_ms": 214524,
+    "cost_usd": 2.37925025,
+    "trace_records": 167,
+    "trace_gaps_drops_failures_unmatched": 0,
+    "schemas": "request/result/answer/trace/summary pass",
+    "source_inputs_unchanged_during_review": true,
+    "post_review": "All8 nonblocking specification suggestions applied. Caller corrected one review overstatement about custom downstream trait implementations using an unchanged-SDK compile-only control (exit0); no proposed APIs/native paths run. No second model review.",
+    "limits": [
+      "Specification review only: no proposed API was compiled, no tests, Redis runtime, archive or consumer builds were run; migration predictions remain untested.",
+      "File hashes in target/f06/review/inputs.json were not recomputed (no Bash); I compared content and line numbers to the spec, not SHA-256 values.",
+      "Reference-module claims (JMESPath 6 consuming sites in 5 handlers, event-stream 8 views and 1 raw callback, Carolina/stream-filter zero) were checked only against the caller-supplied inventory text in target/f06/inventory.json; original module sources were not opened.",
+      "GitHub overlap data was checked for issue 358 and the three selected PR titles only; PR diffs and the remaining open issues/PRs were not audited.",
+      "module.c was read only in the three bounded regions (2795-2834, 2895-2929, 8600-8659); native aliasing, global threading, and context-lifetime safety remain unproved.",
+      "Inventory is textual over tracked Rust files, not AST or whole-ecosystem proof; untracked or downstream callers of try_as_str/from_ptr/string_as_slice are unknown.",
+      "No GitHub, filesystem or memory changes were made; review output only."
+    ]
+  },
+  "retained_evidence": {
+    "inventory": "target/f06/inventory.json",
+    "github": "target/f06/github-overlap.json",
+    "implementation_baseline": "target/f06/implementation-before.json",
+    "source_scope": "target/f06/scope-evidence.json",
+    "custom_trait_impl": "target/f06/custom-nextarg/report.json",
+    "review": "target/f06/review"
+  }
+}

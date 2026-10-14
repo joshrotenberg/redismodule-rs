@@ -86,7 +86,8 @@ publication or recursive delegation. Consider fair bounded comparisons when
 useful and record deferrals. Josh set a two-hour cadence: one bounded chunk per
 run, followed by Done / Next / Blockers / Decisions, a relevant snippet and an
 actual Pacific finish timestamp. Resume unfinished work rather than duplicating
-it. The current SDK queue is F02 logging, macro dependency hygiene, meaningful
-proc-command fixtures, then one focused ergonomics slice. This trial grants no additional SDK push,
+it. F02 logging, F03 macro dependency hygiene, F04 proc-command fixtures and
+F05 borrowed cursor are complete. F06 scopes the legacy string-view repair;
+follow STATUS.md and its reviewed specification for the next bounded chunk. This trial grants no additional SDK push,
 merge, release, credential, settings or cross-project authority. See the current
 [trial checkpoint](docs/DUE_TRIAL.md).
