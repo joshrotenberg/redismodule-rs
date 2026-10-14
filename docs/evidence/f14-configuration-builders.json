@@ -1,0 +1,136 @@
+{
+  "chunk": "F14",
+  "baseline": "46ed6d8bf71d3f044d579357d549f420c9dfc05f",
+  "pure_tests": 30,
+  "new_builder_ownership_probe": 1,
+  "compiler_controls": 26,
+  "archived_sdk_compiler_controls": 26,
+  "example_builds": {
+    "examples": 35,
+    "profiles": [
+      "debug",
+      "release"
+    ]
+  },
+  "doc_tests": {
+    "passed": 18,
+    "ignored": 4
+  },
+  "native_backend_host_profile_mode_cells": 64,
+  "paired_native_cases": 32,
+  "hosts": [
+    "7.2.8",
+    "8.10.2"
+  ],
+  "reference_builds": 4,
+  "reference_runtime_flows": 8,
+  "fresh_archives": 4,
+  "external_consumers": 3,
+  "consumer_profile_builds": 6,
+  "clippy": "warnings denied passed",
+  "comparison": {
+    "streamfilter": {
+      "calls": 6,
+      "before_nonempty_lines": 62,
+      "after_nonempty_lines": 39,
+      "formatter": "rustfmt 1.94.0 defaults edition2021, identical function body extraction; includes existing Result/error conversions",
+      "scope": "selected registration calls only; not complete helper LOC or performance/allocation evidence",
+      "callback_allocations": "no reduction claimed"
+    },
+    "jmespath": {
+      "calls": 4,
+      "before_nonempty_lines": 60,
+      "after_nonempty_lines": 41,
+      "formatter": "rustfmt 1.94.0 defaults edition2021, identical function body extraction; includes existing Result/error conversions",
+      "scope": "selected registration calls only; not complete helper LOC or performance/allocation evidence",
+      "callback_allocations": "no reduction claimed"
+    }
+  },
+  "production_archive_source_bytes_match": true,
+  "original_reference_heads_status_135_rust_hashes": "unchanged",
+  "source_review": {
+    "verdict": "approve",
+    "actual_process_exit": 0,
+    "result_status": "succeeded",
+    "duration_ms": 136864,
+    "reported_cost_usd": 2.06370875,
+    "trace_records": 127,
+    "trace_complete": true,
+    "activities": {
+      "started": 27,
+      "completed": 27,
+      "failed": 0,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "succeeded": 27
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 27,
+          "completed": 27,
+          "completion_status_counts": {
+            "succeeded": 27
+          }
+        }
+      }
+    },
+    "contracts": {
+      "actual_exit": 0,
+      "verdict": "approve",
+      "request_result_answer_all_trace_summary_valid": true,
+      "trace_records": 127,
+      "recorded_inputs_unchanged_through_completion": true,
+      "source_only": true
+    },
+    "limits": [
+      "Read/Grep/Glob only; nothing was built, formatted, linted, tested or executed, and no Redis host was touched.",
+      "Native behaviour, errno values, callback counts and owner accounting are judged from fixture/runner source and the SDK contract, not from runtime output; target/f14/runtime-corrected/report.json was only grepped for 64 cell status keys and its pass/fail state is not asserted here.",
+      "Compiler and reference reports were read as artifacts; their provenance, hashes, rustc/rustfmt versions and SDK graph claims were not independently reproduced.",
+      "Reference review was confined to the selected src/config.rs call sites, calls-before/after and migration diffs; whole reference modules, lib.rs init handling and archive/package contents were not reviewed.",
+      "No FFI/GIL/thread/alias/reentry/panic audit, no host module.c flag-policy check, and no accepted private-data reclamation assessment; outside-cwd originals were not opened."
+    ],
+    "findings_disposition": [
+      "F12 proposal linked to final F14 factory spelling/F13-based metrics",
+      "private Options bound intentionally general; public concrete builder/storage traits enforced"
+    ]
+  },
+  "limits": [
+    "selected macOS arm64 host/profile coverage, not support policy",
+    "no throughput/allocation reduction claim; callback still boxed",
+    "accepted userdata and general context/GIL/FFI/thread/alias/panic contracts deferred",
+    "API-unavailable branch is delegated to existing registration path; no new native missing-API host cell",
+    "archive consumer runtime skipped; native evidence belongs to owned SDK/reference fixtures"
+  ],
+  "retained_failed_attempts": [
+    "wrong-default compiler control expected E0277; corrected to actual E0308",
+    "native string MEMORY flag rejection expectation wrong: both host sources pass NUMERIC_CONFIG; use BITFLAGS as actual ordinary rejection and preserve native policy"
+  ],
+  "due_provenance": {
+    "sdk_head": "46ed6d8bf71d3f044d579357d549f420c9dfc05f",
+    "sdk_dirty": "M Cargo.toml\n M src/configuration.rs\n?? examples/configuration_builders.rs\n?? src/configuration/config.rs\n?? tools/configuration_builders.py",
+    "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "due_source_status": "",
+    "due_version": "due 0.1.0",
+    "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "model_requested": null,
+    "effort_requested": null,
+    "model_observed": "unknown",
+    "effort_observed": "unknown",
+    "compiled_source_identity": "unknown",
+    "comparison_deferred": "equivalent provider permission/tool setup unestablished; SDK delivery priority"
+  },
+  "artifacts": {
+    "native": "target/f14/runtime-corrected/report.json",
+    "compiler": "target/f14/compiler-corrected/report.json",
+    "archive_compiler": "target/f14/archive-compiler/report.json",
+    "references": "target/f14/references/report.json",
+    "reference_runtime": "target/f14/reference-runtime/report.json",
+    "packages": "target/f14/packages/report.json"
+  }
+}

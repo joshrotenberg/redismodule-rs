@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F14 — Typed configuration builders: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | Additive configuration::config integer/boolean/string/enumeration factories, explicit integer range, named flags/callbacks and consuming Result registration delegate to existing functions. Actual selected calls shrink 62→39 lines (stream-filter) and 60→41 (JMESPath), retaining error/callback bodies. 30 pure tests, 26 compiler plus 26 archived-SDK controls, 18 doc tests, all 35 examples both profiles, Clippy/fmt, 64 paired native backend/host/profile/mode cells, four isolated reference builds/eight flows and fresh archive/consumer checks pass. Independent Due/Claude source review approves; caller verifies contracts/effects separately. |
+| **Next** | F15 source-only evidence/priorities checkpoint: summarize F02–F14 gains against the three project goals, distinguish implemented/tested/proposed work, list known gaps and recommend the next bounded SDK slice. Use existing evidence; no automatic new feature/CI/general native audit or unchanged test/review replay. |
+| **Blockers** | None for local F14. CI/drafts 1–4 and accepted userdata cleanup remain deferred. Source-line savings are scoped call-site measurements; no allocation/throughput/support/safety certificate. Pure missing-API coverage remains inherited from F13, no invented native host cell. |
+| **Decisions** | Final factory name integer, not the historical i64 proposal; static storage, borrowed name/default, existing Fn callback and string load admission retained. Free APIs/tuple grammar/successful protocols remain. Original modules unchanged; no push/PR/publication or MSRV/package/support choice. |
+
+Details: [F14 API, measured examples and validation](docs/F14_CONFIGURATION_BUILDERS.md),
+[compact evidence](docs/evidence/f14-configuration-builders.json).
+
 ## F13 — Fallible scalar registration: validated locally
 
 | Status | Report |

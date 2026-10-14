@@ -339,3 +339,34 @@ Sanitized aggregate positive/negative observations route to due-expert only;
 private prompts/code/answers/raw logs remain local under target/f13.
 
 See [compact F13 evidence](evidence/f13-fallible-configuration.json).
+
+## F14 — Additive typed configuration builders
+
+One independent Due/Claude read-only source review approves, true exit 0/status
+succeeded, duration 136,864 ms, reported USD 2.06370875. Caller validates request/
+result/answer/all 127 trace records/summary contracts and immutable recorded
+inputs through completion. Complete delivery, zero drops/gaps and balanced
+successful activities; no denied/failed reads, edits, permission change,
+recursion, retry or arbitrary deadline. Due success is not runtime proof.
+
+Reviewer confirmed typed borrows/storage/callback bounds, consuming delegation,
+fixture/metadata-only controls and actual reference-call migrations/counts. Two
+nonblocking notes: F12's historical factory spelling/baseline now link to final
+F14 results, and private Options intentionally leaves value bounds to each public
+builder. No production change or unchanged model review was needed after approval.
+
+Caller separately verified native pairs, compiler/archived exports, package and
+reference graphs/hashes, original working trees and formatted comparisons. A
+wrong expected compiler diagnostic and a native string-MEMORY rejection
+assumption were corrected with retained evidence; host flag policy is unchanged,
+and neither is attributed to Due. No historical invalid native/crash/leak path.
+
+Due 0.1.0/source 76d33d410319d860425a2dd3609863a4ba5ca565 clean, binary SHA-256
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b; Claude
+2.1.296/macOS arm64. Model/effort omitted; observed settings/compiled source
+identity unknown. Read/Grep/Glob only. Fair comparison deferred: equivalent
+provider permission/tool setup unestablished; SDK delivery first. Outer caller
+routes sanitized aggregate metadata to due-expert; private prompts/code/answers/
+raw logs remain local under target/f14.
+
+See [compact F14 evidence](evidence/f14-configuration-builders.json).

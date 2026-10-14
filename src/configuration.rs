@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 mod registration;
 use registration::PendingRegistration;
+pub mod config;
 mod string_lifecycle;
 use std::rc::Rc;
 use string_lifecycle::{admit, track, StringReply};
