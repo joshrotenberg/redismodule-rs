@@ -319,6 +319,17 @@ macro_rules! redis_module {
             unsafe {
                 let _ = $crate::MODULE_CONTEXT.set_context(&context);
             }
+            // SAFETY: native initialization succeeded; this is the host's legal
+            // owner-thread OnLoad phase. The guard spans every later error return.
+            let string_configuration_scope = match unsafe {
+                $crate::configuration::StringConfigurationLoadScope::begin(&context)
+            } {
+                Ok(scope) => scope,
+                Err(error) => {
+                    context.log_warning(&error.to_string());
+                    return raw::Status::Err as c_int;
+                }
+            };
             // SAFETY: Redis supplies live callback argv/count with legal retention.
             let args = unsafe { $crate::decode_args(ctx, argv, argc) };
 
@@ -396,7 +407,10 @@ macro_rules! redis_module {
                         } else {
                             $string_default
                         };
-                        register_string_configuration(&context, $string_configuration_name, $string_configuration_val, default, $string_flags_options, $string_on_changed);
+                        if let Err(error) = register_string_configuration(&context, $string_configuration_name, $string_configuration_val, default, $string_flags_options, $string_on_changed) {
+                            context.log_warning(&error.to_string());
+                            return raw::Status::Err as c_int;
+                        }
                     )*
                 )?
                 $(
@@ -461,6 +475,11 @@ macro_rules! redis_module {
                 }
             )*
 
+            // SAFETY: successful return from this same live OnLoad scope.
+            if let Err(error) = unsafe { string_configuration_scope.commit() } {
+                context.log_warning(&error.to_string());
+                return raw::Status::Err as c_int;
+            }
             raw::Status::Ok as c_int
         }
 
@@ -478,6 +497,9 @@ macro_rules! redis_module {
                 }
             )*
 
+            // SAFETY: legal native OnUnload after all user deinit succeeded.
+            // Refused/canceled unload returns above without clearing any owners.
+            unsafe { $crate::configuration::close_string_configurations() };
             $crate::raw::Status::Ok as c_int
         }
     }

@@ -1,0 +1,573 @@
+{
+  "status": "implementation_validation_complete",
+  "base": "25b0c2e3c438c5fe6d78aedfa8687844fa66a59c",
+  "draft_pr": "https://github.com/joshrotenberg/redismodule-rs/pull/4",
+  "implementation": {
+    "snapshot_bound": "zero or one per registered string",
+    "registry": "owner-thread TLS, Rc/RefCell, no Send/Sync transport",
+    "cached_context": "OnLoad admission only; cleared at commit",
+    "registration": "Result; native errno before rejected Box cleanup",
+    "raw_lifecycle": "unsafe begin/commit/close with actual host phase/thread obligations",
+    "metadata": "stable accepted Box residual deferred; cached native reply released"
+  },
+  "validation": {
+    "pure_rust_tests": 25,
+    "new_state_tests": 6,
+    "compiler_controls": 7,
+    "compiler_native_execution": false,
+    "doc_tests_passed": 17,
+    "doc_tests_ignored": 20,
+    "python_tests": 22,
+    "examples_each_profile": 33,
+    "native_host_profile_cells": 4,
+    "repeated_gets_per_cell": 225,
+    "same_value_observed_getters": 2,
+    "three_published_configs_owned": 3,
+    "after_success_close_owned": 0,
+    "existing_configuration_cells": 4,
+    "isolated_reference_builds": 4,
+    "selected_reference_flows": 8,
+    "fresh_archives": 4,
+    "external_consumers": 6,
+    "consumer_builds": 12,
+    "compilers": [
+      "1.94.0",
+      "1.98.1"
+    ],
+    "archive_production_bytes_match": true,
+    "clippy_warnings_denied": true,
+    "fmt": true
+  },
+  "native_provenance": [
+    {
+      "profile": "debug",
+      "version": "7.2.8",
+      "server": {
+        "binary": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/servers/redis-7.2.8/src/redis-server",
+        "observed": {
+          "arch_bits": "64",
+          "atomicvar_api": "c11-builtin",
+          "config_file": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f11/runtime-reviewed-corrected-final/debug-7.2.8/redis.conf",
+          "configured_hz": "10",
+          "executable": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/servers/redis-7.2.8/src/redis-server",
+          "gcc_version": "4.2.1",
+          "hz": "10",
+          "io_threads_active": "0",
+          "listener0": "name=tcp,bind=127.0.0.1,port=57448",
+          "lru_clock": "13604464",
+          "monotonic_clock": "POSIX clock_gettime",
+          "multiplexing_api": "kqueue",
+          "os": "Darwin 25.6.0 arm64",
+          "process_id": "25383",
+          "process_supervised": "no",
+          "redis_build_id": "1a0a973037db9b88",
+          "redis_git_dirty": "1",
+          "redis_git_sha1": "febf8cb4",
+          "redis_mode": "standalone",
+          "redis_version": "7.2.8",
+          "run_id": "6e4632ce18fde95c69615633694c4e924ff9c9b2",
+          "server_time_usec": "1791989360155318",
+          "tcp_port": "57448",
+          "uptime_in_days": "0",
+          "uptime_in_seconds": "0"
+        },
+        "sha256": "94480949fb81fb1f0d6f862e9853abfbc7e66273a06fb4d7d7feea8e234df630",
+        "version_output": "Redis server v=7.2.8 sha=febf8cb4:1 malloc=libc bits=64 build=1a0a973037db9b88"
+      },
+      "startup_server_identity": {
+        "arch_bits": "64",
+        "atomicvar_api": "c11-builtin",
+        "config_file": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f11/runtime-reviewed-corrected-final/debug-7.2.8/rewritten.conf",
+        "configured_hz": "10",
+        "executable": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/servers/redis-7.2.8/src/redis-server",
+        "gcc_version": "4.2.1",
+        "hz": "10",
+        "io_threads_active": "0",
+        "listener0": "name=tcp,bind=127.0.0.1,port=57448",
+        "lru_clock": "13604464",
+        "monotonic_clock": "POSIX clock_gettime",
+        "multiplexing_api": "kqueue",
+        "os": "Darwin 25.6.0 arm64",
+        "process_id": "25384",
+        "process_supervised": "no",
+        "redis_build_id": "1a0a973037db9b88",
+        "redis_git_dirty": "1",
+        "redis_git_sha1": "febf8cb4",
+        "redis_mode": "standalone",
+        "redis_version": "7.2.8",
+        "run_id": "bc36ae53986df9ec8fda1408d0208c6f1bae47a9",
+        "server_time_usec": "1791989360271657",
+        "tcp_port": "57448",
+        "uptime_in_days": "0",
+        "uptime_in_seconds": "0"
+      },
+      "modules": {
+        "configuration_ownership": {
+          "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/debug/examples/libconfiguration_ownership.dylib",
+          "sha256": "f5c1e53a8daf5f881cc0c791ccfe3aa83db7308ff8f82f12c5643b0df86d4d31"
+        },
+        "configuration_ownership_b": {
+          "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/debug/examples/libconfiguration_ownership_b.dylib",
+          "sha256": "b4966ff746c7cfd22db9b34ef0d41820b58e111316a86e9090b2e53682a95ed9"
+        }
+      },
+      "cases": [
+        "bounded repeated GET/same-value SET, empty/Unicode/numeric-looking values, rejection/recovery, active-scope/post-commit admission",
+        "binary custom backing, strict text rejection, direct backing refresh, actual CONFIG REWRITE",
+        "canceled/successful unload, independent images, permitted reload, final cached-owner release",
+        "failed OnLoad after read, duplicate registration rejection, pending guard cleanup/recovery",
+        "ordinary invalid LOADEX forced OnUnload, configured LOADEX success and recovery",
+        "actual rewritten-file startup queue, valid native backing before comparison, unload cleanup"
+      ],
+      "same_value_getter_deltas": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "profile": "debug",
+      "version": "8.10.2",
+      "server": {
+        "binary": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+        "observed": {
+          "arch_bits": "64",
+          "atomicvar_api": "c11-builtin",
+          "config_file": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f11/runtime-reviewed-corrected-final/debug-8.10.2/redis.conf",
+          "configured_hz": "10",
+          "executable": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+          "gcc_version": "4.2.1",
+          "hz": "10",
+          "io_threads_active": "0",
+          "listener0": "name=tcp,bind=127.0.0.1,port=57795",
+          "lru_clock": "13604464",
+          "monotonic_clock": "ARM CNTVCT @ 1000 ticks/us",
+          "multiplexing_api": "kqueue",
+          "os": "Darwin 25.6.0 arm64",
+          "process_id": "25387",
+          "process_supervised": "no",
+          "redis_build_id": "764b3e45065a66fb",
+          "redis_git_dirty": "1",
+          "redis_git_sha1": "00000000",
+          "redis_mode": "standalone",
+          "redis_version": "8.10.2",
+          "run_id": "ea7c7642a5622e1af2851ae6764cd1eea54c2494",
+          "server_time_usec": "1791989360453621",
+          "tcp_port": "57795",
+          "uptime_in_days": "0",
+          "uptime_in_seconds": "0"
+        },
+        "sha256": "5f7cd7e2982bca1c7f31e4e3e396cee8c369838a18e41fc53f96ece23e955ae9",
+        "version_output": "Redis server v=8.10.2 sha=00000000:1 malloc=libc bits=64 build=764b3e45065a66fb"
+      },
+      "startup_server_identity": {
+        "arch_bits": "64",
+        "atomicvar_api": "c11-builtin",
+        "config_file": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f11/runtime-reviewed-corrected-final/debug-8.10.2/rewritten.conf",
+        "configured_hz": "10",
+        "executable": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+        "gcc_version": "4.2.1",
+        "hz": "10",
+        "io_threads_active": "0",
+        "listener0": "name=tcp,bind=127.0.0.1,port=57795",
+        "lru_clock": "13604464",
+        "monotonic_clock": "ARM CNTVCT @ 1000 ticks/us",
+        "multiplexing_api": "kqueue",
+        "os": "Darwin 25.6.0 arm64",
+        "process_id": "25388",
+        "process_supervised": "no",
+        "redis_build_id": "764b3e45065a66fb",
+        "redis_git_dirty": "1",
+        "redis_git_sha1": "00000000",
+        "redis_mode": "standalone",
+        "redis_version": "8.10.2",
+        "run_id": "7e8ecd83651d13297d46f4a98c90377a053d4070",
+        "server_time_usec": "1791989360592265",
+        "tcp_port": "57795",
+        "uptime_in_days": "0",
+        "uptime_in_seconds": "0"
+      },
+      "modules": {
+        "configuration_ownership": {
+          "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/debug/examples/libconfiguration_ownership.dylib",
+          "sha256": "f5c1e53a8daf5f881cc0c791ccfe3aa83db7308ff8f82f12c5643b0df86d4d31"
+        },
+        "configuration_ownership_b": {
+          "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/debug/examples/libconfiguration_ownership_b.dylib",
+          "sha256": "b4966ff746c7cfd22db9b34ef0d41820b58e111316a86e9090b2e53682a95ed9"
+        }
+      },
+      "cases": [
+        "bounded repeated GET/same-value SET, empty/Unicode/numeric-looking values, rejection/recovery, active-scope/post-commit admission",
+        "binary custom backing, strict text rejection, direct backing refresh, actual CONFIG REWRITE",
+        "canceled/successful unload, independent images, permitted reload, final cached-owner release",
+        "failed OnLoad after read, duplicate registration rejection, pending guard cleanup/recovery",
+        "ordinary invalid LOADEX forced OnUnload, configured LOADEX success and recovery",
+        "actual rewritten-file startup queue, valid native backing before comparison, unload cleanup"
+      ],
+      "same_value_getter_deltas": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "profile": "release",
+      "version": "7.2.8",
+      "server": {
+        "binary": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/servers/redis-7.2.8/src/redis-server",
+        "observed": {
+          "arch_bits": "64",
+          "atomicvar_api": "c11-builtin",
+          "config_file": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f11/runtime-reviewed-corrected-final/release-7.2.8/redis.conf",
+          "configured_hz": "10",
+          "executable": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/servers/redis-7.2.8/src/redis-server",
+          "gcc_version": "4.2.1",
+          "hz": "10",
+          "io_threads_active": "0",
+          "listener0": "name=tcp,bind=127.0.0.1,port=58138",
+          "lru_clock": "13604464",
+          "monotonic_clock": "POSIX clock_gettime",
+          "multiplexing_api": "kqueue",
+          "os": "Darwin 25.6.0 arm64",
+          "process_id": "25391",
+          "process_supervised": "no",
+          "redis_build_id": "1a0a973037db9b88",
+          "redis_git_dirty": "1",
+          "redis_git_sha1": "febf8cb4",
+          "redis_mode": "standalone",
+          "redis_version": "7.2.8",
+          "run_id": "4e18cbcd39420d998eb48a36820686652b4bc9fa",
+          "server_time_usec": "1791989360767526",
+          "tcp_port": "58138",
+          "uptime_in_days": "0",
+          "uptime_in_seconds": "0"
+        },
+        "sha256": "94480949fb81fb1f0d6f862e9853abfbc7e66273a06fb4d7d7feea8e234df630",
+        "version_output": "Redis server v=7.2.8 sha=febf8cb4:1 malloc=libc bits=64 build=1a0a973037db9b88"
+      },
+      "startup_server_identity": {
+        "arch_bits": "64",
+        "atomicvar_api": "c11-builtin",
+        "config_file": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f11/runtime-reviewed-corrected-final/release-7.2.8/rewritten.conf",
+        "configured_hz": "10",
+        "executable": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f01/servers/redis-7.2.8/src/redis-server",
+        "gcc_version": "4.2.1",
+        "hz": "10",
+        "io_threads_active": "0",
+        "listener0": "name=tcp,bind=127.0.0.1,port=58138",
+        "lru_clock": "13604465",
+        "monotonic_clock": "POSIX clock_gettime",
+        "multiplexing_api": "kqueue",
+        "os": "Darwin 25.6.0 arm64",
+        "process_id": "25400",
+        "process_supervised": "no",
+        "redis_build_id": "1a0a973037db9b88",
+        "redis_git_dirty": "1",
+        "redis_git_sha1": "febf8cb4",
+        "redis_mode": "standalone",
+        "redis_version": "7.2.8",
+        "run_id": "52d14005dba2be327d120fb93f63c65082c0db50",
+        "server_time_usec": "1791989361443313",
+        "tcp_port": "58138",
+        "uptime_in_days": "0",
+        "uptime_in_seconds": "0"
+      },
+      "modules": {
+        "configuration_ownership": {
+          "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/release/examples/libconfiguration_ownership.dylib",
+          "sha256": "c0bc91d2347a994d4f3851b7f572cfdb52f53ac3f3151de9fed4f49ad998defe"
+        },
+        "configuration_ownership_b": {
+          "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/release/examples/libconfiguration_ownership_b.dylib",
+          "sha256": "d71d23c79e16cd25e66e4300da8625f8e9e97d7e45501129238092daa1b8bc61"
+        }
+      },
+      "cases": [
+        "bounded repeated GET/same-value SET, empty/Unicode/numeric-looking values, rejection/recovery, active-scope/post-commit admission",
+        "binary custom backing, strict text rejection, direct backing refresh, actual CONFIG REWRITE",
+        "canceled/successful unload, independent images, permitted reload, final cached-owner release",
+        "failed OnLoad after read, duplicate registration rejection, pending guard cleanup/recovery",
+        "ordinary invalid LOADEX forced OnUnload, configured LOADEX success and recovery",
+        "actual rewritten-file startup queue, valid native backing before comparison, unload cleanup"
+      ],
+      "same_value_getter_deltas": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    },
+    {
+      "profile": "release",
+      "version": "8.10.2",
+      "server": {
+        "binary": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+        "observed": {
+          "arch_bits": "64",
+          "atomicvar_api": "c11-builtin",
+          "config_file": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f11/runtime-reviewed-corrected-final/release-8.10.2/redis.conf",
+          "configured_hz": "10",
+          "executable": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+          "gcc_version": "4.2.1",
+          "hz": "10",
+          "io_threads_active": "0",
+          "listener0": "name=tcp,bind=127.0.0.1,port=58482",
+          "lru_clock": "13604465",
+          "monotonic_clock": "ARM CNTVCT @ 1000 ticks/us",
+          "multiplexing_api": "kqueue",
+          "os": "Darwin 25.6.0 arm64",
+          "process_id": "25408",
+          "process_supervised": "no",
+          "redis_build_id": "764b3e45065a66fb",
+          "redis_git_dirty": "1",
+          "redis_git_sha1": "00000000",
+          "redis_mode": "standalone",
+          "redis_version": "8.10.2",
+          "run_id": "6e264e7c4e247b96418e7b526708d4bf8bce6add",
+          "server_time_usec": "1791989361679025",
+          "tcp_port": "58482",
+          "uptime_in_days": "0",
+          "uptime_in_seconds": "0"
+        },
+        "sha256": "5f7cd7e2982bca1c7f31e4e3e396cee8c369838a18e41fc53f96ece23e955ae9",
+        "version_output": "Redis server v=8.10.2 sha=00000000:1 malloc=libc bits=64 build=764b3e45065a66fb"
+      },
+      "startup_server_identity": {
+        "arch_bits": "64",
+        "atomicvar_api": "c11-builtin",
+        "config_file": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f11/runtime-reviewed-corrected-final/release-8.10.2/rewritten.conf",
+        "configured_hz": "10",
+        "executable": "/opt/homebrew/Cellar/redis/8.10.2/bin/redis-server",
+        "gcc_version": "4.2.1",
+        "hz": "10",
+        "io_threads_active": "0",
+        "listener0": "name=tcp,bind=127.0.0.1,port=58482",
+        "lru_clock": "13604465",
+        "monotonic_clock": "ARM CNTVCT @ 1000 ticks/us",
+        "multiplexing_api": "kqueue",
+        "os": "Darwin 25.6.0 arm64",
+        "process_id": "25410",
+        "process_supervised": "no",
+        "redis_build_id": "764b3e45065a66fb",
+        "redis_git_dirty": "1",
+        "redis_git_sha1": "00000000",
+        "redis_mode": "standalone",
+        "redis_version": "8.10.2",
+        "run_id": "f3fc5aabe429641248ac5e3ffcb4e74fe8914d11",
+        "server_time_usec": "1791989361806188",
+        "tcp_port": "58482",
+        "uptime_in_days": "0",
+        "uptime_in_seconds": "0"
+      },
+      "modules": {
+        "configuration_ownership": {
+          "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/release/examples/libconfiguration_ownership.dylib",
+          "sha256": "c0bc91d2347a994d4f3851b7f572cfdb52f53ac3f3151de9fed4f49ad998defe"
+        },
+        "configuration_ownership_b": {
+          "path": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/release/examples/libconfiguration_ownership_b.dylib",
+          "sha256": "d71d23c79e16cd25e66e4300da8625f8e9e97d7e45501129238092daa1b8bc61"
+        }
+      },
+      "cases": [
+        "bounded repeated GET/same-value SET, empty/Unicode/numeric-looking values, rejection/recovery, active-scope/post-commit admission",
+        "binary custom backing, strict text rejection, direct backing refresh, actual CONFIG REWRITE",
+        "canceled/successful unload, independent images, permitted reload, final cached-owner release",
+        "failed OnLoad after read, duplicate registration rejection, pending guard cleanup/recovery",
+        "ordinary invalid LOADEX forced OnUnload, configured LOADEX success and recovery",
+        "actual rewritten-file startup queue, valid native backing before comparison, unload cleanup"
+      ],
+      "same_value_getter_deltas": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ]
+    }
+  ],
+  "reviews": {
+    "review": {
+      "provider": "claude",
+      "status": "succeeded",
+      "actual_exit": 0,
+      "verdict": "approve",
+      "duration_ms": 229005,
+      "reported_cost_usd": 1.896742,
+      "trace": {
+        "incomplete": false,
+        "dropped_records": 0
+      },
+      "trace_records": 97,
+      "activities": {
+        "started": 11,
+        "completed": 11,
+        "failed": 0,
+        "unmatched_starts": [],
+        "completions_without_observed_start": 0,
+        "starts_without_id": 0,
+        "completions_without_id": 0,
+        "duplicate_starts": 0,
+        "completion_status_counts": {
+          "succeeded": 11
+        },
+        "by_kind": {
+          "tool_call": {
+            "started": 11,
+            "completed": 11,
+            "completion_status_counts": {
+              "succeeded": 11
+            }
+          }
+        }
+      },
+      "contracts": {
+        "actual_exit": 0,
+        "verdict": "approve",
+        "result_answer_trace_summary_valid": true,
+        "trace_records": 97
+      },
+      "provenance": {
+        "sdk_head": "29511230fcc066fda2700175dad5c43a161822c9",
+        "sdk_dirty": " M src/configuration.rs\n M src/macros.rs\n?? src/configuration/\n",
+        "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+        "due_source_status": "",
+        "due_version": "due 0.1.0",
+        "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+        "provider_version": "2.1.296 (Claude Code)",
+        "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+        "model_requested": null,
+        "effort_requested": null,
+        "model_observed": "unknown",
+        "effort_observed": "unknown",
+        "compiled_source_identity": "unknown",
+        "comparison_deferred": "equivalent permission setup unestablished; bounded SDK delivery"
+      }
+    },
+    "review-delta": {
+      "provider": "claude",
+      "status": "succeeded",
+      "actual_exit": 0,
+      "verdict": "approve",
+      "duration_ms": 555637,
+      "reported_cost_usd": 3.82132775,
+      "trace": {
+        "incomplete": false,
+        "dropped_records": 0
+      },
+      "trace_records": 250,
+      "activities": {
+        "started": 34,
+        "completed": 34,
+        "failed": 0,
+        "unmatched_starts": [],
+        "completions_without_observed_start": 0,
+        "starts_without_id": 0,
+        "completions_without_id": 0,
+        "duplicate_starts": 0,
+        "completion_status_counts": {
+          "succeeded": 34
+        },
+        "by_kind": {
+          "tool_call": {
+            "started": 34,
+            "completed": 34,
+            "completion_status_counts": {
+              "succeeded": 34
+            }
+          }
+        }
+      },
+      "contracts": {
+        "actual_exit": 0,
+        "verdict": "approve",
+        "result_answer_trace_summary_valid": true,
+        "trace_records": 250
+      },
+      "provenance": {
+        "sdk_head": "29511230fcc066fda2700175dad5c43a161822c9",
+        "sdk_dirty": "F11 core plus corrected fixtures/runner and doc refinements",
+        "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+        "due_source_status": "",
+        "due_version": "due 0.1.0",
+        "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+        "provider_version": "2.1.296 (Claude Code)",
+        "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+        "model_requested": null,
+        "effort_requested": null,
+        "model_observed": "unknown",
+        "effort_observed": "unknown",
+        "compiled_source_identity": "unknown",
+        "comparison_deferred": "equivalent permission setup unestablished; bounded SDK delivery"
+      }
+    }
+  },
+  "review_dispositions": [
+    "Core and final delta/fixture source reviews approve; contracts independently validate.",
+    "Native errno/raw error propagation/TLS limits clarified.",
+    "Real host active-scope/post-commit/failure/unload/reload probes, no fabricated contexts.",
+    "Actual pure setter dispatch gate; removed construction-only canceled-unload unit.",
+    "Current-operation log tails and diagnostic invariant logs; affected fixtures rechecked."
+  ],
+  "original_references": [
+    {
+      "name": "carolina",
+      "head": "0191175bb18ecf371d49d8b264a514f2c662099c",
+      "rust_files_unchanged": 23
+    },
+    {
+      "name": "eventstream",
+      "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+      "rust_files_unchanged": 37
+    },
+    {
+      "name": "jmespath",
+      "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+      "rust_files_unchanged": 35
+    },
+    {
+      "name": "streamfilter",
+      "head": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+      "rust_files_unchanged": 40
+    }
+  ],
+  "failed_attempts": [
+    "first guard insertion was in command macro; all-target compile caught before native execution",
+    "first SET assertion expected one getter; backup+comparison observed and balanced assertion corrected",
+    "compiler dependency search omitted; E0463 corrected",
+    "retained reference binary lost executable mode; clean startup refusal then original mode preserved",
+    "interim prior-library native run after diagnostic/doc changes superseded by rebuilt cells",
+    "log-hardening edit double-sliced startup tail; corrected and fresh cells pass"
+  ],
+  "limits": [
+    "selected legal owner/GIL phases; no general context/thread/reentry/panic/FFI/alias certificate",
+    "userdata/closure/static backing reclamation deferred",
+    "type/timer/blocked-client refusals and worker-thread config callbacks not separately tested",
+    "macOS arm64 evidence; no MSRV/package/support/release policy",
+    "archive graph/compile/source validation; archived runtime not rerun",
+    "original directories unchanged; selected isolated flows not full applications",
+    "CI deferred; PR4 stays draft; no fork master push or GitHub merge"
+  ]
+}

@@ -155,10 +155,9 @@ impl RedisString {
     }
 
     /// Suppress Drop for exactly one reference. StrCallArgs releases it in its
-    /// own Drop; Redis releases configuration error strings. The legacy string
-    /// configuration getter also calls this, but the examined native getter
-    /// copies bytes without releasing the returned reference. That pre-existing
-    /// leak remains a separate repair; transfer alone does not prove cleanup.
+    /// own Drop; Redis consumes transferred configuration error strings. A
+    /// string configuration getter instead keeps its owner in its adapter and
+    /// returns a borrowed pointer, because native getter consumption is borrowed.
     pub(crate) fn take(self) -> *mut raw::RedisModuleString {
         std::mem::ManuallyDrop::new(self).as_ptr()
     }
