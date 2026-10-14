@@ -88,13 +88,14 @@ run, followed by Done / Next / Blockers / Decisions, a relevant snippet and an
 actual Pacific finish timestamp. Resume unfinished work rather than duplicating
 it. F02 logging, F03 macro dependency hygiene, F04 proc-command fixtures and
 F05 borrowed cursor, F06 string-view scope and F07 owner-bound string views are
-complete; F08's ownership specification, F09's selected repair and F10's
-configuration getter specification are reviewed and validated locally. Read
-STATUS.md/docs/F10_CONFIGURATION_GETTER.md and its compact evidence. Next is F11:
-implement only the reviewed narrow getter owner/lifecycle/registration contract
-following fresh overlap and required baseline/empty kickoff/scoped draft visibility
-before code. Preserve traits; explicit registry/native phase proof and corrected-code
-validation are required. No general userdata reclamation or new load/default policy.
+complete; F08's ownership specification, F09's repair, F10's getter scope and
+F11's selected getter/lifecycle repair are reviewed and validated locally. Read
+STATUS.md/docs/F11_CONFIGURATION_OWNERSHIP.md and compact evidence. F11 leaves
+fork PR4 draft for deferred CI/remote handoff. Next focus is F12 scoping of a
+configuration API ergonomics slice unless Josh steers elsewhere; no F12 code
+in that scoping activation and no automatic CI resumption. Keep real reference
+patterns/before-after examples/validation criteria; originals remain untouched.
+Do not duplicate completed F11 reviews/tests without new changes.
 Do not expand
 into a general FFI audit or execute historical invalid native paths. This trial grants no additional SDK push,
 merge, release, credential, settings or cross-project authority. See the current

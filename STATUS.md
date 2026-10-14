@@ -10,6 +10,19 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F11 — String-configuration reply ownership: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | Each string adapter retains zero/one reply owners and returns a borrowed native pointer. Macro load/error/unload coordination spans direct init registrations, tracks native acceptance, preserves canceled unload and releases final cache after deinit. String registration returns Result with native errno; unsafe raw lifecycle recipe and owner-thread TLS/Rc state avoid Send/Sync transport. Two independent Due/Claude reviews approve. 25 pure Rust tests (six meaningful new state probes), seven compiler controls, 17 docs and 22 Python tests pass; all 33 examples build both profiles, Clippy/fmt pass. Four native ownership host/profile cells, four existing configuration cells, four isolated reference builds/eight flows, four fresh archives/six consumers/12 builds pass. Archive production bytes match sources; originals unchanged. |
+| **Next** | Select F12 focus; recommendation is one source-only configuration API ergonomics specification with actual reference patterns, before/after examples and validation gates. Keep implementation separate; do not duplicate F11 or automatically resume CI. |
+| **Blockers** | None for local F11. CI/remote handoff remains deferred and fork PR 4 stays draft alongside 1/2/3. Full userdata/closure/static backing reclamation remains separate. Worker-thread config callbacks, special native unload refusals and broader platform/GIL/alias/panic contracts are not certified. |
+| **Decisions** | Preserve ConfigurationValue traits, text/default/command and LoadConfigs result/order policy. Direct string callers propagate Err; raw callbacks explicitly manage legal load/unload. Cached owner accounting is tested, not all memory/throughput/safety. Leaves upstream 358 open; 471 excluded. Baseline upload includes F09 local merge/F10 docs; fork master/GitHub merges/releases remain human-owned. No MSRV/package/server support choice. |
+
+Details: [F11 implementation and migration](docs/F11_CONFIGURATION_OWNERSHIP.md),
+[compact evidence](docs/evidence/f11-configuration-ownership.json),
+[fork draft PR 4](https://github.com/joshrotenberg/redismodule-rs/pull/4).
+
 ## F10 — String-configuration getter specification: reviewed locally
 
 | Status | Report |

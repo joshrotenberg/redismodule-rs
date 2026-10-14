@@ -8,6 +8,11 @@ use std::os::raw::{c_char, c_int, c_longlong, c_void};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Mutex;
 
+mod string_lifecycle;
+use std::rc::Rc;
+use string_lifecycle::{admit, track, StringReply};
+pub use string_lifecycle::{close_string_configurations, StringConfigurationLoadScope};
+
 bitflags! {
     /// Configuration options
     pub struct ConfigurationFlags : u32 {
@@ -278,33 +283,57 @@ pub fn get_i64_default_config_value(
     })
 }
 
+struct StringConfigurationPrivateData<T: ConfigurationValue<RedisString> + 'static> {
+    value: ConfigrationPrivateData<RedisString, T>,
+    reply: Rc<StringReply<RedisString>>,
+}
+
 extern "C" fn string_configuration_set<T: ConfigurationValue<RedisString> + 'static>(
     name: *const c_char,
     val: *mut raw::RedisModuleString,
     privdata: *mut c_void,
     err: *mut *mut raw::RedisModuleString,
 ) -> c_int {
-    let new_val = unsafe {
-        RedisString::retain_from_ptr(
-            std::ptr::NonNull::new(val).expect("non-null configuration input"),
-        )
-    };
-    let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<RedisString, T>) };
-    private_data.set_val(name, new_val, err)
+    let private_data = unsafe { &*(privdata as *const StringConfigurationPrivateData<T>) };
+    private_data
+        .reply
+        .call_if_active(|| {
+            let new_val = unsafe {
+                RedisString::retain_from_ptr(
+                    std::ptr::NonNull::new(val).expect("non-null configuration input"),
+                )
+            };
+            private_data.value.set_val(name, new_val, err)
+        })
+        .unwrap_or_else(|| {
+            // Native owns the setter input and consumes an owned error reference.
+            unsafe { *err = RedisString::create(None, "String configuration is closed").take() };
+            raw::REDISMODULE_ERR as c_int
+        })
 }
 
 extern "C" fn string_configuration_get<T: ConfigurationValue<RedisString> + 'static>(
     _name: *const c_char,
     privdata: *mut c_void,
 ) -> *mut raw::RedisModuleString {
-    let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<RedisString, T>) };
-    // we know the GIL is held so it is safe to use Context::dummy().
+    let private_data = unsafe { &*(privdata as *const StringConfigurationPrivateData<T>) };
+    // User code runs before borrowing the cache; its owned result remains alive
+    // for Redis's immediate post-callback copy, with no transfer of ownership.
     private_data
-        .variable
-        .get(&ConfigurationContext::new())
-        .take()
+        .reply
+        .read(|| private_data.value.get_val(), RedisString::as_ptr)
+        .unwrap_or(std::ptr::null_mut())
 }
 
+/// Register a string configuration within a managed module load scope.
+///
+/// [`crate::redis_module!`] supplies the scope automatically, including its user
+/// init callback. Custom native entry points must use
+/// [`StringConfigurationLoadScope`] and [`close_string_configurations`].
+/// Registration outside that scope or a native rejection returns an error.
+/// Any registration error must make a custom OnLoad return ERR; native
+/// acceptance followed by defensive tracking failure leaves stable closed
+/// private data until the host removes it. Other registration signatures remain.
 pub fn register_string_configuration<T: ConfigurationValue<RedisString>>(
     ctx: &Context,
     name: &str,
@@ -312,16 +341,24 @@ pub fn register_string_configuration<T: ConfigurationValue<RedisString>>(
     default: &str,
     flags: ConfigurationFlags,
     on_changed: Option<OnUpdatedCallback<T>>,
-) {
+) -> Result<(), RedisError> {
+    let generation = admit(ctx)?;
     let name = CString::new(name).unwrap();
     let default = CString::new(default).unwrap();
-    let config_private_data = ConfigrationPrivateData {
-        variable,
-        on_changed,
-        phantom: PhantomData::<RedisString>,
-    };
-    unsafe {
-        raw::RedisModule_RegisterStringConfig.unwrap()(
+    let register = unsafe { raw::RedisModule_RegisterStringConfig }
+        .ok_or(RedisError::Str("String configuration API is unavailable"))?;
+    let reply = Rc::new(StringReply::new());
+    let private_data = Box::new(StringConfigurationPrivateData {
+        value: ConfigrationPrivateData {
+            variable,
+            on_changed,
+            phantom: PhantomData::<RedisString>,
+        },
+        reply: Rc::clone(&reply),
+    });
+    let private_data = Box::into_raw(private_data);
+    let status = unsafe {
+        register(
             ctx.ctx,
             name.as_ptr(),
             default.as_ptr(),
@@ -329,9 +366,21 @@ pub fn register_string_configuration<T: ConfigurationValue<RedisString>>(
             Some(string_configuration_get::<T>),
             Some(string_configuration_set::<T>),
             None,
-            Box::into_raw(Box::new(config_private_data)) as *mut c_void,
-        );
+            private_data.cast(),
+        )
+    };
+    if status != raw::REDISMODULE_OK as c_int {
+        // Capture native errno before allocator cleanup can change it.
+        let native_error = std::io::Error::last_os_error();
+        // Native rejection does not acquire private data or call these adapters.
+        unsafe { drop(Box::from_raw(private_data)) };
+        return Err(RedisError::String(format!(
+            "String configuration registration failed: {native_error}"
+        )));
     }
+    // Native accepted the stable Box; it does not free SDK private data. Keep
+    // that existing metadata residual separate from the cached native owner.
+    track(generation, reply)
 }
 
 pub fn get_string_default_config_value<'a>(

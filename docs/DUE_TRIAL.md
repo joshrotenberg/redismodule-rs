@@ -243,3 +243,29 @@ contains verified nonblocking refinements. Do not claim continuous doc immutabil
 Caller verified 210 tracked Rust hashes, reference heads/status and four native
 hashes/Git blob. Sanitized aggregate feedback routes to due-expert; private prompts,
 code, answers and raw logs remain local. See [compact F10 evidence](evidence/f10-configuration-getter.json).
+
+## F11 — Selected configuration getter implementation
+
+Core and final fixture/delta Due/Claude reviews approve, both true exit 0 and
+status succeeded; caller independently validates result/answer/97 and 250 trace
+records/summary. Complete traces, zero drops/gaps, all activities balanced, no
+failed/denied reads or permission expansion. Exact result costs/durations and
+provenance are in compact evidence. Native proof belongs to caller runs, not
+review success. Worker source reads did not certify runtime/full ownership.
+
+Caller applied nonblocking errno/phase/TLS/raw error propagation clarifications,
+added a pure dispatch gate used by the actual setter, scoped log assertions and
+logged fixture invariant failures. A construction-only canceled-unload unit was
+removed; actual native refusal is the evidence. Compiler/native/copy/log harness
+failed attempts are retained and corrections checked. No Due retry/fallback,
+recursive agent, arbitrary deadline, global setting or external worker action.
+
+Installed Due 0.1.0/source 76d33d410319d860425a2dd3609863a4ba5ca565 clean, binary
+SHA-256 11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b; Claude
+2.1.296. Models/effort omitted; observed settings/compiled source identity unknown.
+Comparison deferred because equivalent native permission/tool setup is not
+established and bounded SDK delivery takes priority. Full artifacts stay local
+under target/f11; outer caller sends sanitized positive/negative batch metadata
+to due-expert. No private prompts/code/answers/raw logs are feedback attachments.
+
+See [compact F11 evidence](evidence/f11-configuration-ownership.json).
