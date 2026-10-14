@@ -236,3 +236,7 @@ crate-type = ["cdylib"]
 [[example]]
 name = "configuration_registration"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "configuration_builders"
+crate-type = ["cdylib"]

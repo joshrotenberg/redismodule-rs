@@ -4,6 +4,11 @@ This is a source-reviewed proposal, not an implemented API. F12 changes only
 documentation. Proposed signatures/builders and migrations have not been
 type-checked, compiled or run against Redis. F11 remains complete.
 
+Implementation follow-up: [F14](F14_CONFIGURATION_BUILDERS.md) implements the
+final `config::integer/boolean/string/enumeration` factories. Its F13-based
+measured calls are 62-to-39 lines (stream-filter) and 60-to-41 (JMESPath).
+The proposal and F11-based 57-to-39 count below are historical F12 evidence.
+
 ## Recommendation and implementation order
 
 Make all four registration functions report native rejection consistently, then
