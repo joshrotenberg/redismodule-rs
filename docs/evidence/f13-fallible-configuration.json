@@ -1,0 +1,170 @@
+{
+  "chunk": "F13",
+  "baseline": "f2ed3cd4e09fabf07620f215cf0eb1a6ccb0b381",
+  "scope": "fallible scalar configuration registration only",
+  "pure_tests": 29,
+  "new_drop_probes": 4,
+  "compiler_controls": 10,
+  "archived_sdk_compiler_controls": 10,
+  "native_cells": 56,
+  "native_hosts": [
+    "7.2.8",
+    "8.10.2"
+  ],
+  "profiles": [
+    "debug",
+    "release"
+  ],
+  "examples_built": 34,
+  "reference_builds": 6,
+  "reference_runtime_flows": 12,
+  "fresh_archives": 4,
+  "external_consumers": 3,
+  "consumer_profile_builds": 6,
+  "clippy": "warnings denied passed",
+  "production_archive_source_bytes_match": true,
+  "original_reference_heads_status_hashes_unchanged": true,
+  "limits": [
+    "selected macOS arm64 coverage only, not support policy",
+    "accepted userdata metadata cleanup, CI and broader Context/GIL/FFI/alias/thread/panic contracts deferred",
+    "API-unavailable path covered by shared production helper pure probes, not a missing-API native host",
+    "macro bool/enum rejection has zero reply snapshots before init; direct failures exercise actual one-owner cleanup",
+    "archive consumer runtime skipped; compiler controls use real archived SDK rlib"
+  ],
+  "retained_failed_attempts": [
+    "core edit-script boundary assertion before code writes; pre-edit pure run not counted",
+    "fixture compilation: trailing comma and MutexGuard conversion corrected",
+    "native smoke counter reset across reloads corrected",
+    "8.10 MODULE LIST builtin assumption corrected in scoped runner",
+    "JMESPath package-name mismatch before compilation corrected",
+    "retained dylib executable-mode copy omission corrected"
+  ],
+  "reviews": {
+    "core": "approve, contracts verified",
+    "delta": "approve, contracts verified"
+  },
+  "post_review_changes": "runner comment only, AST unchanged; explicit F13 metadata/migration ledgers added; no build/runtime replay needed",
+  "due_reviews": [
+    {
+      "scope": "review",
+      "actual_process_exit": 0,
+      "status": "succeeded",
+      "verdict": "approve",
+      "duration_ms": 189732,
+      "reported_cost_usd": 1.7276392499999995,
+      "trace_records": 94,
+      "trace_complete": true,
+      "activities": {
+        "started": 12,
+        "completed": 12,
+        "failed": 0,
+        "unmatched_starts": [],
+        "completions_without_observed_start": 0,
+        "starts_without_id": 0,
+        "completions_without_id": 0,
+        "duplicate_starts": 0,
+        "completion_status_counts": {
+          "succeeded": 12
+        },
+        "by_kind": {
+          "tool_call": {
+            "started": 12,
+            "completed": 12,
+            "completion_status_counts": {
+              "succeeded": 12
+            }
+          }
+        }
+      },
+      "contracts": {
+        "actual_exit": 0,
+        "verdict": "approve",
+        "request_result_answer_all_trace_summary_valid": true,
+        "trace_records": 94,
+        "no_denied_reads": true,
+        "recorded_inputs_unchanged_through_completion": true,
+        "limits": "source review only; proposed interpretation is independently checked by caller"
+      },
+      "source_only_limits": [
+        "Source-only review: no build, clippy, cargo test, or owned-server runs; runtime, compiler and hash validation remain with the caller.",
+        "Did not read the 8.10.2 native range (target/f08) or src/configuration/string_lifecycle.rs; F11 scope guard behavior taken from its use sites in macros.rs and the string path in configuration.rs.",
+        "Deny-unused-Result compiler fixture and isolated JMESPath/stream-filter/event-stream migrations were not among the listed files and were not reviewed.",
+        "Builders, accepted private-data reclamation, general Context/GIL/FFI/thread/alias/reentry/panic audit, CI, issue 471, and historical invalid/crash/leak reproduction excluded as instructed.",
+        "Read/Grep/Glob inside cwd only; no edits, Bash, network, or outside-cwd references."
+      ]
+    },
+    {
+      "scope": "review-delta",
+      "actual_process_exit": 0,
+      "status": "succeeded",
+      "verdict": "approve",
+      "duration_ms": 273004,
+      "reported_cost_usd": 3.5149032499999997,
+      "trace_records": 214,
+      "trace_complete": true,
+      "activities": {
+        "started": 43,
+        "completed": 43,
+        "failed": 0,
+        "unmatched_starts": [],
+        "completions_without_observed_start": 0,
+        "starts_without_id": 0,
+        "completions_without_id": 0,
+        "duplicate_starts": 0,
+        "completion_status_counts": {
+          "succeeded": 43
+        },
+        "by_kind": {
+          "tool_call": {
+            "started": 43,
+            "completed": 43,
+            "completion_status_counts": {
+              "succeeded": 43
+            }
+          }
+        }
+      },
+      "contracts": {
+        "actual_exit": 0,
+        "verdict": "approve",
+        "request_result_answer_all_trace_summary_valid": true,
+        "trace_records": 214,
+        "reviewed_inputs_unchanged_through_completion": true,
+        "source_only": true
+      },
+      "source_only_limits": [
+        "Source-only review: no builds, tests, clippy, hashing or server runs. Pass/fail evidence in compiler, archive-compiler, packages and references report.json files and the 56-cell runtime log are caller observations; I verified fixture construction and expected codes, not execution.",
+        "Could not hash files, so I cannot confirm that the archived tools/configuration_registration.py (sha cec730a1...) or the passing runtime run's sources_before correspond to the current runner text.",
+        "Did not reread unchanged SDK production code beyond the error-format sites needed to check the errno assertion (registration.rs finish, configuration.rs string path, macros.rs emitters).",
+        "Did not open per-cell report.json or redis.log outputs under the runtime output directories, and did not reread package_baseline.redis_command RESP parsing for nested MODULE LIST rows.",
+        "Excluded as instructed: builders, accepted private-data reclamation, general Context/GIL/FFI/alias/thread/panic audit, CI, issue 471, historical crash/leak paths, module-level audit broadening. Read/Grep/Glob inside cwd only; no edits."
+      ]
+    }
+  ],
+  "due_provenance": {
+    "sdk_head": "f2ed3cd4e09fabf07620f215cf0eb1a6ccb0b381",
+    "sdk_dirty": "M Cargo.toml\n M src/configuration.rs\n M src/macros.rs\n?? examples/configuration_registration.rs\n?? src/configuration/registration.rs\n?? tools/configuration_registration.py",
+    "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "due_source_status": "",
+    "due_version": "due 0.1.0",
+    "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "model_requested": null,
+    "effort_requested": null,
+    "model_observed": "unknown",
+    "effort_observed": "unknown",
+    "compiled_source_identity": "unknown",
+    "comparison_deferred": "equivalent provider permissions/tool setup unestablished; bounded SDK delivery"
+  },
+  "validation_artifacts": {
+    "native": "target/f13/runtime-corrected/report.json",
+    "pure": "target/f13/pure-final.log",
+    "compiler": "target/f13/compiler/report.json",
+    "archive_compiler": "target/f13/archive-compiler/report.json",
+    "packages": "target/f13/packages/report.json",
+    "references": "target/f13/references/report.json",
+    "reference_runtime": "target/f13/reference-runtime-corrected/report.json"
+  },
+  "next": "F14 additive typed builders, integer/boolean/string/enumeration, after refreshed overlap/local branching"
+}

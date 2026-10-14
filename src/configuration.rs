@@ -8,6 +8,8 @@ use std::os::raw::{c_char, c_int, c_longlong, c_void};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Mutex;
 
+mod registration;
+use registration::PendingRegistration;
 mod string_lifecycle;
 use std::rc::Rc;
 use string_lifecycle::{admit, track, StringReply};
@@ -233,6 +235,11 @@ extern "C" fn i64_configuration_get<T: ConfigurationValue<i64> + 'static>(
 }
 
 #[expect(clippy::too_many_arguments)]
+/// Register a numeric configuration during a legal module OnLoad.
+/// Returns an error if the API is unavailable or native registration rejects
+/// it; rejected callback data is released. Accepted private data stays stable.
+/// Propagate any registration error as OnLoad ERR. Existing CString/enum panic
+/// policy and native context/callback obligations are unchanged.
 pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
     ctx: &Context,
     name: &str,
@@ -242,15 +249,21 @@ pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
     max: i64,
     flags: ConfigurationFlags,
     on_changed: Option<OnUpdatedCallback<T>>,
-) {
+) -> Result<(), RedisError> {
     let name = CString::new(name).unwrap();
     let config_private_data = ConfigrationPrivateData {
         variable,
         on_changed,
         phantom: PhantomData::<i64>,
     };
-    unsafe {
-        raw::RedisModule_RegisterNumericConfig.unwrap()(
+    let (register, pending) = PendingRegistration::prepare(
+        unsafe { raw::RedisModule_RegisterNumericConfig },
+        config_private_data,
+        "Numeric",
+    )?;
+    let private_data = pending.as_ptr().cast();
+    let status = unsafe {
+        register(
             ctx.ctx,
             name.as_ptr(),
             default,
@@ -260,9 +273,10 @@ pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
             Some(i64_configuration_get::<T>),
             Some(i64_configuration_set::<T>),
             None,
-            Box::into_raw(Box::new(config_private_data)) as *mut c_void,
-        );
-    }
+            private_data,
+        )
+    };
+    pending.finish(status)
 }
 
 fn find_config_value<'a>(args: &'a [RedisString], name: &str) -> Option<&'a RedisString> {
@@ -409,6 +423,11 @@ extern "C" fn bool_configuration_get<T: ConfigurationValue<bool> + 'static>(
     private_data.get_val() as i32
 }
 
+/// Register a boolean configuration during a legal module OnLoad.
+/// Returns an error if the API is unavailable or native registration rejects
+/// it; rejected callback data is released. Accepted private data stays stable.
+/// Propagate any registration error as OnLoad ERR. Existing CString/enum panic
+/// policy and native context/callback obligations are unchanged.
 pub fn register_bool_configuration<T: ConfigurationValue<bool>>(
     ctx: &Context,
     name: &str,
@@ -416,15 +435,21 @@ pub fn register_bool_configuration<T: ConfigurationValue<bool>>(
     default: bool,
     flags: ConfigurationFlags,
     on_changed: Option<OnUpdatedCallback<T>>,
-) {
+) -> Result<(), RedisError> {
     let name = CString::new(name).unwrap();
     let config_private_data = ConfigrationPrivateData {
         variable,
         on_changed,
         phantom: PhantomData::<bool>,
     };
-    unsafe {
-        raw::RedisModule_RegisterBoolConfig.unwrap()(
+    let (register, pending) = PendingRegistration::prepare(
+        unsafe { raw::RedisModule_RegisterBoolConfig },
+        config_private_data,
+        "Boolean",
+    )?;
+    let private_data = pending.as_ptr().cast();
+    let status = unsafe {
+        register(
             ctx.ctx,
             name.as_ptr(),
             default as i32,
@@ -432,9 +457,10 @@ pub fn register_bool_configuration<T: ConfigurationValue<bool>>(
             Some(bool_configuration_get::<T>),
             Some(bool_configuration_set::<T>),
             None,
-            Box::into_raw(Box::new(config_private_data)) as *mut c_void,
-        );
-    }
+            private_data,
+        )
+    };
+    pending.finish(status)
 }
 
 pub fn get_bool_default_config_value(
@@ -477,6 +503,11 @@ extern "C" fn enum_configuration_get<
     private_data.get_val().into()
 }
 
+/// Register an enum configuration during a legal module OnLoad.
+/// Returns an error if the API is unavailable or native registration rejects
+/// it; rejected callback data is released. Accepted private data stays stable.
+/// Propagate any registration error as OnLoad ERR. Existing CString/enum panic
+/// policy and native context/callback obligations are unchanged.
 pub fn register_enum_configuration<G: EnumConfigurationValue, T: ConfigurationValue<G>>(
     ctx: &Context,
     name: &str,
@@ -484,7 +515,7 @@ pub fn register_enum_configuration<G: EnumConfigurationValue, T: ConfigurationVa
     default: G,
     flags: ConfigurationFlags,
     on_changed: Option<OnUpdatedCallback<T>>,
-) {
+) -> Result<(), RedisError> {
     let name = CString::new(name).unwrap();
     let (names, vals) = default.get_options();
     assert_eq!(names.len(), vals.len());
@@ -497,25 +528,31 @@ pub fn register_enum_configuration<G: EnumConfigurationValue, T: ConfigurationVa
         on_changed,
         phantom: PhantomData::<G>,
     };
-    unsafe {
-        raw::RedisModule_RegisterEnumConfig.unwrap()(
+    let (register, pending) = PendingRegistration::prepare(
+        unsafe { raw::RedisModule_RegisterEnumConfig },
+        config_private_data,
+        "Enum",
+    )?;
+    let private_data = pending.as_ptr().cast();
+    // Native copies enum names/values before returning. Keep their pointer
+    // array explicit and alive through the registration call.
+    let mut name_pointers: Vec<*const c_char> = names.iter().map(|v| v.as_ptr()).collect();
+    let status = unsafe {
+        register(
             ctx.ctx,
             name.as_ptr(),
             default.into(),
             flags.bits(),
-            names
-                .iter()
-                .map(|v| v.as_ptr())
-                .collect::<Vec<*const c_char>>()
-                .as_mut_ptr(),
+            name_pointers.as_mut_ptr(),
             vals.as_ptr(),
             names.len() as i32,
             Some(enum_configuration_get::<G, T>),
             Some(enum_configuration_set::<G, T>),
             None,
-            Box::into_raw(Box::new(config_private_data)) as *mut c_void,
-        );
-    }
+            private_data,
+        )
+    };
+    pending.finish(status)
 }
 
 pub fn get_enum_default_config_value<G: EnumConfigurationValue>(

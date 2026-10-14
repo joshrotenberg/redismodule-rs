@@ -304,3 +304,38 @@ Sanitized aggregate positive/negative observations route only to due-expert;
 private prompts/code/answers/raw logs remain local.
 
 See [compact F12 evidence](evidence/f12-configuration-api.json).
+
+## F13 — Fallible scalar registration implementation
+
+Core and focused validation/migration Due/Claude source reviews approve; both
+actual exits are 0/status succeeded. Durations 189,732/273,004 ms, reported costs
+USD 1.72763925/3.51490325. Caller validates request/result/answer/all 94/214 trace
+records/summary contracts, complete delivery, zero drops/gaps and balanced
+activities. No failed/denied reads, permission changes, recursive agents, retry
+or arbitrary model deadline. Reviewed inputs stayed unchanged until each completed.
+
+Core review checked the stable raw pending owner, native errno/rejection/drop
+contract and macro propagation. Caller applied per-mode errno checks and platform
+suffix, independently confirmed Clippy's expectation fires, and retained the
+guaranteed non-null Box pointer construction. Focused review checked corrected
+MODULE LIST behavior, compiler fixtures, archive/reference graph/migrations;
+caller added fresh metadata/F13 patch ledgers, clarified repeated rejected loads
+and identified the authoritative passing runtime output. Production source did
+not change after core approval. A runner comment-only edit has identical AST.
+
+Actual native/compiler/archive/reference evidence belongs to caller runs, not
+source review success. Caller caught/retained editor/fixture compile/counter/
+builtin-module/package-name/retained-execute-mode harness mistakes and corrected
+them; they are not attributed to Due. Source-only reviewers could not hash or
+execute. Archive production bytes, original reference heads/status/hashes and
+actual compiler diagnostic codes were separately checked.
+
+Due 0.1.0/source 76d33d410319d860425a2dd3609863a4ba5ca565 clean, binary SHA-256
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b; Claude
+2.1.296/macOS arm64. Model/effort omitted; observed settings and compiled source
+identity unknown. Read/Grep/Glob only. Fair A/B deferred: equivalent provider
+permission/tool setup is unestablished and bounded SDK delivery takes priority.
+Sanitized aggregate positive/negative observations route to due-expert only;
+private prompts/code/answers/raw logs remain local under target/f13.
+
+See [compact F13 evidence](evidence/f13-fallible-configuration.json).
