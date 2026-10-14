@@ -79,3 +79,20 @@ PR 476 remain open; the latter's head is
 Before F02 edits, reconcile scope again and complete the existing dedicated
 branch, empty kickoff and draft-PR requirement. Keep CI deferred and leave MSRV,
 package identities and support commitments undecided.
+
+## October 13 — F05 source review
+
+Due/Claude approves the bounded borrowed-cursor chunk. Actual exit 0, 181,991 ms,
+provider-reported USD 2.44096925. Complete result/answer/request/146 trace records/
+summary independently validate; no dropped records, sequence gaps, failed or
+unmatched activities. SDK source was read and reviewed hashes stayed unchanged.
+The reviewer ran no tests; caller-owned runtime/compiler checks establish effects.
+The source-only reviewer suggested clearer observed measurement output; the caller
+applied it and reran affected builds/runtime/Clippy/fmt. Other nonblocking ideas
+remain SDK followups. Exact current source/binary/provider identity is retained
+under `target/f05/review/`; no plugin/binary refresh or deadline was applied.
+Requested/observed model and effort, and compiled source identity, remain unknown.
+A two-arm comparison was considered and deferred because equivalent native
+read-only permissions/tools are not established and SDK delivery has priority.
+Sanitized aggregate findings route through due-expert; raw prompts/logs remain
+local. See [F05 results](evidence/f05-arguments.json) for checked effects and limits.
