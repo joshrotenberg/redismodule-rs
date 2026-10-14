@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F10 — String-configuration getter specification: reviewed locally
+
+| Status | Report |
+|---|---|
+| **Done** | Source-checked borrowed getter versus temporary setter/error transfer on retained 7.2.8 and pinned 8.10.2. Inventoried 210 tracked Rust files/four references and refreshed 55 issues/45 upstream PRs/three fork drafts. Specified one owned reply per string adapter with narrow load-error/success/canceled-unload cleanup. Due/Claude initial needs_changes and focused approve; caller verified/corrected load-order assumptions and acceptance gates. Result/answer/trace contracts and input hashes checked; no SDK implementation, compilation or native execution. |
+| **Next** | F11: implement only the reviewed getter owner/lifecycle/registration contract after fresh overlap checks and required dedicated baseline/empty kickoff/scoped draft. Corrected-code state/compiler/native/isolated migration/archive validation; carry this chunk forward if unfinished. |
+| **Blockers** | None for F10 scoping. F11 cannot begin code until draft visibility exists and must justify narrow registry access/native lifecycle phases. Full userdata/closure allocation reclamation is deferred; no complete memory/safety claim. Two outside-cwd reviewer reads denied; caller verified retained reference excerpts without expanding permission. CI remains deferred, drafts 1/2/3 remain open. |
+| **Decisions** | Preserve custom ConfigurationValue traits, strict text/default/command behavior; string registration gains Result and unmanaged raw entry needs explicit unsafe lifecycle recipe. Reply cache bounded to zero/one snapshots per registration, closure releases its cached owner; stable private data/registry pointer retirement kept explicit. Original references unchanged; local docs-only no-ff merge, no F10 push/PR/publication. Leaves upstream 358/471 open; F11's partial issue scope must be listed before implementation. No new MSRV/package/support commitments. |
+
+Details: [F10 repair specification](docs/F10_CONFIGURATION_GETTER.md),
+[compact evidence](docs/evidence/f10-configuration-getter.json).
+
 ## F09 — Independent native string ownership: validated locally
 
 | Status | Report |

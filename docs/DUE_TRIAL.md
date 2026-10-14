@@ -205,3 +205,41 @@ is routed once to due-expert; raw prompts/provider logs stay local and ignored.
 
 See [F09 evidence](evidence/f09-string-ownership.json) and retained target/f09/
 review/result, trace, summary, validation, provenance and focused delta records.
+
+## F10 — String-configuration getter specification
+
+Two bounded read-only Due/Claude reviews completed through the installed plugin:
+initial needs_changes (243,210 ms, reported USD 2.062249), focused revised-scope
+approve (193,847 ms, reported USD 1.80372325). Both actual exits are 0 and Due
+status succeeded; approval and execution are recorded separately. Caller validates
+both result/answer/all trace records/summary contracts independently. Traces have
+172/150 records, zero drops/gaps, terminal records and balanced activities.
+The delta has two denied outside-cwd reference reads; permitted caller excerpts
+and original hashes were independently checked without permission expansion.
+No SDK source was changed or compiled/native-executed by F10.
+
+The initial reviewer found an unreachable native pending-removal fixture gate;
+caller moved it to Rust-only state validation, clarified stable registry pointers,
+and read all three NULL consumers. Caller rejected two source assumptions:
+default loading bypasses the getter comparison and stream-filter's actual macro
+has no configurations block. Focused review confirms those dispositions. Its
+suggested additional human permission gate is covered by existing API-break and
+issue-visibility instructions; F11 code remains gated on its scoped draft.
+Registry transport requires a narrow access justification, not a blanket unsafe
+Send/Sync for private user data. Full userdata allocation reclamation stays deferred.
+
+Due source remains 76d33d410319d860425a2dd3609863a4ba5ca565, tracked tree clean;
+Due 0.1.0 binary SHA-256 11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b,
+Claude Code 2.1.296, macOS arm64. Model/effort omitted; observed settings and compiled
+source identity unknown. Read/Grep/Glob only, Agent disabled, no shell or MCP;
+no automatic retry, recursion or altered permissions. No two-arm comparison:
+equivalent provider permissions/setup is unestablished and SDK delivery prioritized.
+
+Artifacts remain local under target/f10/review and review-delta. During delta
+monitoring the caller briefly appended and removed a non-contract disposition
+paragraph; original input hash restored, exact worker read timing unknown. The
+proposed contract/production/native inputs remained unchanged; final documentation
+contains verified nonblocking refinements. Do not claim continuous doc immutability.
+Caller verified 210 tracked Rust hashes, reference heads/status and four native
+hashes/Git blob. Sanitized aggregate feedback routes to due-expert; private prompts,
+code, answers and raw logs remain local. See [compact F10 evidence](evidence/f10-configuration-getter.json).
