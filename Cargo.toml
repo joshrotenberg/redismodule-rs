@@ -232,3 +232,7 @@ crate-type = ["cdylib"]
 [[example]]
 name = "configuration_ownership_b"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "configuration_registration"
+crate-type = ["cdylib"]

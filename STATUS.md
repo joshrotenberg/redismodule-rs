@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F13 — Fallible scalar registration: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | Numeric/bool/enum registration returns Result with unavailable-API/native-error handling, immediate errno capture and rejected callback-data cleanup. Macro failures log/return ERR; accepted metadata stays stable. 29 pure tests (four new ownership probes), 10 compiler controls plus 10 against actual archived SDK, all 34 examples both profiles and Clippy/fmt pass. 56 native host/profile/mode cells, six isolated reference builds/12 flows, four archives/three consumers/six builds pass. Core and focused Due/Claude source reviews approve; caller checks contracts/effects separately. |
+| **Next** | F14 additive typed configuration builders from F12: explicit integer range, named flags/callbacks, consuming Result registration delegating to the existing functions. Preserve tuple DSL/custom traits and validate compiler/native/author-code evidence. Start on a fresh local branch after overlap refresh; no second chunk in this activation. |
+| **Blockers** | None for local F13. CI remains deferred and drafts 1–4 stay open. Accepted userdata/closure/static-resource reclamation and broad native contracts remain separate. Missing-API native host untested; pure shared-helper coverage is explicit. Failed/partial harness attempts are retained and corrected. |
+| **Decisions** | Deliberate Rust Result source break and observable registration rejection; successful command/default/parser/LoadConfigs behavior unchanged. Prefer consistent integer/boolean/string/enumeration factory names next. F13 stays local with no push/PR/publication; original modules unchanged, no new MSRV/package/support commitment. |
+
+Details: [F13 implementation and validation](docs/F13_FALLIBLE_CONFIGURATION.md),
+[compact evidence](docs/evidence/f13-fallible-configuration.json).
+
 ## F12 — Configuration registration ergonomics: reviewed locally
 
 | Status | Report |

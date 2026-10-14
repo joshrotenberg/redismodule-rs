@@ -93,10 +93,16 @@ F11's selected getter/lifecycle repair are reviewed and validated locally. F12's
 source-only registration ergonomics specification is reviewed; no proposed API
 has been compiled/implemented. Read STATUS.md/docs/F12_CONFIGURATION_API.md and
 compact evidence. F11 leaves fork PR4 draft for deferred CI/remote handoff.
-Next is only F13's uniform fallible numeric/bool/enum registration, rejected
-private-data cleanup, macro error propagation and selected isolated direct-caller
-migrations. Builders are a later bounded chunk; preserve tuples, custom traits,
-successful defaults/commands/LoadConfigs policy and F11 string lifecycle.
+F13's uniform fallible numeric/bool/enum registration, rejected-data cleanup,
+macro propagation and selected isolated migrations are validated locally. Read
+docs/F13_FALLIBLE_CONFIGURATION.md and its evidence. Next is one F14 additive
+typed-builder chunk from F12, delegating to those existing functions: explicit
+integer range, named flags/callbacks, consuming Result registration. Prefer
+integer/boolean/string/enumeration factory names; validate actual inference,
+compiler rejection, selected runtime and formatted author-code measurements.
+Preserve tuples, custom traits, successful defaults/commands/LoadConfigs policy
+and F11 string lifecycle. Accepted metadata reclamation/general native audit stay
+separate. Do not duplicate completed F13 reviews/tests without new changes.
 Refresh overlaps and follow local issue-independent process unless mapped to
 tracked issues, which requires draft visibility before code. CI stays deferred;
 originals remain untouched. Do not repeat completed F11/F12 checks without changes.
