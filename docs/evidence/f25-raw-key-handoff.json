@@ -1,0 +1,183 @@
+{
+  "chunk": "F25",
+  "kind": "implemented consuming raw-key ownership handoff",
+  "base": "af85fbc76cf307e6b3510f4af91f22928292025b",
+  "branch": "fix/f25-raw-key-handoff",
+  "status": "validated and independently reviewed for local merge",
+  "contracts": [
+    "Suppress Drop while preserving raw pointer tuple and signatures",
+    "Actual context/native phase/GIL/AM obligations remain; no retained lifetime",
+    "Sole manual close adoption and supported NULL distinct from borrowed callback adapters",
+    "Both scan adapters unchanged and non-closing",
+    "No selected original-module migration"
+  ],
+  "validation": {
+    "all_assertions_passed": true,
+    "pure_tests": 39,
+    "checkout_compiler": 9,
+    "final_archive_compiler": 9,
+    "examples_each_profile": 40,
+    "clippy_fmt_pass": true,
+    "doc_pass": 18,
+    "doc_ignored": 4,
+    "native_cells": 4,
+    "case_groups_per_cell": 21,
+    "owned_host_exit_zero": 4,
+    "archives": 4,
+    "consumers": 3,
+    "consumer_profile_builds": 6,
+    "packaged_source_native_manifest_files": 94,
+    "original_rust_files": 135,
+    "original_heads_status_unchanged": true,
+    "protected_files": 186,
+    "review": "approve",
+    "post_review_changes": "Two comments only in src/key.rs; production statements/fixtures unchanged",
+    "native_as_run_hashes_preserved": true,
+    "final_archives_match_current_source": true
+  },
+  "source_hashes": {
+    "src/key.rs": "0fae8e34d1e2b8340fe95736e65c27585868299ecf9df6ac7c87eede0a11cb78",
+    "src/context/key_cursor.rs": "d55c492450742296d35ca3e386034ce2672d4509fd42090379b2cf20adc230a5",
+    "src/context/keys_cursor.rs": "7378f4fdd822407485e93e75c69c21ef7755ca9839185adc147b13451183c977",
+    "examples/raw_key_handoff.rs": "e0ba941354296ea17c89a2ff6e8f4cbb2161a359a176785493f4821af8067dbf",
+    "tools/raw_key_handoff.py": "a5f5942f1e0902add9663df9473d5375e65dc3d6b4017150c2a52242d4cb0889",
+    "Cargo.toml": "c3802482689c80af61e5ecddc9c9cedaf6d328b94e1dcbfa59c0e6abdb6a3271",
+    "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709"
+  },
+  "receipts": {
+    "target/f25/checks.json": "e05ca481442e5a8f32378f8d808e8419c89379206cc694303e3ffdfc208af941",
+    "target/f25/compiler/report.json": "fc3c79f56c906d3ea2b27f60d4154283935bff4b6f062f478b33a13d1eae90af",
+    "target/f25/runtime/report.json": "4a092e1adb1cdf0a36d1f4d13b38398a745371c5228d865282cd770d8544f6eb",
+    "target/f25/runtime-exit.json": "5b8ec46a017ea0ac9ab325f344e70513750225adfe059359a0344a99926dec64",
+    "target/f25/packages-final/report.json": "fbeab60f61b6c25c29342221fcd92089bfc53f370d537cfa8b8125fe2a11df82",
+    "target/f25/packages-final/commands.json": "020c1e23e1c2c6f93907696246098efde450e7d8bf6dfa407c8fa86b12096501",
+    "target/f25/archive-producer-final/artifact.json": "0b1c24a21527707cd2f837be5a354d6ff3d524047ded597cc8cc361e66ec04d6",
+    "target/f25/archive-compiler-final/report.json": "0282942e1c6aef2b9e3b8251cb3d63b99777108b46498969ea1d76ccc02668b4",
+    "target/f25/archive-sources-final.json": "74a9026d6afc4ae58e6079debdfa02334d5193053c3ff9248daab70feea13af8",
+    "target/f25/final-validation.json": "79dfff1d0c0bd5794a1323c67fba6a5973f273229dbcbf9f6e7beba55f724ac9",
+    "target/f25/originals.json": "7b3621f21be568ed18c092edee3cdfdf90358653dd52e0b52dd3c24d3cdb598a",
+    "target/f25/native-provenance.json": "a7a48448cb483458e08611881a0bde4036d985d3bffdebcfd56fbf9b86dfdeb3",
+    "target/f25/visibility.json": "1e8a1d9582a29710409fae853d4bfd3dd46a17ff9fe67d719e77c3c7c3728946",
+    "target/f25/overlap.json": "3a21e6e5726897e0012af32f56ee9863638472d94beb9039f8c9c2224224f719",
+    "target/f25/due-provenance.json": "0faabb02fc40f2e9e45793da4ddf6f1af878c3e2a66597ef77d091f1c269d265",
+    "target/f25/review/contracts.json": "baaa81764d28266c3cb32c7246514eb3a0dd6b9a4c319f9bd28c2a9f0770d538",
+    "target/f25/review/disposition.json": "2d7bcb51b81db548e06b6c85c1868fb51599dcadf3fffa776cdf8c81bd7a02a3"
+  },
+  "review": {
+    "verdict": "approve",
+    "actual_exit": 0,
+    "trace_records": 176,
+    "duration_ms": 244272,
+    "provider_reported_cost_usd": 2.2384347499999997,
+    "activities": {
+      "started": 33,
+      "completed": 33,
+      "failed": 0,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "succeeded": 33
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 33,
+          "completed": 33,
+          "completion_status_counts": {
+            "succeeded": 33
+          }
+        }
+      }
+    }
+  },
+  "review_refinements": {
+    "review": "approve",
+    "blocking": 0,
+    "findings": [
+      {
+        "index": 1,
+        "action": "Explicit no later command/callback/thread lifetime extension sentence in extractor docs."
+      },
+      {
+        "index": 2,
+        "action": "Inline two-pointer-only assumption and future owned-field reassessment comment."
+      }
+    ],
+    "only_comments_changed_after_review": true,
+    "production_statements_and_fixtures_unchanged": true,
+    "native_receipts": "As-run source hash before comment-only refinements; no native rerun needed",
+    "final_archives": "Repackage and validate actual archived compiler controls against final source bytes",
+    "second_review": "Not repeated; nonblocking comments independently checked, no behavioral revision."
+  },
+  "due_provenance": {
+    "due_version": "due 0.1.0",
+    "binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "available_source_commit": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "available_source_dirty": "",
+    "binary_source_identity": "not embedded/unknown",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "requested_provider": "claude",
+    "requested_model": null,
+    "requested_effort": null,
+    "observed_model": "unknown unless exposed by result",
+    "observed_effort": "unknown",
+    "comparison": "Deferred: one complementary implementation review plus independent host/compiler effects is required; no useful controlled choice justifies a second unchanged review.",
+    "refresh": "No binary/plugin refresh"
+  },
+  "overlap": {
+    "open_fork_prs": [
+      18,
+      17,
+      16,
+      15,
+      14,
+      13,
+      12,
+      11,
+      10,
+      9,
+      8,
+      7,
+      6
+    ],
+    "upstream_prs": 45,
+    "issue205": "open, partial adjacency only; leaves upstream205 open",
+    "pr245_head": "16487cd1ec91090da4a783162d33dcf9e702fb53",
+    "pr375_head": "68a0705b7f3d95a893eda19390e4dff51d3a4263",
+    "focused_extractor_overlap_found": false,
+    "adjacent_key_files": [
+      13,
+      18
+    ],
+    "plan6": "Remote body now records base/relanding decisions; not verified direct human direction to this owning chat. Current explicit scoped authorization retains this checkout/queue. No replacement PR modifications.",
+    "workers": []
+  },
+  "visibility": {
+    "baseline": "af85fbc76cf307e6b3510f4af91f22928292025b",
+    "kickoff": "105de7b818edc304e48c51678e2d895f05f644c4",
+    "zero_content_verified": true,
+    "remote": {
+      "baseRefName": "review/f25-baseline",
+      "headRefOid": "105de7b818edc304e48c51678e2d895f05f644c4",
+      "isDraft": true,
+      "number": 19,
+      "state": "OPEN",
+      "url": "https://github.com/joshrotenberg/redismodule-rs/pull/19"
+    },
+    "implementation_not_started": true
+  },
+  "limits": [
+    "Selected macOS arm64/libc 7.2.8/8.10.2 debug/release, not server support policy",
+    "Issued manual close operations, not internal AM/stack cleanup, heap or refcounts",
+    "No old invalid path, fake native context, live handle across command return or general safety claim",
+    "Post-review comments preserve code; native receipts have earlier as-run key hash, final archives have final source",
+    "Only selected hashtable scans; no template-hash matrix or broad key/DMA alias audit",
+    "Independent source review cannot certify runtime/source-original effects; caller checked separately",
+    "CI held; PR stays draft, GitHub merges/releases human-owned"
+  ],
+  "next": "F26 source-only hash contract and old-native compatibility specification"
+}
