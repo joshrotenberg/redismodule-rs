@@ -1,10 +1,9 @@
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::ItemFn;
 
 mod command;
 mod info_section;
 mod redis_value;
+mod registration;
 
 /// This proc macro allow to specify that the follow function is a Redis command.
 /// The macro accept the following arguments that discribe the command properties:
@@ -97,15 +96,10 @@ pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn role_changed_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ast: ItemFn = match syn::parse(item) {
-        Ok(res) => res,
-        Err(e) => return e.to_compile_error().into(),
-    };
-    let gen = quote! {
-        #[linkme::distributed_slice(redis_module::server_events::ROLE_CHANGED_SERVER_EVENTS_LIST)]
-        #ast
-    };
-    gen.into()
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::server_events::ROLE_CHANGED_SERVER_EVENTS_LIST),
+    )
 }
 
 /// Proc macro which is set on a function that need to be called whenever a loading event happened.
@@ -119,15 +113,10 @@ pub fn role_changed_event_handler(_attr: TokenStream, item: TokenStream) -> Toke
 /// ```
 #[proc_macro_attribute]
 pub fn loading_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ast: ItemFn = match syn::parse(item) {
-        Ok(res) => res,
-        Err(e) => return e.to_compile_error().into(),
-    };
-    let gen = quote! {
-        #[linkme::distributed_slice(redis_module::server_events::LOADING_SERVER_EVENTS_LIST)]
-        #ast
-    };
-    gen.into()
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::server_events::LOADING_SERVER_EVENTS_LIST),
+    )
 }
 
 /// Proc macro which is set on a function that need to be called whenever a flush event happened.
@@ -141,15 +130,10 @@ pub fn loading_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStre
 /// ```
 #[proc_macro_attribute]
 pub fn flush_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ast: ItemFn = match syn::parse(item) {
-        Ok(res) => res,
-        Err(e) => return e.to_compile_error().into(),
-    };
-    let gen = quote! {
-        #[linkme::distributed_slice(redis_module::server_events::FLUSH_SERVER_EVENTS_LIST)]
-        #ast
-    };
-    gen.into()
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::server_events::FLUSH_SERVER_EVENTS_LIST),
+    )
 }
 
 /// Proc macro which is set on a function that need to be called whenever a module is loaded or unloaded on the server.
@@ -163,15 +147,10 @@ pub fn flush_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream
 /// ```
 #[proc_macro_attribute]
 pub fn module_changed_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ast: ItemFn = match syn::parse(item) {
-        Ok(res) => res,
-        Err(e) => return e.to_compile_error().into(),
-    };
-    let gen = quote! {
-        #[linkme::distributed_slice(redis_module::server_events::MODULE_CHANGED_SERVER_EVENTS_LIST)]
-        #ast
-    };
-    gen.into()
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::server_events::MODULE_CHANGED_SERVER_EVENTS_LIST),
+    )
 }
 
 /// Proc macro which is set on a function that need to be called whenever a configuration change
@@ -186,15 +165,10 @@ pub fn module_changed_event_handler(_attr: TokenStream, item: TokenStream) -> To
 /// ```
 #[proc_macro_attribute]
 pub fn config_changed_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ast: ItemFn = match syn::parse(item) {
-        Ok(res) => res,
-        Err(e) => return e.to_compile_error().into(),
-    };
-    let gen = quote! {
-        #[linkme::distributed_slice(redis_module::server_events::CONFIG_CHANGED_SERVER_EVENTS_LIST)]
-        #ast
-    };
-    gen.into()
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::server_events::CONFIG_CHANGED_SERVER_EVENTS_LIST),
+    )
 }
 
 /// Proc macro which is set on a function that need to be called on Redis cron.
@@ -208,15 +182,10 @@ pub fn config_changed_event_handler(_attr: TokenStream, item: TokenStream) -> To
 /// ```
 #[proc_macro_attribute]
 pub fn cron_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ast: ItemFn = match syn::parse(item) {
-        Ok(res) => res,
-        Err(e) => return e.to_compile_error().into(),
-    };
-    let gen = quote! {
-        #[linkme::distributed_slice(redis_module::server_events::CRON_SERVER_EVENTS_LIST)]
-        #ast
-    };
-    gen.into()
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::server_events::CRON_SERVER_EVENTS_LIST),
+    )
 }
 
 /// The macro auto generate a [From] implementation that can convert the struct into [RedisValue].
@@ -387,15 +356,10 @@ pub fn redis_value(item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn info_command_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ast: ItemFn = match syn::parse(item) {
-        Ok(res) => res,
-        Err(e) => return e.to_compile_error().into(),
-    };
-    let gen = quote! {
-        #[linkme::distributed_slice(redis_module::server_events::INFO_COMMAND_HANDLER_LIST)]
-        #ast
-    };
-    gen.into()
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::server_events::INFO_COMMAND_HANDLER_LIST),
+    )
 }
 
 /// Implements a corresponding [`From`] for this struct, to convert
@@ -464,15 +428,10 @@ pub fn info_section(item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn defrag_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ast: ItemFn = match syn::parse(item) {
-        Ok(res) => res,
-        Err(e) => return e.to_compile_error().into(),
-    };
-    let gen = quote! {
-        #[linkme::distributed_slice(redis_module::defrag::DEFRAG_FUNCTIONS_LIST)]
-        #ast
-    };
-    gen.into()
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::defrag::DEFRAG_FUNCTIONS_LIST),
+    )
 }
 
 /// Proc macro which is set on a function that need to be called whenever server start performs defrag.
@@ -487,15 +446,10 @@ pub fn defrag_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 #[proc_macro_attribute]
 pub fn defrag_start_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ast: ItemFn = match syn::parse(item) {
-        Ok(res) => res,
-        Err(e) => return e.to_compile_error().into(),
-    };
-    let gen = quote! {
-        #[linkme::distributed_slice(redis_module::defrag::DEFRAG_START_FUNCTIONS_LIST)]
-        #ast
-    };
-    gen.into()
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::defrag::DEFRAG_START_FUNCTIONS_LIST),
+    )
 }
 
 /// Proc macro which is set on a function that need to be called whenever server end performs defrag.
@@ -510,13 +464,8 @@ pub fn defrag_start_function(_attr: TokenStream, item: TokenStream) -> TokenStre
 /// ```
 #[proc_macro_attribute]
 pub fn defrag_end_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let ast: ItemFn = match syn::parse(item) {
-        Ok(res) => res,
-        Err(e) => return e.to_compile_error().into(),
-    };
-    let gen = quote! {
-        #[linkme::distributed_slice(redis_module::defrag::DEFRAG_END_FUNCTIONS_LIST)]
-        #ast
-    };
-    gen.into()
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::defrag::DEFRAG_END_FUNCTIONS_LIST),
+    )
 }
