@@ -20,7 +20,7 @@ Contents:
 6. wasm-host coverage
 7. Fix sequence
 8. 3.0 scope versus patch fixes
-9. Open decisions
+9. Decisions
 
 ## 1. Current state
 
@@ -315,27 +315,39 @@ Recommendation: base new work on upstream master and re-land the code as small P
 
 ## 7. Fix sequence
 
-Each line is one PR on the fork, based on master, in this order. Safety and crash
-fixes come first, then the string and reply soundness work the wasm host needs, then
-the breaking cleanup.
+The F-series code is re-landed as fork PRs #8 to #15 (decisions 1 and 2 in section 9).
+Each row is one PR, in merge order. Stacked PRs name their base; retarget each one to
+`master` after its base merges, since the fork does not delete merged branches.
 
-1. A1 allocator alignment: fork PR #7 (open).
-2. F04: fix the `proc_macro_commands` key spec, so `cargo test` passes on Redis 8.
-3. F02: logging format string and NUL (A8, #473).
-4. A10: add 8-0 to the `call_blocking` cfgs; add 7-4 and 8-0 rows to CI with `--all-targets -D warnings`.
-5. A7: `catch_unwind` in the command trampoline and every callback; reply with an error or log instead of aborting.
-6. A9: replace `RedisModule_*.unwrap()` with an `api!`-style check that returns an error (#287).
-7. Port upstream #488 (ServerInfo leak) and #427, #417, #397, #386.
-8. F03 macro hygiene; F05 `ArgCursor`.
-9. A12, A13: binary-safe `RedisString::create`; non-ASCII-safe simple strings and errors.
-10. A4: opt-in test allocator feature that falls back to `System` only in test builds, with a hard failure in a loaded module.
-11. F07 string views (break).
-12. F09 string ownership (break), then F11 reworked as the small private-data owner cache.
-13. F17 call replies (behavior break), with `RedisModule_CallReplyProto` for status versus bulk.
-14. F13 fallible configuration registration (break).
-15. A2 WRONGTYPE; A3 insertion-ordered map reply; A5 const type-name check and typed command flags.
-16. wasm-host wrappers: Yield, ACLCheckCommandPermissions, memory-size APIs, blocked-client callbacks, EventLoopAdd.
-17. CI: Redis 8 runtime row, run on push to master, MSRV declaration, sanitizer job (#331).
+| step | change | fork PR | base | breaking |
+|---|---|---|---|---|
+| 1 | F04: `proc_macro_commands` key spec | #8 | master | no |
+| 2 | F02: logging format string and NUL (A8) | #9 | master | no |
+| 3 | F03: macro `linkme` re-export | #10 | master | no |
+| 4 | F17: call string replies as bulk strings | #11 | master | behavior |
+| 5 | F05 `ArgCursor` and F07 string views | #12 | master | yes |
+| 6 | F09: string ownership (A11) | #13 | #12 | yes |
+| 7 | F11 reworked: string configuration getter leak (A15) | #14 | #13 | no |
+| 8 | F13: fallible configuration registration | #15 | #14 | yes |
+| 9 | A1: allocator alignment | #7 | master | no |
+
+Merged into master in this order, the nine branches merge without conflicts. The
+result passes `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+29 unit, 42/42 integration, and 17 doc tests (46/46 integration on the 7-2 floor), on
+1.94.0 against Redis 8.10.2. F14 (configuration builders) stays deferred.
+
+Next, not started:
+
+1. A10: add 8-0 to the `call_blocking` cfgs; add 7-4 and 8-0 rows to CI with `--all-targets -D warnings`.
+2. A7: `catch_unwind` in the command trampoline and every callback; reply with an error or log instead of aborting.
+3. A9: replace `RedisModule_*.unwrap()` with an `api!`-style check that returns an error (#287).
+4. Port upstream #427, #417, #397, #386, #477. The #488 ServerInfo fix is part of fork PR #13.
+5. A12, A13: binary-safe `RedisString::create`; non-ASCII-safe simple strings and errors.
+6. A4: opt-in test allocator feature that falls back to `System` only in test builds, with a hard failure in a loaded module.
+7. A2 WRONGTYPE; A3 insertion-ordered map reply; A5 const type-name check and typed command flags.
+8. `RedisModule_CallReplyProto` for status versus bulk in call replies.
+9. wasm-host wrappers: Yield, ACLCheckCommandPermissions, memory-size APIs, blocked-client callbacks, EventLoopAdd.
+10. CI: Redis 8 runtime row, run on push to master, MSRV declaration, sanitizer job (#331).
 
 ## 8. 3.0 scope versus patch fixes
 
@@ -361,11 +373,16 @@ Patch level (no public API break; some change wire behavior and need a release n
 
 Not proposed: #328 (drop the `Redis` prefix) is churn for every consumer with no behavior gain.
 
-## 9. Open decisions
+## 9. Decisions
 
-1. Base branch: master, re-landing F-series code as small PRs (recommended), or continue on the F-series stack.
-2. F-series: close fork PRs #1 to #5 as each replacement PR opens (recommended), or keep them open as reference.
-3. Allocator: keep PR #7's implementation, or take upstream #483's `src/alloc.rs` and keep PR #7's live test and defrag note. Both are correct.
+Decided 2026-10-15:
+
+1. Base branch: master. The F-series code is re-landed as small PRs (fork PRs #8 to #15).
+2. F-series PRs: fork PRs #1 to #5 are closed, each replaced by fork PR #9, #12, #13, #14, and #11.
+
+Open:
+
+3. Allocator: keep fork PR #7's implementation, or take upstream #483's `src/alloc.rs` and keep fork PR #7's live test and defrag note. Both are correct.
 4. 3.0 scope: confirm the breaking list in section 8, and whether A2's wire change ships as a patch or in 3.0.
 5. Panic policy (A7): reply with an error and keep running, or log and abort. The wasm host needs the former.
 6. Upstream sync: how often fork master merges upstream master (for example when #488 or #483 lands).
