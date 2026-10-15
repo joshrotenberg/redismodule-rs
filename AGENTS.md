@@ -90,19 +90,29 @@ it. F02 logging, F03 macro dependency hygiene, F04 proc-command fixtures and
 F05 borrowed cursor, F06 string-view scope and F07 owner-bound string views are
 complete; F08's ownership specification, F09's repair, F10's getter scope and
 F11's selected getter/lifecycle repair are reviewed and validated locally. F12's
-source-only registration ergonomics specification is reviewed; no proposed API
-has been compiled/implemented. Read STATUS.md/docs/F12_CONFIGURATION_API.md and
-compact evidence. F11 leaves fork PR4 draft for deferred CI/remote handoff.
+source-only registration ergonomics specification preceded F13/F14; the selected
+fallible registration and builder proposals are now implemented. Read STATUS.md,
+docs/F12_CONFIGURATION_API.md and compact evidence. F11 leaves fork PR4 draft for deferred CI/remote handoff.
 F13's uniform fallible numeric/bool/enum registration, rejected-data cleanup,
 macro propagation and selected isolated migrations are validated locally. Read
 docs/F13_FALLIBLE_CONFIGURATION.md and its evidence. F14's additive typed builders
 are complete and validated locally: integer/boolean/string/enumeration factories,
 explicit range, named options, consuming Result and measured author-code savings.
-Read docs/F14_CONFIGURATION_BUILDERS.md/evidence. Next is one F15 source-only
-evidence/priorities checkpoint against the three project goals, using F02–F14's
-existing results/limits and known gaps to propose the next bounded SDK slice.
-No automatic implementation, CI resumption or general native audit in F15;
-do not rerun unchanged tests/model reviews merely to populate the scorecard.
+Read docs/F14_CONFIGURATION_BUILDERS.md/evidence. F15's source-only scorecard is
+reviewed and locally complete: docs/F15_EVIDENCE_PRIORITIES.md and compact
+f15-evidence-priorities.json distinguish scoped measurements, compiler/native
+contracts and remaining gaps. No SDK tests/builds/benchmarks were rerun in F15.
+Default next interval is F16 source-only scoping of the already deferred
+CallReply-string to RedisValue byte/wire conversion, unless Josh redirects.
+Inventory direct value/key conversions and reply emitter, refresh PR93 overlap,
+compare source/wire API migration choices and define corrected-code acceptance
+criteria. Do not implement that repair in its scoping activation, execute old
+invalid paths or broaden into all replies/context/thread/panic safety. Original
+modules remain read-only. Current byte fallback/as_bytes already exist; no
+blanket unsupported-binary or zero-copy claim. CI stays deferred. Do not rerun
+completed F13–F15 reviews/tests without a material change. F15's fresh read-only
+CI snapshot confirms F07 five successes/three failures; the early F07 snapshot
+had one still-running job. No CI rerun or modernization was performed.
 Preserve tuples, custom traits, successful defaults/commands/LoadConfigs policy
 and F11 string lifecycle. Accepted metadata reclamation/general native audit stay
 separate. Do not duplicate completed F13/F14 reviews/tests without new changes.

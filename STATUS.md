@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F15 — Evidence and priorities: reviewed locally
+
+| Status | Report |
+|---|---|
+| **Done** | Scorecard against all three goals records corrected logging/ownership/registration, Rust-like author APIs and measured parser/layout/line-count gains. Existing receipts independently checked: 54 claim checks/59 input hashes; 122 protected SDK files and four original modules' heads/status/135 Rust hashes unchanged. One new Due/Claude source review approves; four nonblocking precision suggestions applied. No SDK tests, builds, benchmarks or native executions rerun. |
+| **Next** | Recommend F16 source-only scope of CallReply string-to-RedisValue byte/wire conversion, an existing F01/F09 gap with upstream PR93 overlap. Inventory the direct value/key conversion sites and emitter, choose API/migration options and corrected-code validation gates before implementation. Later human focus supersedes this recommendation; do not start F16 in F15. |
+| **Blockers** | None for the local scorecard. CI/drafts 1–4 stay deferred; accepted metadata and broader native Context/GIL/thread/alias/panic contracts remain unresolved. Native no-user/template-hash/special-unload/worker-thread and platform gaps remain explicit. F15's read-only CI snapshot confirms F07 five successes/three failures; its earlier retained snapshot was four/three/one pending. No CI rerun or repair occurred. |
+| **Decisions** | Continue the hybrid fork on evidence: parser fixture 3→0 Rust requests, arm64 string owner 16→8 bytes, selected builder calls 62→39 and 60→41 lines. These are distinct scoped measurements, with no whole-project throughput or safety claim. Source-only next scope is the default unless redirected; CI/MSRV/package/support/release choices remain held. No push/PR/publication or original module migration. |
+
+Details: [F15 scorecard and priorities](docs/F15_EVIDENCE_PRIORITIES.md),
+[compact evidence](docs/evidence/f15-evidence-priorities.json).
+
 ## F14 — Typed configuration builders: validated locally
 
 | Status | Report |
