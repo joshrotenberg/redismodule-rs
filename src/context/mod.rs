@@ -429,6 +429,12 @@ impl Context {
         R::from(promise)
     }
 
+    /// Call a command and copy its result into an owned value.
+    ///
+    /// String results are bulk text for valid UTF-8, or a byte buffer otherwise.
+    /// This includes native status strings; explicit module status replies keep
+    /// their separate variants. Use `call_ext` for typed reply access and borrow
+    /// bytes from that reply's owner.
     pub fn call<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> RedisResult {
         self.call_internal::<_, CallResult>(command, raw::FMT, args)
             .map_or_else(|e| Err(e.into()), |v| Ok((&v).into()))
@@ -711,16 +717,18 @@ impl Context {
     }
 
     pub fn version_from_info(info: RedisValue) -> Result<Version, RedisError> {
-        if let RedisValue::SimpleString(info_str) = info {
+        if let RedisValue::SimpleString(info_str) | RedisValue::BulkString(info_str) = info {
             if let Some(ver) = utils::get_regexp_captures(
                 info_str.as_str(),
                 r"(?m)\bredis_version:([0-9]+)\.([0-9]+)\.([0-9]+)\b",
             ) {
-                return Ok(Version {
-                    major: ver[0].parse::<c_int>().unwrap(),
-                    minor: ver[1].parse::<c_int>().unwrap(),
-                    patch: ver[2].parse::<c_int>().unwrap(),
-                });
+                if let [major, minor, patch, ..] = ver.as_slice() {
+                    return Ok(Version {
+                        major: major.parse::<c_int>().unwrap(),
+                        minor: minor.parse::<c_int>().unwrap(),
+                        patch: patch.parse::<c_int>().unwrap(),
+                    });
+                }
             }
         }
         Err(RedisError::Str("Error getting redis_version"))
@@ -873,9 +881,13 @@ impl Context {
     /// Return error in case it was not possible to determind the deployment.
     fn is_enterprise_internal(&self) -> Result<bool, RedisError> {
         let info_res = self.call("info", &["server"])?;
-        let info = match &info_res {
+        Self::enterprise_from_info(&info_res)
+    }
+
+    fn enterprise_from_info(info_res: &RedisValue) -> Result<bool, RedisError> {
+        let info = match info_res {
             RedisValue::BulkRedisString(res) => res.try_as_str()?,
-            RedisValue::SimpleString(res) => res.as_str(),
+            RedisValue::SimpleString(res) | RedisValue::BulkString(res) => res.as_str(),
             _ => return Err(RedisError::Str("Mismatch call reply type")),
         };
         Ok(info.contains("rlec_version:"))
@@ -914,6 +926,43 @@ extern "C" fn post_notification_job<F: FnOnce(&Context)>(
 }
 
 unsafe impl RedisLockIndicator for Context {}
+
+#[cfg(test)]
+mod call_text_tests {
+    use super::Context;
+    use crate::RedisValue;
+
+    #[test]
+    fn version_parser_keeps_explicit_and_bulk_text() {
+        for value in [
+            RedisValue::SimpleString("redis_version:7.2.8\r\n".into()),
+            RedisValue::BulkString("redis_version:7.2.8\r\n".into()),
+        ] {
+            let version = Context::version_from_info(value).unwrap();
+            assert_eq!((version.major, version.minor, version.patch), (7, 2, 8));
+        }
+        assert!(Context::version_from_info(RedisValue::BulkString("no version".into())).is_err());
+        assert!(Context::version_from_info(RedisValue::Integer(7)).is_err());
+    }
+
+    #[test]
+    fn enterprise_parser_keeps_explicit_and_bulk_text() {
+        for enterprise in [true, false] {
+            let text = if enterprise {
+                "redis_version:7.2.8\r\nrlec_version:synthetic\r\n"
+            } else {
+                "redis_version:7.2.8\r\n"
+            };
+            for value in [
+                RedisValue::SimpleString(text.into()),
+                RedisValue::BulkString(text.into()),
+            ] {
+                assert_eq!(Context::enterprise_from_info(&value).unwrap(), enterprise);
+            }
+        }
+        assert!(Context::enterprise_from_info(&RedisValue::Integer(0)).is_err());
+    }
+}
 
 bitflags! {
     /// An object represent ACL permissions.

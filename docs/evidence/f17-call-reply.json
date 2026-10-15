@@ -1,0 +1,149 @@
+{
+  "chunk": "F17",
+  "status": "implemented; independently reviewed and caller-validated locally; draft PR5 stays open",
+  "baseline": "ea0177207ae8ef27352169ee552725b2dfeac9f9",
+  "kickoff": "7be99232c57a1a362a23b303562aa150fad3e583",
+  "draft": "https://github.com/joshrotenberg/redismodule-rs/pull/5",
+  "scoped_upstream_issues": [
+    234
+  ],
+  "credit": {
+    "author": "MikkelSnitker",
+    "upstream_pr": 93,
+    "head": "f1ec666ecc6891e11130df853e8b80c758df5230"
+  },
+  "pure_tests": 35,
+  "new_pure_tests": 5,
+  "compiler_controls": 10,
+  "archive_compiler_controls": 10,
+  "examples_each_profile": 36,
+  "native_host_profile_cells": 4,
+  "integration_executions": 16,
+  "reference_builds": 6,
+  "reference_runtime_flows": 12,
+  "archives": 4,
+  "external_consumers": 3,
+  "consumer_profile_builds": 6,
+  "archive_production_origin_files_verified": 47,
+  "measured_allocation_or_throughput_claim": false,
+  "artifacts": {
+    "debug": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f17/runtime-debug/report.json",
+    "release": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f17/runtime-release/report.json",
+    "references": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f17/references/report.json",
+    "reference_runtime": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f17/reference-runtime/report.json",
+    "integration": "/Users/josh.rotenberg/Code/local/redis-experiments/redismodule-rs-fork/target/f17/integration/report.json",
+    "pure": "target/f17/pure-final.log",
+    "checkout_compiler": "target/f17/compiler/report.json",
+    "archive_compiler": "target/f17/archive-compiler-final/report.json",
+    "packages": "target/f17/packages-final/report.json",
+    "archive_source_match": "target/f17/archive-source-match-final.json",
+    "caller_verification": "target/f17/verification-final.json",
+    "review_contracts": "target/f17/review/contracts.json"
+  },
+  "review": {
+    "actual_exit": 0,
+    "verdict": "approve",
+    "request_result_answer_all_trace_summary_valid": true,
+    "trace_records": 163,
+    "duration_ms": 160575,
+    "provider_reported_cost_usd": 1.92202025,
+    "recorded_inputs_unchanged_through_completion": true,
+    "scope": "source only, no test execution or raw receipts verified by reviewer",
+    "nonblocking_refinements": {
+      "source_review": "approve; contracts independently valid before refinements",
+      "redisvalue_change": "test-only exact whole-buffer assertions in all four long input/value-key UTF-8 branches",
+      "production_prefix_sha256": "1800e6e7186fbf50119efae57a92bb6db21deaabaf99e1c2dfc63cd6ddd2c4f6",
+      "production_prefix_unchanged": true,
+      "runtime_runner_comment_only_ast_unchanged": true,
+      "runtime_runner_as_run_sha256": "342dee29f0bf3c492b59134f30fae59363e78fea2f6dc164592d719f97477fde",
+      "runtime_runner_final_sha256": "66e8a18a3c77fbbfc1f52a30ba5b825d7fb771fe149c33bc4ee78761b7e836a2",
+      "decision": "No repeat model review/native matrix for test assertions and comment. Rerun pure tests and fresh archive/compiler controls for final source bytes."
+    },
+    "provenance": {
+      "sdk_head": "7be99232c57a1a362a23b303562aa150fad3e583",
+      "sdk_dirty": "M Cargo.toml\n M docs/BASELINE.md\n M examples/call.rs\n M src/context/mod.rs\n M src/redisvalue.rs\n M tools/runtime_baseline.py\n?? docs/F17_CALL_REPLY.md\n?? docs/evidence/f17-call-reply.json\n?? examples/call_reply.rs\n?? tools/call_reply.py",
+      "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+      "due_source_status": "",
+      "due_binary": "/Users/josh.rotenberg/.cargo/bin/due",
+      "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+      "due_version": "due 0.1.0",
+      "provider_version": "2.1.296 (Claude Code)",
+      "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+      "host_app": "Codex desktop",
+      "model_requested": null,
+      "effort_requested": null,
+      "model_observed": "unknown",
+      "effort_observed": "unknown",
+      "compiled_source_identity": "unknown",
+      "comparison_deferred": "Equivalent provider native tools/permissions unestablished; prioritize complementary SDK review and verified delivery",
+      "deadline": null,
+      "plugin_binary_refresh": false
+    },
+    "feedback": "sanitized aggregate acknowledged by due-expert; raw private artifacts stay local"
+  },
+  "limits": [
+    "selected macOS arm64/libc hosts/profiles, not support policy",
+    "archive runtime skipped; native evidence belongs to owned SDK/reference fixtures",
+    "synthetic Enterprise-marker tests and actual OSS result are not Enterprise product coverage",
+    "explicit manual SimpleString/unrelated error and native-owner/thread/alias/panic policy remains separate",
+    "earlier pure missing-version and fixture compile failures retained; no historical invalid native paths executed",
+    "Native/reference as-run source hashes precede final test/comment-only refinements; no native rerun for unchanged production code.",
+    "Buffer pointer/capacity reuse is source/pure evidence, not measured allocator requests or throughput.",
+    "CI remains deferred, fork master not pushed, GitHub merges/releases human-owned."
+  ],
+  "doc_tests": {
+    "passed": 18,
+    "ignored": 4
+  },
+  "receipt_sha256": {
+    "target/f17/pure-final.log": "9e0e34f03de251895a8afaf661c3e80faa67f83b1384697ab1ed3666af802972",
+    "target/f17/fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/f17/clippy.log": "618827c9a75c433994e7bac2f85188f2e0e8315a71072aa9c4a4e34b02f33018",
+    "target/f17/docs.log": "dffb934b2800cb6fe41d4c51d02470e2becfcf1881014b6ee192ed4bc7230c13",
+    "target/f17/examples-debug-final.log": "a5f4c585ee974ca44916ac30a98bbc189e067a7e0a6bc6d2e8d6bc525be724af",
+    "target/f17/examples-release.log": "abb83da21f3a27305a3e24e37c0faebfe0ae6dda8f5ac7f5fea9b17852271322",
+    "target/f17/compiler/report.json": "31416c7361b651eb7736a0721712ed7c6ccbfe9c7d691bf5078316b5efecee1c",
+    "target/f17/archive-compiler-final/report.json": "66042ea2a1415f9648ec2bad5848591523ff057fe97580b5804f42643874f910",
+    "target/f17/archive-producer-final/artifact.json": "8379977da85c309ddf6c2edaab12167ca184626679665c5394068139ad6a9e0f",
+    "target/f17/packages-final/report.json": "7660b49b9fdf7a601f02b92e1ee43cd5e713e1de0cc181e7793467a3725d8e0f",
+    "target/f17/packages-final/commands.json": "e5992ee5cb63a6b268c627f1a47882efb7b3597378d08e6e3913391f3dbc262c",
+    "target/f17/archive-source-match-final.json": "8294f27cdbdaa7d70b88b8b33779019c9d8f18ea84b90431232a649180a10e77",
+    "target/f17/runtime-debug/report.json": "fb4d129999969e405a9038d387da7348f41e12623f02a97ffa6d4f55f502b107",
+    "target/f17/runtime-release/report.json": "60736afaa8a4f564a5d79360898cbbc9f619920c1322cbdce056e7921cfe53f9",
+    "target/f17/integration/report.json": "9d60f9c4884530f710847433700c4d48206e599b27aa1b9c44db3f803578f343",
+    "target/f17/references/report.json": "e047e6238d8dfc697f28766ae3e6194a7dcf2f5e33f37f7bc346259009185cbb",
+    "target/f17/reference-runtime/report.json": "d769194804775da719fc6d6ad7bb1b8e2046faada5fc2beade631cc8d0e0787c",
+    "target/f17/review/contracts.json": "d6b5f0d87d59113ef1c3479fe0308a11b06ac47628ad4c33b42fa6a02d7b7cc4",
+    "target/f17/review/summary.json": "eb5fcb01a34920e09c4292cd704ab407e67cdacc7bdb5184a7b14f3cf75a0af3",
+    "target/f17/review/followups.json": "7af770b6de81b2d4007275ce6c46b967b020de0d1fc3393cb0d7e4c30552f1af",
+    "target/f17/review/provenance.json": "490b04613627f85e18a8989bc71263bb0425a92af1d4631f9586f93d10b2702e"
+  },
+  "originals": [
+    {
+      "name": "carolina",
+      "head": "0191175bb18ecf371d49d8b264a514f2c662099c",
+      "status": "",
+      "rust_files": 23
+    },
+    {
+      "name": "eventstream",
+      "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+      "status": "",
+      "rust_files": 37
+    },
+    {
+      "name": "jmespath",
+      "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+      "status": "",
+      "rust_files": 35
+    },
+    {
+      "name": "streamfilter",
+      "head": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+      "status": "",
+      "rust_files": 40
+    }
+  ],
+  "post_review_scope": "Only unit-test assertions and Python comment changed after review. Production prefix and Python AST unchanged; pure/fmt and fresh archive/consumer/compiler checks repeated for final source. Native/reference receipts keep as-run hashes.",
+  "next": "F18 source-only LoadConfigs result/order/error-propagation scope, unless later human focus redirects; no F18 implementation in this activation"
+}

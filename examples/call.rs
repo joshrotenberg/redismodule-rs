@@ -157,34 +157,25 @@ fn call_blocking_from_detach_ctx(ctx: &Context, _: Vec<RedisString>) -> RedisRes
 }
 
 fn call_dump_test(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
-    // Test DUMP with valid UTF-8 value
-    // RDB serialization typically includes non-UTF-8 bytes, but accept both for stability
-    ctx.call("SET", &["test_dump_key", "test_value"])?;
-    let dump_result = ctx.call("DUMP", &["test_dump_key"])?;
-
-    match dump_result {
-        RedisValue::StringBuffer(_) | RedisValue::SimpleString(_) => {}
-        _ => {
-            return Err(RedisError::Str("DUMP returned unexpected type"));
+    // Serialized bytes need not share the input's UTF-8 classification.
+    for input in [b"test_value".as_slice(), &[0xff, 0xfe, 0x80, 0x81]] {
+        ctx.call("SET", &[b"test_dump_key".as_slice(), input])?;
+        let converted = match ctx.call("DUMP", &["test_dump_key"])? {
+            RedisValue::BulkString(text) => text.into_bytes(),
+            RedisValue::StringBuffer(bytes) => bytes,
+            _ => return Err(RedisError::Str("DUMP returned unexpected type")),
+        };
+        let native: CallResult = ctx.call_ext(
+            "DUMP",
+            &CallOptionsBuilder::new().build(),
+            &["test_dump_key"],
+        );
+        match native.map_err(RedisError::from)? {
+            CallReply::String(reply) if reply.as_bytes() == converted => {}
+            _ => return Err(RedisError::Str("DUMP conversion changed serialized bytes")),
         }
+        ctx.call("DEL", &["test_dump_key"])?;
     }
-    ctx.call("DEL", &["test_dump_key"])?;
-
-    // Test DUMP with invalid UTF-8 value - guarantees non-UTF-8 in output
-    let invalid_utf8: &[u8] = &[0xff, 0xfe, 0x80, 0x81];
-    ctx.call("SET", &[&b"test_dump_binary_key"[..], invalid_utf8])?;
-    let dump_binary_result = ctx.call("DUMP", &["test_dump_binary_key"])?;
-
-    match dump_binary_result {
-        RedisValue::StringBuffer(_) => {}
-        _ => {
-            return Err(RedisError::Str(
-                "DUMP with invalid UTF-8 value should return StringBuffer",
-            ));
-        }
-    }
-    ctx.call("DEL", &["test_dump_binary_key"])?;
-
     Ok("pass".into())
 }
 

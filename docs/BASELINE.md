@@ -85,7 +85,8 @@ runner for review.
 | Deferred area or finding | Disposition |
 |---|---|
 | F01 deferred shared proc-command example metadata and derived replies | [F04](F04_PROC_RUNTIME.md) corrects keyless metadata and verifies field/reply, key-discovery and typed archive runtime contracts on selected hosts/profiles. Historical F01 exclusions remain recorded. |
-| Specialized binary CallReply and event-input cases | Validate the corrected contracts in focused follow-up work; no full inherited-suite claim here. |
+| Specialized binary CallReply cases | F17 corrects implicit bulk conversion and validates selected byte/framing/ownership cases; see [F17](F17_CALL_REPLY.md). Historical F01 exclusions remain recorded, without a full inherited-suite claim. |
+| Specialized event-input case | Separate corrected-contract validation remains deferred. |
 | `test_test_helper_err` uses a nonexistent helper command on the hello module | Replace with a meaningful test in the relevant repair. Its current error result would not establish the intended behavior. |
 | Active defragmentation | Needs a server/allocator cell that supports it. A libc skip is not a pass. |
 | 7.4/8.0-only ACL category tests | Not compiled in the selected 7.2 API-floor matrix; later cells must select the relevant floor. |
