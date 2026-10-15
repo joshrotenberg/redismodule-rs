@@ -132,23 +132,36 @@ unchanged. Thirty-eight pure tests, ten checkout plus ten actual-archive control
 checks and source-verified archive consumers pass. Independent Due/Claude review
 approves; one doc-only evidence clarification applied. No SDK push/PR or CI work.
 
-Next is one bounded F20 SOURCE-ONLY evidence/priorities checkpoint, unless Josh
-redirects. Use docs/f20-evidence-checkpoint from clean post-F19 master, refreshing
-changes/overlaps/owned workers and resuming unfinished owned work first. Update
-the F15 goal scorecard for new F17 byte/bulk behavior and F19 error propagation:
-actual before/after author snippets, explicit compatibility/failure-phase effects,
-compiler/source versus selected native evidence, and remaining known gaps. Use
-existing receipts; no SDK implementation, compiler/native/benchmark reruns,
-unchanged reviews or infrastructure work merely to populate the scorecard. One
-focused Due review of the NEW checkpoint and caller source/receipt verification
-are appropriate; merge the reviewed doc locally with no-ff, no push/PR.
-Recommend the next bounded SDK lane from known gaps with dependencies, validation
-and human decisions, without implementing it or selecting CI/MSRV/package/support/
-release policy. Accepted metadata retirement still needs a proven quiescence
-contract; broad native Context/GIL/thread/alias/panic audits stay separate. Do not
-invent unrelated backlog, migrate originals or execute historical invalid native
-paths/fake Contexts/crash/leak samplers. F20 finishes at a reviewable checkpoint,
-not another implementation chunk. Later human focus supersedes this default.
+F20's source-only evidence checkpoint is reviewed and locally complete. Read
+docs/F20_EVIDENCE_CHECKPOINT.md, docs/evidence/f20-evidence-checkpoint.json and
+target/f20/checkpoint.json. Caller checked 33 claims, 96 retained input/receipt
+hashes (three changed F15 sources matched historical Git blobs), 176 protected
+preexisting files and four original heads/status/135 Rust hashes. One Due/Claude
+review approves; two nonblocking wording clarifications were applied. No SDK
+implementation, compilation/test/benchmark/native execution occurred in F20.
+F17 bulk/wrapped-status compatibility and F19 error-phase cleanup/order effects
+are distinct from scoped parser/layout/F14 line measurements. F19 author code
+comparison is unmeasured; source review is not a runtime/hash certification.
+
+Next is one bounded F21 SOURCE-ONLY configuration accepted-metadata retirement
+scope, unless Josh redirects. Use docs/f21-configuration-retirement-scope from
+clean post-F20 master, refreshing instructions/changes/overlap/owned workers and
+resuming unfinished owned scope first. Inventory only accepted registration
+userdata/captured callbacks and F11 registry-pointer retirement; distinguish
+rejected registrations and cached getter owners. Source-check native last-use,
+removal and quiescence in pending failed load/committed/canceled/successful unload
+and reload. Do not assume removal creates a callback window or authorize pointer
+frees without a proven contract. If proof is unavailable, record the blocker and
+retain stable metadata. Broader static-resource families/general native audits
+remain separate. Write a narrow reviewed specification with migration/options,
+dependencies and later corrected pure/compiler/legal host/archive/public-consumer
+validation gates; no implementation/compiled-native prototype in the scoping
+activation. No SDK test/benchmark/native replay, original migration, push/PR,
+CI/MSRV/package/server/platform/support/release choice or historical invalid path,
+fake Context/arbitrary callback/crash/leak sampler. One new Due source review,
+caller source/receipt checks and reviewed local no-ff merge are appropriate.
+Carry incomplete F21 forward; no second chunk or automatic reclamation work.
+Later human direction supersedes this default source-only recommendation.
 F17 draft PR5 and drafts1–4 stay open for deferred CI/remote handoff; master was
 not pushed. Required F17 baseline uploaded F11 merge and F12–F16 history under
 issue-visibility authority. Leaves upstream234/134/246/358/473 open; issue471 is

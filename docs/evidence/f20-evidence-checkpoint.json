@@ -1,0 +1,516 @@
+{
+  "chunk": "F20",
+  "kind": "source-only evidence/priorities checkpoint",
+  "baseline": "e406ed913682f6b207c55586dae4ead49b62c1cb",
+  "sdk_implementation_changed": false,
+  "sdk_tests_builds_benchmarks_native_executions_this_chunk": 0,
+  "claim_checks": [
+    {
+      "claim": "F15 historical claims verified in their checkpoint",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f15-evidence-priorities.json"
+      ]
+    },
+    {
+      "claim": "96 retained input/receipt hashes: 93 current matches, three historical blobs matched",
+      "verified": true,
+      "sources": [
+        "target/f20/receipt-checks.json"
+      ]
+    },
+    {
+      "claim": "F05 parser request/byte measurement boundary retained",
+      "verified": true,
+      "sources": [
+        "docs/F15_EVIDENCE_PRIORITIES.md",
+        "docs/evidence/f05-arguments.json"
+      ]
+    },
+    {
+      "claim": "F09 layout and F14 actual line-count baselines retained",
+      "verified": true,
+      "sources": [
+        "docs/F15_EVIDENCE_PRIORITIES.md",
+        "docs/evidence/f09-string-ownership.json",
+        "docs/evidence/f14-configuration-builders.json"
+      ]
+    },
+    {
+      "claim": "Actual production byte classifier and key identity",
+      "verified": true,
+      "sources": [
+        "src/redisvalue.rs"
+      ]
+    },
+    {
+      "claim": "Strict text extraction and buffer/key tests retained",
+      "verified": true,
+      "sources": [
+        "src/redisvalue.rs"
+      ]
+    },
+    {
+      "claim": "F17 compiler, pure, examples and integration counts",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f17-call-reply.json"
+      ]
+    },
+    {
+      "claim": "target/f17/runtime-debug/report.json actual two host cells passed",
+      "verified": true,
+      "sources": [
+        "target/f17/runtime-debug/report.json"
+      ]
+    },
+    {
+      "claim": "target/f17/runtime-release/report.json actual two host cells passed",
+      "verified": true,
+      "sources": [
+        "target/f17/runtime-release/report.json"
+      ]
+    },
+    {
+      "claim": "F17 actual 16 integrations passed",
+      "verified": true,
+      "sources": [
+        "target/f17/integration/report.json"
+      ]
+    },
+    {
+      "claim": "F17 compatibility effects and as-run refinement limits explicit",
+      "verified": true,
+      "sources": [
+        "docs/F17_CALL_REPLY.md"
+      ]
+    },
+    {
+      "claim": "Real SDK version consumer before/after",
+      "verified": true,
+      "sources": [
+        "src/context/mod.rs",
+        "git:ea01772:src/context/mod.rs"
+      ]
+    },
+    {
+      "claim": "Load helper optional FnOnce status/static errors",
+      "verified": true,
+      "sources": [
+        "src/configuration.rs"
+      ]
+    },
+    {
+      "claim": "Fully qualified macro logs and returns error at same optional position",
+      "verified": true,
+      "sources": [
+        "src/macros.rs"
+      ]
+    },
+    {
+      "claim": "SDK builders old ignored load and new init error propagation",
+      "verified": true,
+      "sources": [
+        "examples/configuration_builders.rs",
+        "target/f20/before-sdk-excerpts.json"
+      ]
+    },
+    {
+      "claim": "streamfilter actual reference before/after tail, Result type and init propagation",
+      "verified": true,
+      "sources": [
+        "target/f17/references/streamfilter/src/config.rs",
+        "target/f19/references/streamfilter/src/config.rs",
+        "target/f19/references/streamfilter/f19-migration.patch",
+        "target/f19/references/streamfilter/src/lib.rs"
+      ]
+    },
+    {
+      "claim": "jmespath actual reference before/after tail, Result type and init propagation",
+      "verified": true,
+      "sources": [
+        "target/f17/references/jmespath/src/config.rs",
+        "target/f19/references/jmespath/src/config.rs",
+        "target/f19/references/jmespath/f19-migration.patch",
+        "target/f19/references/jmespath/src/lib.rs"
+      ]
+    },
+    {
+      "claim": "F19 exact aggregate counts",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f19-load-configs.json"
+      ]
+    },
+    {
+      "claim": "target/f19/compiler-complete/report.json ten actual uninvoked controls",
+      "verified": true,
+      "sources": [
+        "target/f19/compiler-complete/report.json"
+      ]
+    },
+    {
+      "claim": "target/f19/archive-compiler-complete/report.json ten actual uninvoked controls",
+      "verified": true,
+      "sources": [
+        "target/f19/archive-compiler-complete/report.json"
+      ]
+    },
+    {
+      "claim": "Four native F19 cells with zero/one snapshots and startup/registration controls",
+      "verified": true,
+      "sources": [
+        "target/f19/runtime-final/report.json"
+      ]
+    },
+    {
+      "claim": "Four retained F11 ownership host cells pass",
+      "verified": true,
+      "sources": [
+        "target/f19/ownership-runtime/report.json"
+      ]
+    },
+    {
+      "claim": "Twelve actual domain flows and eight selected rejection/reload controls",
+      "verified": true,
+      "sources": [
+        "target/f19/reference-runtime/report.json"
+      ]
+    },
+    {
+      "claim": "Four fresh archives and three passed consumer profile pairs",
+      "verified": true,
+      "sources": [
+        "target/f19/packages/report.json"
+      ]
+    },
+    {
+      "claim": "92 source archive matches in retained producer report",
+      "verified": true,
+      "sources": [
+        "target/f19/archive-source-match.json"
+      ]
+    },
+    {
+      "claim": "F19 error phases/absence evidence and limits retained",
+      "verified": true,
+      "sources": [
+        "docs/F19_LOAD_CONFIGS.md"
+      ]
+    },
+    {
+      "claim": "carolina original head/status/Rust hashes untouched",
+      "verified": true,
+      "sources": [
+        "target/f20/originals.json"
+      ]
+    },
+    {
+      "claim": "eventstream original head/status/Rust hashes untouched",
+      "verified": true,
+      "sources": [
+        "target/f20/originals.json"
+      ]
+    },
+    {
+      "claim": "jmespath original head/status/Rust hashes untouched",
+      "verified": true,
+      "sources": [
+        "target/f20/originals.json"
+      ]
+    },
+    {
+      "claim": "streamfilter original head/status/Rust hashes untouched",
+      "verified": true,
+      "sources": [
+        "target/f20/originals.json"
+      ]
+    },
+    {
+      "claim": "Five existing draft PRs remain open",
+      "verified": true,
+      "sources": [
+        "target/f20/fork-prs.json"
+      ]
+    },
+    {
+      "claim": "All 176 preexisting protected tracked SDK/docs files unchanged",
+      "verified": true,
+      "sources": [
+        "target/f20/baseline.json"
+      ]
+    },
+    {
+      "claim": "F20 proposal and limitations explicit",
+      "verified": true,
+      "sources": [
+        "docs/F20_EVIDENCE_CHECKPOINT.md"
+      ]
+    }
+  ],
+  "input_sha256": {
+    "docs/F15_EVIDENCE_PRIORITIES.md": "b5f5e9face3bbdd0b24e3b69cfcedb0aba1735c2efbfe8b8cd908e14b67763da",
+    "docs/F17_CALL_REPLY.md": "ab7659d56f47ccc14c467e18d65b78de4c8b99eb0c7564492fe07c70e2c1b8c8",
+    "docs/F19_LOAD_CONFIGS.md": "37419b339242e4b2fe094b02b66ea31a365ed6d0a957d046dd90023d900b9cc5",
+    "docs/F20_EVIDENCE_CHECKPOINT.md": "7309c2b71438df219d2c0b35545c8aa200f988b7c132410f0b24685ce704dbfd",
+    "docs/evidence/f05-arguments.json": "1a9bb19da55fdef489049fb7fa7713cfffbdca4abb46bee9e9f238a59b89ae04",
+    "docs/evidence/f09-string-ownership.json": "327fe88c38bda0d073321748081a21306e0f169352f95876a66cd29fd76ba55f",
+    "docs/evidence/f14-configuration-builders.json": "aef76e58b97b5d1aa1a20289d333491ca476eae3f34c138775cdaf2f8b73b1f5",
+    "docs/evidence/f15-evidence-priorities.json": "ebe45913e7d73d32833f7e915f9ef75a59bad1a92d6ad7a924577bf79849e45b",
+    "docs/evidence/f17-call-reply.json": "bbad367ef0ac1e59e152665ec752d190df7628fe3aeed2aab3db3cb622b5fb8f",
+    "docs/evidence/f19-load-configs.json": "a810a67b742f52fcd85b4c59f24005674ff3fd8f40fa53d1c668d3da8725b553",
+    "examples/configuration_builders.rs": "9ba2dec77bf5bc034fe182e1edc7b1c34d302954d37082c451cb80c993068ede",
+    "src/configuration.rs": "b20a1bf64bb988c60590aa17183fb99535cbd2f1ed56861e9568af0c6c1d42ab",
+    "src/context/mod.rs": "7e08a911710a2ae60e6e59369c7c1a80766253842f43602e1a7104e9b324fff2",
+    "src/macros.rs": "ad6662f9d7f26d6b56b260b8050cd7f5391bf3ed49067af82f6f3a6390dd9a20",
+    "src/redisvalue.rs": "35b813901b6a25761013cf1126797e59ec536d715ceda732d25d8e7286c4acd6",
+    "target/f17/integration/report.json": "9d60f9c4884530f710847433700c4d48206e599b27aa1b9c44db3f803578f343",
+    "target/f17/references/jmespath/src/config.rs": "3acf108da555a7fed58e47df43fcd56a91b66199b9758204a827e94d05c09df1",
+    "target/f17/references/streamfilter/src/config.rs": "38a3f34a14342abb191f274ed45c53fa3cb3904e38d0591294cb4dd02dfcacd3",
+    "target/f17/runtime-debug/report.json": "fb4d129999969e405a9038d387da7348f41e12623f02a97ffa6d4f55f502b107",
+    "target/f17/runtime-release/report.json": "60736afaa8a4f564a5d79360898cbbc9f619920c1322cbdce056e7921cfe53f9",
+    "target/f19/archive-compiler-complete/report.json": "df4dd86f70be13e19d0edb4436402dc17e4fbfdc7b60b55529706699e434fc31",
+    "target/f19/archive-source-match.json": "171753d22cdb9dfdfee65d3a71b74a92e66c36d81718c36738449e721636a951",
+    "target/f19/compiler-complete/report.json": "74f2c12e496c77194d3c7cbfc83e458f72d92483853df373ae4ca89dc0ebe8ba",
+    "target/f19/ownership-runtime/report.json": "9fb9546a33ea57a397c6bfa5156186df51d34433ea35e23ab23f5d16d533385a",
+    "target/f19/packages/report.json": "7c46d994fabc18ad102e97eb4f547e88d9fae45268a89e10aa8966a88b12a4b5",
+    "target/f19/reference-runtime/report.json": "ecb89342ef15a52ab5b5fa46635cab7f8e4caa853b0437bcdb9da16c007b9fe3",
+    "target/f19/references/jmespath/f19-migration.patch": "cc5d13aef7f5514a3a9316c98979e05e614be95d779934b754fc715d5bc6e263",
+    "target/f19/references/jmespath/src/config.rs": "68fbc9895dd5fd68acae4fb1440b337021085f85859bb44d414fc2607bef18c3",
+    "target/f19/references/jmespath/src/lib.rs": "f8f803735e3eb39590bec258326e651dc186070b9311acc8ae8e83bd7ab9b37f",
+    "target/f19/references/streamfilter/f19-migration.patch": "2b543b7842f7d58a0c8bf7966d45cdcf5cbf513ec7ee55900b41fac8b36b9425",
+    "target/f19/references/streamfilter/src/config.rs": "b8fb73f3deade7b3f5bacbc82c8dd35c6112ff0306dffa87b1d1d379138d4f91",
+    "target/f19/references/streamfilter/src/lib.rs": "e3e2c4737620a6e56a51245bc9a3d2e8be288a3ab30480360bd859e0b03f5e52",
+    "target/f19/runtime-final/report.json": "6034937ba64d0ad09eb5fb7c879d3022f6cdbdaf72b2a4e7c30cf4d18c3cb067",
+    "target/f20/baseline.json": "c0b2b0b22fd94978532f5fb019f3026d0ceed010e900ee9503885f1427a0501e",
+    "target/f20/before-sdk-excerpts.json": "2de05f8dd867c887f01ea38d988af7c517ac3123e0d627a7fb4f1db3af7d3bc7",
+    "target/f20/fork-prs.json": "5d7a8958c6934110b98e75ac6dfd1885e6fdc9eca585c9bbc627b01dfa8a7829",
+    "target/f20/originals.json": "7b3621f21be568ed18c092edee3cdfdf90358653dd52e0b52dd3c24d3cdb598a",
+    "target/f20/receipt-checks.json": "a7d5274bf69ba467ca34997a916149a83b999293d6feec41d12766fa4202286f",
+    "docs/evidence/f06-string-lifetimes.json": "36de1565111568ccf30da7ad3e30a467cef49e4da6e5decc7ed276b0b8c0bbb0",
+    "docs/evidence/f18-load-configs.json": "fd3610f0506329e2949460aa8214ef05b2c3920885bfb5984e3ce732769f9bbd",
+    "docs/evidence/f08-string-ownership.json": "9a7db3abd6f4d3711784f2af315e500dc8f1d2944150e42bd1261891dcdc886f",
+    "docs/evidence/f16-call-reply-conversion.json": "4e6ef9dae6f49c53b117461842d0fc6784856658dcebc82547c4fc6ea52ca9ac",
+    "docs/evidence/f01-runtime.json": "c885adde7f59b3365b9c2c89d37909229f74f27b0613438c04a6f06008f1a735",
+    "docs/evidence/f12-configuration-api.json": "7e8995774720b2177313bbbc2b6a0ad1891fa12cfd95ad77a0e0644167472a88",
+    "docs/evidence/f11-configuration-ownership.json": "59c8624bdd45d4937a113a1ca0a863f385ebdb177035064cb202e73ae425e29e",
+    "docs/evidence/f03-macros.json": "104f40ca287512a631d8d638e3b0ba4b04d560ce0506af05bc19769b45a0059a",
+    "docs/evidence/f02-logging.json": "da019842dadc8ea4e55643d8af5d14252c299e4cde41db18b75f6fdf86e6fb2b",
+    "docs/evidence/f04-proc-runtime.json": "ac1819521f62c58f16d2e3a2f9742dc74f1641576efcbe7ee8cdab232cdb94c8",
+    "docs/evidence/f10-configuration-getter.json": "6ee1ddfacde0837c3e12eeae718f0d8e29d3484e64c605f0e2ad6e573e8a4842",
+    "docs/evidence/f07-string-views.json": "1508f278f0a75238a9f108a6119f9c7382100bc08b0bcc656ad6a8659f21ee3f",
+    "docs/evidence/f13-fallible-configuration.json": "af3dd0a7fdeef9c9a64ec978e59b2886ba8b4e00b05cbb3cc7d4434a7148105e",
+    "docs/evidence/f01-package-consumers.json": "44cd3aefd1aa3a6ec979d9990ed27fa6721ea6c41508f6600053692d5d7304a9",
+    "docs/evidence/f01-reference-consumers.json": "8a7530540cd255195c7507e30776fdd79eef4a897b601bbfe7f4197f1f13a738",
+    "docs/F10_CONFIGURATION_GETTER.md": "cf81a4b6d6ef25ab221eea097619c9878a3d5e79156ed45f149336ffa853e113",
+    "docs/F16_CALL_REPLY_CONVERSION.md": "e9aacb73f839cb8443253dd1727e18dac243081d650628536345f822fdb11604",
+    "docs/F14_CONFIGURATION_BUILDERS.md": "4371532eb3dacdbb1164b9cc74d8de4bed27452c008a28f30edbd5f1c14059d5",
+    "docs/F12_CONFIGURATION_API.md": "2ba97b3b5b5000bc4612639922ff7d38fabcb5db1ca6040dc103e687631332f1",
+    "docs/F03_MACROS.md": "e14ac8bddd465b4f32edde2b8564c1acc7edda139cdab7940e904d629558e71a",
+    "docs/F08_STRING_OWNERSHIP.md": "899101e9fe759fb2669172f4cf77035b03b6131d23058cf5bb9cc762dff7343b",
+    "docs/F18_LOAD_CONFIGS.md": "eb7fed627b18dca8cc8dba375f2d47ab0d56bc87fc132f4c1c1f719414e2a2cb",
+    "docs/F02_LOGGING.md": "57323a70f06cca37597fa2a1a5150afd06c44e301818bd9bac63c3eb8f2129fd",
+    "docs/F09_STRING_OWNERSHIP.md": "b91b4fb633163daa611d69114c7df5dd392171379210bdf1e1187ae74274d7f7",
+    "docs/F07_STRING_VIEWS.md": "cc6bdd31d15698123bd2e07147c493a6e8c78e033fbfd4733c0a20615cd66de8",
+    "docs/F13_FALLIBLE_CONFIGURATION.md": "966c2635b12dd7f78308b0dcbfba47bece7b30ae4347de80fb1d0a11c692304c",
+    "docs/F05_ARGUMENTS.md": "752e4ca41cec1ee06867256d9a303fba73c8eba1e1a882a708f5248172e79f81",
+    "docs/F06_STRING_LIFETIMES.md": "eb3088652f51f937b2dac08775d24ad04e2f657af817cda22946b27990254538",
+    "docs/F11_CONFIGURATION_OWNERSHIP.md": "4a61d31327c45589f8b1da55ce363fca307be4874162f1aecfc7b9433709351c",
+    "docs/F04_PROC_RUNTIME.md": "4ed278cdb172df54556a77659b604484825228e37f754e08cbce890d8f8d62eb"
+  },
+  "retained_receipt_hash_checks": 96,
+  "historical_changed_sources_matched_to_git_revision": 3,
+  "protected_preexisting_files": 176,
+  "originals": {
+    "modules": 4,
+    "rust_hashes": 135,
+    "heads_status_unchanged": true
+  },
+  "new_outcomes": {
+    "F17": "valid text BulkString, invalid StringBuffer, strict text/key identity; implicit wrapped status wire change; source/pure buffer reuse only",
+    "F19": "checked optional API/status Result, macro/manual propagation at existing positions, selected failed OnLoad pending owner cleanup; successful defaults/order preserved"
+  },
+  "comparison": "F14 measured selected author calls 62-to-39/60-to-41 from F13; F19 real before/after code is unmeasured",
+  "recommendation": "F21 source-only accepted configuration userdata/callback retirement specification, including F11 registry-pointer retirement; no pointer free until proven native last-use/quiescence contract",
+  "review": {
+    "actual_exit": 0,
+    "verdict": "approve",
+    "request_result_answer_all_trace_summary_valid": true,
+    "trace_records": 172,
+    "recorded_inputs_unchanged_through_completion": true,
+    "source_only": true,
+    "duration_ms": 185254,
+    "provider_reported_cost_usd": 3.1619422500000005,
+    "activities": {
+      "started": 36,
+      "completed": 36,
+      "failed": 0,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "succeeded": 36
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 36,
+          "completed": 36,
+          "completion_status_counts": {
+            "succeeded": 36
+          }
+        }
+      }
+    },
+    "failed_activity_details": [],
+    "sdk_source_read": true,
+    "findings": [
+      {
+        "action": "Reword to \"a present empty block still issues the call and reports a missing API when the API is absent, rather than skipping\" (matching F19 line 34-35 and F18 line 21).",
+        "claim": "\"a present empty block deliberately reports missing API\" reads as unconditional; the macro call at src/macros.rs:457 only errors when RedisModule_LoadConfigs is None, and F19's present-empty runtime control passed on real 7.2/8.10 hosts where the API exists.",
+        "file": "docs/F20_EVIDENCE_CHECKPOINT.md",
+        "line": 104,
+        "priority": "nonblocking"
+      },
+      {
+        "action": "Say \"before config helper commands, info/server events, user init and scope commit\" as F18 line 19 does, or drop \"events\".",
+        "claim": "\"The macro's load position stays after registration and before helper commands/events/user init/commit\" is ambiguous about events: keyspace notification handlers (redis_event_handler!, src/macros.rs:374-378) are registered before the configurations block; only register_info_function/register_server_events (lines 475-480) follow the load.",
+        "file": "docs/F20_EVIDENCE_CHECKPOINT.md",
+        "line": 98,
+        "priority": "nonblocking"
+      }
+    ],
+    "limits": [
+      "Read/Grep/Glob only: no compilation, tests, Clippy/fmt, native hosts, archives, benchmarks or reference builds were run; all execution counts in the scorecard remain caller claims cross-checked only against the F17/F19 compact evidence and receipt filenames.",
+      "SHA-256 values in f20-evidence-checkpoint.json and receipt-checks.json were not recomputed; I verified the 96-entry structure and the three historical-blob flags, not the digests. The input_sha256 entry for F20_EVIDENCE_CHECKPOINT.md itself will go stale if the two nonblocking wording fixes are applied.",
+      "target/f20/baseline.json, originals.json, fork-prs.json and target/f19 runtime/ownership/reference/package reports were not opened beyond a name/count grep; 176 protected files, 135 original Rust hashes, four module heads, 10 compiler controls per report, remote draft/PR/issue counts and the git revision 1a5e437 blob matches are caller-verified, not reviewer-certified.",
+      "Original module directories outside this repo were not read, per instruction; before/after reference comparison relied on target/f17 and target/f19 snapshots and the two migration patches.",
+      "Native behavior claims (pending-guard close before native removal, forced-unload deinit under assertion, 7.2/8.10 repeated-default policy, no OnUnload on failed OnLoad) were checked for consistency with F18/F19 text and SDK source anchors, not against redis module.c/config.c or any execution trace.",
+      "No broad F11/F13 string_lifecycle, Context/GIL/thread/alias/panic or historical SDK audit was performed; only the Drop/commit/close anchors needed for the scorecard's F19 sentences were read."
+    ],
+    "disposition": {
+      "verdict": "approve",
+      "nonblocking_findings_applied": 2,
+      "source_check": "src/macros.rs keyspace event registrations at 374-378 precede load at 457; info/server events follow at 475-480. Existing present-empty runtime pass and optional API mapping confirm conditional absence.",
+      "change": "Doc-only API-absence condition and precise event ordering. No SDK/prototype/test/benchmark/native execution or unchanged model replay."
+    }
+  },
+  "due_provenance": {
+    "sdk_head": "e406ed913682f6b207c55586dae4ead49b62c1cb",
+    "sdk_dirty": "?? docs/F20_EVIDENCE_CHECKPOINT.md\n?? docs/evidence/f20-evidence-checkpoint.json",
+    "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "due_source_status": "",
+    "due_binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "due_version": "due 0.1.0",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "model_requested": null,
+    "effort_requested": null,
+    "model_observed": "unknown",
+    "effort_observed": "unknown",
+    "compiled_source_identity": "unknown",
+    "deadline": null,
+    "comparison_deferred": "One complementary review of a new source-only checkpoint; equivalent native tool/permission controls remain unestablished. No comparison spend solely for cadence."
+  },
+  "remote": {
+    "fork_drafts": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "upstream_open_prs": 45,
+    "upstream_open_issues": 55,
+    "ci_held": true,
+    "ci_polled_or_rerun": false,
+    "new_sdk_push_pr_publication": false
+  },
+  "limits": [
+    "Historical receipts belong to their tested/as-run hashes, not a cumulative test run against current tree.",
+    "Selected macOS arm64/libc hosts/profiles, not product/platform/support or full native safety.",
+    "No F17 allocator-request/zero-copy/throughput measurement; no F19 line-count or allocation measurement.",
+    "Accepted userdata/closure/static-resource retirement, broad Context/GIL/thread/phase/alias/reentry/panic and listed native host-cell gaps remain separate.",
+    "Existing forwarded getter owners/API release counts do not prove native refcounts/process heap balance."
+  ],
+  "review_inputs_sha256": {
+    "docs/F02_LOGGING.md": "57323a70f06cca37597fa2a1a5150afd06c44e301818bd9bac63c3eb8f2129fd",
+    "docs/F03_MACROS.md": "e14ac8bddd465b4f32edde2b8564c1acc7edda139cdab7940e904d629558e71a",
+    "docs/F04_PROC_RUNTIME.md": "4ed278cdb172df54556a77659b604484825228e37f754e08cbce890d8f8d62eb",
+    "docs/F05_ARGUMENTS.md": "752e4ca41cec1ee06867256d9a303fba73c8eba1e1a882a708f5248172e79f81",
+    "docs/F06_STRING_LIFETIMES.md": "eb3088652f51f937b2dac08775d24ad04e2f657af817cda22946b27990254538",
+    "docs/F07_STRING_VIEWS.md": "cc6bdd31d15698123bd2e07147c493a6e8c78e033fbfd4733c0a20615cd66de8",
+    "docs/F08_STRING_OWNERSHIP.md": "899101e9fe759fb2669172f4cf77035b03b6131d23058cf5bb9cc762dff7343b",
+    "docs/F09_STRING_OWNERSHIP.md": "b91b4fb633163daa611d69114c7df5dd392171379210bdf1e1187ae74274d7f7",
+    "docs/F10_CONFIGURATION_GETTER.md": "cf81a4b6d6ef25ab221eea097619c9878a3d5e79156ed45f149336ffa853e113",
+    "docs/F11_CONFIGURATION_OWNERSHIP.md": "4a61d31327c45589f8b1da55ce363fca307be4874162f1aecfc7b9433709351c",
+    "docs/F12_CONFIGURATION_API.md": "2ba97b3b5b5000bc4612639922ff7d38fabcb5db1ca6040dc103e687631332f1",
+    "docs/F13_FALLIBLE_CONFIGURATION.md": "966c2635b12dd7f78308b0dcbfba47bece7b30ae4347de80fb1d0a11c692304c",
+    "docs/F14_CONFIGURATION_BUILDERS.md": "4371532eb3dacdbb1164b9cc74d8de4bed27452c008a28f30edbd5f1c14059d5",
+    "docs/F15_EVIDENCE_PRIORITIES.md": "b5f5e9face3bbdd0b24e3b69cfcedb0aba1735c2efbfe8b8cd908e14b67763da",
+    "docs/F16_CALL_REPLY_CONVERSION.md": "e9aacb73f839cb8443253dd1727e18dac243081d650628536345f822fdb11604",
+    "docs/F17_CALL_REPLY.md": "ab7659d56f47ccc14c467e18d65b78de4c8b99eb0c7564492fe07c70e2c1b8c8",
+    "docs/F18_LOAD_CONFIGS.md": "eb7fed627b18dca8cc8dba375f2d47ab0d56bc87fc132f4c1c1f719414e2a2cb",
+    "docs/F19_LOAD_CONFIGS.md": "37419b339242e4b2fe094b02b66ea31a365ed6d0a957d046dd90023d900b9cc5",
+    "docs/F20_EVIDENCE_CHECKPOINT.md": "e4328d6e7362f97a75d18bd90545df43779d6d09e8176666a4c867190e2da1b1",
+    "docs/evidence/f01-package-consumers.json": "44cd3aefd1aa3a6ec979d9990ed27fa6721ea6c41508f6600053692d5d7304a9",
+    "docs/evidence/f01-reference-consumers.json": "8a7530540cd255195c7507e30776fdd79eef4a897b601bbfe7f4197f1f13a738",
+    "docs/evidence/f01-runtime.json": "c885adde7f59b3365b9c2c89d37909229f74f27b0613438c04a6f06008f1a735",
+    "docs/evidence/f02-logging.json": "da019842dadc8ea4e55643d8af5d14252c299e4cde41db18b75f6fdf86e6fb2b",
+    "docs/evidence/f03-macros.json": "104f40ca287512a631d8d638e3b0ba4b04d560ce0506af05bc19769b45a0059a",
+    "docs/evidence/f04-proc-runtime.json": "ac1819521f62c58f16d2e3a2f9742dc74f1641576efcbe7ee8cdab232cdb94c8",
+    "docs/evidence/f05-arguments.json": "1a9bb19da55fdef489049fb7fa7713cfffbdca4abb46bee9e9f238a59b89ae04",
+    "docs/evidence/f06-string-lifetimes.json": "36de1565111568ccf30da7ad3e30a467cef49e4da6e5decc7ed276b0b8c0bbb0",
+    "docs/evidence/f07-string-views.json": "1508f278f0a75238a9f108a6119f9c7382100bc08b0bcc656ad6a8659f21ee3f",
+    "docs/evidence/f08-string-ownership.json": "9a7db3abd6f4d3711784f2af315e500dc8f1d2944150e42bd1261891dcdc886f",
+    "docs/evidence/f09-string-ownership.json": "327fe88c38bda0d073321748081a21306e0f169352f95876a66cd29fd76ba55f",
+    "docs/evidence/f10-configuration-getter.json": "6ee1ddfacde0837c3e12eeae718f0d8e29d3484e64c605f0e2ad6e573e8a4842",
+    "docs/evidence/f11-configuration-ownership.json": "59c8624bdd45d4937a113a1ca0a863f385ebdb177035064cb202e73ae425e29e",
+    "docs/evidence/f12-configuration-api.json": "7e8995774720b2177313bbbc2b6a0ad1891fa12cfd95ad77a0e0644167472a88",
+    "docs/evidence/f13-fallible-configuration.json": "af3dd0a7fdeef9c9a64ec978e59b2886ba8b4e00b05cbb3cc7d4434a7148105e",
+    "docs/evidence/f14-configuration-builders.json": "aef76e58b97b5d1aa1a20289d333491ca476eae3f34c138775cdaf2f8b73b1f5",
+    "docs/evidence/f15-evidence-priorities.json": "ebe45913e7d73d32833f7e915f9ef75a59bad1a92d6ad7a924577bf79849e45b",
+    "docs/evidence/f16-call-reply-conversion.json": "4e6ef9dae6f49c53b117461842d0fc6784856658dcebc82547c4fc6ea52ca9ac",
+    "docs/evidence/f17-call-reply.json": "bbad367ef0ac1e59e152665ec752d190df7628fe3aeed2aab3db3cb622b5fb8f",
+    "docs/evidence/f18-load-configs.json": "fd3610f0506329e2949460aa8214ef05b2c3920885bfb5984e3ce732769f9bbd",
+    "docs/evidence/f19-load-configs.json": "a810a67b742f52fcd85b4c59f24005674ff3fd8f40fa53d1c668d3da8725b553",
+    "docs/evidence/f20-evidence-checkpoint.json": "c273cf84bfef321bbd978dddc499b25547ed00ce63e426b96aa4b2a7fdd30845",
+    "examples/configuration_builders.rs": "9ba2dec77bf5bc034fe182e1edc7b1c34d302954d37082c451cb80c993068ede",
+    "src/configuration.rs": "b20a1bf64bb988c60590aa17183fb99535cbd2f1ed56861e9568af0c6c1d42ab",
+    "src/context/mod.rs": "7e08a911710a2ae60e6e59369c7c1a80766253842f43602e1a7104e9b324fff2",
+    "src/macros.rs": "ad6662f9d7f26d6b56b260b8050cd7f5391bf3ed49067af82f6f3a6390dd9a20",
+    "src/redisvalue.rs": "35b813901b6a25761013cf1126797e59ec536d715ceda732d25d8e7286c4acd6",
+    "target/f17/integration/report.json": "9d60f9c4884530f710847433700c4d48206e599b27aa1b9c44db3f803578f343",
+    "target/f17/references/jmespath/src/config.rs": "3acf108da555a7fed58e47df43fcd56a91b66199b9758204a827e94d05c09df1",
+    "target/f17/references/streamfilter/src/config.rs": "38a3f34a14342abb191f274ed45c53fa3cb3904e38d0591294cb4dd02dfcacd3",
+    "target/f17/runtime-debug/report.json": "fb4d129999969e405a9038d387da7348f41e12623f02a97ffa6d4f55f502b107",
+    "target/f17/runtime-release/report.json": "60736afaa8a4f564a5d79360898cbbc9f619920c1322cbdce056e7921cfe53f9",
+    "target/f19/archive-compiler-complete/report.json": "df4dd86f70be13e19d0edb4436402dc17e4fbfdc7b60b55529706699e434fc31",
+    "target/f19/archive-source-match.json": "171753d22cdb9dfdfee65d3a71b74a92e66c36d81718c36738449e721636a951",
+    "target/f19/compiler-complete/report.json": "74f2c12e496c77194d3c7cbfc83e458f72d92483853df373ae4ca89dc0ebe8ba",
+    "target/f19/ownership-runtime/report.json": "9fb9546a33ea57a397c6bfa5156186df51d34433ea35e23ab23f5d16d533385a",
+    "target/f19/packages/report.json": "7c46d994fabc18ad102e97eb4f547e88d9fae45268a89e10aa8966a88b12a4b5",
+    "target/f19/reference-runtime/report.json": "ecb89342ef15a52ab5b5fa46635cab7f8e4caa853b0437bcdb9da16c007b9fe3",
+    "target/f19/references/jmespath/f19-migration.patch": "cc5d13aef7f5514a3a9316c98979e05e614be95d779934b754fc715d5bc6e263",
+    "target/f19/references/jmespath/src/config.rs": "68fbc9895dd5fd68acae4fb1440b337021085f85859bb44d414fc2607bef18c3",
+    "target/f19/references/jmespath/src/lib.rs": "f8f803735e3eb39590bec258326e651dc186070b9311acc8ae8e83bd7ab9b37f",
+    "target/f19/references/streamfilter/f19-migration.patch": "2b543b7842f7d58a0c8bf7966d45cdcf5cbf513ec7ee55900b41fac8b36b9425",
+    "target/f19/references/streamfilter/src/config.rs": "b8fb73f3deade7b3f5bacbc82c8dd35c6112ff0306dffa87b1d1d379138d4f91",
+    "target/f19/references/streamfilter/src/lib.rs": "e3e2c4737620a6e56a51245bc9a3d2e8be288a3ab30480360bd859e0b03f5e52",
+    "target/f19/runtime-final/report.json": "6034937ba64d0ad09eb5fb7c879d3022f6cdbdaf72b2a4e7c30cf4d18c3cb067",
+    "target/f20/baseline.json": "c0b2b0b22fd94978532f5fb019f3026d0ceed010e900ee9503885f1427a0501e",
+    "target/f20/before-sdk-excerpts.json": "2de05f8dd867c887f01ea38d988af7c517ac3123e0d627a7fb4f1db3af7d3bc7",
+    "target/f20/excerpts.json": "e342a588dac946812c2d487ad5ea8d92a9358445ca2fdec63aa711142314bc9e",
+    "target/f20/fork-prs.json": "5d7a8958c6934110b98e75ac6dfd1885e6fdc9eca585c9bbc627b01dfa8a7829",
+    "target/f20/originals.json": "7b3621f21be568ed18c092edee3cdfdf90358653dd52e0b52dd3c24d3cdb598a",
+    "target/f20/receipt-checks.json": "a7d5274bf69ba467ca34997a916149a83b999293d6feec41d12766fa4202286f",
+    "target/f20/verification.json": "12b820383c197985f74b73d05bee2c0dc7cd79aa75b493665ea56434e8ceed0a"
+  },
+  "current_scorecard_sha256": "7309c2b71438df219d2c0b35545c8aa200f988b7c132410f0b24685ce704dbfd",
+  "status": "source-only checkpoint independently reviewed and caller verified",
+  "verified_utc": "2026-10-15T10:21:20.945935+00:00",
+  "feedback": "One sanitized aggregate acknowledged by the authorized due-expert hub",
+  "no_sdk_push_pr_publication": true
+}

@@ -494,3 +494,27 @@ or plugin/binary refresh. Comparison deferred: complementary implementation
 review and unestablished equivalent native provider tool/permission controls.
 One sanitized aggregate was acknowledged by the authorized due-expert hub;
 private prompts/code/raw answers/logs remain local. See [F19 evidence](evidence/f19-load-configs.json).
+
+
+## October 15 — F20 source-only checkpoint review
+
+One monitored Due/Claude read-only review of the NEW evidence scorecard approves.
+True exit 0; 185,254 ms; provider-reported USD 3.16194225. Request/result/answer,
+172 trace records and offline summary validate; 36 matched activities succeed,
+no gaps/drops. Frozen reviewed inputs remain unchanged through completion.
+Caller checked/applied two nonblocking doc-only clarifications: empty-block
+failure depends on absent API, and keyspace handlers precede load while info/
+server events follow. No SDK execution or unchanged model review was replayed.
+Reviewer verified selected source/snippets/evidence consistency, not raw digest,
+remote/original-state or runtime certification; caller checked those receipts.
+
+Due 0.1.0 / Claude Code 2.1.296; clean available Due source
+76d33d410319d860425a2dd3609863a4ba5ca565, executable SHA-256
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b.
+Requested model/effort omitted; observed settings and compiled-source identity
+unknown. No deadline/retry/fallback/recursive delegation/permission expansion or
+binary/plugin refresh. Controlled comparison deferred: bounded complementary
+source review and unestablished equivalent native tool/permission controls;
+no spend solely for cadence. One sanitized aggregate was acknowledged by the
+authorized due-expert hub; raw prompts/source/answers/provider logs remain local.
+See [F20 evidence](evidence/f20-evidence-checkpoint.json).

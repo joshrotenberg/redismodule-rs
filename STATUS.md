@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F20 — Evidence/priorities checkpoint: reviewed locally
+
+| Status | Report |
+|---|---|
+| **Done** | Updated F15 scorecard with F17 bulk/strict-key/status compatibility and F19 checked-load/failure-phase cleanup, actual isolated author/SDK code and precise evidence limits. Caller checked 33 claims, 96 retained hashes (three historical source blobs), 176 protected tracked files and original heads/status/135 Rust hashes. Due/Claude approves; two wording clarifications applied. No SDK implementation, compilation/tests/benchmarks/native executions. |
+| **Next** | Recommend F21 source-only scope of accepted configuration userdata/callback and F11 registry-pointer retirement. Prove native last use/quiescence before considering frees; define narrow options and later validation gates. If unavailable, record blocker and retain metadata. Later human focus supersedes; no automatic implementation. |
+| **Blockers** | None for the local checkpoint. Metadata retirement contract, broad native Context/GIL/thread/alias/reentry/panic, selected host-cell gaps and CI/drafts1–5 remain deferred. Historical results are revision-specific, not cumulative current-tree coverage. |
+| **Decisions** | F15's two priorities are addressed. Keep F05 parser requests, F09 layout and F14 measured author lines distinct from F17 buffer mechanics and unmeasured F19 snippets. Hybrid fork continues; originals unchanged, no new SDK push/PR/publication or CI/MSRV/package/support/release commitment. |
+
+Details: [F20 goal scorecard and next bounded lane](docs/F20_EVIDENCE_CHECKPOINT.md),
+[compact evidence](docs/evidence/f20-evidence-checkpoint.json).
+
 ## F19 — Fallible LoadConfigs propagation: validated locally
 
 | Status | Report |
