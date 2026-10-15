@@ -114,7 +114,10 @@ invariant and do not invent retry/panic behavior or a broad alias-safety guarant
 The stream example reads two records to choose the trim boundary, but currently
 opens a writer and trims while the iterator remains live. Correct it to end both
 iterator and read-handle scopes before opening the writer. Preserve the selected
-ID returned and current trim semantics for zero/one/many records. Do not change
+ID returned and nonempty trim semantics. The zero-record Null gate below is
+an intended result: F23 validation later confirmed the old trim helper rejected
+a zero native count, so that gate requires skipping the unnecessary empty trim.
+Do not change
 replication policy or interpret this as fixing all native handle aliases.
 
 Current code (abbreviated, actual operations):
