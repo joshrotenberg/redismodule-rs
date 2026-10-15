@@ -91,7 +91,7 @@ A1 to A6 come from the klogmini study. A7 to A15 were found in this inventory. E
 
 | id | finding | where | status |
 |---|---|---|---|
-| A1 | `RedisAlloc` ignores alignment above 16 bytes; misaligned `Box` is UB, and a debug build aborts the server | `src/alloc.rs` | fixed in fork PR #7; upstream #483 is the same scheme |
+| A1 | `RedisAlloc` ignores alignment above 16 bytes; misaligned `Box` is UB, and a debug build aborts the server | `src/alloc.rs` | fork PR #7 (kept over upstream #483, which uses the same scheme) |
 | A2 | `get_value` returns "Existing key has wrong Redis type" instead of the standard WRONGTYPE error | `src/key.rs:721` (`verify_type`) | open; `RedisError::WrongType` already exists |
 | A3 | No order-preserving map reply: `Map` is a `HashMap`, `OrderedMap` is a sorted `BTreeMap` | `src/redisvalue.rs:33-36` | open; no PR |
 | A4 | `cargo test` cannot run module logic in-process: `RedisAlloc` aborts when `RedisModule_Alloc` is unset, and `RedisString::create` unwraps a missing API | `src/alloc.rs`, `src/redismodule.rs:158` | open; issues #89, #221 |
@@ -383,10 +383,10 @@ Decided 2026-10-15:
 
 1. Base branch: master. The F-series code is re-landed as small PRs (fork PRs #8 to #15).
 2. F-series PRs: fork PRs #1 to #5 are closed, each replaced by fork PR #9, #12, #13, #14, and #11.
+3. Allocator: keep fork PR #7's implementation, with its live test and defrag note. Upstream #483 is not adopted.
 5. Panic policy (A7): reply with an error and keep running (fork PR #17).
 
 Open:
 
-3. Allocator: keep fork PR #7's implementation, or take upstream #483's `src/alloc.rs` and keep fork PR #7's live test and defrag note. Both are correct.
 4. 3.0 scope: confirm the breaking list in section 8, and whether A2's wire change ships as a patch or in 3.0.
 6. Upstream sync: how often fork master merges upstream master (for example when #488 or #483 lands).
