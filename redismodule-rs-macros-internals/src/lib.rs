@@ -125,7 +125,7 @@ pub fn api(item: TokenStream) -> TokenStream {
         #original_func_vis #original_func_sig {
             #(
                 #[allow(non_snake_case)]
-                let #requested_apis = unsafe{crate::raw::#requested_apis.unwrap()};
+                let #requested_apis = unsafe{crate::__required_api!(#requested_apis)};
             )*
             let __callback__ = move || -> #inner_return_return_type {
                 #original_func_code

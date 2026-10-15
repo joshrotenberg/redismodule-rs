@@ -11,7 +11,7 @@ pub struct ServerInfo {
 
 impl Drop for ServerInfo {
     fn drop(&mut self) {
-        unsafe { raw::RedisModule_FreeServerInfo.unwrap()(self.ctx, self.inner) };
+        unsafe { crate::__required_api!(RedisModule_FreeServerInfo)(self.ctx, self.inner) };
     }
 }
 
@@ -19,7 +19,11 @@ impl ServerInfo {
     pub fn field(&self, field: &str) -> Option<RedisString> {
         let field = CString::new(field).unwrap();
         let value = unsafe {
-            raw::RedisModule_ServerInfoGetField.unwrap()(self.ctx, self.inner, field.as_ptr())
+            crate::__required_api!(RedisModule_ServerInfoGetField)(
+                self.ctx,
+                self.inner,
+                field.as_ptr(),
+            )
         };
         if value.is_null() {
             None
@@ -34,7 +38,7 @@ impl Context {
     pub fn server_info(&self, section: &str) -> ServerInfo {
         let section = CString::new(section).unwrap();
         let server_info = unsafe {
-            raw::RedisModule_GetServerInfo.unwrap()(
+            crate::__required_api!(RedisModule_GetServerInfo)(
                 self.ctx,         // ctx
                 section.as_ptr(), // section
             )

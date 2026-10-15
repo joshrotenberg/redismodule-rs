@@ -27,7 +27,8 @@ impl<'root> StringCallReply<'root> {
     pub fn as_bytes(&self) -> &[u8] {
         let mut len: usize = 0;
         let reply_string: *mut u8 = unsafe {
-            RedisModule_CallReplyStringPtr.unwrap()(self.reply.as_ptr(), &mut len) as *mut u8
+            crate::__required_api!(RedisModule_CallReplyStringPtr)(self.reply.as_ptr(), &mut len)
+                as *mut u8
         };
         unsafe { slice::from_raw_parts(reply_string, len) }
     }
@@ -78,7 +79,8 @@ impl<'root> ErrorCallReply<'root> {
     pub fn as_bytes(&self) -> &[u8] {
         let mut len: usize = 0;
         let reply_string: *mut u8 = unsafe {
-            RedisModule_CallReplyStringPtr.unwrap()(self.reply.as_ptr(), &mut len) as *mut u8
+            crate::__required_api!(RedisModule_CallReplyStringPtr)(self.reply.as_ptr(), &mut len)
+                as *mut u8
         };
         unsafe { slice::from_raw_parts(reply_string, len) }
     }
@@ -647,8 +649,11 @@ impl<'root> VerbatimStringCallReply<'root> {
         let mut len: usize = 0;
         let mut format: *const c_char = std::ptr::null();
         let reply_string: *mut u8 = unsafe {
-            RedisModule_CallReplyVerbatim.unwrap()(self.reply.as_ptr(), &mut len, &mut format)
-                as *mut u8
+            crate::__required_api!(RedisModule_CallReplyVerbatim)(
+                self.reply.as_ptr(),
+                &mut len,
+                &mut format,
+            ) as *mut u8
         };
         Some((
             std::str::from_utf8(unsafe { slice::from_raw_parts(format as *const u8, FORMAT_LEN) })
@@ -916,7 +921,7 @@ pub(crate) fn create_promise_call_reply(
     reply: Option<NonNull<RedisModuleCallReply>>,
 ) -> PromiseCallReply<'static, '_> {
     reply.map_or(PromiseCallReply::Resolved(Ok(CallReply::Unknown)), |val| {
-        let ty = unsafe { RedisModule_CallReplyType.unwrap()(val.as_ptr()) };
+        let ty = unsafe { crate::__required_api!(RedisModule_CallReplyType)(val.as_ptr()) };
         if ty == REDISMODULE_REPLY_PROMISE as i32 {
             return PromiseCallReply::Future(FutureCallReply {
                 _ctx: ctx,

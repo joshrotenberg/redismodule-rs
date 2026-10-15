@@ -38,7 +38,7 @@ impl<'key> StreamIterator<'key> {
         };
 
         let res = unsafe {
-            raw::RedisModule_StreamIteratorStart.unwrap()(
+            crate::__available_api!(RedisModule_StreamIteratorStart)(
                 key.key_inner,
                 flags,
                 from.as_mut().map_or(ptr::null_mut(), |v| v),
@@ -63,7 +63,7 @@ impl<'key> Iterator for StreamIterator<'key> {
         let mut field_val: *mut raw::RedisModuleString = ptr::null_mut();
         if Status::Ok
             != unsafe {
-                raw::RedisModule_StreamIteratorNextID.unwrap()(
+                crate::__required_api!(RedisModule_StreamIteratorNextID)(
                     self.key.key_inner,
                     &mut id,
                     &mut num_fields,
@@ -76,7 +76,7 @@ impl<'key> Iterator for StreamIterator<'key> {
         let mut fields = Vec::new();
         while Status::Ok
             == unsafe {
-                raw::RedisModule_StreamIteratorNextField.unwrap()(
+                crate::__required_api!(RedisModule_StreamIteratorNextField)(
                     self.key.key_inner,
                     &mut field_name,
                     &mut field_val,
@@ -95,6 +95,6 @@ impl<'key> Iterator for StreamIterator<'key> {
 
 impl<'key> Drop for StreamIterator<'key> {
     fn drop(&mut self) {
-        unsafe { raw::RedisModule_StreamIteratorDelete.unwrap()(self.key.key_inner) };
+        unsafe { crate::__required_api!(RedisModule_StreamIteratorDelete)(self.key.key_inner) };
     }
 }

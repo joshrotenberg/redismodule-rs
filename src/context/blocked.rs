@@ -12,7 +12,7 @@ unsafe impl Send for BlockedClient {}
 
 impl Drop for BlockedClient {
     fn drop(&mut self) {
-        unsafe { raw::RedisModule_UnblockClient.unwrap()(self.inner, ptr::null_mut()) };
+        unsafe { crate::__required_api!(RedisModule_UnblockClient)(self.inner, ptr::null_mut()) };
     }
 }
 
@@ -20,7 +20,7 @@ impl Context {
     #[must_use]
     pub fn block_client(&self) -> BlockedClient {
         let blocked_client = unsafe {
-            raw::RedisModule_BlockClient.unwrap()(
+            crate::__required_api!(RedisModule_BlockClient)(
                 self.ctx, // ctx
                 None,     // reply_func
                 None,     // timeout_func

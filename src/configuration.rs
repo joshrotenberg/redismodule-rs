@@ -245,7 +245,7 @@ pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
         phantom: PhantomData::<i64>,
     };
     unsafe {
-        raw::RedisModule_RegisterNumericConfig.unwrap()(
+        crate::__required_api!(RedisModule_RegisterNumericConfig)(
             ctx.ctx,
             name.as_ptr(),
             default,
@@ -317,7 +317,7 @@ pub fn register_string_configuration<T: ConfigurationValue<RedisString>>(
         phantom: PhantomData::<RedisString>,
     };
     unsafe {
-        raw::RedisModule_RegisterStringConfig.unwrap()(
+        crate::__required_api!(RedisModule_RegisterStringConfig)(
             ctx.ctx,
             name.as_ptr(),
             default.as_ptr(),
@@ -371,7 +371,7 @@ pub fn register_bool_configuration<T: ConfigurationValue<bool>>(
         phantom: PhantomData::<bool>,
     };
     unsafe {
-        raw::RedisModule_RegisterBoolConfig.unwrap()(
+        crate::__required_api!(RedisModule_RegisterBoolConfig)(
             ctx.ctx,
             name.as_ptr(),
             default as i32,
@@ -445,7 +445,7 @@ pub fn register_enum_configuration<G: EnumConfigurationValue, T: ConfigurationVa
         phantom: PhantomData::<G>,
     };
     unsafe {
-        raw::RedisModule_RegisterEnumConfig.unwrap()(
+        crate::__required_api!(RedisModule_RegisterEnumConfig)(
             ctx.ctx,
             name.as_ptr(),
             default.into(),
