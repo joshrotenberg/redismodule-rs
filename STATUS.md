@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F22 — Reviewed finite SDK roadmap and stream specification
+
+| Status | Report |
+|---|---|
+| **Done** | Deep source-only plan selects stream cleanup, consuming raw-key handoff and single-field hash count/byte contracts. First stream repair specified with actual example ordering and corrected-code gates. 26 source predicates, 20 source hashes, two pinned native origins, 18 excerpts, selected 86 SDK/135 reference Rust inventory; originals unchanged. Due/Claude approves; six source clarifications applied. No SDK code/build/test/native execution. |
+| **Next** | F23 stream repair/validation/review next two-hour activation; then F24/F25 raw-key scope/repair, F26/F27 hash scope/repair, F28 results checkpoint. Resume incomplete chunks; finish finite batch and remove its schedule. |
+| **Blockers** | None for the reviewed roadmap or selecting the first repair. F21 reclamation remains parked; future raw-key proof and hash old-version/API gates must pass before their implementation. Issue visibility required for mapped work. |
+| **Decisions** | Keep CI and from-scratch SDK paused, accepted metadata stable. Use existing cadence, one bounded chunk per run. No general audit/support decision, original migration or SDK publication. Stream-filter's selective iterator/replicated command writers are not forcibly replaced. |
+
+Details: [F22 roadmap, first repair specification and queue](docs/F22_SDK_ROADMAP.md),
+[compact evidence](docs/evidence/f22-sdk-roadmap.json).
+
 ## F21 — Accepted configuration metadata retirement: reviewed scope
 
 | Status | Report |

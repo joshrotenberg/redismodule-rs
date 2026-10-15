@@ -158,22 +158,37 @@ Keep accepted boxes/captures/Rc stable. F11 cached owners/rejected-data cleanup
 remain distinct and unchanged. Registry retirement must precede any future free,
 with proved native last-use/quiescence plus image/thread/allocator validity.
 
-No F22 implementation or new audit/default backlog is selected. The retirement
-implementation is blocked on native contract evidence, not permissions or builds.
-An optional next-focus question was posted; reconcile any direct human answer
-before choosing the next lane. Until a new authorized focus or substantive native
-retirement evidence arrives, preserve this safe checkpoint and specific blocker;
-do not duplicate F21, rerun unchanged reviews/tests or spend on model work merely
-because the schedule fires. Keep the existing two-hour report cadence; CI stays
-held unless Josh explicitly resumes it. No pointer free, tombstone/native callback
-experiment, broad Context/GIL/thread/alias/reentry/panic/static-resource audit,
-original migration, push/PR/publication, server change, MSRV/package/support/release
-choice, invalid historical execution, fake Context, arbitrary raw callback or
-crash/leak sampler. If new in-scope evidence arrives, scope one bounded follow-up
-and its independent validation before implementation; issue visibility still
-applies to any tracked implementation. Later direct human direction supersedes
-this standby checkpoint. Do not turn the proposal's future test gates into
-already-executed coverage or automatic work.
+Josh's October 15 direct instruction supersedes F21 standby: dig deeply, plan
+several SDK improvements, schedule and work through them. F22's source-only
+roadmap and first stream specification are complete and independently reviewed.
+Read docs/F22_SDK_ROADMAP.md, its compact evidence and target/f22/checkpoint.json.
+The finite queue is F23 stream cleanup/example repair; F24 raw-key handoff scope;
+F25 reviewed raw-key repair; F26 single-field hash result/byte/compatibility scope;
+F27 reviewed hash repair; F28 outcome/migration checkpoint and schedule completion.
+No further approval is needed to pursue those bounded lanes. Resume unfinished
+work, one chunk per two-hour activation; after F28 remove the batch automation
+rather than invent another task. Later human focus supersedes this queue.
+
+F23 is implementation-ready under the new specification, subject to fresh overlap.
+Stop iterator instead of Delete, resolve Start/Stop/NextID/NextField before
+acquisition, preserve range/Item/owned fields and stop/read-close before the
+example's writable trim. Validate corrected legal paths and source/compiler/
+archive contracts; no historical live-trim execution or fake native contexts.
+F24/F26 specifications must settle their stated native/API/compatibility gates
+before implementation. F25/F27 have tracked-issue relationships and require the
+usual dedicated baseline/empty kickoff/push/scoped draft BEFORE code. Baseline
+uploads include intervening ancestors; record this consequence. No issue invention
+for publication. Preserve borrowed ManuallyDrop scan aliases and replicated
+reference-module command behavior. Original checkouts remain read-only.
+
+The F21 metadata retirement implementation stays blocked on native contract
+proof, independently of this queue. Retain accepted boxes/captures/Rc. CI,
+from-scratch SDK, broad native audits and package/MSRV/support/release decisions
+stay held. F22 changed docs only, with no SDK compiler/tests/benchmarks/native
+execution or SDK push/PR. One Due/Claude review approved; six nonblocking
+source refinements were caller-checked and applied. Source claims are not runtime
+validation. Continue the user's interval reports and authorized sanitized
+Due feedback routing. Do not rerun unchanged completed checks or reviews.
 F17 draft PR5 and drafts1–4 stay open for deferred CI/remote handoff; master was
 not pushed. Required F17 baseline uploaded F11 merge and F12–F16 history under
 issue-visibility authority. Leaves upstream234/134/246/358/473 open; issue471 is

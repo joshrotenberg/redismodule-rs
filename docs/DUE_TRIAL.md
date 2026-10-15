@@ -540,3 +540,28 @@ binary/plugin refresh. Comparison deferred: one complementary new-spec review,
 unestablished equivalent native provider read/permission controls, no spend just
 for cadence. One sanitized aggregate was acknowledged by authorized due-expert;
 raw prompts/source/answers/provider logs remain local. See [F21 evidence](evidence/f21-configuration-retirement.json).
+
+
+## F22 — Finite SDK roadmap and stream repair source review (2026-10-15)
+
+Latest direct human direction resumes a planned finite SDK batch; F21 retirement
+and CI stay parked. Caller source planning selected stream cleanup, raw-key
+handoff and single-field hash result/byte contracts. One monitored read-only
+Due/Claude review approved the new roadmap/first specification. Actual process
+exit 0; request/result/answer/233 trace records/offline summary validate; 50 matched
+successful activities, no failures/gaps/drops. Frozen inputs stayed unchanged
+through review completion. Six nonblocking refinements were independently
+source-checked and applied to docs only; no second unchanged review or SDK
+compile/test/benchmark/native execution. Final records are target/f22/review.
+
+Due 0.1.0, available clean source 76d33d410319d860425a2dd3609863a4ba5ca565;
+binary SHA256 11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b;
+Claude Code 2.1.296; macOS 26.7.1 arm64. Requested provider Claude, model/effort
+omitted, observed model/effort unknown. Compiled source identity unknown; no
+binary/plugin refresh. Duration 251251 ms; provider-reported USD 2.61984275.
+No retries, permission expansion, alternate delegation or arbitrary deadline.
+A/B comparison deferred: one complementary new-plan review was useful; another
+comparison would not verify native effects or solve the parked contract gap.
+Caller verified source/origin/protected-file/original/remote evidence separately;
+source approval does not establish runtime coverage. Sanitized aggregate is routed
+to the human-authorized due-expert hub, not directly to Due GitHub issues.
