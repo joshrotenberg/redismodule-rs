@@ -156,6 +156,8 @@ pub fn start_redis_server_with_module(
         module_path.as_str(),
         "--enable-debug-command",
         "yes",
+        "--enable-module-command",
+        "local",
         "--dir",
         rdb_out_dir
             .to_str()
