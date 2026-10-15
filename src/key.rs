@@ -80,11 +80,24 @@ impl RedisKey {
     ///
     /// # Safety
     ///
-    /// The caller must ensure:
-    /// 1. The `ctx` pointer remains valid for the lifetime of the `RedisKey`.
-    /// 2. The `key_inner` pointer remains valid for the lifetime of the `RedisKey`.
-    /// 3. `ctx` is the actual native opening/producer context for this key; string
-    ///    getters use it to resolve any AutoMemory registrations.
+    /// `ctx` must be the actual, valid native opening/producer context. A non-null
+    /// `key_inner` must be a live compatible handle whose sole manual close
+    /// obligation is transferred to this owner. It must not have been closed or
+    /// collected. The NULL result of a readonly missing-key open is also allowed;
+    /// it carries no close obligation, but still requires the actual valid context.
+    ///
+    /// Native modes, context/handle lifetimes, legal callback phase and GIL
+    /// requirements must hold for every use and for destruction. This constructor
+    /// does not retain the context or detach AutoMemory. With AutoMemory enabled
+    /// before opening, drop this owner before collection; manual close removes
+    /// that registration. Do not create a second closing owner or use the handle
+    /// after close, collection or context teardown.
+    ///
+    /// Internal scan adapters may instead borrow a native-owned handle by
+    /// immediately wrapping this value in `ManuallyDrop`. Such adapters must not
+    /// close or extract the handle, adopt ownership, or escape their callback.
+    /// In particular, a Keys scan can supply a stack handle; it is not an owned
+    /// heap handle that may be passed to `CloseKey`.
     pub const unsafe fn from_raw_parts(
         ctx: *mut raw::RedisModuleCtx,
         key_inner: *mut raw::RedisModuleKey,
@@ -94,11 +107,25 @@ impl RedisKey {
 
     /// Decomposes a `RedisKey` into its raw components: `(redismodule context pointer, key pointer)`.
     ///
-    /// After calling this function, the caller is responsible for cleaning up the raw key previously managed by the `RedisKey`.
-    /// The only way to do this safely is to convert the raw redismodule context and key pointers back into a `RedisKey` with
-    /// the [`from_raw_parts`][Self::from_raw_parts] function, allowing the destructor to perform the cleanup.
+    /// Transfers this owner's manual close obligation without closing the handle.
+    /// The recipient must either reconstruct one owner with [`Self::from_raw_parts`]
+    /// or call native `CloseKey` once, while the actual opening context and handle
+    /// remain valid. NULL from a readonly missing-key open needs no close.
+    ///
+    /// This does not retain either pointer, extend its native phase/GIL/lifetime
+    /// obligations, or detach an existing AutoMemory registration. Explicit close
+    /// removes that registration. End all access before native collection/context
+    /// teardown; never later adopt or close a collected handle. Enabling AutoMemory
+    /// after opening does not register an existing handle retroactively. With
+    /// AutoMemory off, discarding the tuple without closing abandons the resource.
+    /// This API does not permit carrying either pointer into a later command or
+    /// callback, or onto another thread; it grants no lifetime extension.
+    /// Outstanding borrows, iterators and native users must end before close.
     pub fn to_raw_parts(self) -> (*mut raw::RedisModuleCtx, *mut raw::RedisModuleKey) {
-        (self.ctx, self.key_inner)
+        // Reassess whole-owner suppression if owned Rust fields are added:
+        // RedisKey currently contains only the two raw pointers.
+        let key = std::mem::ManuallyDrop::new(self);
+        (key.ctx, key.key_inner)
     }
 
     /// # Panics

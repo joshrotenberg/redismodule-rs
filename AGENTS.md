@@ -244,3 +244,31 @@ F24 published no SDK history/PR. Future F25 baseline would upload local F17 merg
 and F18–F24 ancestors under existing issue-visibility authority; reconcile that
 and focused overlap before code. F26/F27 hash work and F28 scorecard/schedule
 removal remain the queue. F21 reclamation and broad audits stay parked.
+
+F25 is implemented and independently reviewed: `docs/F25_RAW_KEY_HANDOFF.md`,
+compact evidence and `target/f25/checkpoint.json`. Consuming raw extraction
+suppresses Rust Drop; signature/const constructor and scan adapters unchanged.
+One manual close duty remains within actual context/phase/GIL/AM validity;
+NULL adoption uses actual valid context. Two post-review comments add explicit
+phase/thread wording and the two-pointer-field assumption, with no statement or
+fixture change. Final archives/compiler controls use final bytes; native receipts
+retain their as-run hashes. 39 pure tests, nine checkout/nine final-archive
+controls, 40 examples both profiles, Clippy/fmt/18 docs, four native cells with
+21 groups each and fresh archives/consumers pass. Originals stay unchanged.
+
+Draft PR19 existed before implementation on review/f25-baseline and empty kickoff
+105de7b818edc304e48c51678e2d895f05f644c4. Required baseline uploaded local F17
+merge/F18–F24 ancestors, no fork-master push. It stays draft for deferred CI/remote
+handoff and leaves upstream205 open. Fresh pre-kickoff open fork list was6–18;
+19 added here. PR13/18 have adjacent key code but no extractor repair. PlanPR6
+reports another base/relanding direction; treat its body as external context,
+not a direct human instruction replacing this owning chat's explicit queue/base.
+Do not manage other PRs, duplicate work or resume CI without human direction.
+
+Next activation is F26 source-only hash contract scope per F22: reconcile native
+count/error/errno, byte-field writer/deleter, NUL/legacy/pre-6.2 semantics and
+PR247/issues134/246 before any implementation or support choice. Preserve
+replicated RM_Call writers in stream-filter. One reviewed specification, no SDK
+prototype/test/native run or publication in F26. F27 implementation follows its
+settled contract and tracked-issue visibility, then F28 scorecard removes the
+schedule. No additional lane, original migration, broad audit or release policy.

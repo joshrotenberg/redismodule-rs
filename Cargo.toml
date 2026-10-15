@@ -256,3 +256,7 @@ crate-type = ["cdylib"]
 [[example]]
 name = "configuration_load_empty"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "raw_key_handoff"
+crate-type = ["cdylib"]
