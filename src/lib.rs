@@ -3,6 +3,7 @@ extern crate num_traits;
 
 pub mod alloc;
 pub mod apierror;
+mod args;
 pub mod error;
 pub mod io;
 pub mod native_types;
@@ -20,6 +21,7 @@ pub mod logging;
 mod macros;
 mod utils;
 
+pub use crate::args::ArgCursor;
 pub use crate::context::blocked::BlockedClient;
 pub use crate::context::thread_safe::{
     ContextGuard, DetachedFromClient, RedisGILGuard, RedisLockIndicator, ThreadSafeContext,
