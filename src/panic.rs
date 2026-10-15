@@ -12,11 +12,11 @@
 //! type methods, can use [`catch_panic`] the same way.
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::ffi::CString;
 use std::os::raw::c_int;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
-use std::ptr;
+use std::ptr::{self, NonNull};
 
 use crate::raw;
 
@@ -124,27 +124,31 @@ pub(crate) fn run_config_set(
 
 thread_local! {
     /// A panic caught in a callback that Redis made in the middle of a call
-    /// from Rust, waiting for that call to return.
-    static DEFERRED_PANIC: RefCell<Option<Box<dyn Any + Send>>> = const { RefCell::new(None) };
+    /// from Rust, waiting for that call to return. It holds a raw pointer
+    /// rather than a `Box`: a thread local with a destructor would keep glibc
+    /// from unloading the module on MODULE UNLOAD.
+    static DEFERRED_PANIC: Cell<Option<NonNull<dyn Any + Send>>> = const { Cell::new(None) };
 }
 
 /// Runs a callback that Redis makes in the middle of a call from Rust, such as
 /// a scan callback. A panic is kept until [`resume_deferred_panic`] runs after
 /// the outer call returns, and the callbacks that follow it are skipped.
 pub(crate) fn defer_panic(f: impl FnOnce()) {
-    if DEFERRED_PANIC.with(|deferred| deferred.borrow().is_some()) {
+    if DEFERRED_PANIC.get().is_some() {
         return;
     }
     if let Err(payload) = catch_unwind(AssertUnwindSafe(f)) {
-        DEFERRED_PANIC.with(|deferred| *deferred.borrow_mut() = Some(payload));
+        DEFERRED_PANIC.set(Some(NonNull::from(Box::leak(payload))));
     }
 }
 
 /// Resumes a panic that [`defer_panic`] kept, in the Rust code that made the
 /// call into Redis.
 pub(crate) fn resume_deferred_panic() {
-    if let Some(payload) = DEFERRED_PANIC.with(|deferred| deferred.borrow_mut().take()) {
-        resume_unwind(payload);
+    if let Some(payload) = DEFERRED_PANIC.take() {
+        // SAFETY: the pointer came from Box::leak in defer_panic, and taking it
+        // out of the slot means it is turned back into a Box only once.
+        resume_unwind(unsafe { Box::from_raw(payload.as_ptr()) });
     }
 }
 
@@ -181,6 +185,11 @@ mod tests {
         assert_eq!(run_callback("test", || 1, || 2), 1);
         // Outside Redis the log call is skipped, so only the fallback shows.
         assert_eq!(run_callback("test", || -> i32 { panic!("boom") }, || 2), 2);
+    }
+
+    #[test]
+    fn the_deferred_panic_slot_needs_no_destructor() {
+        assert!(!std::mem::needs_drop::<Cell<Option<NonNull<dyn Any + Send>>>>());
     }
 
     #[test]
