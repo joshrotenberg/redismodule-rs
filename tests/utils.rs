@@ -11,8 +11,12 @@ use std::time::Duration;
 /// and a port, returns the connection guards (`ChildGuard`) through
 /// which the redis instance can be interacted with.
 pub fn start_redis(module_name: &str, port: u16) -> Result<Vec<ChildGuard>, &'static str> {
-    Ok(vec![start_redis_server_with_module(module_name, port)
-        .map_err(|_| "failed to start redis server")?])
+    Ok(vec![start_redis_server_with_module(
+        module_name,
+        port,
+        None,
+    )
+    .map_err(|_| "failed to start redis server")?])
 }
 
 pub struct TestConnection {
@@ -32,6 +36,31 @@ impl TestConnection {
             _guards: start_redis(module_name, port).expect("Redis instance started."),
             connection: get_redis_connection(port).expect("Established connection to server."),
         }
+    }
+
+    /// Like [`TestConnection::new`], but the server writes its log to a file
+    /// that [`TestConnection::server_log`] reads, instead of to stdout.
+    pub fn with_log_file(module_name: &str) -> Self {
+        let port = TEST_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let log_file = test_dir(port)
+            .expect("Test directory path.")
+            .join("redis.log");
+        let guard = start_redis_server_with_module(module_name, port, Some(log_file))
+            .expect("Redis instance started.");
+
+        Self {
+            _guards: vec![guard],
+            connection: get_redis_connection(port).expect("Established connection to server."),
+        }
+    }
+
+    /// Reads the server log of a connection made with [`TestConnection::with_log_file`].
+    pub fn server_log(&self) -> std::io::Result<String> {
+        let log_file = self._guards[0]
+            .log_file
+            .as_ref()
+            .expect("The server was started with a log file.");
+        fs::read_to_string(log_file)
     }
 }
 
@@ -54,6 +83,7 @@ impl std::ops::DerefMut for TestConnection {
 pub struct ChildGuard {
     name: &'static str,
     child: std::process::Child,
+    log_file: Option<PathBuf>,
 }
 
 impl Drop for ChildGuard {
@@ -67,7 +97,16 @@ impl Drop for ChildGuard {
     }
 }
 
-pub fn start_redis_server_with_module(module_name: &str, port: u16) -> Result<ChildGuard> {
+/// The working directory of the test server on `port`.
+fn test_dir(port: u16) -> Result<PathBuf> {
+    Ok(std::env::current_dir()?.join(format!("target/integration-test/instance-p{port}")))
+}
+
+pub fn start_redis_server_with_module(
+    module_name: &str,
+    port: u16,
+    log_file: Option<PathBuf>,
+) -> Result<ChildGuard> {
     let extension = if cfg!(target_os = "macos") {
         "dylib"
     } else {
@@ -96,8 +135,7 @@ pub fn start_redis_server_with_module(module_name: &str, port: u16) -> Result<Ch
     let module_path = format!("{}", module_path.display());
 
     let rdb_filename = format!("test-on-port-{}.rdb", port);
-    let rdb_out_dir = std::env::current_dir()?;
-    let rdb_out_dir = rdb_out_dir.join(format!("target/integration-test/instance-p{}", port));
+    let rdb_out_dir = test_dir(port)?;
     if rdb_out_dir.exists() {
         fs::remove_dir_all(&rdb_out_dir).with_context(|| {
             format!(
@@ -110,9 +148,10 @@ pub fn start_redis_server_with_module(module_name: &str, port: u16) -> Result<Ch
     fs::create_dir_all(&rdb_out_dir)
         .with_context(|| format!("Creating rdb output dir: {}", rdb_out_dir.display()))?;
 
-    let args = &[
+    let port = port.to_string();
+    let mut args = vec![
         "--port",
-        &port.to_string(),
+        &port,
         "--loadmodule",
         module_path.as_str(),
         "--enable-debug-command",
@@ -124,6 +163,14 @@ pub fn start_redis_server_with_module(module_name: &str, port: u16) -> Result<Ch
         "--dbfilename",
         rdb_filename.as_str(),
     ];
+    if let Some(log_file) = &log_file {
+        args.push("--logfile");
+        args.push(
+            log_file
+                .to_str()
+                .expect("Log file path contains invalid UTF-8 characters"),
+        );
+    }
 
     let redis_server = Command::new("redis-server")
         .args(args)
@@ -131,6 +178,7 @@ pub fn start_redis_server_with_module(module_name: &str, port: u16) -> Result<Ch
         .map(|c| ChildGuard {
             name: "redis-server",
             child: c,
+            log_file,
         })?;
 
     Ok(redis_server)

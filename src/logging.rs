@@ -1,5 +1,5 @@
 use crate::raw;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::ptr;
 use strum_macros::AsRefStr;
 
@@ -28,6 +28,38 @@ impl From<log::Level> for RedisLogLevel {
     }
 }
 
+impl RedisLogLevel {
+    const fn as_c_str(self) -> &'static CStr {
+        match self {
+            Self::Debug => c"debug",
+            Self::Notice => c"notice",
+            Self::Verbose => c"verbose",
+            Self::Warning => c"warning",
+        }
+    }
+}
+
+/// Preserve diagnostic text, spelling embedded NUL bytes as visible `\0`.
+/// Adapted from upstream PR 476.
+fn sanitize_message(message: &str) -> CString {
+    let bytes = message.as_bytes();
+    let nuls = bytes.iter().filter(|&&byte| byte == 0).count();
+    if nuls == 0 {
+        return CString::new(bytes).expect("message contains no NUL bytes");
+    }
+
+    // Reserve the terminator too, so CString can consume this buffer directly.
+    let mut escaped = Vec::with_capacity(bytes.len() + nuls + 1);
+    for &byte in bytes {
+        if byte == 0 {
+            escaped.extend_from_slice(b"\\0");
+        } else {
+            escaped.push(byte);
+        }
+    }
+    CString::new(escaped).expect("NUL bytes were escaped")
+}
+
 pub(crate) fn log_internal<L: Into<RedisLogLevel>>(
     ctx: *mut raw::RedisModuleCtx,
     level: L,
@@ -37,27 +69,34 @@ pub(crate) fn log_internal<L: Into<RedisLogLevel>>(
         return;
     }
 
-    let level = CString::new(level.into().as_ref()).unwrap();
-    let fmt = CString::new(message).unwrap();
+    let level = level.into().as_c_str();
+    let message = sanitize_message(message);
     unsafe {
-        raw::RedisModule_Log.expect(NOT_INITIALISED_MESSAGE)(ctx, level.as_ptr(), fmt.as_ptr())
+        raw::RedisModule_Log.expect(NOT_INITIALISED_MESSAGE)(
+            ctx,
+            level.as_ptr(),
+            c"%s".as_ptr(),
+            message.as_ptr(),
+        )
     }
 }
 
 /// This function should be used when a callback is returning a critical error
 /// to the caller since cannot load or save the data for some critical reason.
+/// Embedded NUL bytes in the message are rendered as `\0`; other text is passed literally.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn log_io_error(io: *mut raw::RedisModuleIO, level: RedisLogLevel, message: &str) {
     if cfg!(test) {
         return;
     }
-    let level = CString::new(level.as_ref()).unwrap();
-    let fmt = CString::new(message).unwrap();
+    let level = level.as_c_str();
+    let message = sanitize_message(message);
     unsafe {
         raw::RedisModule_LogIOError.expect(NOT_INITIALISED_MESSAGE)(
             io,
             level.as_ptr(),
-            fmt.as_ptr(),
+            c"%s".as_ptr(),
+            message.as_ptr(),
         )
     }
 }
@@ -65,6 +104,7 @@ pub fn log_io_error(io: *mut raw::RedisModuleIO, level: RedisLogLevel, message: 
 /// Log a message to the Redis log with the given log level, without
 /// requiring a context. This prevents Redis from including the module
 /// name in the logged message.
+/// Embedded NUL bytes are rendered as `\0`; other text is passed literally.
 pub fn log<T: AsRef<str>>(level: RedisLogLevel, message: T) {
     log_internal(ptr::null_mut(), level, message.as_ref());
 }
@@ -194,3 +234,64 @@ pub mod standard_log_implementation {
     }
 }
 pub use standard_log_implementation::*;
+
+#[cfg(test)]
+mod tests {
+    use super::{sanitize_message, RedisLogLevel};
+
+    #[test]
+    fn preserves_empty_unicode_percent_and_backslash_text() {
+        for message in [
+            "",
+            "plain text",
+            "café 日本語",
+            "100% ready",
+            "100%% ready",
+            r"literal \0",
+        ] {
+            assert_eq!(sanitize_message(message).to_bytes(), message.as_bytes());
+        }
+    }
+
+    #[test]
+    fn escapes_every_nul_without_dropping_text() {
+        for (message, expected) in [
+            ("\0", r"\0"),
+            ("\0start", r"\0start"),
+            ("end\0", r"end\0"),
+            ("a\0\0b", r"a\0\0b"),
+            ("é\0日本語", r"é\0日本語"),
+        ] {
+            assert_eq!(sanitize_message(message).to_bytes(), expected.as_bytes());
+        }
+    }
+
+    #[test]
+    fn preserves_all_nonzero_bytes_of_utf8_text() {
+        let input: String = (0..=255).map(char::from).collect();
+        assert_eq!(
+            sanitize_message(&input).to_bytes(),
+            input.replace('\0', "\\0").as_bytes()
+        );
+    }
+
+    #[test]
+    fn handles_repeated_nuls_in_long_messages() {
+        assert_eq!(
+            sanitize_message(&"a\0".repeat(4096)).to_bytes(),
+            "a\\0".repeat(4096).as_bytes()
+        );
+    }
+
+    #[test]
+    fn c_levels_match_public_level_names() {
+        for level in [
+            RedisLogLevel::Debug,
+            RedisLogLevel::Notice,
+            RedisLogLevel::Verbose,
+            RedisLogLevel::Warning,
+        ] {
+            assert_eq!(level.as_c_str().to_bytes(), level.as_ref().as_bytes());
+        }
+    }
+}
