@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F16 — Call-result conversion scope: reviewed locally
+
+| Status | Report |
+|---|---|
+| **Done** | Source-only specification recommends valid UTF-8 BulkString and invalid StringBuffer, reusing one owned copy and retaining key variants. Inventoried 218 tracked Rust files/four references; 37 caller document/source checks, 12 source hashes and ten reference excerpts checked. Due/Claude approves; five nonblocking refinements applied. Native source distinguishes 7.2 direct status output from 8.10 CR/LF mapping. No implementation, compilation, SDK tests/benchmarks/native execution. |
+| **Next** | F17: narrow conversion repair, version/enterprise text consumers and config-get forwarding/selected corrected fixtures. Before code, refresh overlap and create/push post-F16 baseline/empty kickoff plus scoped draft listing upstream234 and PR93 credit. Baseline uploads local F11 merge/F12–F16 ancestors under issue-visibility history authority; never push fork master. |
+| **Blockers** | None for local F16. Future implementation remains gated on draft visibility and corrected-code compiler/native/archive/reference validation. CI/drafts1–4, accepted metadata and broad native contracts remain deferred. The source proposal has no runtime pass or measured allocation saving. |
+| **Decisions** | Prefer valid-text bulk plus existing binary fallback over always-byte values or opt-in-only repair; preserve strict extraction and key Eq/Hash/Ord. Wrapped status becomes bulk deliberately; explicit module status stays. Existing JMESPath text patterns need no selected domain rewrite. Original modules unchanged; no new package/MSRV/support/release commitment. |
+
+Details: [F16 scope, options and validation gates](docs/F16_CALL_REPLY_CONVERSION.md),
+[compact evidence](docs/evidence/f16-call-reply-conversion.json).
+
 ## F15 — Evidence and priorities: reviewed locally
 
 | Status | Report |

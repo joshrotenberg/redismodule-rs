@@ -1,0 +1,352 @@
+{
+  "chunk": "F16",
+  "kind": "source-only repair specification",
+  "base": "1a5e437cfa7058a97bc163444e157d4ccdf1d007",
+  "branch": "docs/f16-call-reply-scope",
+  "implementation": false,
+  "compiled_proposed_apis": false,
+  "tests_builds_benchmarks_native_executions": 0,
+  "inventory": {
+    "path": "target/f16/inventory.json",
+    "sha256": "dd346df2b9373816a1a4841d8c0fc41d793202ff38e0a7eec10919be8e2f3ae0",
+    "tracked_rust_files": 218,
+    "method": "tracked Rust hashes and selected literal syntax, not exhaustive AST/callgraph resolution",
+    "references": [
+      {
+        "name": "carolina",
+        "head": "0191175bb18ecf371d49d8b264a514f2c662099c",
+        "status": "",
+        "tracked_rust_files": 23,
+        "match_count_including_false_positives": 103
+      },
+      {
+        "name": "eventstream",
+        "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+        "status": "",
+        "tracked_rust_files": 37,
+        "match_count_including_false_positives": 34
+      },
+      {
+        "name": "jmespath",
+        "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+        "status": "",
+        "tracked_rust_files": 35,
+        "match_count_including_false_positives": 86
+      },
+      {
+        "name": "streamfilter",
+        "head": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+        "status": "",
+        "tracked_rust_files": 40,
+        "match_count_including_false_positives": 51
+      }
+    ]
+  },
+  "sdk_sources": {
+    "src/redisvalue.rs": "5d1ad6f05342ca88c9773ef154bd2756472723fed1d3c2d136849f475f46b4d9",
+    "src/context/mod.rs": "f42c59f354774429a900663137b7485d927662c615c13bbfce0eb40ae90e99c1",
+    "src/context/call_reply.rs": "4e315e45c0536188aca4148cb08b6fcd3aa0ab15b92940700bb6aaab1f7f9428",
+    "src/configuration.rs": "3ec9b02d4e627f74cb8922f3bc3f3e61a480274f8e455dc31a8d0f58c3ee32a4",
+    "examples/call.rs": "845ce858fe0245a49bc0e3f138b3c48114e457030c7900f778a5f23cf4b6e875",
+    "tests/integration.rs": "807d910051565e2c3d67ed893dc6a8b59a251a2f4b7bcea964d8e52a995d252a",
+    "tools/runtime_baseline.py": "8b6eb8e145d2b2c93d507462e163d9657093dd0627b57a3079c6e5eae36c560a"
+  },
+  "native_sources": {
+    "target/f01/servers/redis-7.2.8/src/module.c": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+    "target/f08/native-8.10.2/module.c": "bcfad92db0a7be63df49ed981b4ad224b31ab4ff0fdf9752d60b6d0a519d3329",
+    "target/f01/servers/redis-7.2.8/src/call_reply.c": "9a3754f58574d3f3f2b59827173a8a270779130312ef91f550b5cfdaa48c1a0e",
+    "target/f16/native-8.10.2/call_reply.c": "77e5535f774216b62000917df27542411e423c69975753755553db03a028836c",
+    "target/f16/native-8.10.2/networking.c": "84bc0a5a7982b5e6cde7f32255b9753a15d4bc0daa6034b443d00e2ffc810e4b"
+  },
+  "native_8_10_provenance": "target/f16/native-8.10.2/provenance.json",
+  "github": {
+    "fork_drafts": 4,
+    "upstream_open_prs": 45,
+    "upstream_open_issues": 55,
+    "implementation_scoped_issues": [
+      234
+    ],
+    "background_issues": [
+      134,
+      246,
+      358
+    ],
+    "excluded_issue": 471,
+    "pr93": {
+      "author": "MikkelSnitker",
+      "head": "f1ec666ecc6891e11130df853e8b80c758df5230",
+      "state": "OPEN",
+      "diff_sha256": "852c7eb6f9660a24803e277dc834b4cf027b1ff6f4274a429f54ba8f391579ef"
+    },
+    "pr375": {
+      "author": "iddm",
+      "head": "68a0705b7f3d95a893eda19390e4dff51d3a4263",
+      "selected_diff_sha256": "f2524cce5ae4d3fa14016ae1fc2bc742fb9e1c50402c60b58ba6545e148b4483",
+      "disposition": "file overlap broad status/FFI changes; selected diff does not implement string conversion policy"
+    }
+  },
+  "proposal": {
+    "value": "valid UTF8 BulkString(String), invalid StringBuffer(Vec<u8>); reuse failed owned buffer",
+    "key": "retain String/BulkString byte variants and Eq/Hash/Ord; remove eager fallback/second copy",
+    "public_signatures": "unchanged",
+    "new_borrowed_api": false,
+    "direct_sdk_migrations": [
+      "Context::version_from_info",
+      "Context::is_enterprise_internal",
+      "focused call/DUMP fixtures/docs"
+    ],
+    "reference_domain_migration": "none imposed; selected successful-text patterns already accept BulkString, typed byte path unchanged",
+    "wire_change": "all implicit string results become bulk, including status text; explicit simple/status variants unchanged",
+    "performance": "source mechanics only; no measured allocation/throughput gain",
+    "native_status_difference": "7.2.8 direct status write, 8.10.2 addReplyStatusSafe maps CR/LF to spaces; not executed",
+    "direct_sdk_forwarding_consumer": "module_config_get: no code-policy rewrite; new bulk framing needs selected regression"
+  },
+  "future_validation": [
+    "pure actual-production byte/text/key policy and buffer reuse",
+    "metadata-only public consumer controls",
+    "corrected legal owned-host exact-byte and framing/next-command checks",
+    "selected native map/set and root-disposal ownership flow",
+    "SDK version/enterprise-text direct consumers",
+    "fresh archives and isolated selected reference flows",
+    "bounded allocation measurement only if claiming it"
+  ],
+  "review": {
+    "actual_exit": 0,
+    "verdict": "approve",
+    "request_result_answer_all_trace_summary_valid": true,
+    "trace_records": 177,
+    "recorded_inputs_unchanged_through_completion": true,
+    "source_only": true,
+    "duration_ms": 167278,
+    "provider_reported_cost_usd": 1.9676202499999995,
+    "activities": {
+      "started": 41,
+      "completed": 41,
+      "failed": 0,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "succeeded": 41
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 41,
+          "completed": 41,
+          "completion_status_counts": {
+            "succeeded": 41
+          }
+        }
+      }
+    },
+    "failed_activity_details": [],
+    "failed_activity_disposition": "Failed activities retained as observed metadata; inspect before acceptance, no automatic retry/permission expansion; source approval separate from effects",
+    "reviewed_files": [
+      "docs/F16_CALL_REPLY_CONVERSION.md",
+      "docs/evidence/f16-call-reply-conversion.json",
+      "src/redisvalue.rs (41-53, 200-314)",
+      "src/context/call_reply.rs (1-60)",
+      "src/context/mod.rs (410-549, 710-749, 870-894)",
+      "src/configuration.rs (578-622)",
+      "examples/call.rs (155-216)",
+      "tests/integration.rs (668-712, 1385-1420, grep)",
+      "tools/runtime_baseline.py (grep EXCLUDED)",
+      "AGENTS.md (100-125, grep)",
+      "STATUS.md (grep)",
+      "target/f01/servers/redis-7.2.8/src/module.c (3070-3089, 3312-3327, 5850-5863, 6003-6014)",
+      "target/f01/servers/redis-7.2.8/src/call_reply.c (86-110, 296-319)",
+      "target/f08/native-8.10.2/module.c (3206-3223, 3446-3460, 6601-6613)",
+      "target/f16/native-8.10.2/call_reply.c (66-89, 277-299)",
+      "target/f16/native-8.10.2/networking.c (870-885)",
+      "target/f16/reference-excerpts.json",
+      "target/f16/upstream-pr93.diff",
+      "target/f16/issue234.json",
+      "target/f16/upstream-pr375-selected.diff (grep only)"
+    ],
+    "sdk_source_read": true,
+    "findings": [
+      {
+        "action": "Create the checkpoint artifact before the no-ff merge or reword the sentence to point at an existing file (e.g. target/f16/baseline.json and the evidence JSON).",
+        "claim": "Spec directs readers to target/f16/checkpoint.json before the next interval, but no such file exists in the worktree (Glob target/f16/checkpoint.json returned nothing; target/f16 holds baseline/inventory/review artifacts only).",
+        "file": "docs/F16_CALL_REPLY_CONVERSION.md",
+        "line": 176,
+        "priority": "nonblocking"
+      },
+      {
+        "action": "Add module_config_get to the before/after table as a no-code-change consumer whose reply framing moves from simple to bulk (matching native CONFIG GET), and add a selected config-get check to the SDK helper regressions gate.",
+        "claim": "The direct SDK migration list names version_from_info and is_enterprise_internal only. src/configuration.rs:589-606 module_config_get also routes native CONFIG GET replies through From<&CallResult> and returns them for module emission, so today valid config values are re-emitted as CString simple strings and under the proposal become bulk; this observable consequence is unlisted even though evidence hashes configuration.rs.",
+        "file": "docs/F16_CALL_REPLY_CONVERSION.md",
+        "line": 80,
+        "priority": "nonblocking"
+      },
+      {
+        "action": "List target/f16/reference-excerpts.json (with its sha256) in retained_artifacts so the reference-table evidence basis is ledgered alongside the inventory.",
+        "claim": "retained_artifacts omits target/f16/reference-excerpts.json (and pre-review-checks.json), yet the spec's reference table and this review's reference claims rest on that excerpt file and its per-file source_sha256 values.",
+        "file": "docs/evidence/f16-call-reply-conversion.json",
+        "line": 113,
+        "priority": "nonblocking"
+      },
+      {
+        "action": "Tighten the four cited ranges to the exact lines so the caller's hash/line checks and future diffs anchor precisely.",
+        "claim": "Minor line-range drift: Context::call is mod.rs:432-435 (cited 432-436); the StringBuffer emitter arm ends at mod.rs:547 (cited range ends 546); 7.2.8 callReplyGetString spans call_reply.c:299-315 (cited 298-317); 8.10.2 bulk/error/simple parsers span 69-88 (cited 69-87). Content claims are correct.",
+        "file": "docs/F16_CALL_REPLY_CONVERSION.md",
+        "line": 18,
+        "priority": "nonblocking"
+      },
+      {
+        "action": "Name tests/integration.rs:701 as the retained explicit SimpleString control in the gate and specify adding a BulkString sibling case rather than replacing it.",
+        "claim": "The SDK helper regressions gate asks for pure version-parser tests on old explicit and new bulk text but does not note that tests/integration.rs:701 already constructs RedisValue::SimpleString(info) for version_from_info; that existing call is the retained explicit-text control and must keep passing after the migration.",
+        "file": "docs/F16_CALL_REPLY_CONVERSION.md",
+        "line": 131,
+        "priority": "nonblocking"
+      }
+    ],
+    "limits": [
+      "Source-only read review inside cwd; no Bash, build, compile, test, native execution, benchmark or reproduction of any path.",
+      "SHA-256 values in the evidence JSON were not recomputed or verified (no hashing tool permitted); file identity was taken from content at the cited lines only.",
+      "Inventory counts (218/83/135) checked only by arithmetic against the evidence JSON; target/f16/inventory.json itself was not opened.",
+      "Original module repositories were not read; reference claims rely solely on target/f16/reference-excerpts.json.",
+      "PR 375 selected diff was grepped for conversion identifiers only, not read in full; PR 93 JSON, issues 134/246/358, fork/upstream PR and issue snapshots, provenance.json, pre-review-checks.json and target/f16/review/* were not opened.",
+      "CallReply array/map/set getter implementations were not read; spec makes no claims about them beyond nested reuse of the same conversion, which was verified at the redisvalue.rs call sites.",
+      "No assessment of GitHub state, branch/merge process execution, or F02-F15 unchanged work."
+    ]
+  },
+  "retained_artifacts": [
+    "target/f16/baseline.json",
+    "target/f16/inventory.json",
+    "target/f16/fork-prs.json",
+    "target/f16/upstream-prs.json",
+    "target/f16/upstream-issues.json",
+    "target/f16/upstream-pr93.json",
+    "target/f16/upstream-pr93.diff",
+    "target/f16/issue234.json",
+    "target/f16/issue134.json",
+    "target/f16/issue246.json",
+    "target/f16/issue358.json",
+    "target/f16/upstream-pr375.json",
+    "target/f16/upstream-pr375-selected.diff",
+    "target/f16/reference-excerpts.json",
+    "target/f16/pre-review-checks.json",
+    "target/f16/verification.json"
+  ],
+  "limits": [
+    "Source-only, no compiled/native proposal evidence",
+    "Selected literal searches include clients/comments/Lua; not exhaustive call graph or exact call count",
+    "No general context/GIL/thread/reentry/alias/panic/native-owner audit",
+    "No original module edits, push/PR/CI/release/support policy",
+    "Future tracked implementation gated on dedicated baseline/empty kickoff/scoped draft; uploads local F11 merge/F12-F16 ancestors under issue-work visibility authority"
+  ],
+  "due_provenance": {
+    "sdk_head": "1a5e437cfa7058a97bc163444e157d4ccdf1d007",
+    "sdk_dirty": "?? docs/F16_CALL_REPLY_CONVERSION.md\n?? docs/evidence/f16-call-reply-conversion.json",
+    "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "due_source_status": "",
+    "due_binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "due_version": "due 0.1.0",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "host_app": "Codex desktop",
+    "model_requested": null,
+    "effort_requested": null,
+    "model_observed": "unknown",
+    "effort_observed": "unknown",
+    "compiled_source_identity": "unknown",
+    "plugin_binary_refresh": false,
+    "comparison_deferred": "Single new source-spec review; equivalent provider tool/permission controls unestablished; SDK scope priority",
+    "deadline": null
+  },
+  "caller_checks": {
+    "kind": "caller source/document checks, no SDK tests/builds/prototype/native execution",
+    "checks": [
+      "protected SDK files unchanged",
+      "carolina original head/status/hash match",
+      "eventstream original head/status/hash match",
+      "jmespath original head/status/hash match",
+      "streamfilter original head/status/hash match",
+      "218 tracked Rust files /135 originals",
+      "source hash src/redisvalue.rs",
+      "source hash src/context/mod.rs",
+      "source hash src/context/call_reply.rs",
+      "source hash src/configuration.rs",
+      "source hash examples/call.rs",
+      "source hash tests/integration.rs",
+      "source hash tools/runtime_baseline.py",
+      "source hash target/f01/servers/redis-7.2.8/src/module.c",
+      "source hash target/f08/native-8.10.2/module.c",
+      "source hash target/f01/servers/redis-7.2.8/src/call_reply.c",
+      "source hash target/f16/native-8.10.2/call_reply.c",
+      "source hash target/f16/native-8.10.2/networking.c",
+      "reference excerpt eventstream/src/commands.rs:90",
+      "reference excerpt eventstream/src/commands.rs:224",
+      "reference excerpt eventstream/src/capture.rs:1335",
+      "reference excerpt jmespath/src/command.rs:83",
+      "reference excerpt jmespath/src/search.rs:24",
+      "reference excerpt jmespath/src/streams.rs:23",
+      "reference excerpt jmespath/src/timeseries.rs:23",
+      "reference excerpt streamfilter/src/native.rs:15",
+      "reference excerpt streamfilter/src/reply.rs:1",
+      "reference excerpt streamfilter/src/reply.rs:116",
+      "value current UTF8-first simple/fallback source",
+      "key eager fallback and preserved variants",
+      "two direct SDK text consumers",
+      "native parser same string tag 7.2 and8.10",
+      "native bulk wrapper both retained versions",
+      "native string pointer borrowed contract",
+      "fresh overlap/issue234/pr93",
+      "local markdown link evidence/f16-call-reply-conversion.json",
+      "review inputs frozen"
+    ],
+    "count": 37,
+    "protected_sdk_files": 122,
+    "original_rust_files": 135,
+    "reference_excerpts": 10,
+    "source_files_hashed": 12,
+    "source_contracts_verified": true,
+    "local_links_valid": 1
+  },
+  "retained_artifact_sha256": {
+    "target/f16/baseline.json": "59b8274d513b72bf351fbda256ad4fa3bbcec8b1c4aa6e6831f2f35a436e1a3a",
+    "target/f16/inventory.json": "dd346df2b9373816a1a4841d8c0fc41d793202ff38e0a7eec10919be8e2f3ae0",
+    "target/f16/fork-prs.json": "44c797b6a8ac2f4c9005c3fb10d926e72f7ace331de1927cdbff004e59bffd1b",
+    "target/f16/upstream-prs.json": "2adcfc1f6de57e0ce46fe8f69c85e3f0aa0d5a0ad32b4ee2e197f02a775c17ca",
+    "target/f16/upstream-issues.json": "67b5f33b5eb806a8f310b84d0c395d5ccc7313bb685932a80a1ae0b89f47e578",
+    "target/f16/upstream-pr93.json": "6c6ae8072cd71be5589f4297da3f7c719102dab9ebfc38a4e931783ab59cd161",
+    "target/f16/upstream-pr93.diff": "852c7eb6f9660a24803e277dc834b4cf027b1ff6f4274a429f54ba8f391579ef",
+    "target/f16/issue234.json": "e28cd625890cb51ee22cad936bde6a973b47552e189aa6d94a26d59ed81e526a",
+    "target/f16/issue134.json": "e97044bb172885dd86ca4664dba44915db85e5bbdc84a8486f060a1ff4e29061",
+    "target/f16/issue246.json": "58c9ec03f6f1e97f7191961a1129b8185163c2d5538ece9218e9d3df979e43c5",
+    "target/f16/issue358.json": "04d6c3980f89025e3d68d8bdf6f4fb16ea145b502bd452dad7a61696ebbcbc93",
+    "target/f16/upstream-pr375.json": "b75a448bd9603f3a5f6bf48e1d18e2b7d4ca3c09dd53c16672ba31aba762847d",
+    "target/f16/upstream-pr375-selected.diff": "f2524cce5ae4d3fa14016ae1fc2bc742fb9e1c50402c60b58ba6545e148b4483",
+    "target/f16/reference-excerpts.json": "4079fd39112366af77cb27014602731a5555ebca4518889b5bf256aaf25f33c8",
+    "target/f16/pre-review-checks.json": "54531708c045d0b8e374c2577648f9cb1cebca4939fb3e71f0c4bb31ed4cdb70",
+    "target/f16/verification.json": "97bc632918088198cefd0cc2da9bd3dd363b053f1965ac2ef7897bc4ea154a17"
+  },
+  "review_dispositions": [
+    {
+      "item": "checkpoint",
+      "status": "created as reviewed, awaiting local merge; final IDs recorded after merge"
+    },
+    {
+      "item": "module_config_get forwarding",
+      "status": "source checked, added before/after table and future regression gate"
+    },
+    {
+      "item": "excerpt/probe ledger",
+      "status": "paths and hashes retained"
+    },
+    {
+      "item": "line anchors",
+      "status": "caller corrected cited ranges"
+    },
+    {
+      "item": "old explicit version parser control",
+      "status": "retain existing integration control; add new bulk sibling plus pure checks"
+    }
+  ],
+  "post_review_changes": "five nonblocking documentation/receipt refinements applied by caller; no second review, SDK implementation or proposal compilation",
+  "final_spec_sha256": "e9aacb73f839cb8443253dd1727e18dac243081d650628536345f822fdb11604"
+}
