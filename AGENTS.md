@@ -102,17 +102,26 @@ Read docs/F14_CONFIGURATION_BUILDERS.md/evidence. F15's source-only scorecard is
 reviewed and locally complete: docs/F15_EVIDENCE_PRIORITIES.md and compact
 f15-evidence-priorities.json distinguish scoped measurements, compiler/native
 contracts and remaining gaps. No SDK tests/builds/benchmarks were rerun in F15.
-Default next interval is F16 source-only scoping of the already deferred
-CallReply-string to RedisValue byte/wire conversion, unless Josh redirects.
-Inventory direct value/key conversions and reply emitter, refresh PR93 overlap,
-compare source/wire API migration choices and define corrected-code acceptance
-criteria. Do not implement that repair in its scoping activation, execute old
-invalid paths or broaden into all replies/context/thread/panic safety. Original
-modules remain read-only. Current byte fallback/as_bytes already exist; no
-blanket unsupported-binary or zero-copy claim. CI stays deferred. Do not rerun
-completed F13–F15 reviews/tests without a material change. F15's fresh read-only
-CI snapshot confirms F07 five successes/three failures; the early F07 snapshot
-had one still-running job. No CI rerun or modernization was performed.
+F16's CallReply conversion specification is reviewed and locally complete. Read
+docs/F16_CALL_REPLY_CONVERSION.md, its compact evidence and checkpoint before F17.
+Next is only the reviewed narrow repair: implicit valid text becomes BulkString,
+invalid text remains StringBuffer; reuse the failed owned buffer. Preserve key
+String/byte variants and Eq/Hash/Ord, public signatures, strict extraction,
+explicit statuses and unrelated reply policy. Migrate the two direct SDK text
+consumers and validate module_config_get's forwarding plus selected fixtures.
+No all-byte redesign, new borrowed API, broad reply/context/GIL/thread/alias/panic
+or native-owner audit. Source proposal is not compiled/runtime evidence.
+F17 relates directly to upstream234: refresh issue/PR overlap, credit PR93 at
+f1ec666ecc6891e11130df853e8b80c758df5230, then reconcile review/f17-baseline at
+post-F16 and fix/f17-call-reply-bulk-strings. Required baseline/empty kickoff push
+and scoped draft must exist before code; record upload of local F11 merge and
+F12–F16 ancestor history under existing issue-work visibility authority. Stop
+implementation if visibility/history authority is blocked. Do not push master
+or merge/release on GitHub. Originals remain read-only; selected isolated
+snapshots carry previous prerequisites. Use only corrected-code tests/legal
+native host phases; never old invalid wire/panic paths. F16 scope did no SDK
+implementation/tests/builds/native execution. Do not replay unchanged reviews.
+CI stays deferred; drafts1–4 remain open, no new support/package/MSRV commitment.
 Preserve tuples, custom traits, successful defaults/commands/LoadConfigs policy
 and F11 string lifecycle. Accepted metadata reclamation/general native audit stay
 separate. Do not duplicate completed F13/F14 reviews/tests without new changes.

@@ -399,3 +399,25 @@ and equivalent native tool/permission settings remain unestablished. Positive
 workflow evidence and the failed-Grep limitation route in one sanitized aggregate
 to due-expert; raw prompts/source/answers/logs stay local. See the
 [F15 evidence](evidence/f15-evidence-priorities.json) and target/f15/review.
+
+## October 14 — F16 new source specification review
+
+One Due/Claude source-only review approves the call-result conversion scope.
+True exit 0; 167,278 ms; provider-reported USD 1.96762025. Request/result/answer,
+177 trace records and offline summary independently validate. All 41 activities
+match, with no failures/drops/gaps/unmatched records. Inputs stayed unchanged
+through review. Five nonblocking doc/evidence refinements were checked/applied
+by caller: checkpoint, config-forwarding gate, excerpt ledger, line anchors and
+retained explicit-text parser control. No second model review or SDK implementation,
+compilation/test/native/benchmark claim. Caller separately checked sources/hashes,
+originals and final diff. Source/native snippets define later gates, not a pass.
+
+Due 0.1.0, Claude 2.1.296; available Due source
+76d33d410319d860425a2dd3609863a4ba5ca565 clean; executable SHA-256
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b.
+Requested model/effort omitted; observed settings/compiled-source identity unknown.
+No binary/plugin refresh, deadline, permission expansion, provider retry,
+fallback, recursive delegation or extra comparison. A/B deferred for the single
+bounded source review and unestablished equivalent provider tools/permissions.
+Sanitized aggregate feedback routes through due-expert; raw prompts/answers/code/
+logs stay local. See [F16 evidence](evidence/f16-call-reply-conversion.json).
