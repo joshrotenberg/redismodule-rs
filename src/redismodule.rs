@@ -39,10 +39,31 @@ impl From<RedisError> for RedisValueResult {
 pub const REDIS_OK: RedisValueResult = Ok(RedisValue::SimpleStringStatic("OK"));
 pub const TYPE_METHOD_VERSION: u64 = raw::REDISMODULE_TYPE_METHOD_VERSION as u64;
 
+/// Parse a consuming iterator of owned arguments.
+///
+/// Use [`crate::ArgCursor`] for borrowed text, or bind [`Self::next_arg`] to a
+/// local owner before calling [`RedisString::try_as_str`]. `next_string` retains
+/// its existing lossy conversion; it is not a strict-text replacement.
+///
+/// The consuming borrowed-text method has been removed:
+///
+/// ```compile_fail,E0599
+/// use redis_module::{NextArg, RedisString};
+/// fn text(argv: Vec<RedisString>) {
+///     let _ = argv.into_iter().next_str();
+/// }
+/// ```
+///
+/// ```
+/// use redis_module::{NextArg, RedisError, RedisString};
+/// fn owned_text(argv: Vec<RedisString>) -> Result<String, RedisError> {
+///     let owner = argv.into_iter().next_arg()?;
+///     Ok(owner.try_as_str()?.to_owned())
+/// }
+/// ```
 pub trait NextArg {
     fn next_arg(&mut self) -> Result<RedisString, RedisError>;
     fn next_string(&mut self) -> Result<String, RedisError>;
-    fn next_str<'a>(&mut self) -> Result<&'a str, RedisError>;
     fn next_i64(&mut self) -> Result<i64, RedisError>;
     fn next_u64(&mut self) -> Result<u64, RedisError>;
     fn next_f64(&mut self) -> Result<f64, RedisError>;
@@ -62,12 +83,6 @@ where
     fn next_string(&mut self) -> Result<String, RedisError> {
         self.next()
             .map_or(Err(RedisError::WrongArity), |v| Ok(v.to_string_lossy()))
-    }
-
-    #[inline]
-    fn next_str<'a>(&mut self) -> Result<&'a str, RedisError> {
-        self.next()
-            .map_or(Err(RedisError::WrongArity), |v| v.try_as_str())
     }
 
     #[inline]
@@ -196,9 +211,34 @@ impl RedisString {
         Self { ctx, inner }
     }
 
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn from_ptr<'a>(ptr: *const raw::RedisModuleString) -> Result<&'a str, Utf8Error> {
-        str::from_utf8(Self::string_as_slice(ptr))
+    /// Borrow strict UTF-8 text from an ownerless native pointer.
+    /// Prefer [`Self::try_as_str`] when a Rust owner is available.
+    ///
+    /// # Safety
+    /// Redis's API must be initialized and `ptr` must identify a valid non-null
+    /// native string. Its buffer must remain alive and unchanged for all of `'a`:
+    /// no freeing, trimming, appending or other invalidation through any alias.
+    /// Access must obey Redis's server/thread/callback rules. The returned view
+    /// is read-only; this function neither retains nor takes ownership.
+    ///
+    /// ```compile_fail,E0133
+    /// use redis_module::RedisString;
+    /// fn text(owner: &RedisString) {
+    ///     let _ = RedisString::from_ptr(owner.inner);
+    /// }
+    /// ```
+    ///
+    /// ```
+    /// use redis_module::RedisString;
+    /// fn text(owner: &RedisString) -> Result<&str, std::str::Utf8Error> {
+    ///     // For a valid owner, borrow only during legal Redis access, with no
+    ///     // buffer invalidation through a native alias during this view.
+    ///     unsafe { RedisString::from_ptr(owner.inner) }
+    /// }
+    /// ```
+    pub unsafe fn from_ptr<'a>(ptr: *const raw::RedisModuleString) -> Result<&'a str, Utf8Error> {
+        // SAFETY: the caller supplies the native lifetime/access guarantees.
+        str::from_utf8(unsafe { Self::string_as_slice(ptr) })
     }
 
     pub fn append(&mut self, s: &str) -> raw::Status {
@@ -226,17 +266,82 @@ impl RedisString {
         (ptr, len)
     }
 
-    pub fn try_as_str<'a>(&self) -> Result<&'a str, RedisError> {
-        Self::from_ptr(self.inner).map_err(|_| RedisError::Str("Couldn't parse as UTF-8 string"))
+    /// Borrow strict UTF-8 text for the lifetime of this Rust owner.
+    ///
+    /// This borrows through [`Self::as_slice`] without a copy or native retain.
+    /// Rust excludes mutation/drop through this owner while the view is used.
+    /// Native aliases (including `safe_clone`), raw constructors, public `inner`
+    /// and context/thread validity remain subject to existing SDK contracts.
+    ///
+    /// ```
+    /// use redis_module::{RedisError, RedisString};
+    /// fn text(owner: &RedisString) -> Result<&str, RedisError> {
+    ///     owner.try_as_str()
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0515
+    /// use redis_module::RedisString;
+    /// fn escape(owner: RedisString) -> &'static str {
+    ///     owner.try_as_str().unwrap()
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0505
+    /// use redis_module::RedisString;
+    /// fn drop_owner(owner: RedisString) {
+    ///     let text = owner.try_as_str().unwrap();
+    ///     drop(owner);
+    ///     println!("{text}");
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0502
+    /// use redis_module::RedisString;
+    /// fn mutate_owner(mut owner: RedisString) {
+    ///     let text = owner.try_as_str().unwrap();
+    ///     owner.append("more");
+    ///     println!("{text}");
+    /// }
+    /// ```
+    pub fn try_as_str(&self) -> Result<&str, RedisError> {
+        str::from_utf8(self.as_slice())
+            .map_err(|_| RedisError::Str("Couldn't parse as UTF-8 string"))
     }
 
     #[must_use]
     pub fn as_slice(&self) -> &[u8] {
-        Self::string_as_slice(self.inner)
+        // SAFETY: a correctly constructed/used RedisString owns or retains a
+        // valid native string; the output borrows this owner. Legal Redis access
+        // and buffer stability through native aliases remain required. Public
+        // inner/raw constructors can violate this assumed type invariant; their
+        // broader safety contract is not repaired by this lifetime change.
+        unsafe { Self::string_as_slice(self.inner) }
     }
 
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn string_as_slice<'a>(ptr: *const raw::RedisModuleString) -> &'a [u8] {
+    /// Borrow raw bytes without a Rust owner or a native retain.
+    /// Prefer [`Self::as_slice`] when a Rust owner is available.
+    ///
+    /// # Safety
+    /// The initialized Redis API, valid non-null native string, read-only stable
+    /// buffer for all of `'a`, and legal server/thread/callback access guarantees
+    /// documented on [`Self::from_ptr`] apply equally to this byte view.
+    ///
+    /// ```compile_fail,E0133
+    /// use redis_module::RedisString;
+    /// fn bytes(owner: &RedisString) {
+    ///     let _ = RedisString::string_as_slice(owner.inner);
+    /// }
+    /// ```
+    ///
+    /// ```
+    /// use redis_module::RedisString;
+    /// fn bytes(owner: &RedisString) -> &[u8] {
+    ///     // For a valid owner during legal Redis access; no alias invalidation.
+    ///     unsafe { RedisString::string_as_slice(owner.inner) }
+    /// }
+    /// ```
+    pub unsafe fn string_as_slice<'a>(ptr: *const raw::RedisModuleString) -> &'a [u8] {
         let mut len: libc::size_t = 0;
         let bytes = unsafe { raw::RedisModule_StringPtrLen.unwrap()(ptr, &mut len) };
 

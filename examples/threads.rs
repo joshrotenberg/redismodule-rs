@@ -34,7 +34,8 @@ lazy_static! {
 
 fn set_static_data(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);
-    let val = args.next_str()?;
+    let owner = args.next_arg()?;
+    let val = owner.try_as_str()?;
     let mut static_data = STATIC_DATA.lock(ctx);
     static_data.data = val.to_string();
     Ok(RedisValue::SimpleStringStatic("OK"))
