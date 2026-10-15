@@ -595,3 +595,33 @@ duplicate review spend. Useful sanitized aggregate evidence routes once to the
 human-authorized due-expert hub; raw prompts/provider logs stay local. See
 `target/f23/review/contracts.json`, `target/f23/due-provenance.json` and compact
 `docs/evidence/f23-stream-cleanup.json`.
+
+## F24 — Independent raw-key specification review (2026-10-15)
+
+One monitored Due/Claude read-only review approves the new source-only contract.
+True exit 0, 155 complete trace records; 29 matched activities,
+28 successful and one failed StructuredOutput activity. A subsequent StructuredOutput
+activity succeeded within the same provider invocation. The normalized metadata
+and empty stderr do not expose the failure cause; do not classify it as a Due
+schema/permission defect without more evidence. Caller launched no retry, changed
+no permissions and used no fallback. Request/result/answer/all trace/summary
+schemas validate; frozen inputs match through review completion. No SDK execution.
+
+Six nonblocking clarifications were caller-checked against actual source: native
+anchors, explicit NULL adoption, negative compile-only gates, legal initialized
+API forwarder setup and complete factory range. The seventh optional wording
+suggestion was narrowed to AM-off abandonment versus native AM collection;
+no broad “at worst a leak” safety promise. Proposed implementation unchanged.
+No second unchanged review. Caller separately verified origins/hashes/protected
+files/originals/remote state; source approval is not native validation.
+
+Due 0.1.0; clean available source 76d33d410319d860425a2dd3609863a4ba5ca565;
+binary SHA256 11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b;
+Claude Code 2.1.296; macOS 26.7.1 arm64. Requested model/effort omitted, observed
+unknown; compiled source identity unknown, no plugin/binary refresh. Duration
+208409 ms; provider-reported USD 2.31524150.
+A/B deferred: one complementary new-specification review met this task; no fair
+selection decision justified duplicate spend. Sanitized aggregate is routed once
+to human-authorized due-expert; no raw prompts/logs/code or direct Due publication.
+Local evidence: target/f24/review/contracts.json, disposition.json and compact
+[raw-key specification evidence](evidence/f24-raw-key-handoff.json).

@@ -1,0 +1,235 @@
+{
+  "chunk": "F24",
+  "kind": "source-only raw-key handoff specification",
+  "base": "6a21613cbbaa22a78887cba5e4d78151957ed60d",
+  "branch": "docs/f24-raw-key-handoff-scope",
+  "status": "source-verified and independently reviewed for local merge",
+  "proposal_not_implemented": [
+    "Preserve exact consuming extractor and const unsafe constructor signatures",
+    "ManuallyDrop suppresses Rust close while preserving actual pointers and existing AM registration",
+    "One manual close obligation within existing native context/phase; no retained owner or lifetime extension",
+    "Preserve non-closing borrowed stack/outer-key scan adapters",
+    "NULL result requires actual valid context; no fabricated Context",
+    "No selected original-module migration"
+  ],
+  "validation": {
+    "claims_passed": 41,
+    "sdk_tracked_rust_files": 87,
+    "lexical_sites": 17,
+    "original_tracked_rust_files": 135,
+    "protected_preexisting_files": 186,
+    "all_sdk_original_sources_unchanged": true,
+    "sdk_compilation_tests_benchmarks_native_executions": 0
+  },
+  "excerpts": 21,
+  "native_sources": [
+    {
+      "host": "7.2.8",
+      "path": "target/f01/servers/redis-7.2.8/src/module.c",
+      "sha256": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+      "origin": "https://download.redis.io/releases/redis-7.2.8.tar.gz",
+      "archive_sha256": "6be4fdfcdb2e5ac91454438246d00842d2671f792673390e742dfcaf1bf01574",
+      "archive_bytes_match": true,
+      "f22_hash_matches_f21": true,
+      "f22_archive_bytes_match": true,
+      "f24_archive_bytes_match": true
+    },
+    {
+      "host": "8.10.2",
+      "path": "target/f08/native-8.10.2/module.c",
+      "sha256": "bcfad92db0a7be63df49ed981b4ad224b31ab4ff0fdf9752d60b6d0a519d3329",
+      "git_blob_sha": "ff646d5934f143699434f34980f7939bc2e5c56d",
+      "commit": "498ecd0d6d007db11ddb3aea9428552598a78622",
+      "source_url": "https://github.com/redis/redis/blob/498ecd0d6d007db11ddb3aea9428552598a78622/src/module.c",
+      "f22_hash_matches_f21": true,
+      "f22_blob_matches": true,
+      "f24_blob_matches": true
+    }
+  ],
+  "source_hashes": {
+    "src/key.rs": "3c0de1613204352e7972ce3ed54b662de5cbd1304f88aa2f4ec9620e77eb68ea",
+    "src/raw.rs": "845931f3f7be3bf384e6de2196ac269f5b2efe1e0db48cf216dfdb015acfb7a6",
+    "src/context/mod.rs": "7e08a911710a2ae60e6e59369c7c1a80766253842f43602e1a7104e9b324fff2",
+    "src/context/key_cursor.rs": "d55c492450742296d35ca3e386034ce2672d4509fd42090379b2cf20adc230a5",
+    "src/context/keys_cursor.rs": "7378f4fdd822407485e93e75c69c21ef7755ca9839185adc147b13451183c977",
+    "src/stream.rs": "8f4b54ae933df92dd462fe4cd9e3413d08f023fa57b383c66aefcd13c75732c4",
+    "examples/stream_cleanup.rs": "7a2a0302d635a53f0adee9686b334cbf57cc040d7f93774b7edaead8cf85d615",
+    "docs/F22_SDK_ROADMAP.md": "0377120134c6f2784a8cccff10f471ac35c379eb40a338ad01a4686e625007ab",
+    "docs/F23_STREAM_CLEANUP.md": "54cd39b88e97cb9cbbb724fdb3a5a6eb245f2d26d00b07782b1e260b32391a13",
+    "target/f01/servers/redis-7.2.8/src/module.c": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+    "target/f08/native-8.10.2/module.c": "bcfad92db0a7be63df49ed981b4ad224b31ab4ff0fdf9752d60b6d0a519d3329",
+    "../redis-stream-filter-module/src/iter.rs": "efe08ac190f012e8352f2da8689e32fde6f57ee008940064daab2541e7a202f0",
+    "src/include/redismodule.h": "c6bd37d49653968f3d37771477426775f2af8563d414e15730bd3debbd74c76a"
+  },
+  "receipts": {
+    "target/f24/claims.json": "be092105146e7df80e342dedbd9d8a0eabd3d565b1c5326f5be48bfab85a433b",
+    "target/f24/source-hashes.json": "8779aa0a511e4b2c7c0cc744dccab135973edba088d9fabf8a3ac02a8a9d49df",
+    "target/f24/native-provenance.json": "a7a48448cb483458e08611881a0bde4036d985d3bffdebcfd56fbf9b86dfdeb3",
+    "target/f24/excerpts.json": "7528300e112a4b4cb5a44c567bfa1e895cd8c36b11f115eaa26631d3b1d91f04",
+    "target/f24/sdk-uses.json": "60917a3541c09ebdf5b3b28055aac4ba3100f981ac8e53b3645a239194ace706",
+    "target/f24/reference-uses.json": "d503ecd95242a7c39ebe77e851c8b99815c69c245de9bd0b390f26bbf0fd58e7",
+    "target/f24/originals.json": "7b3621f21be568ed18c092edee3cdfdf90358653dd52e0b52dd3c24d3cdb598a",
+    "target/f24/verification.json": "6a49cea14f570a074a15be26abfbeea97c3c8408b5ab39dfc52159d72cfd8e10",
+    "target/f24/fork-prs.json": "0f7cf21ce937f66e33831530e6de23e42ae0ad56adb57a10e18597050a182572",
+    "target/f24/upstream-prs.json": "d5b18835242a889710405daeaf802ef0e699643587f1fb13962d513904b337ab",
+    "target/f24/upstream-issues.json": "69b7a9d010c23cea4fd8a088e2dde49cdf7ef989217c63cc21c83483c79f6ff8",
+    "target/f24/upstream-issues-205.json": "50874bd99e37eb9974957f3261861bb25d2750ddf331f7b42b74dac795e1a08a",
+    "target/f24/upstream-pulls-245.json": "07f36d0f24b6d7155c677553417a4bb925ffb35a78e0e7fe1d3b16b6e00db19f",
+    "target/f24/upstream-pr-245-files.json": "1310375cf8a99a79089280db830a3448680268a1907b29613b96183f463b79b5",
+    "target/f24/upstream-pr-375-files.json": "ee0bc209cc78faa450be185eef9f8c50852e51abcaff788882300f55ee267614",
+    "target/f24/prior-draft-state.json": "e5c344341876bcc0bbe84217e9fb2bc6eebf82703d18de5cd6d8371df2833b1b",
+    "target/f24/workers.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "target/f24/due-provenance.json": "b8033fff647e28aa88e755f9f5c502262d174554d0e9667328c62ae6151fb377",
+    "target/f24/review/contracts.json": "4a619827fe4ac5d0b2cd7333996b9e9e0551042c7a3e0be75c27af039f4ce83a",
+    "target/f24/review/disposition.json": "ff8e51cdb5e1ae97a78d5b8d9711b107a9cc4f9e7b63ca93671159387551605d",
+    "target/f24/review/summary.json": "374c7afb988fabee3a061bedea8c2b9f5e906650ab75ec9386f142e21f124ac0",
+    "target/f24/review/process-exit.json": "5b8ec46a017ea0ac9ab325f344e70513750225adfe059359a0344a99926dec64",
+    "target/f24/verify.py": "5d3eebf6c58c2828cb2a19338a6e29ee1e401ade1a6702ac8cc0bb1919c585c2"
+  },
+  "review": {
+    "verdict": "approve",
+    "actual_exit": 0,
+    "trace_records": 155,
+    "duration_ms": 208409,
+    "provider_reported_cost_usd": 2.3152414999999995,
+    "activities": {
+      "started": 29,
+      "completed": 29,
+      "failed": 1,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "failed": 1,
+        "succeeded": 28
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 29,
+          "completed": 29,
+          "completion_status_counts": {
+            "failed": 1,
+            "succeeded": 28
+          }
+        }
+      }
+    },
+    "sdk_source_read": true,
+    "frozen_inputs_unchanged_through_completion": true,
+    "contracts_validated": true
+  },
+  "due_provenance": {
+    "due_version": "due 0.1.0",
+    "binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "available_source_commit": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "available_source_dirty": "",
+    "binary_source_identity": "not embedded/unknown",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "requested_provider": "claude",
+    "requested_model": null,
+    "requested_effort": null,
+    "observed_model": "unknown unless exposed by result",
+    "observed_effort": "unknown",
+    "comparison": "Deferred: this new source-only specification needs one complementary review; no fair decision needing a repeated comparison is selected, and Due evaluation stays secondary.",
+    "refresh": "No binary/plugin refresh"
+  },
+  "overlap": {
+    "fork_open_drafts": [
+      11,
+      10,
+      9,
+      8,
+      7,
+      6,
+      4,
+      3,
+      2
+    ],
+    "prior_drafts_1_5": "closed, unmerged; replacements described by 9/11",
+    "external_plan_6": "Source context only; not human authority to alter checkout/CI hold/queue",
+    "upstream_prs": 45,
+    "upstream_issues": 55,
+    "mapped_issue": 205,
+    "issue_status": "leaves upstream205 open",
+    "pr245_author": "ephraimfeldblum",
+    "pr245_head": "16487cd1ec91090da4a783162d33dcf9e702fb53",
+    "pr245_role": "Historical interop context; no accepted port",
+    "pr375": [
+      {
+        "number": 375,
+        "title": "Update dependencies  and refactor the FFI calls",
+        "headRefOid": "68a0705b7f3d95a893eda19390e4dff51d3a4263",
+        "url": "https://github.com/RedisLabsModules/redismodule-rs/pull/375"
+      }
+    ],
+    "sdk_push_pr_publication": false
+  },
+  "limits": [
+    "Source-only, no SDK implementation/prototype/compilation/test/benchmark/native execution",
+    "Future corrected host/compiler/archive gates remain unexecuted",
+    "Native AM collection bypasses module CloseKey pointer wrapper; issued operations are not heap/refcount balance",
+    "Selected 7.2.8/8.10.2 source proof is not support policy or general Context/GIL/alias safety",
+    "Original modules unchanged, source-only reviewer may use retained original excerpts",
+    "No CI or existing completed source work reopened",
+    "Provider had one failed StructuredOutput then one successful attempt in the same invocation; cause unavailable in normalized metadata. No caller retry/permission change."
+  ],
+  "next": "F25 gated implementation after refreshed overlap and required baseline/empty-kickoff/scoped-draft visibility",
+  "review_refinements": {
+    "verdict": "approve",
+    "blocking": 0,
+    "findings": [
+      {
+        "index": 1,
+        "claim": "The 7.2.8 Open row cites 4034-4057, but RM_OpenKey spans 4036-4060 and the autoMemoryAdd registration the row describes is at line 4058, outside the cited range; 4034-4035 are comment lines. target/f24/excerpts.json already uses 4036-4060.",
+        "action": "Corrected 7.2 Open anchor from actual pinned lines."
+      },
+      {
+        "index": 2,
+        "claim": "The 7.2.8 Init row cites 3997-4006, but moduleInitKey spans 3996-4005 (signature at 3996, closing brace at 4005, 4006 blank). excerpts.json records 3996-4005.",
+        "action": "Corrected 7.2 initializer anchor from actual pinned lines."
+      },
+      {
+        "index": 3,
+        "claim": "Constructor mode 1 requires 'the non-null handle is live', while lines 121-127 permit a normal owner to carry (actual_ctx, NULL) and gate 5 reconstructs NULL. The F22 roadmap (line 206) phrases it as 'valid handle or supported NULL case'. The two sections are reconcilable but mode 1 as written excludes NULL adoption.",
+        "action": "Explicit supported NULL adoption carries no close obligation and still requires actual valid context."
+      },
+      {
+        "index": 4,
+        "claim": "Gate 2 lists 'consume-once rejection' and 'rejection of extraction while a read/iterator borrow is subsequently used'. These are negative checks: an uninvoked consumer that compiles cannot demonstrate them. They need compile_fail doctests or an equivalent compile-only harness.",
+        "action": "Named compile-only expected-rejection harness and positive metadata controls; no execution."
+      },
+      {
+        "index": 5,
+        "claim": "The gate 4 wrapper relies on RedisModule_CloseKey being a module-side mutable static Option function pointer (confirmed in generated bindings). The swap only works after RedisModule_Init populates it, and the fixture must capture and forward to the original pointer; SDK Drop reaches it via raw::close_key at src/raw.rs:348 while native AM collection does not.",
+        "action": "Require populated original CloseKey capture after RedisModule_Init, fixture-only swap. Caller checked current header declaration/init, not only retained generated output."
+      },
+      {
+        "index": 6,
+        "claim": "The inventory row cites src/context/mod.rs:631-649, but the four key factories span 631-652 (open_key_writable_with_flags closes at 652).",
+        "action": "Corrected context-factory range to include closing brace."
+      },
+      {
+        "index": 7,
+        "claim": "'Return of raw pointers remains safe' is accurate under the fix: dropping the tuple without a close is a leak (as mem::forget is), not undefined behavior, whereas the current code makes the documented reconstruction a double close. Worth stating that the fix converts a UB path into at worst a leak for callers who never reconstruct.",
+        "action": "Applied only scoped abandonment distinction: AM-off forgotten nonnull resource versus AM collection; declined broad at-worst-leak/general UB wording."
+      }
+    ],
+    "frozen_inputs_validated_before_refinement": true,
+    "sdk_source_unchanged": true,
+    "second_review": "Not repeated: nonblocking source/doc clarifications, verified directly by caller; proposed implementation unchanged",
+    "provider_activity_failure": "One StructuredOutput activity failed, then a second succeeded inside the same provider invocation. Failure cause not exposed by normalized trace/result; no stderr. Caller did not retry or change permissions. Final schemas/trace independently validate."
+  },
+  "review_limits": [
+    "Source-only review: nothing was compiled, tested or executed; the proposed extractor body and recipe remain uncompiled, and their compile-correctness is inferred (ManuallyDrop Deref field reads of pub(crate) Copy pointers within the impl).",
+    "No native execution or runtime ownership observation; AM/close behavior is argued from pinned module.c text only.",
+    "Did not certify SHA-256/blob hashes of the module.c pins, the SDK source hashes, or the receipt hashes in docs/evidence; those are caller receipts.",
+    "Original module roots were not accessed; the stream-filter iter.rs and reference-checkout inventory claims were reviewed only via target/f24/excerpts.json and the caller's compact evidence.",
+    "Fork/upstream overlap claims (nine open drafts, PR245/PR375 heads, issue 205 status) were not verified against the network.",
+    "The RedisModule_CloseKey binding declaration was read from an existing target/debug build output, which may be stale relative to the current redismodule.h.",
+    "No broad FFI, Context/GIL, alias, panic or writable-key audit was performed, per scope."
+  ]
+}

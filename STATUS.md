@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F24 — Raw-key handoff: reviewed source-only specification
+
+| Status | Report |
+|---|---|
+| **Done** | Specifies the consuming raw-key transfer repair, actual context/AutoMemory/NULL obligations and both non-closing scan adapters. Caller verified 41 source predicates, two pinned native origins/21 excerpts, 87 SDK tracked Rust files/17 lexical sites, 186 protected files and original heads/status/135 Rust hashes. Due/Claude approves; six clarifications and one scoped compatibility note applied. No SDK implementation, compile/test/benchmark/native execution. |
+| **Next** | F25 implements only the reviewed extractor/doc repair after refreshing overlap and establishing the required issue205 baseline, empty kickoff and scoped draft. F26/F27 hash scope/repair, then F28 scorecard and schedule deletion. |
+| **Blockers** | None for completed F24. F25 still requires draft visibility and corrected-code runtime/compiler/archive gates; those are not F24 passes. F21 metadata retirement stays parked on native contract proof. |
+| **Decisions** | Preserve public signatures; suppress Rust Drop without retaining the context or detaching AutoMemory. Keep scan adapters borrowed and non-closing; no original migration. Fork remote now has drafts2/3/4/6–11; prior1/5 closed unmerged. External replacement/plan bodies do not change this owning chat's authority or CI hold. No SDK push/PR/publication this chunk. |
+
+Details: [F24 contract, recipes and validation gates](docs/F24_RAW_KEY_HANDOFF.md),
+[compact evidence](docs/evidence/f24-raw-key-handoff.json).
+
 ## F23 — Stream iterator cleanup and actual example repair
 
 | Status | Report |
