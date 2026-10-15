@@ -46,6 +46,10 @@ crate-type = ["cdylib"]
 required-features = ["min-redis-compatibility-version-7-2"]
 
 [[example]]
+name = "call_reply"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "keys_pos"
 crate-type = ["cdylib"]
 

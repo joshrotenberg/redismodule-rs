@@ -742,6 +742,132 @@ fn test_call_binary_data() -> Result<()> {
     Ok(())
 }
 
+/// Values whose bytes a forwarded call reply must keep: empty, ASCII, Unicode,
+/// NUL, CR, LF, CRLF, invalid UTF-8, and a 4 KiB value ending in invalid UTF-8.
+fn call_reply_inputs() -> Vec<Vec<u8>> {
+    let mut large = vec![b'x'; 4096];
+    large.push(0xff);
+    vec![
+        b"".to_vec(),
+        b"ASCII".to_vec(),
+        "h\u{e9}llo \u{65e5}\u{672c}".as_bytes().to_vec(),
+        b"a\0b".to_vec(),
+        b"\r".to_vec(),
+        b"\n".to_vec(),
+        b"\r\n".to_vec(),
+        vec![0xff, 0, 0xfe],
+        large,
+    ]
+}
+
+#[test]
+fn test_call_reply_strings_are_bulk() -> Result<()> {
+    let mut con = TestConnection::new("call_reply");
+    let inputs = call_reply_inputs();
+    let keys: Vec<String> = (0..inputs.len())
+        .map(|i| format!("call_reply:{i}"))
+        .collect();
+
+    for (key, input) in keys.iter().zip(&inputs) {
+        let echoed: Value = redis::cmd("call_reply.echo")
+            .arg(input.as_slice())
+            .query(&mut con)
+            .with_context(|| format!("failed to forward ECHO {input:?}"))?;
+        assert_eq!(echoed, Value::Data(input.clone()), "ECHO {input:?}");
+
+        redis::cmd("SET")
+            .arg(key)
+            .arg(input.as_slice())
+            .query::<()>(&mut con)?;
+        let value: Value = redis::cmd("call_reply.get").arg(key).query(&mut con)?;
+        assert_eq!(value, Value::Data(input.clone()), "GET {input:?}");
+
+        let direct: Value = redis::cmd("DUMP").arg(key).query(&mut con)?;
+        let forwarded: Value = redis::cmd("call_reply.dump").arg(key).query(&mut con)?;
+        assert_eq!(forwarded, direct, "DUMP of {input:?}");
+    }
+
+    let values: Value = redis::cmd("call_reply.mget").arg(&keys).query(&mut con)?;
+    let expected = inputs.iter().cloned().map(Value::Data).collect();
+    assert_eq!(values, Value::Bulk(expected));
+
+    let missing: Value = redis::cmd("call_reply.get")
+        .arg("call_reply:missing")
+        .query(&mut con)?;
+    assert_eq!(missing, Value::Nil);
+
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_call_reply_status_and_collections() -> Result<()> {
+    let mut con = TestConnection::new("call_reply");
+    let inputs = call_reply_inputs();
+
+    // A typed call reply cannot tell status from bulk, so a forwarded native
+    // status arrives as bulk text. A module's own status reply stays a status.
+    let forwarded: Value = redis::cmd("call_reply.status")
+        .arg("call_reply:status")
+        .arg("value")
+        .query(&mut con)?;
+    assert_eq!(forwarded, Value::Data(b"OK".to_vec()));
+    let explicit: Value = redis::cmd("call_reply.explicit_status").query(&mut con)?;
+    assert_eq!(explicit, Value::Okay);
+
+    // Each field is a numbered prefix followed by the input bytes.
+    let fields: Vec<Vec<u8>> = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, input)| [format!("field-{i}:").as_bytes(), input].concat())
+        .collect();
+    let mut hset = redis::cmd("HSET");
+    hset.arg("call_reply:hash");
+    for (field, input) in fields.iter().zip(&inputs) {
+        hset.arg(field.as_slice()).arg(input.as_slice());
+    }
+    hset.query::<()>(&mut con)?;
+    let pairs: Vec<Vec<u8>> = redis::cmd("call_reply.hgetall")
+        .arg("call_reply:hash")
+        .query(&mut con)?;
+    let pairs: HashMap<Vec<u8>, Vec<u8>> = pairs
+        .chunks(2)
+        .map(|pair| (pair[0].clone(), pair[1].clone()))
+        .collect();
+    assert_eq!(pairs.len(), inputs.len());
+    for (field, input) in fields.iter().zip(&inputs) {
+        assert_eq!(pairs.get(field), Some(input), "HGETALL field {field:?}");
+    }
+
+    redis::cmd("SADD")
+        .arg("call_reply:set")
+        .arg(&inputs)
+        .query::<()>(&mut con)?;
+    let mut members: Vec<Vec<u8>> = redis::cmd("call_reply.smembers")
+        .arg("call_reply:set")
+        .query(&mut con)?;
+    let mut expected = inputs.clone();
+    members.sort();
+    expected.sort();
+    assert_eq!(members, expected);
+
+    let server: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version: Vec<i64> = server
+        .lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .expect("INFO server reports redis_version")
+        .trim()
+        .split('.')
+        .map(|part| part.parse().expect("numeric version part"))
+        .collect();
+    let reported: Vec<i64> = redis::cmd("call_reply.version").query(&mut con)?;
+    assert_eq!(reported[..3], version[..3]);
+    assert_eq!(reported[3], 0, "not an enterprise server");
+
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
 #[test]
 fn test_open_key_with_flags() -> Result<()> {
     let mut con = TestConnection::new("open_key_with_flags");
