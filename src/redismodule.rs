@@ -155,7 +155,11 @@ impl RedisString {
         let ctx = ctx.map_or(std::ptr::null_mut(), |v| v.as_ptr());
         let str = CString::new(s).unwrap();
         let inner = unsafe {
-            raw::RedisModule_CreateString.unwrap()(ctx, str.as_ptr(), str.as_bytes().len())
+            crate::__required_api!(RedisModule_CreateString)(
+                ctx,
+                str.as_ptr(),
+                str.as_bytes().len(),
+            )
         };
 
         Self { ctx, inner }
@@ -174,7 +178,7 @@ impl RedisString {
     ) -> Self {
         let ctx = ctx.map_or(std::ptr::null_mut(), |v| v.as_ptr());
 
-        let inner = unsafe { raw::RedisModule_CreateString.unwrap()(ctx, s, len) };
+        let inner = unsafe { crate::__required_api!(RedisModule_CreateString)(ctx, s, len) };
 
         Self { ctx, inner }
     }
@@ -182,7 +186,11 @@ impl RedisString {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn create_from_slice(ctx: *mut raw::RedisModuleCtx, s: &[u8]) -> Self {
         let inner = unsafe {
-            raw::RedisModule_CreateString.unwrap()(ctx, s.as_ptr().cast::<c_char>(), s.len())
+            crate::__required_api!(RedisModule_CreateString)(
+                ctx,
+                s.as_ptr().cast::<c_char>(),
+                s.len(),
+            )
         };
 
         Self { ctx, inner }
@@ -238,7 +246,7 @@ impl RedisString {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn string_as_slice<'a>(ptr: *const raw::RedisModuleString) -> &'a [u8] {
         let mut len: libc::size_t = 0;
-        let bytes = unsafe { raw::RedisModule_StringPtrLen.unwrap()(ptr, &mut len) };
+        let bytes = unsafe { crate::__required_api!(RedisModule_StringPtrLen)(ptr, &mut len) };
 
         unsafe { slice::from_raw_parts(bytes.cast::<u8>(), len) }
     }
@@ -288,7 +296,7 @@ impl Drop for RedisString {
     fn drop(&mut self) {
         if !self.inner.is_null() {
             unsafe {
-                raw::RedisModule_FreeString.unwrap()(self.ctx, self.inner);
+                crate::__required_api!(RedisModule_FreeString)(self.ctx, self.inner);
             }
         }
     }
@@ -340,7 +348,7 @@ impl Clone for RedisString {
             // so we use [std::ptr::null_mut()] instead of the curren RedisString context.
             // We do this because we can not promise the new RedisString will not outlive the current
             // context and we want them to be independent.
-            unsafe { raw::RedisModule_CreateStringFromString.unwrap()(ptr::null_mut(), self.inner) };
+            unsafe { crate::__required_api!(RedisModule_CreateStringFromString)(ptr::null_mut(), self.inner) };
         Self::from_redis_module_string(ptr::null_mut(), inner)
     }
 }
@@ -443,7 +451,7 @@ impl AsRef<[u8]> for RedisBuffer {
 impl Drop for RedisBuffer {
     fn drop(&mut self) {
         unsafe {
-            raw::RedisModule_Free.unwrap()(self.buffer.cast::<c_void>());
+            crate::__required_api!(RedisModule_Free)(self.buffer.cast::<c_void>());
         }
     }
 }

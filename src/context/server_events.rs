@@ -183,7 +183,7 @@ fn register_single_server_event_type<T>(
 ) -> Result<(), RedisError> {
     if !callbacks.is_empty() {
         let res = unsafe {
-            raw::RedisModule_SubscribeToServerEvent.unwrap()(
+            crate::__available_api!(RedisModule_SubscribeToServerEvent)(
                 ctx.ctx,
                 raw::RedisModuleEvent {
                     id: server_event,

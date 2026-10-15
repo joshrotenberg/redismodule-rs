@@ -94,8 +94,8 @@ unsafe impl RedisLockIndicator for ContextGuard {}
 impl Drop for ContextGuard {
     fn drop(&mut self) {
         unsafe {
-            raw::RedisModule_ThreadSafeContextUnlock.unwrap()(self.ctx.ctx);
-            raw::RedisModule_FreeThreadSafeContext.unwrap()(self.ctx.ctx);
+            crate::__required_api!(RedisModule_ThreadSafeContextUnlock)(self.ctx.ctx);
+            crate::__required_api!(RedisModule_FreeThreadSafeContext)(self.ctx.ctx);
         };
     }
 }
@@ -131,7 +131,8 @@ unsafe impl<B: Send> Sync for ThreadSafeContext<B> {}
 impl ThreadSafeContext<DetachedFromClient> {
     #[must_use]
     pub fn new() -> Self {
-        let ctx = unsafe { raw::RedisModule_GetThreadSafeContext.unwrap()(ptr::null_mut()) };
+        let ctx =
+            unsafe { crate::__required_api!(RedisModule_GetThreadSafeContext)(ptr::null_mut()) };
         Self {
             ctx,
             blocked_client: DetachedFromClient,
@@ -148,7 +149,9 @@ impl Default for ThreadSafeContext<DetachedFromClient> {
 impl ThreadSafeContext<BlockedClient> {
     #[must_use]
     pub fn with_blocked_client(blocked_client: BlockedClient) -> Self {
-        let ctx = unsafe { raw::RedisModule_GetThreadSafeContext.unwrap()(blocked_client.inner) };
+        let ctx = unsafe {
+            crate::__required_api!(RedisModule_GetThreadSafeContext)(blocked_client.inner)
+        };
         Self {
             ctx,
             blocked_client,
@@ -168,8 +171,9 @@ impl<B: Send> ThreadSafeContext<B> {
     /// All other APIs require locking the context, so we wrap it in a way
     /// similar to `std::sync::Mutex`.
     pub fn lock(&self) -> ContextGuard {
-        unsafe { raw::RedisModule_ThreadSafeContextLock.unwrap()(self.ctx) };
-        let ctx = unsafe { raw::RedisModule_GetThreadSafeContext.unwrap()(ptr::null_mut()) };
+        unsafe { crate::__required_api!(RedisModule_ThreadSafeContextLock)(self.ctx) };
+        let ctx =
+            unsafe { crate::__required_api!(RedisModule_GetThreadSafeContext)(ptr::null_mut()) };
         let ctx = Context::new(ctx);
         ContextGuard { ctx }
     }
@@ -177,6 +181,6 @@ impl<B: Send> ThreadSafeContext<B> {
 
 impl<B: Send> Drop for ThreadSafeContext<B> {
     fn drop(&mut self) {
-        unsafe { raw::RedisModule_FreeThreadSafeContext.unwrap()(self.ctx) };
+        unsafe { crate::__required_api!(RedisModule_FreeThreadSafeContext)(self.ctx) };
     }
 }

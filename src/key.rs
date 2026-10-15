@@ -105,8 +105,9 @@ impl RedisKey {
     pub fn get_value<T>(&self, redis_type: &RedisType) -> Result<Option<&T>, RedisError> {
         verify_type(self.key_inner, redis_type)?;
 
-        let value =
-            unsafe { raw::RedisModule_ModuleTypeGetValue.unwrap()(self.key_inner).cast::<T>() };
+        let value = unsafe {
+            crate::__available_api!(RedisModule_ModuleTypeGetValue)(self.key_inner).cast::<T>()
+        };
 
         if value.is_null() {
             return Ok(None);
@@ -122,7 +123,7 @@ impl RedisKey {
     /// Will panic if `RedisModule_KeyType` is missing in redismodule.h
     #[must_use]
     pub fn key_type(&self) -> raw::KeyType {
-        unsafe { raw::RedisModule_KeyType.unwrap()(self.key_inner) }.into()
+        unsafe { crate::__required_api!(RedisModule_KeyType)(self.key_inner) }.into()
     }
 
     /// Detects whether the key pointer given to us by Redis is null.
@@ -403,7 +404,7 @@ impl RedisKeyWritable {
     ///
     /// Will panic if `RedisModule_DeleteKey` is missing in redismodule.h
     pub fn delete(&self) -> RedisResult {
-        unsafe { raw::RedisModule_DeleteKey.unwrap()(self.key_inner) };
+        unsafe { crate::__available_api!(RedisModule_DeleteKey)(self.key_inner) };
         REDIS_OK
     }
 
@@ -411,7 +412,7 @@ impl RedisKeyWritable {
     ///
     /// Will panic if `RedisModule_UnlinkKey` is missing in redismodule.h
     pub fn unlink(&self) -> RedisResult {
-        unsafe { raw::RedisModule_UnlinkKey.unwrap()(self.key_inner) };
+        unsafe { crate::__available_api!(RedisModule_UnlinkKey)(self.key_inner) };
         REDIS_OK
     }
 
@@ -420,7 +421,7 @@ impl RedisKeyWritable {
     /// Will panic if `RedisModule_KeyType` is missing in redismodule.h
     #[must_use]
     pub fn key_type(&self) -> raw::KeyType {
-        unsafe { raw::RedisModule_KeyType.unwrap()(self.key_inner) }.into()
+        unsafe { crate::__required_api!(RedisModule_KeyType)(self.key_inner) }.into()
     }
 
     pub fn open_with_redis_string(
@@ -442,8 +443,9 @@ impl RedisKeyWritable {
         redis_type: &RedisType,
     ) -> Result<Option<&'b mut T>, RedisError> {
         verify_type(self.key_inner, redis_type)?;
-        let value =
-            unsafe { raw::RedisModule_ModuleTypeGetValue.unwrap()(self.key_inner).cast::<T>() };
+        let value = unsafe {
+            crate::__available_api!(RedisModule_ModuleTypeGetValue)(self.key_inner).cast::<T>()
+        };
 
         if value.is_null() {
             return Ok(None);
@@ -460,7 +462,7 @@ impl RedisKeyWritable {
         verify_type(self.key_inner, redis_type)?;
         let value = Box::into_raw(Box::new(value)).cast::<c_void>();
         let status: raw::Status = unsafe {
-            raw::RedisModule_ModuleTypeSetValue.unwrap()(
+            crate::__available_api!(RedisModule_ModuleTypeSetValue)(
                 self.key_inner,
                 *redis_type.raw_type.borrow(),
                 value,
@@ -482,7 +484,11 @@ impl RedisKeyWritable {
             0
         };
         let res = unsafe {
-            raw::RedisModule_StreamTrimByID.unwrap()(self.key_inner, flags as i32, &mut id)
+            crate::__available_api!(RedisModule_StreamTrimByID)(
+                self.key_inner,
+                flags as i32,
+                &mut id,
+            )
         };
         if res <= 0 {
             Err(RedisError::Str("Failed trimming the stream"))
@@ -711,11 +717,12 @@ fn to_raw_mode(mode: KeyMode) -> raw::KeyMode {
 /// Will panic if `RedisModule_KeyType` or `RedisModule_ModuleTypeGetType` are missing in redismodule.h
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn verify_type(key_inner: *mut raw::RedisModuleKey, redis_type: &RedisType) -> RedisResult {
-    let key_type: KeyType = unsafe { raw::RedisModule_KeyType.unwrap()(key_inner) }.into();
+    let key_type: KeyType =
+        unsafe { crate::__available_api!(RedisModule_KeyType)(key_inner) }.into();
 
     if key_type != KeyType::Empty {
         // The key exists; check its type
-        let raw_type = unsafe { raw::RedisModule_ModuleTypeGetType.unwrap()(key_inner) };
+        let raw_type = unsafe { crate::__available_api!(RedisModule_ModuleTypeGetType)(key_inner) };
 
         if raw_type != *redis_type.raw_type.borrow() {
             return Err(RedisError::Str("Existing key has wrong Redis type"));

@@ -41,7 +41,7 @@ impl RedisType {
         let type_name = CString::new(self.name).unwrap();
 
         let redis_type = unsafe {
-            raw::RedisModule_CreateDataType.unwrap()(
+            crate::__required_api!(RedisModule_CreateDataType)(
                 ctx,
                 type_name.as_ptr(),
                 self.version, // Encoding version

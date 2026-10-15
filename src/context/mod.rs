@@ -189,7 +189,7 @@ unsafe impl RedisLockIndicator for DetachedContextGuard {}
 impl Drop for DetachedContextGuard {
     fn drop(&mut self) {
         unsafe {
-            raw::RedisModule_ThreadSafeContextUnlock.unwrap()(self.ctx.ctx);
+            crate::__required_api!(RedisModule_ThreadSafeContextUnlock)(self.ctx.ctx);
         };
     }
 }
@@ -229,7 +229,8 @@ impl DetachedContext {
         if !c.is_null() {
             return Err(RedisError::Str("Detached context is already set"));
         }
-        let ctx = unsafe { raw::RedisModule_GetDetachedThreadSafeContext.unwrap()(ctx.ctx) };
+        let ctx =
+            unsafe { crate::__available_api!(RedisModule_GetDetachedThreadSafeContext)(ctx.ctx) };
         self.ctx.store(ctx, Ordering::Relaxed);
         Ok(())
     }
@@ -240,7 +241,7 @@ impl DetachedContext {
     /// However, this function will not return on the second call (it might panic or deadlock, for example)..
     pub fn lock(&self) -> DetachedContextGuard {
         let c = self.ctx.load(Ordering::Relaxed);
-        unsafe { raw::RedisModule_ThreadSafeContextLock.unwrap()(c) };
+        unsafe { crate::__required_api!(RedisModule_ThreadSafeContextLock)(c) };
         let ctx = Context::new(c);
         DetachedContextGuard { ctx }
     }
@@ -270,7 +271,7 @@ pub struct ContextUserScope<'ctx> {
 impl<'ctx> Drop for ContextUserScope<'ctx> {
     fn drop(&mut self) {
         self.ctx.deautenticate_user();
-        unsafe { raw::RedisModule_FreeModuleUser.unwrap()(self.user) };
+        unsafe { crate::__required_api!(RedisModule_FreeModuleUser)(self.user) };
     }
 }
 
@@ -291,7 +292,7 @@ impl<'a> Drop for StrCallArgs<'a> {
     fn drop(&mut self) {
         if self.is_owner {
             self.args.iter_mut().for_each(|v| unsafe {
-                raw::RedisModule_FreeString.unwrap()(std::ptr::null_mut(), *v)
+                crate::__required_api!(RedisModule_FreeString)(std::ptr::null_mut(), *v)
             });
         }
     }
@@ -372,7 +373,7 @@ impl Context {
     /// Will panic if `RedisModule_AutoMemory` is missing in redismodule.h
     pub fn auto_memory(&self) {
         unsafe {
-            raw::RedisModule_AutoMemory.unwrap()(self.ctx);
+            crate::__required_api!(RedisModule_AutoMemory)(self.ctx);
         }
     }
 
@@ -386,7 +387,7 @@ impl Context {
             return false;
         }
 
-        (unsafe { raw::RedisModule_IsKeysPositionRequest.unwrap()(self.ctx) }) != 0
+        (unsafe { crate::__required_api!(RedisModule_IsKeysPositionRequest)(self.ctx) }) != 0
     }
 
     /// # Panics
@@ -396,7 +397,7 @@ impl Context {
         // TODO: This will crash redis if `pos` is out of range.
         // Think of a way to make this safe by checking the range.
         unsafe {
-            raw::RedisModule_KeyAtPos.unwrap()(self.ctx, pos as c_int);
+            crate::__required_api!(RedisModule_KeyAtPos)(self.ctx, pos as c_int);
         }
     }
 
@@ -416,7 +417,7 @@ impl Context {
 
         let cmd = CString::new(command).unwrap();
         let reply: *mut raw::RedisModuleCallReply = unsafe {
-            let p_call = raw::RedisModule_Call.unwrap();
+            let p_call = crate::__required_api!(RedisModule_Call);
             p_call(
                 self.ctx,
                 cmd.as_ptr(),
@@ -489,7 +490,7 @@ impl Context {
     #[allow(clippy::must_use_candidate)]
     pub fn reply_error_string(&self, s: &str) -> raw::Status {
         let msg = Self::str_as_legal_resp_string(s);
-        unsafe { raw::RedisModule_ReplyWithError.unwrap()(self.ctx, msg.as_ptr()).into() }
+        unsafe { crate::__required_api!(RedisModule_ReplyWithError)(self.ctx, msg.as_ptr()).into() }
     }
 
     pub fn reply_with_key(&self, result: RedisValueKey) -> raw::Status {
@@ -607,7 +608,7 @@ impl Context {
                     // We can't return a result since we don't have a client
                     raw::Status::Err
                 } else {
-                    raw::RedisModule_WrongArity.unwrap()(self.ctx).into()
+                    crate::__required_api!(RedisModule_WrongArity)(self.ctx).into()
                 }
             },
 
@@ -744,7 +745,7 @@ impl Context {
         }
     }
     pub fn set_module_options(&self, options: ModuleOptions) {
-        unsafe { raw::RedisModule_SetModuleOptions.unwrap()(self.ctx, options.bits()) };
+        unsafe { crate::__required_api!(RedisModule_SetModuleOptions)(self.ctx, options.bits()) };
     }
 
     /// Return ContextFlags object that allows to check properties related to the state of
@@ -754,13 +755,13 @@ impl Context {
     /// * Execution mode such as multi exec or Lua
     pub fn get_flags(&self) -> ContextFlags {
         ContextFlags::from_bits_truncate(unsafe {
-            raw::RedisModule_GetContextFlags.unwrap()(self.ctx)
+            crate::__required_api!(RedisModule_GetContextFlags)(self.ctx)
         })
     }
 
     /// Return the current user name attached to the context
     pub fn get_current_user(&self) -> RedisString {
-        let user = unsafe { raw::RedisModule_GetCurrentUserName.unwrap()(self.ctx) };
+        let user = unsafe { crate::__required_api!(RedisModule_GetCurrentUserName)(self.ctx) };
         RedisString::from_redis_module_string(ptr::null_mut(), user)
     }
 
@@ -772,16 +773,18 @@ impl Context {
         &self,
         user_name: &RedisString,
     ) -> Result<ContextUserScope<'_>, RedisError> {
-        let user = unsafe { raw::RedisModule_GetModuleUserFromUserName.unwrap()(user_name.inner) };
+        let user = unsafe {
+            crate::__available_api!(RedisModule_GetModuleUserFromUserName)(user_name.inner)
+        };
         if user.is_null() {
             return Err(RedisError::Str("User does not exists or disabled"));
         }
-        unsafe { raw::RedisModule_SetContextUser.unwrap()(self.ctx, user) };
+        unsafe { crate::__available_api!(RedisModule_SetContextUser)(self.ctx, user) };
         Ok(ContextUserScope::new(self, user))
     }
 
     fn deautenticate_user(&self) {
-        unsafe { raw::RedisModule_SetContextUser.unwrap()(self.ctx, ptr::null_mut()) };
+        unsafe { crate::__required_api!(RedisModule_SetContextUser)(self.ctx, ptr::null_mut()) };
     }
 
     /// Verify the the given user has the give ACL permission on the given key.
@@ -793,19 +796,21 @@ impl Context {
         key_name: &RedisString,
         permissions: &AclPermissions,
     ) -> Result<(), RedisError> {
-        let user = unsafe { raw::RedisModule_GetModuleUserFromUserName.unwrap()(user_name.inner) };
+        let user = unsafe {
+            crate::__available_api!(RedisModule_GetModuleUserFromUserName)(user_name.inner)
+        };
         if user.is_null() {
             return Err(RedisError::Str("User does not exists or disabled"));
         }
         let acl_permission_result: raw::Status = unsafe {
-            raw::RedisModule_ACLCheckKeyPermissions.unwrap()(
+            crate::__available_api!(RedisModule_ACLCheckKeyPermissions)(
                 user,
                 key_name.inner,
                 permissions.bits(),
             )
         }
         .into();
-        unsafe { raw::RedisModule_FreeModuleUser.unwrap()(user) };
+        unsafe { crate::__available_api!(RedisModule_FreeModuleUser)(user) };
         let acl_permission_result: Result<(), &str> = acl_permission_result.into();
         acl_permission_result.map_err(|_e| RedisError::Str("User does not have permissions on key"))
     }
