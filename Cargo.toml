@@ -167,7 +167,8 @@ min-redis-compatibility-version-7-0 = ["redis-module/min-redis-compatibility-ver
 min-redis-compatibility-version-6-2 = ["redis-module/min-redis-compatibility-version-6-2"]
 min-redis-compatibility-version-6-0 = ["redis-module/min-redis-compatibility-version-6-0"]
 
-# Builds the examples that use Redis 7.2 APIs. Enabled by the 7.2 and later floors.
+# Builds the examples that use Redis 7.2 APIs. Internal: the 7.2 and later floors
+# enable it, and it does not build on its own or with an older floor.
 redis-7-2-examples = []
 
 # Enable static linking to libclang in bindgen (incompatible with `bindgen-runtime`)
