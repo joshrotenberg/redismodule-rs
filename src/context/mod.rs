@@ -922,7 +922,7 @@ extern "C" fn post_notification_job<F: FnOnce(&Context)>(
             )
         },
         |callback| {
-            callback(&ctx);
+            crate::panic::run_callback("post notification job", || callback(&ctx), || ());
         },
     );
 }

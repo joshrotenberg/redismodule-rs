@@ -138,6 +138,10 @@ name = "info"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "panic"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "scan_keys"
 crate-type = ["cdylib"]
 
