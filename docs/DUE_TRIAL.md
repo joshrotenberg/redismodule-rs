@@ -445,3 +445,30 @@ equivalent native tools/permissions remain unestablished and complementary SDK
 review is the bounded task. Sanitized aggregate feedback was sent once to the
 authorized due-expert hub and acknowledged. Private prompts/source/raw answers/
 logs remain local. See [F17 evidence](evidence/f17-call-reply.json).
+
+## October 14 — F18 source-specification review
+
+One monitored Due/Claude read-only review approves the new LoadConfigs scope.
+True exit 0; 273,868 ms; provider-reported USD 3.340327. Request/result/answer,
+219 trace records and offline summary independently validate. Reviewed inputs
+stayed unchanged through completion; all 46 activities match, no gaps/drops.
+Three activities failed: two Read and one Grep. Reviewer reports denied original
+reference reads outside its workspace, using retained excerpts instead. Caller
+read the original signatures/tails and verified heads/status/135 Rust hashes.
+The Grep diagnostic is not exposed and its cause remains unknown. No permission
+expansion, provider retry, fallback, recursive delegation or native permission
+bypass. Approval does not certify denied reads, caller hashes or remote state.
+
+Caller checked 49 source/receipt predicates, native pinned blobs/initialization
+bits and final scope. The review's nonblocking forced-unload clarification was
+checked/applied; caller clarified pure slot versus real native guard tests and
+proposed static error messages. No SDK implementation, compiler/test/benchmark
+or native execution. Due source remains clean
+76d33d410319d860425a2dd3609863a4ba5ca565; executable SHA-256
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b,
+Due 0.1.0 / Claude Code 2.1.296. Requested model/effort omitted; observed settings
+and compiled-source identity unknown. No binary/plugin refresh or deadline.
+Comparison deferred: bounded complementary review and unestablished equivalent
+native tool/permission controls. One sanitized aggregate success/permission-limit
+report was acknowledged by due-expert; raw private prompts/source/answers/logs
+remain local. See [F18 evidence](evidence/f18-load-configs.json).
