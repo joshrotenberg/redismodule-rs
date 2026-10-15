@@ -15,7 +15,9 @@ fn verify_key_access_for_user(ctx: &Context, args: Vec<RedisString>) -> RedisRes
 }
 
 fn get_current_user(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
-    Ok(RedisValue::BulkRedisString(ctx.get_current_user()))
+    Ok(ctx
+        .get_current_user()
+        .map_or(RedisValue::Null, RedisValue::BulkRedisString))
 }
 
 //////////////////////////////////////////////////////

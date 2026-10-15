@@ -62,7 +62,7 @@ pub struct RedisKey {
 
 impl RedisKey {
     pub fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
-        let key_inner = raw::open_key(ctx, key.inner, to_raw_mode(KeyMode::Read));
+        let key_inner = raw::open_key(ctx, key.as_ptr(), to_raw_mode(KeyMode::Read));
         Self { ctx, key_inner }
     }
 
@@ -72,7 +72,7 @@ impl RedisKey {
         flags: KeyFlags,
     ) -> Self {
         let key_inner =
-            raw::open_key_with_flags(ctx, key.inner, to_raw_mode(KeyMode::Read), flags.bits());
+            raw::open_key_with_flags(ctx, key.as_ptr(), to_raw_mode(KeyMode::Read), flags.bits());
         Self { ctx, key_inner }
     }
 
@@ -83,6 +83,8 @@ impl RedisKey {
     /// The caller must ensure:
     /// 1. The `ctx` pointer remains valid for the lifetime of the `RedisKey`.
     /// 2. The `key_inner` pointer remains valid for the lifetime of the `RedisKey`.
+    /// 3. `ctx` is the actual native opening/producer context for this key; string
+    ///    getters use it to resolve any AutoMemory registrations.
     pub const unsafe fn from_raw_parts(
         ctx: *mut raw::RedisModuleCtx,
         key_inner: *mut raw::RedisModuleKey,
@@ -171,8 +173,13 @@ impl RedisKey {
         if self.is_null() {
             return Ok(None);
         }
-        let value = raw::hash_get_by_string(self.key_inner, field.inner)?;
-        Ok((!value.is_null()).then(|| RedisString::from_redis_module_string(self.ctx, value)))
+        let value = raw::hash_get_by_string(self.key_inner, field.as_ptr())?;
+        Ok((!value.is_null()).then(|| unsafe {
+            RedisString::from_owned_ptr(
+                NonNull::new(self.ctx),
+                NonNull::new(value).expect("present hash result"),
+            )
+        }))
     }
 
     /// Returns the values associated with the specified fields in the hash stored at this key.
@@ -230,7 +237,7 @@ pub struct RedisKeyWritable {
 
 impl RedisKeyWritable {
     pub fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
-        let key_inner = raw::open_key(ctx, key.inner, to_raw_mode(KeyMode::ReadWrite));
+        let key_inner = raw::open_key(ctx, key.as_ptr(), to_raw_mode(KeyMode::ReadWrite));
         Self { ctx, key_inner }
     }
 
@@ -241,7 +248,7 @@ impl RedisKeyWritable {
     ) -> Self {
         let key_inner = raw::open_key_with_flags(
             ctx,
-            key.inner,
+            key.as_ptr(),
             to_raw_mode(KeyMode::ReadWrite),
             flags.bits(),
         );
@@ -279,7 +286,7 @@ impl RedisKeyWritable {
 
     #[allow(clippy::must_use_candidate)]
     pub fn hash_set(&self, field: &str, value: RedisString) -> raw::Status {
-        raw::hash_set(self.key_inner, field, value.inner)
+        raw::hash_set(self.key_inner, field, value.as_ptr())
     }
 
     #[allow(clippy::must_use_candidate)]
@@ -302,8 +309,13 @@ impl RedisKeyWritable {
         &self,
         field: &RedisString,
     ) -> Result<Option<RedisString>, RedisError> {
-        let value = raw::hash_get_by_string(self.key_inner, field.inner)?;
-        Ok((!value.is_null()).then(|| RedisString::from_redis_module_string(self.ctx, value)))
+        let value = raw::hash_get_by_string(self.key_inner, field.as_ptr())?;
+        Ok((!value.is_null()).then(|| unsafe {
+            RedisString::from_owned_ptr(
+                NonNull::new(self.ctx),
+                NonNull::new(value).expect("present hash result"),
+            )
+        }))
     }
 
     /// Returns the values associated with the specified fields in the hash stored at this key.
@@ -325,13 +337,13 @@ impl RedisKeyWritable {
     // `list_push_head` inserts the specified element at the head of the list stored at this key.
     #[allow(clippy::must_use_candidate)]
     pub fn list_push_head(&self, element: RedisString) -> raw::Status {
-        raw::list_push(self.key_inner, raw::Where::ListHead, element.inner)
+        raw::list_push(self.key_inner, raw::Where::ListHead, element.as_ptr())
     }
 
     // `list_push_tail` inserts the specified element at the tail of the list stored at this key.
     #[allow(clippy::must_use_candidate)]
     pub fn list_push_tail(&self, element: RedisString) -> raw::Status {
-        raw::list_push(self.key_inner, raw::Where::ListTail, element.inner)
+        raw::list_push(self.key_inner, raw::Where::ListTail, element.as_ptr())
     }
 
     //  `list_pop_head` pops and returns the first element of the list.
@@ -346,7 +358,12 @@ impl RedisKeyWritable {
             return None;
         }
 
-        Some(RedisString::new(NonNull::new(self.ctx), ptr))
+        Some(unsafe {
+            RedisString::from_owned_ptr(
+                NonNull::new(self.ctx),
+                NonNull::new(ptr).expect("present list result"),
+            )
+        })
     }
 
     //  `list_pop_head` pops and returns the last element of the list.
@@ -361,7 +378,12 @@ impl RedisKeyWritable {
             return None;
         }
 
-        Some(RedisString::new(NonNull::new(self.ctx), ptr))
+        Some(unsafe {
+            RedisString::from_owned_ptr(
+                NonNull::new(self.ctx),
+                NonNull::new(ptr).expect("present list result"),
+            )
+        })
     }
 
     pub fn set_expire(&self, expire: Duration) -> RedisResult {
@@ -393,7 +415,7 @@ impl RedisKeyWritable {
 
     pub fn write(&self, val: &str) -> RedisResult {
         let val_str = RedisString::create(NonNull::new(self.ctx), val);
-        match raw::string_set(self.key_inner, val_str.inner) {
+        match raw::string_set(self.key_inner, val_str.as_ptr()) {
             raw::Status::Ok => REDIS_OK,
             raw::Status::Err => Err(RedisError::Str("Error while setting key")),
         }
@@ -691,7 +713,12 @@ where
             if ptr.is_null() {
                 None
             } else {
-                Some(RedisString::from_redis_module_string(ctx, *ptr))
+                Some(unsafe {
+                    RedisString::from_owned_ptr(
+                        NonNull::new(ctx),
+                        NonNull::new(*ptr).expect("present hash result"),
+                    )
+                })
             }
         }));
     }

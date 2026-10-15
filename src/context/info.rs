@@ -19,12 +19,18 @@ impl ServerInfo {
     pub fn field(&self, field: &str) -> Option<RedisString> {
         let field = CString::new(field).unwrap();
         let value = unsafe {
-            raw::RedisModule_ServerInfoGetField.unwrap()(self.ctx, self.inner, field.as_ptr())
+            raw::RedisModule_ServerInfoGetField.unwrap()(
+                std::ptr::null_mut(),
+                self.inner,
+                field.as_ptr(),
+            )
         };
         if value.is_null() {
             None
         } else {
-            Some(RedisString::new(NonNull::new(self.ctx), value))
+            // Owned-result correction identified in upstream PR 487 (jonnyomerredis)
+            // and refined for AM off/on in PR 488 (oshadmi).
+            Some(unsafe { RedisString::from_owned_ptr(None, NonNull::new(value).unwrap()) })
         }
     }
 }
