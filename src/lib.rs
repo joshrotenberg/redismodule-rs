@@ -1,6 +1,13 @@
 pub use crate::context::InfoContext;
 extern crate num_traits;
 
+// Paths used by generated registration attributes. Consumers do not need to
+// declare the SDK's registration implementation dependency themselves.
+#[doc(hidden)]
+pub mod __private {
+    pub use ::linkme;
+}
+
 pub mod alloc;
 pub mod apierror;
 pub mod error;
