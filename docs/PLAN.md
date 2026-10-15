@@ -300,16 +300,16 @@ Recommendation: base new work on upstream master and re-land the code as small P
 
 | surface | crate today | gap | existing work |
 |---|---|---|---|
-| `RedisModule_Call` (guest `redis.call`) | `Context::call`, `call_ext`, `CallOptionsBuilder` with W, S, C, M, E, !, 0/3, K; typed `CallResult` | string replies become `SimpleString` (#234); no status versus bulk distinction; flags built as a string; no D (dry run), A or R flags | F16, F17, #303 |
+| `RedisModule_Call` (guest `redis.call`) | `Context::call`, `call_ext`, `CallOptionsBuilder` with W, S, C, M, E, !, 0/3, K; typed `CallResult` | string replies become `SimpleString` (#234); no status versus bulk distinction; flags built as a string; no D (dry run), A or R flags | F17 (fork PR #11), #303 |
 | effect replication | `replicate`, `replicate_verbatim`, call flag `!` | none found | |
 | thread-safe contexts | `ThreadSafeContext`, `DetachedContext`, `RedisGILGuard` | guards deref to the full `Context` including reply APIs; no TryLock; safe `Context::new` makes the GIL token forgeable | #351, F-series harvest |
-| blocked clients | `block_client`, `call_blocking` with an unblock handler | no reply or timeout callbacks, no privdata, no BlockClientOnKeys; `call_blocking` missing under the 8-0 floor | #61, A10 |
+| blocked clients | `block_client`, `call_blocking` with an unblock handler | no reply or timeout callbacks, no privdata, no BlockClientOnKeys; `call_blocking` missing under the 8-0 floor | #61, A10 (fork PR #16) |
 | `RedisModule_Yield` | none | needed to keep the server responsive during long guest runs | none |
 | ACL checks | `acl_check_key_permission`, `get_current_user`, call flag C | no ACLCheckCommandPermissions, ChannelPermissions or ACLAddLogEntry wrappers | #354, #381 |
 | memory accounting | none | no MallocSize, MallocUsableSize or GetUsedMemoryRatio wrappers; guest linear memory is mmapped outside `RedisAlloc`, so `used_memory` and `maxmemory` do not see it | #206 |
-| allocator | `RedisAlloc` as `#[global_allocator]` | A1 (fixed in PR #7); A4 | #483 |
-| panics across FFI | none | A7: a guest trap that surfaces as a Rust panic aborts the server; A9 adds 155 abort sites | #287 |
-| guest-held strings | `RedisString` | stored ctx and unbounded lifetimes | F07, F09, #358 |
+| allocator | `RedisAlloc` as `#[global_allocator]` | A1; A4 | A1: fork PR #7 |
+| panics across FFI | none | A7: a guest trap that surfaces as a Rust panic aborts the server; A9 adds 155 abort sites | A7: fork PR #17; A9: fork PR #18 (#287) |
+| guest-held strings | `RedisString` | stored ctx and unbounded lifetimes | F07 and F09 (fork PRs #12, #13), #358 |
 | event loop | none | no EventLoopAdd wrapper | none |
 | command filters | none | | #437 |
 
