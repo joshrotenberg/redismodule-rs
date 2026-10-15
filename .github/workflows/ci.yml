@@ -17,6 +17,8 @@ jobs:
           - [6-2, "7.2"]
           - [7-0, "7.2"]
           - [7-2, "7.2"]
+          - [7-4, "7.4"]
+          - [8-0, "8.0"]
         toolchain:
           - stable
 
@@ -72,7 +74,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime
+        run: cargo clippy --workspace --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime -- -D warnings
 
       - name: Build debug
         run: cargo build --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime
