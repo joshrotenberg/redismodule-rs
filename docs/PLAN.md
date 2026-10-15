@@ -97,15 +97,15 @@ A1 to A6 come from the klogmini study. A7 to A15 were found in this inventory. E
 | A4 | `cargo test` cannot run module logic in-process: `RedisAlloc` aborts when `RedisModule_Alloc` is unset, and `RedisString::create` unwraps a missing API | `src/alloc.rs`, `src/redismodule.rs:158` | open; issues #89, #221 |
 | A5 | Native type name length (9) is checked at load; command flags are a raw string, so a typo fails at load | `src/native_types.rs:35`, `src/macros.rs:16` | open; issues #365, #332, #330 |
 | A6 | Every build needs libclang (bindgen runs in `build.rs`; the features only choose dynamic or static) | `build.rs`, `Cargo.toml` | verified; issue #150 |
-| A7 | No `catch_unwind` at any `extern "C"` boundary: a panic in a command, notification, config or post-notification callback aborts redis-server | `src/macros.rs:20-30` and all callback trampolines | open |
-| A8 | Logging passes the message as the printf format string, so `%s` or `%n` in logged data is UB; an interior NUL panics | `src/logging.rs:41-43,55-61` | fixed by F02 (fork PR #1); upstream #476 fixes only the NUL |
-| A9 | 155 `RedisModule_*.unwrap()` call sites abort the server when the running Redis lacks an API | `src/**` | open; issue #287 |
-| A10 | `call_blocking` and `build_blocking` disappear under the 8-0 floor: the cfg lists 7-2 and 7-4 only | `src/context/mod.rs:145,453` | open; not in CI |
-| A11 | `KeysCursor` scan retains each key name and then `mem::forget`s it: one leaked string per scanned key | `src/context/keys_cursor.rs:20,34` | fixed by F09 (fork PR #3) |
+| A7 | No `catch_unwind` at any `extern "C"` boundary: a panic in a command, notification, config or post-notification callback aborts redis-server | `src/macros.rs:20-30` and all callback trampolines | fork PR #17 |
+| A8 | Logging passes the message as the printf format string, so `%s` or `%n` in logged data is UB; an interior NUL panics | `src/logging.rs:41-43,55-61` | fork PR #9 (F02); upstream #476 fixes only the NUL |
+| A9 | 155 `RedisModule_*.unwrap()` call sites abort the server when the running Redis lacks an API | `src/**` | fork PR #18; issue #287 |
+| A10 | `call_blocking` and `build_blocking` disappear under the 8-0 floor: the cfg lists 7-2 and 7-4 only | `src/context/mod.rs:145,453` | fork PR #16 |
+| A11 | `KeysCursor` scan retains each key name and then `mem::forget`s it: one leaked string per scanned key | `src/context/keys_cursor.rs:20,34` | fork PR #13 (F09) |
 | A12 | `RedisString::create` and `Context::create_string` go through `CString::new(..).unwrap()`: panic on NUL, not binary safe | `src/redismodule.rs:156` | open; issue #134 |
 | A13 | `str_as_legal_resp_string` maps each `char` with `c as u8`, truncating non-ASCII text in simple strings and errors | `src/context/mod.rs:471` | open |
 | A14 | `unsafe impl Sync for RedisType` while it holds a `RefCell` (non-atomic borrow flag) | `src/native_types.rs:11,16` | open; low risk while the GIL serializes access |
-| A15 | String configuration getters leak one `RedisModuleString` per CONFIG GET | `src/configuration.rs` | fixed by F11 (fork PR #4), which needs rework |
+| A15 | String configuration getters leak one `RedisModuleString` per CONFIG GET | `src/configuration.rs` | fork PR #14 (F11 reworked) |
 
 ## 3. Upstream open issues (55)
 
@@ -330,24 +330,28 @@ Each row is one PR, in merge order. Stacked PRs name their base; retarget each o
 | 7 | F11 reworked: string configuration getter leak (A15) | #14 | #13 | no |
 | 8 | F13: fallible configuration registration | #15 | #14 | yes |
 | 9 | A1: allocator alignment | #7 | master | no |
+| 10 | A10: `call_blocking` under the 8-0 floor; 7-4 and 8-0 CI rows | #16 | master | no |
+| 11 | A7: catch panics at FFI boundaries | #17 | master | no |
+| 12 | A9: name the missing API instead of unwrapping `None` | #18 | master | no |
 
-Merged into master in this order, the nine branches merge without conflicts. The
-result passes `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
+Merged into master in this order, steps 1 to 10 merge without conflicts. Steps 11
+and 12 merge cleanly on master alone, but after steps 1 to 8 they conflict where
+F03, F09, F11, and F13 rewrote the same lines (10 and 17 hunks). Rebase them last;
+fork PR #18 carries the script that regenerates its change. Merging them first
+instead moves the conflicts into five F-series PRs. Steps 1 to 9 merged together
+pass `cargo fmt --all -- --check`, `cargo clippy --all-targets -- -D warnings`,
 29 unit, 42/42 integration, and 17 doc tests (46/46 integration on the 7-2 floor), on
 1.94.0 against Redis 8.10.2. F14 (configuration builders) stays deferred.
 
 Next, not started:
 
-1. A10: add 8-0 to the `call_blocking` cfgs; add 7-4 and 8-0 rows to CI with `--all-targets -D warnings`.
-2. A7: `catch_unwind` in the command trampoline and every callback; reply with an error or log instead of aborting.
-3. A9: replace `RedisModule_*.unwrap()` with an `api!`-style check that returns an error (#287).
-4. Port upstream #427, #417, #397, #386, #477. The #488 ServerInfo fix is part of fork PR #13.
-5. A12, A13: binary-safe `RedisString::create`; non-ASCII-safe simple strings and errors.
-6. A4: opt-in test allocator feature that falls back to `System` only in test builds, with a hard failure in a loaded module.
-7. A2 WRONGTYPE; A3 insertion-ordered map reply; A5 const type-name check and typed command flags.
-8. `RedisModule_CallReplyProto` for status versus bulk in call replies.
-9. wasm-host wrappers: Yield, ACLCheckCommandPermissions, memory-size APIs, blocked-client callbacks, EventLoopAdd.
-10. CI: Redis 8 runtime row, run on push to master, MSRV declaration, sanitizer job (#331).
+1. Port upstream #427, #417, #397, #386, #477. The #488 ServerInfo fix is part of fork PR #13.
+2. A12, A13: binary-safe `RedisString::create`; non-ASCII-safe simple strings and errors.
+3. A4: opt-in test allocator feature that falls back to `System` only in test builds, with a hard failure in a loaded module.
+4. A2 WRONGTYPE; A3 insertion-ordered map reply; A5 const type-name check and typed command flags.
+5. `RedisModule_CallReplyProto` for status versus bulk in call replies.
+6. wasm-host wrappers: Yield, ACLCheckCommandPermissions, memory-size APIs, blocked-client callbacks, EventLoopAdd.
+7. CI: run on push to master, MSRV declaration, sanitizer job (#331), Redis 6 server rows (#378).
 
 ## 8. 3.0 scope versus patch fixes
 
@@ -379,10 +383,10 @@ Decided 2026-10-15:
 
 1. Base branch: master. The F-series code is re-landed as small PRs (fork PRs #8 to #15).
 2. F-series PRs: fork PRs #1 to #5 are closed, each replaced by fork PR #9, #12, #13, #14, and #11.
+5. Panic policy (A7): reply with an error and keep running (fork PR #17).
 
 Open:
 
 3. Allocator: keep fork PR #7's implementation, or take upstream #483's `src/alloc.rs` and keep fork PR #7's live test and defrag note. Both are correct.
 4. 3.0 scope: confirm the breaking list in section 8, and whether A2's wire change ships as a patch or in 3.0.
-5. Panic policy (A7): reply with an error and keep running, or log and abort. The wasm host needs the former.
 6. Upstream sync: how often fork master merges upstream master (for example when #488 or #483 lands).
