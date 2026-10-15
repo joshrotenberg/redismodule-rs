@@ -235,7 +235,9 @@ extern "C" fn i64_configuration_get<T: ConfigurationValue<i64> + 'static>(
 ///
 /// Returns an error if the Redis API is missing or Redis rejects the
 /// registration (for example a duplicate or invalid name); the private data and
-/// `on_changed` callback of a rejected registration are dropped.
+/// `on_changed` callback of a rejected registration are dropped. Outside the
+/// `configurations` block of `redis_module!`, call `RedisModule_LoadConfigs`
+/// after the last registration.
 #[expect(clippy::too_many_arguments)]
 pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
     ctx: &Context,
@@ -334,7 +336,9 @@ extern "C" fn string_configuration_get<T: ConfigurationValue<RedisString> + 'sta
 ///
 /// Returns an error if the Redis API is missing or Redis rejects the
 /// registration (for example a duplicate or invalid name); the private data and
-/// `on_changed` callback of a rejected registration are dropped.
+/// `on_changed` callback of a rejected registration are dropped. Outside the
+/// `configurations` block of `redis_module!`, call `RedisModule_LoadConfigs`
+/// after the last registration.
 pub fn register_string_configuration<T: ConfigurationValue<RedisString>>(
     ctx: &Context,
     name: &str,
@@ -403,7 +407,9 @@ extern "C" fn bool_configuration_get<T: ConfigurationValue<bool> + 'static>(
 ///
 /// Returns an error if the Redis API is missing or Redis rejects the
 /// registration (for example a duplicate or invalid name); the private data and
-/// `on_changed` callback of a rejected registration are dropped.
+/// `on_changed` callback of a rejected registration are dropped. Outside the
+/// `configurations` block of `redis_module!`, call `RedisModule_LoadConfigs`
+/// after the last registration.
 pub fn register_bool_configuration<T: ConfigurationValue<bool>>(
     ctx: &Context,
     name: &str,
@@ -482,7 +488,9 @@ extern "C" fn enum_configuration_get<
 ///
 /// Returns an error if the Redis API is missing or Redis rejects the
 /// registration (for example a duplicate or invalid name); the private data and
-/// `on_changed` callback of a rejected registration are dropped.
+/// `on_changed` callback of a rejected registration are dropped. Outside the
+/// `configurations` block of `redis_module!`, call `RedisModule_LoadConfigs`
+/// after the last registration.
 pub fn register_enum_configuration<G: EnumConfigurationValue, T: ConfigurationValue<G>>(
     ctx: &Context,
     name: &str,

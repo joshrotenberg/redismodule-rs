@@ -58,9 +58,11 @@ fn init(ctx: &Context, args: &[RedisString]) -> Status {
             .into_iter()
             .try_for_each(|kind| register(ctx, kind, kind))
             .and_then(|()| load_configs(ctx)),
-        Some(Ok(kind)) => {
-            register(ctx, kind, "duplicate").and_then(|()| register(ctx, kind, "duplicate"))
-        }
+        // LoadConfigs runs here too, so a rejection that was not reported would
+        // let the module load and the test would see it.
+        Some(Ok(kind)) => register(ctx, kind, "duplicate")
+            .and_then(|()| register(ctx, kind, "duplicate"))
+            .and_then(|()| load_configs(ctx)),
         _ => Err(RedisError::Str("expected a mode argument")),
     };
     match result {

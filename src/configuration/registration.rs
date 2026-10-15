@@ -29,9 +29,8 @@ impl<T> PendingRegistration<T> {
         Ok((
             api,
             Self {
-                // Box guarantees a non-null allocation. Keep this exact raw
-                // pointer through native acceptance, without moving/reborrowing
-                // a Box after the host has stored its pointer.
+                // Box guarantees a non-null allocation. Keep this raw pointer,
+                // not a Box, so nothing moves the data after Redis stores it.
                 data: NonNull::new(Box::into_raw(Box::new(data))).unwrap(),
                 accepted: false,
                 kind,
@@ -53,8 +52,8 @@ impl<T> PendingRegistration<T> {
                 self.kind
             )));
         }
-        // Redis accepted this pointer. Keep the existing stable allocation;
-        // native removal/quiescence needed for accepted-data cleanup is deferred.
+        // Redis keeps this pointer for the life of the module and has no free
+        // callback for it, so the allocation stays.
         self.accepted = true;
         Ok(())
     }
@@ -63,8 +62,8 @@ impl<T> PendingRegistration<T> {
 impl<T> Drop for PendingRegistration<T> {
     fn drop(&mut self) {
         if !self.accepted {
-            // Only this guard owns an unaccepted Box, and Drop runs once. The
-            // selected native rejection contract stores no pointer/callback.
+            // Only this guard owns an unaccepted Box, and Drop runs once. Redis
+            // rejects a registration before storing the pointer.
             unsafe { drop(Box::from_raw(self.data.as_ptr())) };
         }
     }
@@ -132,8 +131,7 @@ mod tests {
         assert_eq!(pointer, moved.as_ptr());
         moved.finish(raw::REDISMODULE_OK as c_int).unwrap();
         assert_eq!(drops.get(), 0);
-        // Pure Rust test allocation, never exposed to Redis. Reclaim after
-        // proving transfer so this test does not leak its synthetic owner.
+        // This allocation never reached Redis; free it so the test does not leak.
         unsafe { drop(Box::from_raw(pointer)) };
         assert_eq!(drops.get(), 1);
     }
