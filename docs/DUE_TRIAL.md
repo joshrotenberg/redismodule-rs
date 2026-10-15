@@ -565,3 +565,33 @@ comparison would not verify native effects or solve the parked contract gap.
 Caller verified source/origin/protected-file/original/remote evidence separately;
 source approval does not establish runtime coverage. Sanitized aggregate is routed
 to the human-authorized due-expert hub, not directly to Due GitHub issues.
+
+## F23 — Independent stream cleanup source review (2026-10-15)
+
+Caller implemented the scoped repair; one monitored Due/Claude read-only review
+approved. True exit 0, 187 complete trace records, 37 matched successful tool
+activities, no failed activities, unmatched records, sequence gaps or delivery
+drops. Request/result/answer/trace/summary schemas validated independently; frozen
+inputs matched through completion. Due 0.1.0, available clean source
+`76d33d410319d860425a2dd3609863a4ba5ca565`, binary SHA-256
+`11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b`,
+Claude Code 2.1.296. Compiled source identity unknown; model/effort omitted and
+observed values unknown. No plugin/binary refresh or permissions expansion.
+
+Five nonblocking findings reconciled: empty behavior correction/roadmap wording,
+write-labelled diagnostic fixture, documented sticky teardown sentinel and fatal
+unexpected mutex poisoning, optional EDOM coverage retained as a gap. Final
+fixture flag/comments and docs changed after review; SDK production/actual
+example unchanged. Caller independently ran native/compiler/pure/package checks
+and refreshed affected fixture/native/archive controls. Source approval itself
+is not runtime certification. The first corrected-code native attempt found an
+application/example zero-trim issue, not a Due defect; its partial receipt and
+normal host shutdown remain. A caller archive inventory initially missed nested
+workspace manifests, then was corrected against declared members; packages
+already built successfully. No retry of the Due run.
+
+A second comparison was deferred because no controlled selection question needed
+duplicate review spend. Useful sanitized aggregate evidence routes once to the
+human-authorized due-expert hub; raw prompts/provider logs stay local. See
+`target/f23/review/contracts.json`, `target/f23/due-provenance.json` and compact
+`docs/evidence/f23-stream-cleanup.json`.

@@ -8,29 +8,36 @@ fn stream_read_from(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let stream_key = args.next_arg()?;
 
-    let stream = ctx.open_key(&stream_key);
-    let key_type = stream.key_type();
+    let (element, id_to_keep) = {
+        let stream = ctx.open_key(&stream_key);
+        let key_type = stream.key_type();
 
-    if key_type != KeyType::Stream {
-        return Err(RedisError::WrongType);
-    }
+        if key_type != KeyType::Stream {
+            return Err(RedisError::WrongType);
+        }
 
-    let mut iter = stream.get_stream_iterator(false)?;
-    let element = iter.next();
-    let id_to_keep = iter.next().as_ref().map_or_else(
-        || RedisModuleStreamID {
-            ms: u64::MAX,
-            seq: u64::MAX,
-        },
-        |e| e.id,
-    );
-
+        let mut iter = stream.get_stream_iterator(false)?;
+        let element = iter.next();
+        let id_to_keep = iter.next().as_ref().map_or_else(
+            || RedisModuleStreamID {
+                ms: u64::MAX,
+                seq: u64::MAX,
+            },
+            |e| e.id,
+        );
+        (element, id_to_keep)
+    };
+    // An existing empty stream needs no trim. The current trim helper treats
+    // a native zero count as an error; preserve the command's Null result.
+    let Some(element) = element else {
+        return Ok(RedisValue::Null);
+    };
     let stream = ctx.open_key_writable(&stream_key);
     stream.trim_stream_by_id(id_to_keep, false)?;
-    Ok(match element {
-        Some(e) => RedisValue::BulkString(format!("{}-{}", e.id.ms, e.id.seq)),
-        None => RedisValue::Null,
-    })
+    Ok(RedisValue::BulkString(format!(
+        "{}-{}",
+        element.id.ms, element.id.seq
+    )))
 }
 
 //////////////////////////////////////////////////////

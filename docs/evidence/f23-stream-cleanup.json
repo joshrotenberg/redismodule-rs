@@ -1,0 +1,162 @@
+{
+  "chunk": "F23",
+  "kind": "implemented stream iterator cleanup and actual example repair",
+  "base": "532e84262799389b93eebed5bfe6ea2961936b57",
+  "branch": "fix/f23-stream-cleanup",
+  "status": "validated and independently reviewed for local merge",
+  "contracts": [
+    "All four APIs selected before Start; each missing API descriptive Err",
+    "Only successful Start owns Stop; rejected second Start preserves first traversal",
+    "Drop cached Stop, no Delete; native-handle validity obligation remains",
+    "Public factories/Item/ranges/reverse/field adoption preserved",
+    "Actual example ends iterator/read key before writer trim; existing-empty returns Null before unnecessary trim"
+  ],
+  "scope_adjustment": "First corrected legal run exposed existing zero-count trim error. Example skips unnecessary empty trim to meet F22 Null gate. Broader trim helper unchanged; F22 wording clarified. No historical invalid execution.",
+  "validation": {
+    "all_assertions_passed": true,
+    "pure": 39,
+    "new_pure_tests": 1,
+    "new_pure_selection_cases": 5,
+    "examples_each_profile": 39,
+    "compiler_checkout": 6,
+    "compiler_archive": 6,
+    "native_cells": 4,
+    "case_groups_per_cell": 17,
+    "doc_passed": 18,
+    "doc_ignored": 4,
+    "archives": 4,
+    "consumers": 3,
+    "consumer_profile_builds": 6,
+    "packaged_source_native_manifest_files": 93,
+    "original_rust_files": 135,
+    "original_heads_status_unchanged": true,
+    "protected_files": 178,
+    "post_review_changes": [
+      "examples/stream_cleanup.rs",
+      "docs/F22_SDK_ROADMAP.md"
+    ],
+    "review": "approve",
+    "final_native_and_archive_process_exit": 0
+  },
+  "source_hashes": {
+    "src/stream.rs": "8f4b54ae933df92dd462fe4cd9e3413d08f023fa57b383c66aefcd13c75732c4",
+    "src/key.rs": "3c0de1613204352e7972ce3ed54b662de5cbd1304f88aa2f4ec9620e77eb68ea",
+    "examples/stream.rs": "06a18f1b61bfe20a33d1bcf68ad84f315435a2e930e49791bf60ae89723dcf2d",
+    "examples/stream_cleanup.rs": "7a2a0302d635a53f0adee9686b334cbf57cc040d7f93774b7edaead8cf85d615",
+    "examples/string_ownership.rs": "177ac23041a7c5904991110e623871f521f8d6c4029a00163ca7657e23a439e3",
+    "tools/stream_cleanup.py": "48ab4f2f8c6d4de6fd04dee81d71ed85b232ff5dfa87674982bf80ffc5d2dc26",
+    "Cargo.toml": "84093990e755aceeadd526120832826b0ac366206c0c1510d9d5be335458f46e",
+    "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709"
+  },
+  "receipts": {
+    "target/f23/all-checks.json": "8e4d5fd3d7d91c0937582601cf9d4f7c13e2f7be1864ec12c872736faf93fc49",
+    "target/f23/fixture-builds-final.json": "35accde10f3de20c7f8f66bf41f8b95666def41d344297fa2b13246a2e5ad497",
+    "target/f23/compiler/report.json": "ac67b35cf9ae32ca2a9e042f7e32cf9404111c754eeeebd12a6fa9513b9a6c85",
+    "target/f23/archive-compiler-final/report.json": "5e3eb2fbab65689a4e608f6d60dc27a7bf4f693f1c3cf5b266658b952b1beaf3",
+    "target/f23/archive-producer-final/artifact.json": "ac53268fbe46dfb88b4ca39b728ac47d13a9b48a1fba8e88a33c1e47bc0cf725",
+    "target/f23/runtime-final/report.json": "a8e2309215d24419041cb791fe4596eef2a401142beb052e357d10e2858f24d5",
+    "target/f23/runtime-disposition.json": "67af8bde7f6c36c6b5ff98df924b917a41c904c2a3d19dbb0154876fa6ec1476",
+    "target/f23/packages-final/report.json": "0679f8921ffedbced68da27bbbbaca60cbd46e61c7dccf924631fc74ffd7458a",
+    "target/f23/packages-final/commands.json": "a53e442aa97f4c52051422ab4323397678cb11afddf485c798700b6b5f8697f8",
+    "target/f23/archive-sources-final.json": "f6e5dadc46be507ac4460e388433258865bc04455f57790cb0a718e74e165d3d",
+    "target/f23/final-validation.json": "9a57e2b978e70c9f4d3eb60387427d7c3aa02c6efdea255b3ba1eb099291c40f",
+    "target/f23/native-source-hashes.json": "95fd106994dde6c43feb421380849cfb9d6703a55dcb1f51d33ef3315f703de6",
+    "target/f23/due-provenance.json": "f19fd536836bf8490180e824ac95468f094298bce2c90df9a7c04d0a26909480",
+    "target/f23/review/contracts.json": "2007e19d85a6db47721fe6e717f97e61e4eaae91609f5064056456f7f0f54ee8",
+    "target/f23/review/disposition.json": "b4c00519b28342fdb6cf8fa3ca5f092eb38b0efb0c4947e94639a834e8d5c7af"
+  },
+  "review": {
+    "verdict": "approve",
+    "actual_exit": 0,
+    "trace_records": 187,
+    "duration_ms": 249285,
+    "provider_reported_cost_usd": 3.01533925,
+    "activities": {
+      "started": 37,
+      "completed": 37,
+      "failed": 0,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "succeeded": 37
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 37,
+          "completed": 37,
+          "completion_status_counts": {
+            "succeeded": 37
+          }
+        }
+      }
+    }
+  },
+  "review_refinements": {
+    "verdict": "approve",
+    "blocking": 0,
+    "findings": [
+      {
+        "index": 1,
+        "action": "F23 explicitly records empty behavior correction; F22 preservation wording amended."
+      },
+      {
+        "index": 2,
+        "action": "Fixture command marked write, close-time signal explained. Fresh targeted builds/native/archive/compiler checks follow."
+      },
+      {
+        "index": 3,
+        "action": "Sticky active-close sentinel documented in fixture."
+      },
+      {
+        "index": 4,
+        "action": "Fatal unexpected fixture poisoning documented; no generalized panic containment added."
+      },
+      {
+        "index": 5,
+        "action": "Optional exclusive EDOM failure case retained as explicit gap; no unrequested coverage expansion."
+      }
+    ],
+    "production_and_actual_example_unchanged": true,
+    "frozen_review_inputs_validated_before_refinement": true,
+    "no_second_review": "Nonblocking fixture flag/comments and docs only; caller verifies narrow effects independently."
+  },
+  "due_provenance": {
+    "due_version": "due 0.1.0",
+    "binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "available_source_commit": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "available_source_dirty": "",
+    "binary_source_identity": "not embedded/unknown",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "requested_provider": "claude",
+    "requested_model": null,
+    "requested_effort": null,
+    "observed_model": "unknown unless exposed by result",
+    "observed_effort": "unknown",
+    "comparison": "Deferred: one implementation review and independent native/compiler effects are required; a second unchanged review would duplicate spend without a defined decision needing comparison.",
+    "refresh": "No binary/plugin refresh"
+  },
+  "limits": [
+    "Selected macOS arm64/libc 7.2.8/8.10.2 debug/release; no support policy",
+    "Counts issued API operations, not heap/refcounts",
+    "Actual example ordering is lexical source evidence plus native output, not instrumented API trace",
+    "No measured allocation/throughput/zero-copy/general safety claim",
+    "EDOM exclusive range, second Start on write handle, live iterator across command return untested",
+    "Fixture unexpected poisoning is fatal; no broad panic boundary",
+    "Archive source matching excludes later status/evidence prose",
+    "Source review is distinct from independently verified execution effects"
+  ],
+  "overlap": {
+    "fork_drafts": 5,
+    "upstream_prs": 45,
+    "upstream_issues": 55,
+    "all_metadata_unchanged_from_f22": true,
+    "narrow_issue_mapping": null,
+    "sdk_push_pr_publication": false
+  },
+  "next": "F24 source-only raw-key handoff specification; F25 implementation gated on review and issue205 visibility"
+}

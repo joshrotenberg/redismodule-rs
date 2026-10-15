@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F23 — Stream iterator cleanup and actual example repair
+
+| Status | Report |
+|---|---|
+| **Done** | Resolve Start/Stop/NextID/NextField before acquisition, cache traversal/Stop functions, stop instead of delete on Drop. Real stream example closes iterator/read handle before writer trim and returns Null for existing-empty input before unnecessary trim. 39 pure tests, six checkout + six archived compiler controls, 39 examples both profiles, Clippy/fmt/18 docs, four native host/profile cells with 17 case groups each, four archives/three consumers/six builds pass. 93 packaged source/native/manifest files match; original heads/status/135 Rust hashes unchanged. Due/Claude approves. |
+| **Next** | F24 source-only raw-key handoff specification at the next two-hour interval; then gated F25 repair, F26/F27 hash scope/repair and F28 batch scorecard/schedule completion. No second chunk this activation. |
+| **Blockers** | None for completed local F23. Broader native aliases/Context/GIL/phase/panic and F21 metadata retirement remain separate. No native EDOM exclusive-range or second Start on write-handle cell claimed. |
+| **Decisions** | Empty-stream Null is a deliberate example correction: earlier trim helper rejected native zero count. Skip that unnecessary trim; broader trim helper stays unchanged. Fixture is marked write for legal WRITE-handle close signalling, with fresh checks after review clarification. Counts are operations, not heap accounting; no support/performance claim. Local-only, no SDK push/PR or CI work. |
+
+Details: [F23 implementation and validation](docs/F23_STREAM_CLEANUP.md),
+[compact evidence](docs/evidence/f23-stream-cleanup.json).
+
 ## F22 — Reviewed finite SDK roadmap and stream specification
 
 | Status | Report |

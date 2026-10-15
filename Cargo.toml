@@ -206,6 +206,10 @@ name = "scan_keys"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "stream_cleanup"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "stream"
 crate-type = ["cdylib"]
 

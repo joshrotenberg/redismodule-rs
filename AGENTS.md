@@ -205,3 +205,17 @@ Do not expand
 into a general FFI audit or execute historical invalid native paths. This trial grants no additional SDK push,
 merge, release, credential, settings or cross-project authority. See the current
 [trial checkpoint](docs/DUE_TRIAL.md).
+
+F23 is now implemented, independently reviewed and validated locally. Read
+`docs/F23_STREAM_CLEANUP.md`, compact evidence and `target/f23/checkpoint.json`.
+Drop calls cached Stop; all four required APIs resolve before acquisition. Failed
+Start never owns teardown. Actual example ends read scopes before writer trim;
+existing-empty returns Null before unnecessary trim (a deliberate correction,
+since the unchanged trim helper rejects zero counts). Final fixture write flag
+reflects close-time modification signalling, not changed stream contents.
+39 pure tests, six checkout/six archived compiler controls, 39 examples in both
+profiles, Clippy/fmt/18 docs, four native cells/17 groups each and fresh archives/
+consumers pass. Other-provider source review approves; fixture/doc refinements
+received fresh relevant checks. Original four heads/status/135 Rust hashes stay.
+Next is F24 source-only raw-key handoff specification; do not repeat F23 or begin
+F25 code before the reviewed contract and issue205 visibility prerequisites.
