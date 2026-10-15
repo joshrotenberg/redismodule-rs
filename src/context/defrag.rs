@@ -128,6 +128,11 @@ impl DefragContext {
     /// The function is unsafe because it is assumed that the pointer is valid and previusly
     /// allocated. It is considered undefined if this is not the case.
     ///
+    /// The pointer must be one that RM_Alloc returned. A block from
+    /// [crate::alloc::RedisAlloc] (including [Self::defrag_alloc]) qualifies only if its
+    /// layout is aligned to 16 bytes or less: a block with a larger alignment starts
+    /// inside a bigger RM_Alloc allocation.
+    ///
     /// If a non-NULL value is returned, the caller should use the new pointer instead
     /// of the old one and update any reference to the old pointer, which must not
     /// be used again.
