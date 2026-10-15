@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F25 — Raw-key handoff repair: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | Consuming extraction now suppresses Rust Drop and returns the original context/key pointers. Public signatures and borrowed scan adapters stay unchanged; adoption/NULL/AM/phase duties documented. 39 pure tests, nine checkout/nine final-archive metadata controls, 40 examples both profiles, Clippy/fmt/18 docs, four native host/profile cells with 21 groups each and four archives/three consumers/six builds pass. 94 packaged source/native/manifest files match; originals unchanged. Due/Claude approves. |
+| **Next** | F26 source-only single-field hash count/error/byte/old-native compatibility specification; then gated F27 implementation and F28 scorecard/schedule completion. No second chunk this interval. |
+| **Blockers** | None for local F25. CI/remote handoff and broader native/metadata/platform contracts remain deferred. Source/issued-close evidence is not native heap/refcount balance or general safety. |
+| **Decisions** | One manual close obligation, no retained context/AM detachment/lifetime extension. Real NULL separate from fabricated context; scan adapters remain borrowed. Draft PR19/empty kickoff existed before code; required baseline uploaded local F17 merge/F18–F24 history, no fork-master push. Leaves upstream205 open. Two post-review comments preserve statements/fixtures; native receipts retain as-run hashes, final archives use final source. |
+
+Details: [F25 implementation, validation and limits](docs/F25_RAW_KEY_HANDOFF.md),
+[compact evidence](docs/evidence/f25-raw-key-handoff.json), [draft PR19](https://github.com/joshrotenberg/redismodule-rs/pull/19).
+
 ## F24 — Raw-key handoff: reviewed source-only specification
 
 | Status | Report |

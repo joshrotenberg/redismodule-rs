@@ -625,3 +625,27 @@ selection decision justified duplicate spend. Sanitized aggregate is routed once
 to human-authorized due-expert; no raw prompts/logs/code or direct Due publication.
 Local evidence: target/f24/review/contracts.json, disposition.json and compact
 [raw-key specification evidence](evidence/f24-raw-key-handoff.json).
+
+## F25 — Independent raw-key implementation review (2026-10-15)
+
+One monitored Due/Claude read-only review approved the new implementation and
+corrected fixtures. True exit 0; 176 complete trace records,
+33 matched successful activities, no failed activities, gaps, drops or unmatched
+records. Request/result/answer/all trace/summary schemas validate independently;
+frozen inputs match through completion. Source approval is separate from caller
+native/compiler/archive/original effects verification. Two nonblocking comments
+were applied: explicit phase/thread boundary and the two-pointer-only assumption.
+Production statements and fixtures stay unchanged; no duplicate review or native
+replay. Final archives and public compiler controls were refreshed for final
+source bytes. Native receipts preserve their earlier as-run hashes.
+
+Due 0.1.0, clean available source 76d33d410319d860425a2dd3609863a4ba5ca565;
+binary SHA256 11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b;
+Claude Code 2.1.296, macOS 26.7.1 arm64. Compiled source identity unknown;
+requested model/effort omitted and observed settings unknown. No binary/plugin
+refresh, permission expansion, retry or fallback. Duration 244272 ms,
+provider-reported USD 2.23843475. Comparison deferred:
+no fair controlled choice required duplicate source review beyond independent
+host/compiler effects. Sanitized aggregate routes once to the authorized
+due-expert hub, without private code/prompts or raw provider logs. Evidence:
+`target/f25/review/contracts.json`, disposition and compact F25 evidence.
