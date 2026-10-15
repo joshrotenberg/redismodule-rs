@@ -2,7 +2,10 @@
 //! Counts only freshly owned getter results, not process heap or static backings.
 use lazy_static::lazy_static;
 use redis_module::{
-    configuration::{register_string_configuration, ConfigurationContext, ConfigurationFlags},
+    configuration::{
+        register_bool_configuration, register_string_configuration, ConfigurationContext,
+        ConfigurationFlags,
+    },
     raw, redis_module, ConfigurationValue, Context, RedisError, RedisGILGuard, RedisResult,
     RedisString, RedisValue, Status,
 };
@@ -67,6 +70,20 @@ struct Tracked(Kind);
 static NATIVE_CONFIG: Tracked = Tracked(Kind::Native);
 static TEXT_CONFIG: Tracked = Tracked(Kind::Text);
 static BINARY_CONFIG: Tracked = Tracked(Kind::Binary);
+struct LoadGuard;
+static LOAD_GUARD: LoadGuard = LoadGuard;
+impl ConfigurationValue<bool> for LoadGuard {
+    fn get(&self, _: &ConfigurationContext) -> bool {
+        true
+    }
+    fn set(&self, _: &ConfigurationContext, value: bool) -> Result<(), RedisError> {
+        if value {
+            Ok(())
+        } else {
+            Err(RedisError::Str("F19 guarded boolean rejected"))
+        }
+    }
+}
 impl ConfigurationValue<RedisString> for Tracked {
     fn get(&self, ctx: &ConfigurationContext) -> RedisString {
         issued(match self.0 {
@@ -138,10 +155,34 @@ fn init(ctx: &Context, args: &[RedisString]) -> Status {
             return Status::Err;
         }
     }
-    // Match the existing direct-init reference recipe and preserve ignored return.
-    unsafe {
-        raw::RedisModule_LoadConfigs.unwrap()(ctx.ctx);
+    // Selected F19 cases: a valid queued string can publish a getter snapshot
+    // before this later boolean setter rejects; default rejection can publish none.
+    let mode = args.first().map(|a| a.as_slice());
+    if matches!(mode, Some(b"load-guard" | b"load-guard-default"))
+        && register_bool_configuration(
+            ctx,
+            "guard",
+            &LOAD_GUARD,
+            mode != Some(b"load-guard-default".as_slice()),
+            ConfigurationFlags::DEFAULT,
+            None,
+        )
+        .is_err()
+    {
+        return Status::Err;
     }
+    ctx.log_notice("F19_MANUAL_LOAD_BEGIN");
+    if let Err(error) = redis_module::configuration::load_configurations(ctx) {
+        CLOSING.store(true, Ordering::Relaxed);
+        ctx.log_notice(&format!(
+            "F19_MANUAL_LOAD_ERROR issued={} live={}",
+            ISSUED.load(Ordering::Relaxed),
+            LIVE.lock().unwrap().len()
+        ));
+        ctx.log_warning(&error.to_string());
+        return Status::Err;
+    }
+    ctx.log_notice("F19_MANUAL_LOAD_OK");
     // Legal actual OnLoad command access, creates post-callback snapshots that
     // the pending guard must close if this load is later rejected.
     let pattern = format!("{}.*", crate::NAME);

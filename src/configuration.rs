@@ -16,6 +16,85 @@ use std::rc::Rc;
 use string_lifecycle::{admit, track, StringReply};
 pub use string_lifecycle::{close_string_configurations, StringConfigurationLoadScope};
 
+/// Apply registered module configurations during the real native OnLoad.
+///
+/// Reports an unavailable API or native failure. The detailed native cause is in
+/// the Redis server log; this API has no errno contract. Successful prior setter
+/// effects are not rolled back, and the call is neither retried nor deduplicated.
+/// Keep the existing registration/default/load order and propagate failure before
+/// committing a pending [`StringConfigurationLoadScope`].
+///
+/// Use a valid live host Context under the existing SDK/native phase and GIL
+/// obligations. Native phase checks do not establish arbitrary Context validity
+/// or general thread/reentry safety. Raw entry points still need their explicit
+/// string configuration lifecycle; this helper does not create that scope.
+pub fn load_configurations(ctx: &Context) -> Result<(), RedisError> {
+    // SAFETY: the existing Context/native host obligations apply. Availability
+    // is resolved before invoking the API; no context is retained by this helper.
+    unsafe {
+        load_configurations_with(raw::RedisModule_LoadConfigs.map(|api| move || api(ctx.ctx)))
+    }
+}
+
+fn load_configurations_with(call: Option<impl FnOnce() -> c_int>) -> Result<(), RedisError> {
+    let call = call.ok_or(RedisError::Str("LoadConfigs API is unavailable"))?;
+    if call() == raw::REDISMODULE_OK as c_int {
+        Ok(())
+    } else {
+        Err(RedisError::Str(
+            "Module configuration loading failed; see Redis server log",
+        ))
+    }
+}
+
+#[cfg(test)]
+mod load_tests {
+    use super::load_configurations_with;
+    use crate::raw;
+    use std::cell::Cell;
+
+    #[test]
+    fn missing_load_api_is_an_error_without_a_native_call() {
+        let result = load_configurations_with(None::<fn() -> i32>);
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "LoadConfigs API is unavailable"
+        );
+    }
+
+    #[test]
+    fn native_status_is_checked_once_without_retry() {
+        for status in [raw::REDISMODULE_OK as i32, raw::REDISMODULE_ERR as i32, -42] {
+            let calls = Cell::new(0);
+            let result = load_configurations_with(Some(|| {
+                calls.set(calls.get() + 1);
+                status
+            }));
+            assert_eq!(calls.get(), 1);
+            assert_eq!(result.is_ok(), status == raw::REDISMODULE_OK as i32);
+            if let Err(error) = result {
+                assert_eq!(
+                    error.to_string(),
+                    "Module configuration loading failed; see Redis server log"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn propagated_failure_skips_later_work_without_undoing_prior_effects() {
+        let effects = Cell::new(0);
+        let operation = || {
+            effects.set(1);
+            load_configurations_with(Some(|| raw::REDISMODULE_ERR as i32))?;
+            effects.set(2);
+            Ok::<(), crate::RedisError>(())
+        };
+        assert!(operation().is_err());
+        assert_eq!(effects.get(), 1);
+    }
+}
+
 bitflags! {
     /// Configuration options
     pub struct ConfigurationFlags : u32 {

@@ -454,8 +454,9 @@ macro_rules! redis_module {
                         }
                     )*
                 )?
-                if let Some(load_config) = raw::RedisModule_LoadConfigs {
-                    load_config(ctx);
+                if let Err(error) = $crate::configuration::load_configurations(&context) {
+                    context.log_warning(&error.to_string());
+                    return raw::Status::Err as c_int;
                 }
 
                 $(

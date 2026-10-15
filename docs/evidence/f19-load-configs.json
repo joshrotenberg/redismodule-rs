@@ -1,0 +1,177 @@
+{
+  "chunk": "F19",
+  "status": "implemented, independently reviewed and caller validated locally",
+  "baseline": "f2dd7ed32bca749eb011f224813fd0b87499437e",
+  "scope": "reviewed F18 additive LoadConfigs helper and macro/manual propagation only",
+  "api": "configuration::load_configurations(&Context) -> Result<(), RedisError>",
+  "pure_tests": 38,
+  "new_pure_tests": 3,
+  "compiler_controls": 10,
+  "archive_compiler_controls": 10,
+  "examples_each_profile": 38,
+  "doc_tests": {
+    "passed": 18,
+    "ignored": 4
+  },
+  "native_f19_host_profile_cells": 4,
+  "native_startup_controls": 4,
+  "native_registration_rejection_controls": 4,
+  "native_ownership_cells": 4,
+  "reference_builds": 6,
+  "reference_domain_flows": 12,
+  "reference_rejection_reload_controls": 8,
+  "archives": 4,
+  "external_consumers": 3,
+  "consumer_profile_builds": 6,
+  "archive_source_files_matched": 92,
+  "verification": {
+    "checks": {
+      "compiler-final/report.json": 9,
+      "archive-compiler/report.json": 9,
+      "runtime-final/report.json": 4,
+      "ownership-runtime/report.json": 4,
+      "reference-runtime/report.json": 12
+    },
+    "originals": "all four heads/status/135 tracked Rust hashes unchanged",
+    "archive_source_files_matched": 92,
+    "reference_builds": 6,
+    "reference_domain_flows": 12,
+    "reference_rejection_reload_controls": 8,
+    "native_controls": "four F19 main host/profile cells plus four startup and four F13 registration-rejection controls; four F11 ownership cells",
+    "sdk_phase_and_hooks": "No LoadConfigs pointer is modified or native API absence fabricated. Native accounting uses the existing F11 FreeString forwarding fixture; its hook installation/forwarder is unchanged, not used in pure/compiler tests.",
+    "failed_attempts": [
+      "initial closure capture E0373 fixed with move; pure-corrected.log passes",
+      "new fixture macro field/trailing syntax corrected; examples-debug-corrected.log passes",
+      "initial debug 7.2 cell passed then wrong 8.10 executable path caused runner setup failure; runtime-final is complete passing matrix",
+      "initial compiler harness macro data_types comma corrected; compiler-final and archived controls pass"
+    ],
+    "limits": [
+      "selected macOS arm64/libc 7.2.8/8.10.2 host profiles only",
+      "no historical invalid native paths, fake Contexts, crash or leak sampler",
+      "archived consumer runtime skipped; separate owned-host fixtures provide selected native evidence",
+      "behavior and forwarded getter-owner counts do not certify whole process/accepted metadata/native thread or alias safety"
+    ]
+  },
+  "review": {
+    "actual_exit": 0,
+    "verdict": "approve",
+    "duration_ms": 188970,
+    "provider_reported_cost_usd": 2.55948325,
+    "request_result_answer_all_trace_summary_valid": true,
+    "trace_records": 141,
+    "recorded_inputs_unchanged_through_completion": true,
+    "activities": {
+      "started": 27,
+      "completed": 27,
+      "failed": 0,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "succeeded": 27
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 27,
+          "completed": 27,
+          "completion_status_counts": {
+            "succeeded": 27
+          }
+        }
+      }
+    },
+    "limits": [
+      "Read-only source review; no compilation, tests, Clippy/fmt, native hosts, archives or reference builds were run. All execution counts (38 pure tests, 10+10 compiler controls, 38 examples, native/ownership/reference/archive cells, 92 byte matches) are caller claims and are not certified here.",
+      "Did not re-derive hashes, receipts under target/f19, remote/overlap state, or original reference module heads; relied on target/f18/excerpts.json for prior reference syntax and on the caller's statement that originals are untouched.",
+      "Native behavior (getter invoked before a rejected queued string setter, phase rejection from a command context, no OnUnload on failed OnLoad) was checked against the F18 source anchors and fixture expectations, not by reading or executing redis module.c/config.c in this review.",
+      "Reviewed only the F19 changes to the ownership fixture; the pre-existing FreeString hook, accounting, StringConfigurationLoadScope internals, F11/F13/F14 contracts and general Context/GIL/thread/alias/panic safety were not audited.",
+      "Cargo.toml was reviewed only through the diff hunk adding the two example entries; the compiler-complete generated sources were not read beyond target/f19/compiler.py."
+    ],
+    "disposition": {
+      "verdict": "approve",
+      "nonblocking_findings_applied": 1,
+      "change": "Documentation distinguishes absent-block source/compiler evidence and manual call placement logs from a native call-count trace.",
+      "production_fixtures_runners_unchanged": true,
+      "review_limits": "Source only; caller separately checked execution/hash/remote/original receipts. No broad F11 or native safety audit."
+    }
+  },
+  "overlap": {
+    "scope": "LoadConfigs helper/result propagation; no matching narrow open issue found",
+    "issue_independent": true,
+    "process": "dedicated local branch/no push or PR",
+    "fork_drafts": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "pr229": {
+      "author": "MeirShpilraien",
+      "head": "566ad273797871acc6f50b5345a0c1cfa16fc34b",
+      "diff_unchanged_since_F18": true,
+      "scope": "broad API ancestry; not a full port"
+    },
+    "excluded": [
+      378,
+      471
+    ]
+  },
+  "no_sdk_push_pr_publication": true,
+  "limits": [
+    "selected macOS arm64/libc host evidence, not support policy",
+    "API release counts do not prove complete native refcount/process/accepted metadata balance",
+    "archive runtime skipped; separate owned-host native fixtures",
+    "no historical invalid native execution/fake Contexts/crash/leak sampler; missing native API tested only through actual production pure adapter",
+    "successful order/default/repeated-call behavior preserved; no general native Context/GIL/thread/alias/panic audit",
+    "Raw custom lifecycle helper recipe compiles as an uninvoked consumer; no new raw-custom-entrypoint native fixture is claimed."
+  ],
+  "due_provenance": {
+    "sdk_head": "f2dd7ed32bca749eb011f224813fd0b87499437e",
+    "sdk_dirty": "M Cargo.toml\n M examples/configuration_builders.rs\n M examples/support/configuration_ownership.rs\n M src/configuration.rs\n M src/macros.rs\n M tools/configuration_ownership.py\n?? docs/F19_LOAD_CONFIGS.md\n?? docs/evidence/f19-load-configs.json\n?? examples/configuration_load.rs\n?? examples/configuration_load_empty.rs\n?? tools/configuration_load.py",
+    "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "due_source_status": "",
+    "due_binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "due_version": "due 0.1.0",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "host_app": "Codex desktop",
+    "model_requested": null,
+    "effort_requested": null,
+    "model_observed": "unknown",
+    "effort_observed": "unknown",
+    "compiled_source_identity": "unknown",
+    "deadline": null,
+    "plugin_binary_refresh": false,
+    "comparison_deferred": "Complementary implementation review with SDK delivery scope; equivalent native provider tool/permission controls remain unestablished."
+  },
+  "receipt_hashes": {
+    "target/f19/pure-corrected.log": "0ad4a9f09bbe3783765b7f819735764310c17de366a6258f7a4e77e4a2535e19",
+    "target/f19/examples-debug-corrected.log": "dfc9af5bb1466c72e3ed5f80b7b77b489584d2d8eb298ae34f20fc465a6feade",
+    "target/f19/examples-release.log": "aebbe49ace5cfda0d989d69b35d3a22aa64d8c548bd8036c7af3142fd107caa2",
+    "target/f19/clippy.log": "036477edd392a1a4e20028c0c4857f060981c5bf34c77924a242a8087ad65559",
+    "target/f19/fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/f19/docs.log": "59cc37a5250c71f4e86039f5ef93ac451b9beed8fdd1762230214ce44a7c69a5",
+    "target/f19/compiler-complete/report.json": "74f2c12e496c77194d3c7cbfc83e458f72d92483853df373ae4ca89dc0ebe8ba",
+    "target/f19/archive-compiler-complete/report.json": "df4dd86f70be13e19d0edb4436402dc17e4fbfdc7b60b55529706699e434fc31",
+    "target/f19/runtime-final/report.json": "6034937ba64d0ad09eb5fb7c879d3022f6cdbdaf72b2a4e7c30cf4d18c3cb067",
+    "target/f19/ownership-runtime/report.json": "9fb9546a33ea57a397c6bfa5156186df51d34433ea35e23ab23f5d16d533385a",
+    "target/f19/reference-runtime/report.json": "ecb89342ef15a52ab5b5fa46635cab7f8e4caa853b0437bcdb9da16c007b9fe3",
+    "target/f19/references/report.json": "70128be499ad039ec054c7f714246a434ceae27cabf4e4ed3724e80acff3ae22",
+    "target/f19/packages/report.json": "7c46d994fabc18ad102e97eb4f547e88d9fae45268a89e10aa8966a88b12a4b5",
+    "target/f19/packages/commands.json": "b2ff4f4239f3836291a666dba1cc759d73c0756317f69b4428cfc86c2a726545",
+    "target/f19/archive-source-match.json": "171753d22cdb9dfdfee65d3a71b74a92e66c36d81718c36738449e721636a951",
+    "target/f19/archive-producer/artifact.json": "c4a41a6b1951199740b89a04e077a64f08619358794447459f850da2366bbabe"
+  },
+  "next": "F20 source-only evidence/priorities checkpoint for F17/F19 using existing receipts; later human focus supersedes. No F20 work in this activation.",
+  "final_document_sha256": "37419b339242e4b2fe094b02b66ea31a365ed6d0a957d046dd90023d900b9cc5",
+  "feedback": "One sanitized aggregate acknowledged by due-expert; private raw artifacts stay local.",
+  "review_receipt_hashes": {
+    "target/f19/review/contracts.json": "acf43a0dc0a6335d5df91e0a9790088239676d3a4b95676767ee41553284d3d4",
+    "target/f19/review/dispositions.json": "594c2ac1f726f71c0efd7936813fe302c997cde4825617e74a6e354650cf2c2d",
+    "target/f19/review/provenance.json": "9f4527b6b1265eac57a8d5e2baf288070ed4b23d88e068aec5085c3d6b93744e"
+  }
+}

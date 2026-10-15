@@ -472,3 +472,25 @@ Comparison deferred: bounded complementary review and unestablished equivalent
 native tool/permission controls. One sanitized aggregate success/permission-limit
 report was acknowledged by due-expert; raw private prompts/source/answers/logs
 remain local. See [F18 evidence](evidence/f18-load-configs.json).
+
+## October 15 — F19 implementation review
+
+One monitored Due/Claude read-only review approves the implementation/fixtures.
+True exit 0; 188,970 ms; provider-reported USD 2.55948325. Request/result/answer,
+141 trace records and offline summary independently validate; all 27 activities
+complete successfully, no gaps/drops/unmatched events. Inputs stayed unchanged
+through review completion. One nonblocking wording correction distinguishes
+absent-block source/compiler evidence from runtime call-count traces; applied
+as documentation only, without changing production/fixtures/runners or repeating
+unchanged SDK checks. Reviewer did not execute checks or re-derive raw receipt,
+archive/hash/remote/original-state evidence; caller verifies those separately.
+
+Due 0.1.0 / Claude Code 2.1.296; available clean Due source
+76d33d410319d860425a2dd3609863a4ba5ca565, executable SHA-256
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b.
+Requested model/effort omitted; observed settings/compiled-source identity unknown.
+No provider retry, deadline, permission expansion, fallback, recursive delegation
+or plugin/binary refresh. Comparison deferred: complementary implementation
+review and unestablished equivalent native provider tool/permission controls.
+One sanitized aggregate was acknowledged by the authorized due-expert hub;
+private prompts/code/raw answers/logs remain local. See [F19 evidence](evidence/f19-load-configs.json).

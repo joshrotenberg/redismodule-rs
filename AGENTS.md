@@ -119,39 +119,36 @@ nonblocking clarification, applied with caller refinements. Two original reads
 were denied to the worker; caller verified originals independently. No SDK
 implementation, compilation/test/benchmark/native execution occurred in F18.
 
-Next is one bounded F19 implementation of only the reviewed additive
-configuration::load_configurations(&Context) -> Result<(), RedisError> and
-macro/manual propagation, unless Josh redirects. Refresh overlaps/issue mapping,
-current changes and owned workers first; resume unfinished owned scope. Use
-fix/f19-load-configs-propagation from clean post-F18 master if issue-independent,
-following validated local no-ff merge with no push/PR. If mapped to tracked
-issues, satisfy dedicated baseline/empty kickoff/push/scoped draft visibility
-before code; do not manufacture issue scope. Preserve PR229 MeirShpilraien at
-566ad273797871acc6f50b5345a0c1cfa16fc34b as broad API ancestry, not a full port.
+F19's additive load_configurations helper and same-position macro/manual error
+propagation are complete and validated locally. Read docs/F19_LOAD_CONFIGS.md,
+docs/evidence/f19-load-configs.json and target/f19/checkpoint.json. Missing API
+and native failure return distinct static errors, with no errno/retry/rollback.
+F11 guard stays pending on error; helper-command/event/init/commit order remains.
+Absent configurations block has no generated call; source/compiler controls
+establish that property, not a native call-count trace. Selected manual snapshots
+preserve Result String/map_err and JMESPath Result/init handling. Originals stay
+unchanged. Thirty-eight pure tests, ten checkout plus ten actual-archive controls,
+38 examples both profiles, Clippy/fmt/docs, selected native/ownership/reference
+checks and source-verified archive consumers pass. Independent Due/Claude review
+approves; one doc-only evidence clarification applied. No SDK push/PR or CI work.
 
-Keep existing optional configurations-block position and macro registration,
-helper-command/event/init/commit order; absent block does not auto-load. Present
-empty block now deliberately reports missing API. Resolve availability and call
-native once per helper invocation; distinguish unavailable API/native failure
-with static messages, no errno claim/retry/rollback. Use fully qualified $crate
-macro path, log and return ERR while F11 guard is pending. Direct stream-filter
-snapshot preserves Result<(), String>/map_err; JMESPath keeps migrated Result
-and init propagation; event-stream tuples/custom storage stay. Migrate the two
-selected SDK manual examples. No call deduplication/reordering, repeated-default
-repair, LoadDefaultConfigs addition or new lifecycle/metadata/Context/GIL/thread/
-alias/panic audit. Original modules remain read-only; isolated snapshots carry
-all prior prerequisites/provenance.
-
-Follow F18 acceptance gates: actual production pure availability/status adapter
-without Redis APIs/fake Contexts; generic slot probes separate from legal native
-guard integration; metadata-only compiler controls; owned legal OnLoad/default/
-LOADEX/setter-error/order/owner-close/reload/unload checks; fresh archives/public
-consumers/selected references, examples/pure/Clippy/fmt/docs and independent other-
-provider source review. Never run old unchecked/invalid native paths or crash/
-leak samplers. Forced post-load rejection still calls deinit under a native
-assertion; do not use refusing deinit there. Native behavior is not release-
-balance/general safety proof. Carry unfinished F19 rather than opening another
-chunk; no new CI/MSRV/package/support/release commitment.
+Next is one bounded F20 SOURCE-ONLY evidence/priorities checkpoint, unless Josh
+redirects. Use docs/f20-evidence-checkpoint from clean post-F19 master, refreshing
+changes/overlaps/owned workers and resuming unfinished owned work first. Update
+the F15 goal scorecard for new F17 byte/bulk behavior and F19 error propagation:
+actual before/after author snippets, explicit compatibility/failure-phase effects,
+compiler/source versus selected native evidence, and remaining known gaps. Use
+existing receipts; no SDK implementation, compiler/native/benchmark reruns,
+unchanged reviews or infrastructure work merely to populate the scorecard. One
+focused Due review of the NEW checkpoint and caller source/receipt verification
+are appropriate; merge the reviewed doc locally with no-ff, no push/PR.
+Recommend the next bounded SDK lane from known gaps with dependencies, validation
+and human decisions, without implementing it or selecting CI/MSRV/package/support/
+release policy. Accepted metadata retirement still needs a proven quiescence
+contract; broad native Context/GIL/thread/alias/panic audits stay separate. Do not
+invent unrelated backlog, migrate originals or execute historical invalid native
+paths/fake Contexts/crash/leak samplers. F20 finishes at a reviewable checkpoint,
+not another implementation chunk. Later human focus supersedes this default.
 F17 draft PR5 and drafts1–4 stay open for deferred CI/remote handoff; master was
 not pushed. Required F17 baseline uploaded F11 merge and F12–F16 history under
 issue-visibility authority. Leaves upstream234/134/246/358/473 open; issue471 is
