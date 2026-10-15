@@ -244,3 +244,11 @@ crate-type = ["cdylib"]
 [[example]]
 name = "call_reply"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "configuration_load"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "configuration_load_empty"
+crate-type = ["cdylib"]

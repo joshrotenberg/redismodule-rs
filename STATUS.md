@@ -1,6 +1,6 @@
 # Fork status
 
-Updated 2026-10-14. Direction: improve the original SDK with justified Rust API
+Updated 2026-10-15. Direction: improve the original SDK with justified Rust API
 changes. Work is local; automatic publication remains disabled. Package names
 and versions are inherited, not a new fork release.
 
@@ -9,6 +9,18 @@ provisional; F02 draft jobs ran with failures, so remote CI is not certified.
 Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
+
+## F19 — Fallible LoadConfigs propagation: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | Additive Result helper checks API/status once; macro/manual callers propagate at existing positions. Pending F11 guard closes owners on error and macro user init is skipped. 38 pure tests, ten checkout + ten archived compiler controls, 38 examples both profiles, Clippy/fmt/18 docs, four new native host/profile cells plus startup/registration controls, four ownership cells, six reference builds/12 flows/eight rejection-reload controls and four archives/three consumers/six builds pass. 92 packaged source/manifest files match. Due/Claude approves; doc-only evidence clarification applied. |
+| **Next** | F20 source-only evidence/priorities checkpoint: update F15 scorecard with actual F17/F19 changes, before/after author code, compatibility effects, evidence/limits and next bounded SDK recommendation. Reuse receipts; no unchanged checks or extra implementation. Later human focus supersedes. |
+| **Blockers** | None for local F19. CI/drafts1–5 and broader native/metadata/platform gaps remain deferred. Raw custom lifecycle recipe is metadata-only, not a new native fixture. Selected API-release counts are not complete native/process memory balance. |
+| **Decisions** | Missing API/native failure are distinct; no errno/retry/rollback. Preserve successful defaults/order, tuples and direct helper result types. Present-empty block deliberately errors on missing API; absent block stays absent by source/compiler evidence. F19 stays local with no push/PR/publication; originals unchanged. |
+
+Details: [F19 implementation, migration and validation](docs/F19_LOAD_CONFIGS.md),
+[compact evidence](docs/evidence/f19-load-configs.json).
 
 ## F18 — LoadConfigs result/order scope: reviewed locally
 

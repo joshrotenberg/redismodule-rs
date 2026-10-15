@@ -220,9 +220,9 @@ fn init(ctx: &Context, _: &[RedisString]) -> Status {
         ctx.log_warning(&error.to_string());
         return Status::Err;
     }
-    // Preserve the direct-reference manual LoadConfigs result/order policy.
-    unsafe {
-        raw::RedisModule_LoadConfigs.unwrap()(ctx.ctx);
+    if let Err(error) = redis_module::configuration::load_configurations(ctx) {
+        ctx.log_warning(&error.to_string());
+        return Status::Err;
     }
     if ctx.call("CONFIG", &["GET", "cfgbuilders.text"]).is_err() {
         return Status::Err;

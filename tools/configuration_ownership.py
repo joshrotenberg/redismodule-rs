@@ -115,12 +115,13 @@ def one_cell(binary,version,profile,out):
         position=len(log.read_text(errors="replace"))
         error('MODULE','LOADEX',pa,'CONFIG',a+'.text','reject')
         tail=log.read_text(errors="replace")[position:]
-        assert 'F11_CLOSE_BEGIN cfgowners ' in tail and 'F11_REPLY_RELEASE cfgowners live=0' in tail,tail
+        assert 'F11_CLOSE_BEGIN cfgowners ' not in tail,tail
+        assert 'F19_MANUAL_LOAD_ERROR' in tail and 'F11_REPLY_RELEASE cfgowners live=0' in tail,tail
         assert q('CONFIG','GET',a+'.*')==[]
         assert q('MODULE','LOADEX',pa,'CONFIG',a+'.text','load-value')==b'OK'
         assert get(a+'.text')==b'load-value';check(a)
         assert q('MODULE','UNLOAD',a)==b'OK'
-        result['cases'].append('ordinary invalid LOADEX forced OnUnload, configured LOADEX success and recovery')
+        result['cases'].append('ordinary rejected LOADEX returns OnLoad ERR with pending cleanup, configured LOADEX success and recovery')
         result['final_server_identity']=host.verify_server_info(q('INFO','server'),process.pid,version)
         result['status']='passed'
     except BaseException as e:
