@@ -111,27 +111,55 @@ Selected parser/config/DUMP/host/archive/reference checks pass. Source review
 approves; final pure/archive checks include two test/comment refinements without
 production changes. No allocation/throughput/general FFI safety claim.
 
-Next is one bounded F18 source-only scoping chunk for the known deferred
-LoadConfigs result/order/error propagation boundary, unless Josh redirects.
-Refresh current state, overlaps and workers first; resume unfinished owned work.
-Use docs/f18-load-configs-scope from clean post-F17 master. Inventory actual SDK
-macro/manual and selected isolated-reference usage, native loading/error rules
-and F11 ownership cleanup; compare narrow API/migration options and define pure,
-compiler, legal isolated host/archive/reference validation gates. Preserve
-successful defaults/commands/parser/stored-format policy while specifying any
-proposed error/order changes explicitly. Do not implement in the scoping chunk,
-reproduce invalid native paths, change originals or broaden to lifecycle/GIL/
-thread/alias/panic audits. One focused Due review of the new specification and
-caller verification, then validated local no-ff merge. No SDK push/PR for this
-source-only chunk; future tracked implementation requires draft visibility.
+F18's source-only LoadConfigs specification is reviewed and locally complete.
+Read docs/F18_LOAD_CONFIGS.md, docs/evidence/f18-load-configs.json and
+target/f18/checkpoint.json. Caller verified 49 source/receipt predicates, 84 SDK
+and 135 original Rust files/excerpts/provenance. Due/Claude approves with one
+nonblocking clarification, applied with caller refinements. Two original reads
+were denied to the worker; caller verified originals independently. No SDK
+implementation, compilation/test/benchmark/native execution occurred in F18.
+
+Next is one bounded F19 implementation of only the reviewed additive
+configuration::load_configurations(&Context) -> Result<(), RedisError> and
+macro/manual propagation, unless Josh redirects. Refresh overlaps/issue mapping,
+current changes and owned workers first; resume unfinished owned scope. Use
+fix/f19-load-configs-propagation from clean post-F18 master if issue-independent,
+following validated local no-ff merge with no push/PR. If mapped to tracked
+issues, satisfy dedicated baseline/empty kickoff/push/scoped draft visibility
+before code; do not manufacture issue scope. Preserve PR229 MeirShpilraien at
+566ad273797871acc6f50b5345a0c1cfa16fc34b as broad API ancestry, not a full port.
+
+Keep existing optional configurations-block position and macro registration,
+helper-command/event/init/commit order; absent block does not auto-load. Present
+empty block now deliberately reports missing API. Resolve availability and call
+native once per helper invocation; distinguish unavailable API/native failure
+with static messages, no errno claim/retry/rollback. Use fully qualified $crate
+macro path, log and return ERR while F11 guard is pending. Direct stream-filter
+snapshot preserves Result<(), String>/map_err; JMESPath keeps migrated Result
+and init propagation; event-stream tuples/custom storage stay. Migrate the two
+selected SDK manual examples. No call deduplication/reordering, repeated-default
+repair, LoadDefaultConfigs addition or new lifecycle/metadata/Context/GIL/thread/
+alias/panic audit. Original modules remain read-only; isolated snapshots carry
+all prior prerequisites/provenance.
+
+Follow F18 acceptance gates: actual production pure availability/status adapter
+without Redis APIs/fake Contexts; generic slot probes separate from legal native
+guard integration; metadata-only compiler controls; owned legal OnLoad/default/
+LOADEX/setter-error/order/owner-close/reload/unload checks; fresh archives/public
+consumers/selected references, examples/pure/Clippy/fmt/docs and independent other-
+provider source review. Never run old unchecked/invalid native paths or crash/
+leak samplers. Forced post-load rejection still calls deinit under a native
+assertion; do not use refusing deinit there. Native behavior is not release-
+balance/general safety proof. Carry unfinished F19 rather than opening another
+chunk; no new CI/MSRV/package/support/release commitment.
 F17 draft PR5 and drafts1–4 stay open for deferred CI/remote handoff; master was
 not pushed. Required F17 baseline uploaded F11 merge and F12–F16 history under
 issue-visibility authority. Leaves upstream234/134/246/358/473 open; issue471 is
 excluded. Preserve PR93 MikkelSnitker at f1ec666ecc6891e11130df853e8b80c758df5230,
 prior BSD/F02/F09 credit and selected native gaps. No replay of completed tests/
 reviews or new CI/MSRV/package/support/release commitments.
-Preserve tuples, custom traits, successful defaults/commands/LoadConfigs policy
-and F11 string lifecycle. Accepted metadata reclamation/general native audit stay
+Preserve tuples, custom traits, successful defaults/commands, existing load order
+and F11 string lifecycle; F19 deliberately makes load failure observable. Accepted metadata reclamation/general native audit stay
 separate. Do not duplicate completed F13/F14 reviews/tests without new changes.
 Refresh overlaps and follow local issue-independent process unless mapped to
 tracked issues, which requires draft visibility before code. CI stays deferred;

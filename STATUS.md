@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F18 — LoadConfigs result/order scope: reviewed locally
+
+| Status | Report |
+|---|---|
+| **Done** | Source-only specification covers the ignored macro/manual load result, native status/log/partial-effect contracts, actual first-call placement and F11 failure cleanup. Inventory: 84 SDK + 135 original Rust files, seven excerpts; 49 caller source/receipt checks. Due/Claude approves; forced-unload clarification and caller refinements applied. No SDK implementation, compilation/tests/benchmarks/native execution. |
+| **Next** | F19: additive fallible configuration::load_configurations helper plus propagation at existing macro/manual positions, selected SDK examples and isolated reference migrations. Refresh overlap/issue process, then implement/validate the reviewed narrow contract. No F19 code in F18. |
+| **Blockers** | None for the local specification. Later implementation/compiler/native/archive/reference gates remain pending. Reviewer original reads were denied; it used retained excerpts while caller verified originals. CI/drafts1–5 and broader native/metadata gaps remain deferred. |
+| **Decisions** | Distinguish unavailable API from native failure, with no errno/retry/rollback claim. Preserve order/defaults; absent configurations block stays absent, present empty block reports missing API deliberately. Pending F11 guard closes owners on propagated OnLoad failure; post-load forced unload still calls deinit under assertion. No repeated-default/deduplication/lifecycle redesign or publication. |
+
+Details: [F18 source scope and later validation gates](docs/F18_LOAD_CONFIGS.md),
+[compact evidence](docs/evidence/f18-load-configs.json).
+
 ## F17 — Call-result bulk strings: validated locally
 
 | Status | Report |

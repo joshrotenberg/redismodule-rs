@@ -1,0 +1,232 @@
+{
+  "chunk": "F18",
+  "kind": "source-only repair specification",
+  "baseline": "41f84bedb78f1e35e97babd68448e64b4b3dba22",
+  "branch": "docs/f18-load-configs-scope",
+  "implementation": false,
+  "compiled_proposed_api": false,
+  "sdk_tests_builds_benchmarks_native_executions": 0,
+  "inventory": {
+    "sdk_tracked_rust": 84,
+    "original_tracked_rust": 135,
+    "literal_matches": 20,
+    "retained_excerpts": 7,
+    "semantic_exhaustiveness": false
+  },
+  "selected_source_sha256": {
+    "src/macros.rs": "1bf8af6b4d2a2d3335f2f96d8740247190085c7b97214222aba6d67aa9453669",
+    "src/configuration.rs": "3ec9b02d4e627f74cb8922f3bc3f3e61a480274f8e455dc31a8d0f58c3ee32a4",
+    "src/configuration/string_lifecycle.rs": "dfd9c80212c23b8c16f484c63afb8c224a39808d12dc03b587fa58a7aec82e18",
+    "src/configuration/registration.rs": "31477026fc9b840a65662b4ac228f41205c3fb6fc1de66843437d2e891e199df",
+    "examples/configuration_builders.rs": "f77dcc42383e2e88236c92b35766249d725784e0e157546e5f8a6eed7a6a1e3c",
+    "examples/support/configuration_ownership.rs": "14afc45a50d05389152d2b45ff1abeb91bcec8981f9009772e4fb4579ac76be4",
+    "target/f17/references/jmespath/src/config.rs": "3acf108da555a7fed58e47df43fcd56a91b66199b9758204a827e94d05c09df1",
+    "target/f17/references/jmespath/src/lib.rs": "f8f803735e3eb39590bec258326e651dc186070b9311acc8ae8e83bd7ab9b37f",
+    "target/f17/references/streamfilter/src/config.rs": "38a3f34a14342abb191f274ed45c53fa3cb3904e38d0591294cb4dd02dfcacd3",
+    "target/f17/references/streamfilter/src/lib.rs": "e3e2c4737620a6e56a51245bc9a3d2e8be288a3ab30480360bd859e0b03f5e52",
+    "target/f01/servers/redis-7.2.8/src/module.c": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+    "target/f01/servers/redis-7.2.8/src/config.c": "5ca98ff62ddc3a19b80b73e67d7149230fa74463b5a90bb4821d3c9d28bdcd32",
+    "target/f08/native-8.10.2/module.c": "bcfad92db0a7be63df49ed981b4ad224b31ab4ff0fdf9752d60b6d0a519d3329",
+    "target/f18/native-8.10.2/config.c": "a600d92c78d1c9afb4fc89ffbc2c5307fc6b4c3ae588a93273071b9b5e3050c4"
+  },
+  "native_8_10_provenance": {
+    "commit": "498ecd0d6d007db11ddb3aea9428552598a78622",
+    "git_blob_sha": "488cc0f72fea712b1d5b1787549ce8b1a722a2fa",
+    "sha256": "a600d92c78d1c9afb4fc89ffbc2c5307fc6b4c3ae588a93273071b9b5e3050c4",
+    "source_url": "https://github.com/redis/redis/blob/498ecd0d6d007db11ddb3aea9428552598a78622/src/config.c",
+    "method": "GitHub content API pinned exact commit; decoded bytes checked against git blob"
+  },
+  "overlap": {
+    "fork_open_drafts": [
+      5,
+      4,
+      3,
+      2,
+      1
+    ],
+    "upstream_open_prs": 45,
+    "upstream_open_issues": 55,
+    "scope": "source-only LoadConfigs specification; no mapped scoped tracked issue found",
+    "reviewed_legacy_overlap": {
+      "pr": 229,
+      "author": "MeirShpilraien",
+      "head": "566ad273797871acc6f50b5345a0c1cfa16fc34b",
+      "classification": "Broad configuration API ancestry; selected PR229 diff introduces optional LoadConfigs and ignores return; no port or full PR scope"
+    },
+    "excluded": [
+      471
+    ],
+    "publication": "none for source-only scope; future issue mapping must be refreshed"
+  },
+  "proposal": {
+    "api": "configuration::load_configurations(&Context) -> Result<(), RedisError>",
+    "status": "proposed, uncompiled",
+    "macro": "same optional block and position; propagate result before helper commands/events/user init/commit",
+    "manual": "same selected init placement, keep Result String conversion and migrated JMESPath Result RedisError",
+    "failure_policy": "unavailable API and native failure are distinct; no errno attribution/retry/rollback; present empty block reports missing API, absent block unchanged",
+    "default_and_repeated_calls": "preserve native existing behavior; no reordering, deduplication or LoadDefaultConfigs addition"
+  },
+  "future_validation": "F18_LOAD_CONFIGS.md acceptance gates only; none executed in F18",
+  "review": {
+    "actual_exit": 0,
+    "verdict": "approve",
+    "request_result_answer_all_trace_summary_valid": true,
+    "trace_records": 219,
+    "duration_ms": 273868,
+    "provider_reported_cost_usd": 3.340327,
+    "recorded_inputs_unchanged_through_completion": true,
+    "activities": {
+      "started": 46,
+      "completed": 46,
+      "failed": 3,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "failed": 3,
+        "succeeded": 43
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 46,
+          "completed": 46,
+          "completion_status_counts": {
+            "failed": 3,
+            "succeeded": 43
+          }
+        }
+      }
+    },
+    "limits": [
+      "Reads of the original stream-filter and JMESPath directories outside the fork were denied by the permission mode; original tails were checked only through the retained excerpts and hashes in target/f18/excerpts.json and inventory.json. The original stream-filter helper's Result<(), String> signature was inferred from the F17 snapshot and the excerpt's Ok(()) tail, not read directly.",
+      "No shell or network: SHA-256 hashes, the 8.10.2 git blob SHA, PR229 head revision, and the 5/45/55 draft/PR/issue counts were not independently recomputed or fetched; only internal consistency between the spec, evidence JSON, inventory and provenance files was checked.",
+      "MODULE_CONFIGS_DEFAULTS/USER_VALS/ALL_APPLIED definitions were not located in module.c (likely server.h); repeat-call and post-load behavior was inferred from their use at 8.10.2 module.c:14155, 14179 and 13735.",
+      "No compilation, SDK test, benchmark or native execution was performed or is claimed; the proposed API and macro replacement were reviewed as uncompiled source text only.",
+      "Line-range anchors in the spec are accurate to the cited functions; a few ranges include one adjacent blank line, which is not treated as an error."
+    ],
+    "dispositions": {
+      "source_review_verdict": "approve",
+      "nonblocking_findings_applied": 1,
+      "caller_refinements": [
+        "Disambiguate forced post-load unload and refusing deinit; verify actual OnUnload/native assertion source, no execution.",
+        "Pure generic slot probes do not certify actual guard begin/commit/Drop; native integration requires legal host.",
+        "Specify two proposed stable error strings, no errno attribution.",
+        "Resolve reviewer bit-constant source gap with exact pinned server.h/blob verification."
+      ],
+      "permission_limits": [
+        "Two original-reference Read denials reported by reviewer; caller read original signatures/tails and verified unchanged sources.",
+        "One failed Grep activity has no exposed diagnostic; cause unknown. No native permission bypass, provider retry or fallback."
+      ],
+      "implementation_and_tests": false
+    }
+  },
+  "limits": [
+    "Source only; earlier execution receipts do not validate this proposal.",
+    "Original reference directories unchanged; no migration, CI, publishing, MSRV/package/support/release change.",
+    "General native Context/GIL/thread/alias/panic and accepted metadata reclamation remain separate.",
+    "Overlap is keyword/candidate-source review, not a proof that no unknown downstream or differently described issue exists."
+  ],
+  "due_provenance": {
+    "sdk_head": "41f84bedb78f1e35e97babd68448e64b4b3dba22",
+    "sdk_dirty": "?? docs/F18_LOAD_CONFIGS.md\n?? docs/evidence/f18-load-configs.json",
+    "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "due_source_status": "",
+    "due_binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "due_version": "due 0.1.0",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "host_app": "Codex desktop",
+    "model_requested": null,
+    "effort_requested": null,
+    "model_observed": "unknown",
+    "effort_observed": "unknown",
+    "compiled_source_identity": "unknown",
+    "deadline": null,
+    "plugin_binary_refresh": false,
+    "comparison_deferred": "One bounded complementary source-spec review; equivalent native tool/permission controls for a fair provider comparison remain unestablished."
+  },
+  "caller_source_checks": {
+    "kind": "caller source/receipt assertions; no SDK tests, compiler or native API execution",
+    "checks": [
+      "macro enum registration precedes load, which precedes init then pending commit",
+      "macro ignores result",
+      "macro block terminates before info registration",
+      "load inside optional configuration expansion",
+      "F11 scope begins before macro registration",
+      "pending guard closes owned replies",
+      "commit clears callback Context and pending flag",
+      "pure lifecycle tests use generic slot probes, not a native scope",
+      "7.2.8 load checks actual native phase",
+      "7.2.8 LoadConfigs has no errno assignment",
+      "7.2.8 sequential list iteration",
+      "7.2.8 failure logs then clears queue and returns ERR",
+      "7.2.8 load loop does not restore earlier values",
+      "7.2.8 defaults dispatch directly to module setters",
+      "7.2.8 queued strings compare via getter before setter",
+      "7.2.8 failed OnLoad cleanup does not call OnUnload",
+      "7.2.8 separate post-load rejection invokes forced unload",
+      "7.2 loop lacks the 8.10 missing-defaults gate",
+      "8.10.2 load checks actual native phase",
+      "8.10.2 LoadConfigs has no errno assignment",
+      "8.10.2 sequential list iteration",
+      "8.10.2 failure logs then clears queue and returns ERR",
+      "8.10.2 load loop does not restore earlier values",
+      "8.10.2 defaults dispatch directly to module setters",
+      "8.10.2 queued strings compare via getter before setter",
+      "8.10.2 failed OnLoad cleanup does not call OnUnload",
+      "8.10.2 separate post-load rejection invokes forced unload",
+      "8.10 missing-defaults gate preserves earlier initialization",
+      "jmespath selected helper ignores load status",
+      "jmespath macro lacks configurations block",
+      "streamfilter selected helper ignores load status",
+      "streamfilter macro lacks configurations block",
+      "selected streamfilter Result String preserved",
+      "selected JMESPath Result RedisError preserved",
+      "8.10 initialization bit DEFAULTS",
+      "8.10 initialization bit USER_VALS",
+      "8.10 initialization bit ALL_APPLIED",
+      "7.2.8 forced path still runs OnUnload and refusal returns ERR",
+      "8.10.2 forced path still runs OnUnload and refusal returns ERR",
+      "selected source hashes unchanged",
+      "carolina original head/status unchanged",
+      "carolina original tracked Rust hashes unchanged",
+      "eventstream original head/status unchanged",
+      "eventstream original tracked Rust hashes unchanged",
+      "jmespath original head/status unchanged",
+      "jmespath original tracked Rust hashes unchanged",
+      "streamfilter original head/status unchanged",
+      "streamfilter original tracked Rust hashes unchanged",
+      "protected tracked checkout files unchanged"
+    ],
+    "count": 49,
+    "limits": [
+      "literal source checks, not exhaustive semantic/FFI proof",
+      "pure slot probes are distinct from native guard begin/commit/Drop integration"
+    ]
+  },
+  "native_8_10_header_provenance": {
+    "commit": "498ecd0d6d007db11ddb3aea9428552598a78622",
+    "git_blob_sha": "b4285dff4ecbfb0bfaa3525ccb68b88ad47e382b",
+    "sha256": "3ef5ffc71e8681530fe45859cb3a1ebd9fb6032d2ebe8b4dac33ec41ad718300",
+    "source_url": "https://github.com/redis/redis/blob/498ecd0d6d007db11ddb3aea9428552598a78622/src/server.h",
+    "method": "GitHub pinned content API; blob SHA validated by caller after review to resolve reviewer source limit"
+  },
+  "status": "source-only proposal approved; caller verified; no implementation or SDK execution",
+  "next": "F19 implement only the reviewed helper/propagation and selected caller consequences after fresh overlap/process checks; no F19 implementation in this activation",
+  "receipt_sha256": {
+    "target/f18/inventory.json": "cd62b9a8e148f43be4faa046d98f0438a8ecc1e4968f209d3bfd5670cde4d16f",
+    "target/f18/excerpts.json": "62e0ffeaf58811bb3943a73dec88881d663ea36a3fd79e3d9139d259e94b9465",
+    "target/f18/overlap.json": "0fbdf5cc6fdaeb582efff7a81bb2093dbcf2321a6988ea98169c4b6902a31f1b",
+    "target/f18/source-checks.json": "04ef64885d9f16345007a49498c8dbc920888e9a1afd7e5825deeb4fb395a01d",
+    "target/f18/native-provenance.json": "388cf06746ab20d42d79326ebb6494b42c5246471355733fea6ddce354fe6dc2",
+    "target/f18/review/contracts.json": "a37e1d1047abb2ff53b9feb8ca9deb7f00d56dc9d10d2bf30fdad1ae8d93d937",
+    "target/f18/review/summary.json": "bb559e5e4794e1d5253202b3b730294d405c848e1bc39d484941ffe888e3ea01",
+    "target/f18/review/dispositions.json": "9950ed4e89818c432cf1503ce1c255a5678e539aa7fcb2c83121c61f3095c8fc",
+    "target/f18/review/inputs.json": "c2f14732abb1d0ced7ef1e43459cb09ca3b6d0c1eda30e452daaf5a93f6656eb"
+  },
+  "final_spec_sha256": "eb7fed627b18dca8cc8dba375f2d47ab0d56bc87fc132f4c1c1f719414e2a2cb",
+  "feedback": "One sanitized aggregate acknowledged by authorized due-expert hub; raw private artifacts stay local."
+}
