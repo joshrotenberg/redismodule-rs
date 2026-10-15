@@ -1,0 +1,710 @@
+{
+  "chunk": "F15",
+  "kind": "source-only evidence and priorities checkpoint",
+  "baseline": "b3d205416578f3c0cfe15d1fba03df243d0e6045",
+  "claim_checks": [
+    {
+      "claim": "F02 fixed text/native logging and eight selected passes",
+      "verified": true,
+      "sources": [
+        "docs/F02_LOGGING.md",
+        "docs/evidence/f02-logging.json",
+        "target/f02/validation-20261013T161912Z/report.json"
+      ]
+    },
+    {
+      "claim": "F02 contribution source retained",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f02-logging.json"
+      ]
+    },
+    {
+      "claim": "F03 author dependency reduction, 11 attributes and actual archive linking",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f03-macros.json",
+        "target/f03/packages-recovered/report.json"
+      ]
+    },
+    {
+      "claim": "F04 selected example/archive runtime count",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f04-proc-runtime.json"
+      ]
+    },
+    {
+      "claim": "F05 eight native executions and 360 paired parse observations",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f05-arguments.json",
+        "target/f05/runtime-final/report.json",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 1 in target/f05/runtime-final/logs/debug-7.2.8-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/debug-7.2.8-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 32 in target/f05/runtime-final/logs/debug-7.2.8-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/debug-7.2.8-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 4096 in target/f05/runtime-final/logs/debug-7.2.8-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/debug-7.2.8-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 1 in target/f05/runtime-final/logs/debug-8.10.2-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/debug-8.10.2-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 32 in target/f05/runtime-final/logs/debug-8.10.2-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/debug-8.10.2-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 4096 in target/f05/runtime-final/logs/debug-8.10.2-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/debug-8.10.2-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 1 in target/f05/runtime-final/logs/release-7.2.8-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/release-7.2.8-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 32 in target/f05/runtime-final/logs/release-7.2.8-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/release-7.2.8-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 4096 in target/f05/runtime-final/logs/release-7.2.8-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/release-7.2.8-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 1 in target/f05/runtime-final/logs/release-8.10.2-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/release-8.10.2-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 32 in target/f05/runtime-final/logs/release-8.10.2-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/release-8.10.2-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F05 observed expression length 4096 in target/f05/runtime-final/logs/release-8.10.2-test_argument_parser_allocations.log",
+      "verified": true,
+      "sources": [
+        "target/f05/runtime-final/logs/release-8.10.2-test_argument_parser_allocations.log",
+        "target/f05/measurements-final.json"
+      ]
+    },
+    {
+      "claim": "F07 compiler/native counts",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f07-string-views.json",
+        "target/f07/runtime-final/report.json"
+      ]
+    },
+    {
+      "claim": "F09 counts and layout",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f09-string-ownership.json"
+      ]
+    },
+    {
+      "claim": "F11 selected state/native ownership counts",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f11-configuration-ownership.json",
+        "target/f11/runtime-reviewed-corrected-final/report.json"
+      ]
+    },
+    {
+      "claim": "F13 selected counts and authoritative corrected receipt",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f13-fallible-configuration.json",
+        "target/f13/runtime-corrected/report.json"
+      ]
+    },
+    {
+      "claim": "F14 pure_tests",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/verification.json"
+      ]
+    },
+    {
+      "claim": "F14 compiler_controls",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/verification.json"
+      ]
+    },
+    {
+      "claim": "F14 archived_sdk_compiler_controls",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/verification.json"
+      ]
+    },
+    {
+      "claim": "F14 native_backend_host_profile_mode_cells",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/verification.json"
+      ]
+    },
+    {
+      "claim": "F14 paired_native_cases",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/verification.json"
+      ]
+    },
+    {
+      "claim": "F14 reference_builds",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/verification.json"
+      ]
+    },
+    {
+      "claim": "F14 reference_runtime_flows",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/verification.json"
+      ]
+    },
+    {
+      "claim": "F14 fresh_archives",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/verification.json"
+      ]
+    },
+    {
+      "claim": "F14 external_consumers",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/verification.json"
+      ]
+    },
+    {
+      "claim": "F14 consumer_profile_builds",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/verification.json"
+      ]
+    },
+    {
+      "claim": "F14 streamfilter formatted call-site counts",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/references/report.json"
+      ]
+    },
+    {
+      "claim": "F14 jmespath formatted call-site counts",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json",
+        "target/f14/references/report.json"
+      ]
+    },
+    {
+      "claim": "target/f14/compiler-corrected/report.json controls",
+      "verified": true,
+      "sources": [
+        "target/f14/compiler-corrected/report.json"
+      ]
+    },
+    {
+      "claim": "target/f14/archive-compiler/report.json controls",
+      "verified": true,
+      "sources": [
+        "target/f14/archive-compiler/report.json"
+      ]
+    },
+    {
+      "claim": "F14 native 64 cells and success pairing",
+      "verified": true,
+      "sources": [
+        "target/f14/runtime-corrected/report.json"
+      ]
+    },
+    {
+      "claim": "F14 isolated builds and flows",
+      "verified": true,
+      "sources": [
+        "target/f14/references/report.json",
+        "target/f14/reference-runtime/report.json"
+      ]
+    },
+    {
+      "claim": "F14 actual archive/consumer results",
+      "verified": true,
+      "sources": [
+        "target/f14/packages/report.json"
+      ]
+    },
+    {
+      "claim": "F14 retained pure log test result: ok. 24 passed",
+      "verified": true,
+      "sources": [
+        "target/f14/pure.log"
+      ]
+    },
+    {
+      "claim": "F14 retained pure log test result: ok. 6 passed",
+      "verified": true,
+      "sources": [
+        "target/f14/pure.log"
+      ]
+    },
+    {
+      "claim": "F14 retained docs log",
+      "verified": true,
+      "sources": [
+        "target/f14/docs.log"
+      ]
+    },
+    {
+      "claim": "F14 example/doc counts",
+      "verified": true,
+      "sources": [
+        "docs/evidence/f14-configuration-builders.json"
+      ]
+    },
+    {
+      "claim": "Next-scope source boundary exists; not implemented repair",
+      "verified": true,
+      "sources": [
+        "src/redisvalue.rs",
+        "src/context/call_reply.rs"
+      ]
+    },
+    {
+      "claim": "LoadConfigs policy source observation",
+      "verified": true,
+      "sources": [
+        "src/macros.rs"
+      ]
+    },
+    {
+      "claim": "Original carolina retained head/status/Rust hashes",
+      "verified": true,
+      "sources": [
+        "target/f12/inventory.json"
+      ]
+    },
+    {
+      "claim": "Original eventstream retained head/status/Rust hashes",
+      "verified": true,
+      "sources": [
+        "target/f12/inventory.json"
+      ]
+    },
+    {
+      "claim": "Original jmespath retained head/status/Rust hashes",
+      "verified": true,
+      "sources": [
+        "target/f12/inventory.json"
+      ]
+    },
+    {
+      "claim": "Original streamfilter retained head/status/Rust hashes",
+      "verified": true,
+      "sources": [
+        "target/f12/inventory.json"
+      ]
+    },
+    {
+      "claim": "SDK protected files unchanged",
+      "verified": true,
+      "sources": [
+        "target/f15/baseline.json"
+      ]
+    },
+    {
+      "claim": "Remote overlap snapshot",
+      "verified": true,
+      "sources": [
+        "target/f15/fork-prs.json",
+        "target/f15/upstream-prs.json",
+        "target/f15/upstream-issues.json"
+      ]
+    },
+    {
+      "claim": "PR93 credit/head",
+      "verified": true,
+      "sources": [
+        "target/f15/upstream-pr93.json"
+      ]
+    },
+    {
+      "claim": "F07 early versus current CI snapshot timing",
+      "verified": true,
+      "sources": [
+        "target/f07/remote-final.json",
+        "target/f15/f07-ci-current.json",
+        "docs/F08_STRING_OWNERSHIP.md"
+      ]
+    },
+    {
+      "claim": "Next-scope emitter and direct key conversion source observations",
+      "verified": true,
+      "sources": [
+        "src/redisvalue.rs",
+        "src/context/mod.rs"
+      ]
+    },
+    {
+      "claim": "F14 native recorded sources still match current",
+      "verified": true,
+      "sources": [
+        "target/f15/f14-native-source-match.json",
+        "target/f14/runtime-corrected/report.json"
+      ]
+    }
+  ],
+  "receipt_sha256": {
+    "docs/F02_LOGGING.md": "57323a70f06cca37597fa2a1a5150afd06c44e301818bd9bac63c3eb8f2129fd",
+    "docs/F03_MACROS.md": "e14ac8bddd465b4f32edde2b8564c1acc7edda139cdab7940e904d629558e71a",
+    "docs/F04_PROC_RUNTIME.md": "4ed278cdb172df54556a77659b604484825228e37f754e08cbce890d8f8d62eb",
+    "docs/F05_ARGUMENTS.md": "752e4ca41cec1ee06867256d9a303fba73c8eba1e1a882a708f5248172e79f81",
+    "docs/F06_STRING_LIFETIMES.md": "eb3088652f51f937b2dac08775d24ad04e2f657af817cda22946b27990254538",
+    "docs/F07_STRING_VIEWS.md": "cc6bdd31d15698123bd2e07147c493a6e8c78e033fbfd4733c0a20615cd66de8",
+    "docs/F08_STRING_OWNERSHIP.md": "899101e9fe759fb2669172f4cf77035b03b6131d23058cf5bb9cc762dff7343b",
+    "docs/F09_STRING_OWNERSHIP.md": "b91b4fb633163daa611d69114c7df5dd392171379210bdf1e1187ae74274d7f7",
+    "docs/F10_CONFIGURATION_GETTER.md": "cf81a4b6d6ef25ab221eea097619c9878a3d5e79156ed45f149336ffa853e113",
+    "docs/F11_CONFIGURATION_OWNERSHIP.md": "4a61d31327c45589f8b1da55ce363fca307be4874162f1aecfc7b9433709351c",
+    "docs/F12_CONFIGURATION_API.md": "2ba97b3b5b5000bc4612639922ff7d38fabcb5db1ca6040dc103e687631332f1",
+    "docs/F13_FALLIBLE_CONFIGURATION.md": "966c2635b12dd7f78308b0dcbfba47bece7b30ae4347de80fb1d0a11c692304c",
+    "docs/F14_CONFIGURATION_BUILDERS.md": "4371532eb3dacdbb1164b9cc74d8de4bed27452c008a28f30edbd5f1c14059d5",
+    "docs/evidence/f02-logging.json": "da019842dadc8ea4e55643d8af5d14252c299e4cde41db18b75f6fdf86e6fb2b",
+    "docs/evidence/f03-macros.json": "104f40ca287512a631d8d638e3b0ba4b04d560ce0506af05bc19769b45a0059a",
+    "docs/evidence/f04-proc-runtime.json": "ac1819521f62c58f16d2e3a2f9742dc74f1641576efcbe7ee8cdab232cdb94c8",
+    "docs/evidence/f05-arguments.json": "1a9bb19da55fdef489049fb7fa7713cfffbdca4abb46bee9e9f238a59b89ae04",
+    "docs/evidence/f06-string-lifetimes.json": "36de1565111568ccf30da7ad3e30a467cef49e4da6e5decc7ed276b0b8c0bbb0",
+    "docs/evidence/f07-string-views.json": "1508f278f0a75238a9f108a6119f9c7382100bc08b0bcc656ad6a8659f21ee3f",
+    "docs/evidence/f08-string-ownership.json": "9a7db3abd6f4d3711784f2af315e500dc8f1d2944150e42bd1261891dcdc886f",
+    "docs/evidence/f09-string-ownership.json": "327fe88c38bda0d073321748081a21306e0f169352f95876a66cd29fd76ba55f",
+    "docs/evidence/f10-configuration-getter.json": "6ee1ddfacde0837c3e12eeae718f0d8e29d3484e64c605f0e2ad6e573e8a4842",
+    "docs/evidence/f11-configuration-ownership.json": "59c8624bdd45d4937a113a1ca0a863f385ebdb177035064cb202e73ae425e29e",
+    "docs/evidence/f12-configuration-api.json": "7e8995774720b2177313bbbc2b6a0ad1891fa12cfd95ad77a0e0644167472a88",
+    "docs/evidence/f13-fallible-configuration.json": "af3dd0a7fdeef9c9a64ec978e59b2886ba8b4e00b05cbb3cc7d4434a7148105e",
+    "docs/evidence/f14-configuration-builders.json": "aef76e58b97b5d1aa1a20289d333491ca476eae3f34c138775cdaf2f8b73b1f5",
+    "src/context/call_reply.rs": "4e315e45c0536188aca4148cb08b6fcd3aa0ab15b92940700bb6aaab1f7f9428",
+    "src/context/mod.rs": "f42c59f354774429a900663137b7485d927662c615c13bbfce0eb40ae90e99c1",
+    "src/macros.rs": "1bf8af6b4d2a2d3335f2f96d8740247190085c7b97214222aba6d67aa9453669",
+    "src/redisvalue.rs": "5d1ad6f05342ca88c9773ef154bd2756472723fed1d3c2d136849f475f46b4d9",
+    "target/f02/validation-20261013T161912Z/report.json": "5d51607c25f96fcaf2bdd63cf5c0359f5fa8d3aac5e9feb42602262a0719c274",
+    "target/f03/packages-recovered/report.json": "bf4dcc12be95ad5fc005eae66cb2a9c81bbfe4ce048543b8faa7b6bfc37ca90a",
+    "target/f05/measurements-final.json": "bf28702d54459469602b2d0e39442f851a123f504aa3639cf2cd81fad0092480",
+    "target/f05/runtime-final/logs/debug-7.2.8-test_argument_parser_allocations.log": "333ebadb30b7d8af4b610c071f9bce1da1ea5358623dd0193dbf55a72b7c021b",
+    "target/f05/runtime-final/logs/debug-8.10.2-test_argument_parser_allocations.log": "a55fbe216416621f2d8eec8ccc85d6c2b466ff051d283122badcee3a6db00bd3",
+    "target/f05/runtime-final/logs/release-7.2.8-test_argument_parser_allocations.log": "898a498c51c305424548897a32756252e2e94bcb5d0ac7079cd862bfe50f6025",
+    "target/f05/runtime-final/logs/release-8.10.2-test_argument_parser_allocations.log": "2646dc91a1ec2d07bf88f0fe6f588a041bb29f957cb901abd1999bc937f38627",
+    "target/f05/runtime-final/report.json": "34f85436b9ee4a9b81b6a06ceee0e2ce7a505f6f13c834dca71ece0899e667fc",
+    "target/f07/remote-final.json": "8912921379b1bec6d128cfef0e1ab3c3f6e2f8ddaf5bc11e64a391d4826cbb82",
+    "target/f07/runtime-final/report.json": "a8dd2d07e8bc0270818cd8657147f6f39bdd196ba99013e4401732fcf833aea5",
+    "target/f11/runtime-reviewed-corrected-final/report.json": "454b5985ec4073010aa18974135ed5c159b6a5b2e31746a1e2c09a9281069048",
+    "target/f12/inventory.json": "5bf74b42ac8ba8474b0ce6a60a9776cd32d97aa4ebae642c38bcbc8ec4f13a20",
+    "target/f13/runtime-corrected/report.json": "60a2767ae4d6494d5fd7e0d9010f760948bd16e5e6aedb914cb8c68a4f686462",
+    "target/f14/archive-compiler/report.json": "874b6800bdfdf9f16afba2ec1a1bf9e691327362196ea8bfe38448b755661049",
+    "target/f14/compiler-corrected/report.json": "ad44eab1df423a1308f476127673e743a706a7e1fd71a20fac2c294f55c83d8c",
+    "target/f14/docs.log": "ac9acb8d288ec64ab3b8d93650c535f83dcaa0066abf80d5384a690adecfffe9",
+    "target/f14/packages/report.json": "3c078f75bc7ae4ffcf69c6ca1194c4776bed0784c3f9d5708bb1ae5e9ad57956",
+    "target/f14/pure.log": "1bfda6bd4dfa37719652a0cf9c01be358dc2fb99c19825c11182a9ca4826acad",
+    "target/f14/reference-runtime/report.json": "9768ef36c15ef6b1a9f86a143091dbb33d1f4041025cff0f448c8fbc6592aa02",
+    "target/f14/references/report.json": "b758afbecaf6abb10b065de9bc8116e3accd51be5e384c9f5f23f385c0327e36",
+    "target/f14/runtime-corrected/report.json": "8812f0a5ed97f6f248ea98cad38051573700727eb4f8fa754ed4774e96a3031a",
+    "target/f14/verification.json": "b7cbb828f7a55913e7b70f86d5b7f769b9eba2272e998f0e69711cbefb1d6244",
+    "target/f15/baseline.json": "80917c1d4c9c1b1b86ff3d6992f75cd40717cfbccd6e0b1c67e062443de478c0",
+    "target/f15/f07-ci-current.json": "16e3701979d33cccb62da1800f4b64d4c55aa6182095246abe67480b959c74e8",
+    "target/f15/f14-native-source-match.json": "aa9b4485a12a2099790b1a92cbbcff6504aabcbca07a5ee25e1e98cf266a6072",
+    "target/f15/fork-prs.json": "130fb18fb19041c4368eea43440032b3ce2000974f3908e736681664241c6fef",
+    "target/f15/upstream-issues.json": "9822e14da536cd2b72dad2b510b2119fafc3ff1de1915d2a366bc77e7d0ef8f1",
+    "target/f15/upstream-pr93.json": "46909cef1c2ff270e7296c293e605f8c000975a167e0fb7bb694fd83b8a01e3a",
+    "target/f15/upstream-prs.json": "1974c4d5840f14667683372a257524c4857dbafec5bafcde3493fb33c97c476e"
+  },
+  "originals": [
+    {
+      "name": "carolina",
+      "head": "0191175bb18ecf371d49d8b264a514f2c662099c",
+      "status": "",
+      "tracked_rust_files": 23,
+      "hashes_unchanged": true
+    },
+    {
+      "name": "eventstream",
+      "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+      "status": "",
+      "tracked_rust_files": 37,
+      "hashes_unchanged": true
+    },
+    {
+      "name": "jmespath",
+      "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+      "status": "",
+      "tracked_rust_files": 35,
+      "hashes_unchanged": true
+    },
+    {
+      "name": "streamfilter",
+      "head": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+      "status": "",
+      "tracked_rust_files": 40,
+      "hashes_unchanged": true
+    }
+  ],
+  "protected_sdk_files": 122,
+  "sdk_implementation_changed": false,
+  "tests_builds_benchmarks_native_executions_this_chunk": 0,
+  "recommendation": "F16 source-only scope: CallReply string to RedisValue byte/wire conversion; no repair implemented",
+  "review": {
+    "actual_exit": 0,
+    "verdict": "approve",
+    "request_result_answer_all_trace_summary_valid": true,
+    "trace_records": 206,
+    "recorded_inputs_unchanged_through_completion": true,
+    "source_only": true,
+    "duration_ms": 217200,
+    "provider_reported_cost_usd": 2.44205525,
+    "activities": {
+      "started": 42,
+      "completed": 42,
+      "failed": 1,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "failed": 1,
+        "succeeded": 41
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 42,
+          "completed": 42,
+          "completion_status_counts": {
+            "failed": 1,
+            "succeeded": 41
+          }
+        }
+      }
+    },
+    "failed_activity_details": [
+      {
+        "activities_completed": 36,
+        "activities_failed": 1,
+        "activities_started": 36,
+        "activity": "tool_call",
+        "activity_duration_ms": 1681,
+        "activity_id": "toolu_01PenGJdS9sNZTqnkMwgRBhi",
+        "dropped_records": 0,
+        "elapsed_ms": 124098,
+        "event": "activity_completed",
+        "idle_ms": 38,
+        "messages": 47,
+        "pgid": 54048,
+        "pid": 54048,
+        "provider": "claude",
+        "run_id": "e7c7f957-7002-4fcb-b81c-fb3777d5fbaa",
+        "schema_version": 1,
+        "seq": 159,
+        "session_id": "e5a5de8f-e991-4d84-9d4c-39c016e48fe9",
+        "status": "failed",
+        "timestamp_ms": 1792023491812,
+        "tool": "Grep"
+      }
+    ],
+    "failed_activity_disposition": "One Grep failed; metadata-only cause unknown; no reviewer-reported permission blocker or retry; source review approve accepted separately from activity outcome",
+    "reviewed_files": [
+      "AGENTS.md",
+      "docs/F15_EVIDENCE_PRIORITIES.md",
+      "docs/evidence/f15-evidence-priorities.json",
+      "docs/evidence/f03-macros.json",
+      "docs/evidence/f09-string-ownership.json",
+      "docs/evidence/f14-configuration-builders.json",
+      "docs/evidence/f02-logging.json (selected lines)",
+      "docs/evidence/f04-proc-runtime.json (selected lines)",
+      "docs/evidence/f07-string-views.json (selected lines)",
+      "docs/evidence/f11-configuration-ownership.json (selected lines)",
+      "docs/evidence/f13-fallible-configuration.json (selected lines)",
+      "docs/F02_LOGGING.md (selected lines)",
+      "docs/F05_ARGUMENTS.md (selected lines)",
+      "docs/F07_STRING_VIEWS.md (selected lines)",
+      "docs/F08_STRING_OWNERSHIP.md (selected lines)",
+      "docs/F09_STRING_OWNERSHIP.md (selected lines)",
+      "docs/F11_CONFIGURATION_OWNERSHIP.md (selected lines)",
+      "docs/F12_CONFIGURATION_API.md (selected lines)",
+      "docs/F13_FALLIBLE_CONFIGURATION.md (selected lines)",
+      "docs/BASELINE.md (selected lines)",
+      "STATUS.md (selected lines)",
+      "tools/runtime_baseline.py (selected lines)",
+      "target/f05/measurements-final.json",
+      "target/f14/references/report.json",
+      "target/f15/upstream-pr93.json",
+      "target/f15/fork-prs.json (keys/numbers/isDraft)",
+      "target/f15/upstream-prs.json (numbers)",
+      "target/f15/upstream-issues.json (numbers)",
+      "target/f15/verification.json (review field only)",
+      "target/f07/remote-final.json (conclusions only)",
+      "src/redisvalue.rs:215-249",
+      "src/context/call_reply.rs:1-45",
+      "src/context/mod.rs (reply emitter grep)",
+      "src/macros.rs (LoadConfigs grep)"
+    ],
+    "sdk_source_read": true,
+    "findings": [
+      {
+        "action": "Restate as four successes, three failures, one unresolved conclusion at snapshot (or cite F08 and note the receipt discrepancy), and add target/f07/remote-final.json plus docs/F08_STRING_OWNERSHIP.md to receipt_sha256 with a matching claim_check.",
+        "claim": "\"F07 finished five successes/three failures\" is taken from docs/F08_STRING_OWNERSHIP.md:326 and STATUS.md:93, but the retained receipt target/f07/remote-final.json records four SUCCESS, three FAILURE and one empty conclusion; neither source is in f15-evidence-priorities.json receipt_sha256 or claim_checks.",
+        "file": "docs/F15_EVIDENCE_PRIORITIES.md",
+        "line": 143,
+        "priority": "nonblocking"
+      },
+      {
+        "action": "Add one sentence in the F16 scope naming the SimpleString reply emitter's CString conversion as a source-observed, untested hazard that the direct-conversion/affected-caller inventory must include; keep it marked as not reproduced.",
+        "claim": "The recommendation says current conversion chooses SimpleString for valid UTF-8 but does not name the downstream emitter: src/context/mod.rs:523-525 builds CString::new(s).unwrap() for SimpleString replies, so a valid-UTF-8 CallReply containing an interior NUL converts successfully today and would panic at reply emission (source observation only, not executed).",
+        "file": "docs/F15_EVIDENCE_PRIORITIES.md",
+        "line": 98,
+        "priority": "nonblocking"
+      },
+      {
+        "action": "Name src/redisvalue.rs:214-218 alongside 236-239 as the two direct conversion sites F16 must inventory, and note the existing unhashable-key panic as a retained behavior to decide on, not change, in the scoping chunk.",
+        "claim": "\"map/set keys only where directly affected\" leaves implicit that src/redisvalue.rs:214-218 (TryFrom<&CallReply> for RedisValueKey) uses the same to_string-first pattern with a BulkString fallback and feeds the panic at src/redisvalue.rs:246-248; it is a second direct conversion site, not a conditional one.",
+        "file": "docs/F15_EVIDENCE_PRIORITIES.md",
+        "line": 106,
+        "priority": "nonblocking"
+      },
+      {
+        "action": "Change to \"four new pure production-helper probes (unavailable API, rejected callback drop, stable accepted owner)\".",
+        "claim": "\"F13: four new pure ownership probes\" paraphrases docs/F13_FALLIBLE_CONFIGURATION.md:70, which describes four production-helper probes covering unavailable API, rejected/unsubmitted callback Drop and stable accepted pointer/owner; the unavailable-API probe is not an ownership probe.",
+        "file": "docs/F15_EVIDENCE_PRIORITIES.md",
+        "line": 22,
+        "priority": "nonblocking"
+      }
+    ],
+    "limits": [
+      "Source-only review inside cwd: no Bash, tests, builds, native execution, hash recomputation or network; receipt JSON contents were read as recorded, not re-executed.",
+      "Did not reread every F02-F14 chunk doc or inventory the SDK; verified selected headline figures, credit heads, overlap counts and the recommendation's source boundary only.",
+      "target/f14/runtime-corrected, compiler-corrected, archive-compiler, reference-runtime and packages reports were not reopened; their counts were checked through the F14 compact evidence, which F15 cites.",
+      "Identity of target/f15/verification.json with the committed compact file was spot-checked on structure (review field at the same line) rather than byte-compared.",
+      "The CString unwrap panic path in the SimpleString reply emitter is a source observation; no execution or reproduction was performed and none is claimed.",
+      "Original reference head/status/135 Rust hash verification was performed by the caller against target/f12/inventory.json and was not independently repeated."
+    ]
+  },
+  "limits": [
+    "Existing receipts belong to their own tested revisions; no cumulative final-tree suite claim",
+    "Selected macOS arm64/libc hosts/profiles, no support/release/CI certification",
+    "No throughput/general FFI/GIL/thread/alias/panic or complete allocation reclamation claim",
+    "No SDK push/PR/publication or original module modifications"
+  ],
+  "due_provenance": {
+    "sdk_head": "b3d205416578f3c0cfe15d1fba03df243d0e6045",
+    "sdk_dirty": "?? docs/F15_EVIDENCE_PRIORITIES.md\n?? docs/evidence/f15-evidence-priorities.json",
+    "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "due_source_status": "",
+    "due_binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "due_version": "due 0.1.0",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "host_app": "Codex desktop",
+    "model_requested": null,
+    "effort_requested": null,
+    "model_observed": "unknown",
+    "effort_observed": "unknown",
+    "compiled_source_identity": "unknown",
+    "plugin_binary_refresh": false,
+    "comparison_deferred": "Only one new scorecard review authorized; equivalent provider tool/permission setup unestablished; SDK delivery priority",
+    "deadline": null
+  },
+  "review_dispositions": [
+    {
+      "item": "CI receipt timing",
+      "status": "applied; early snapshot 4/3/1 pending, fresh read-only snapshot 5/3 for same implementation head; no CI rerun"
+    },
+    {
+      "item": "SimpleString emitter",
+      "status": "applied; source observation only; no native reproduction"
+    },
+    {
+      "item": "direct value/key conversion and unhashable-key policy",
+      "status": "applied; named in next scope; no implementation"
+    },
+    {
+      "item": "F13 helper probe wording",
+      "status": "applied; unavailable API plus rejected/unsubmitted/accepted ownership probes"
+    }
+  ],
+  "post_review_changes": "Only nonblocking documentation/receipt refinements applied by caller; no second model review or SDK implementation",
+  "review_inputs_sha256": {
+    "docs/F15_EVIDENCE_PRIORITIES.md": "d793c3b0e4fec301535086e259265cde0c276173f47c4fb8a777b61d8dbe862e",
+    "docs/evidence/f15-evidence-priorities.json": "8eae9ea7e3982448a77a959ba4eda9d13e817192e9f122eeb73fe90e44ee2cb2",
+    "src/redisvalue.rs": "5d1ad6f05342ca88c9773ef154bd2756472723fed1d3c2d136849f475f46b4d9",
+    "src/context/call_reply.rs": "4e315e45c0536188aca4148cb08b6fcd3aa0ab15b92940700bb6aaab1f7f9428",
+    "src/configuration/config.rs": "6ae5aa2e87f2847f1e1e813cdf790106c5ef9d89ee92608992555d55c79358f4",
+    "src/macros.rs": "1bf8af6b4d2a2d3335f2f96d8740247190085c7b97214222aba6d67aa9453669"
+  },
+  "current_scorecard_sha256": "b5f5e9face3bbdd0b24e3b69cfcedb0aba1735c2efbfe8b8cd908e14b67763da",
+  "verified_utc": "2026-10-15T00:21:57.232401+00:00"
+}

@@ -370,3 +370,32 @@ routes sanitized aggregate metadata to due-expert; private prompts/code/answers/
 raw logs remain local under target/f14.
 
 See [compact F14 evidence](evidence/f14-configuration-builders.json).
+
+## October 14 — F15 new scorecard review
+
+One Due/Claude read-only review approves the new source-only evidence/priorities
+scorecard. True exit 0; duration 217,200 ms; provider-reported USD 2.44205525.
+Request/result/answer, all 206 trace records and offline summary independently
+validate. No gaps/drops/unmatched activities; one Grep activity failed with
+metadata-only cause unknown. No permission blocker is reported; no provider
+retry, permission expansion, fallback, recursive delegation or new comparison.
+Inputs stayed unchanged through review completion. Available Due source remains
+76d33d410319d860425a2dd3609863a4ba5ca565 (clean), binary SHA-256
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b;
+Due 0.1.0 / Claude 2.1.296. Requested model/effort omitted; observed settings
+and compiled-source identity stay unknown. Plugin/binary were not refreshed.
+
+Caller checked 54 claims/59 receipt hashes, current protected SDK inputs and
+original module heads/status/135 Rust hashes. No completed SDK tests, builds,
+benchmarks or native checks were replayed. Review caught an early CI snapshot
+with one still-running job versus later prose's terminal five/three; caller's
+fresh read-only GitHub snapshot confirms the terminal result without running CI.
+Other nonblocking refinements identify the next-scope emitter/key boundary and
+clarify production-helper probe wording. These documentation edits were checked
+by the caller; no second model review or new SDK safety proof is claimed.
+
+A two-arm comparison is deferred: this chunk authorizes one new scorecard review,
+and equivalent native tool/permission settings remain unestablished. Positive
+workflow evidence and the failed-Grep limitation route in one sanitized aggregate
+to due-expert; raw prompts/source/answers/logs stay local. See the
+[F15 evidence](evidence/f15-evidence-priorities.json) and target/f15/review.
