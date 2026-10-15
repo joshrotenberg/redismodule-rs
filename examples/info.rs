@@ -1,5 +1,5 @@
 use redis_module::{
-    redis_module, Context, NextArg, RedisError, RedisResult, RedisString, RedisValue,
+    redis_module, ArgCursor, Context, RedisError, RedisResult, RedisString, RedisValue,
 };
 
 fn info_cmd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -7,7 +7,7 @@ fn info_cmd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         return Err(RedisError::WrongArity);
     }
 
-    let mut args = args.into_iter().skip(1);
+    let mut args = ArgCursor::new(&args[1..]);
 
     let section = args.next_str()?;
     let field = args.next_str()?;

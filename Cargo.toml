@@ -29,6 +29,10 @@ name = "args"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "string_views"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "string"
 crate-type = ["cdylib"]
 
