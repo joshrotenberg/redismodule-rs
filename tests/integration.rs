@@ -887,3 +887,22 @@ fn test_defrag() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_alloc_alignment() -> Result<()> {
+    let mut con = TestConnection::new("alloc_alignment");
+
+    // Each entry is [align, size, misaligned count].
+    let res: Vec<Vec<i64>> = redis::cmd("alloc_alignment.check")
+        .query(&mut con)
+        .with_context(|| "failed to run alloc_alignment.check")?;
+    assert_eq!(res.len(), 7);
+
+    let misaligned: Vec<_> = res.iter().filter(|entry| entry[2] != 0).collect();
+    assert!(
+        misaligned.is_empty(),
+        "misaligned boxes as [align, size, count]: {misaligned:?}"
+    );
+
+    Ok(())
+}
