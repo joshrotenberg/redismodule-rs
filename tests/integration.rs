@@ -632,33 +632,64 @@ fn test_response() -> Result<()> {
 fn test_command_proc_macro() -> Result<()> {
     let mut con = TestConnection::new("proc_macro_commands");
 
+    let info: Vec<Value> = redis::cmd("COMMAND")
+        .arg(&[
+            "INFO",
+            "redis_value_derive",
+            "classic_keys",
+            "keyword_keys",
+            "num_keys",
+        ])
+        .query(&mut con)?;
+    assert_eq!(info.len(), 4);
+    for (entry, (name, arity)) in info.iter().zip([
+        ("redis_value_derive", -1),
+        ("classic_keys", -2),
+        ("keyword_keys", -2),
+        ("num_keys", -2),
+    ]) {
+        let fields = entry.as_sequence().expect("COMMAND INFO entry");
+        assert_eq!(redis::from_redis_value::<String>(&fields[0])?, name);
+        assert_eq!(redis::from_redis_value::<i64>(&fields[1])?, arity);
+        let flags: Vec<String> = redis::from_redis_value(&fields[2])?;
+        assert!(flags.iter().any(|flag| flag == "readonly"));
+    }
+    let keyless = info[0].as_sequence().expect("Keyless command metadata");
+    assert_eq!(
+        &keyless[3..6],
+        &[Value::Int(0), Value::Int(0), Value::Int(0)]
+    );
+    assert!(keyless[8].as_sequence().expect("Key specs").is_empty());
+
     let res: Vec<String> = redis::cmd("COMMAND")
         .arg(&["GETKEYS", "classic_keys", "x", "foo", "y", "bar"])
         .query(&mut con)
-        .with_context(|| "failed to run string.set")?;
+        .with_context(|| "failed key discovery for classic_keys")?;
 
     assert_eq!(&res, &["x", "y"]);
 
     let res: Vec<String> = redis::cmd("COMMAND")
         .arg(&["GETKEYS", "keyword_keys", "foo", "x", "1", "y", "2"])
         .query(&mut con)
-        .with_context(|| "failed to run string.set")?;
+        .with_context(|| "failed key discovery for keyword_keys")?;
 
     assert_eq!(&res, &["x", "y"]);
 
     let res: Vec<String> = redis::cmd("COMMAND")
         .arg(&["GETKEYS", "num_keys", "3", "x", "y", "z", "foo", "bar"])
         .query(&mut con)
-        .with_context(|| "failed to run string.set")?;
+        .with_context(|| "failed key discovery for num_keys")?;
 
     assert_eq!(&res, &["x", "y", "z"]);
 
     let res: Vec<String> = redis::cmd("COMMAND")
         .arg(&["GETKEYS", "num_keys", "0", "foo", "bar"])
         .query(&mut con)
-        .with_context(|| "failed to run string.set")?;
+        .with_context(|| "failed zero-key discovery for num_keys")?;
 
     assert!(res.is_empty());
+
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
 
     Ok(())
 }
@@ -669,16 +700,43 @@ fn test_redis_value_derive() -> Result<()> {
 
     let res: Value = redis::cmd("redis_value_derive")
         .query(&mut con)
-        .with_context(|| "failed to run string.set")?;
+        .with_context(|| "failed structured redis_value_derive reply")?;
 
-    assert_eq!(res.as_sequence().unwrap().len(), 22);
+    let fields: HashMap<String, Value> = redis::from_redis_value(&res)?;
+    assert_eq!(fields.len(), 11);
+    let text = |s: &str| Value::Data(s.as_bytes().to_vec());
+    let inner = |i| Value::Bulk(vec![text("i1"), Value::Int(i)]);
+    for (name, expected) in [
+        ("i", Value::Int(10)),
+        ("i1", Value::Int(1)),
+        ("u", Value::Int(20)),
+        ("s", text("s")),
+        (
+            "v",
+            Value::Bulk(vec![Value::Int(1), Value::Int(2), Value::Int(3)]),
+        ),
+        ("v2", Value::Bulk(vec![inner(1), inner(2)])),
+        ("hash_map", Value::Bulk(vec![text("key"), text("val")])),
+        ("hash_set", Value::Bulk(vec![text("key")])),
+        ("ordered_map", Value::Bulk(vec![text("key"), inner(10)])),
+        ("ordered_set", Value::Bulk(vec![text("key")])),
+    ] {
+        assert_eq!(fields.get(name), Some(&expected), "Reply field {name}");
+    }
+    assert_eq!(redis::from_redis_value::<f64>(&fields["f"])?, 1.1);
+    assert!(
+        !fields.contains_key("inner"),
+        "Flattened fields belong at the top level"
+    );
 
     let res: String = redis::cmd("redis_value_derive")
         .arg(&["test"])
         .query(&mut con)
-        .with_context(|| "failed to run string.set")?;
+        .with_context(|| "failed string variant of redis_value_derive")?;
 
     assert_eq!(res, "OK");
+
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
 
     Ok(())
 }
