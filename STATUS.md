@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F21 — Accepted configuration metadata retirement: reviewed scope
+
+| Status | Report |
+|---|---|
+| **Done** | Narrow source-only specification inventories accepted boxes/captures/Rc versus rejected data, cached native owners and borrowed statics; compares native load/unload/removal/API boundaries and conditional migration choices. 44 source predicates, five pinned source origins, 28 excerpts, 178 protected files and original heads/status/135 Rust hashes checked. Due/Claude approves; three source clarifications applied. No SDK implementation, compilation/tests/benchmarks/native execution. |
+| **Next** | Reconcile Josh's next-focus answer or substantive new retirement evidence. No automatic F22 implementation/new backlog; unchanged intervals retain the blocker without model/test spend. Existing two-hour reporting cadence remains. |
+| **Blockers** | Accepted-data reclamation lacks a proved available native last-use/removal/quiescence hook before image/allocator removal. SDK close occurs before native config removal, and cleanup may call module auth code first. This is a selected contract gap, not permission/build failure or proof of impossibility on every host. |
+| **Decisions** | Retain stable accepted metadata. No public free API, early payload/tombstone behavior or server change selected. Future registry detach must precede free and needs legal native/image/thread/allocator proof. F11 cache/rejected cleanup unchanged; CI/drafts1–5 and broad native/static-resource gaps remain deferred. Originals unchanged; no push/PR/publication/support/package/MSRV/release commitment. |
+
+Details: [F21 scope, options and gated validation](docs/F21_CONFIGURATION_RETIREMENT.md),
+[compact evidence](docs/evidence/f21-configuration-retirement.json).
+
 ## F20 — Evidence/priorities checkpoint: reviewed locally
 
 | Status | Report |

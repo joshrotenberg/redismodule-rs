@@ -518,3 +518,25 @@ source review and unestablished equivalent native tool/permission controls;
 no spend solely for cadence. One sanitized aggregate was acknowledged by the
 authorized due-expert hub; raw prompts/source/answers/provider logs remain local.
 See [F20 evidence](evidence/f20-evidence-checkpoint.json).
+
+
+## October 15 — F21 source-only retirement specification review
+
+One monitored Due/Claude Read/Grep/Glob review of the NEW specification approves.
+True exit 0; 151,813 ms; provider-reported USD 2.47549025. Request/result/answer,
+124 trace records and offline summary validate; all 23 matched activities succeed,
+no gaps/drops/failures. Frozen reviewed inputs remain unchanged through completion.
+Caller checked/applied three nonblocking source refinements: exact unload-body
+ranges, 8.10 module-side config query/set exports and forced-unload NULL errmsg.
+Source-only review does not certify hashes, original/remote state or runtime;
+caller checked those separately. No SDK execution or unchanged model replay.
+
+Due 0.1.0 / Claude Code 2.1.296; available clean Due source
+76d33d410319d860425a2dd3609863a4ba5ca565 and binary SHA-256
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b.
+Model/effort requested omitted; observed settings and compiled-source identity
+unknown. No deadline/retry/fallback/recursive delegation/permission expansion or
+binary/plugin refresh. Comparison deferred: one complementary new-spec review,
+unestablished equivalent native provider read/permission controls, no spend just
+for cadence. One sanitized aggregate was acknowledged by authorized due-expert;
+raw prompts/source/answers/provider logs remain local. See [F21 evidence](evidence/f21-configuration-retirement.json).

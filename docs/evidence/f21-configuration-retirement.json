@@ -1,0 +1,527 @@
+{
+  "chunk": "F21",
+  "kind": "source-only accepted configuration metadata retirement specification",
+  "baseline": "5ee09dd0b8124c89a9bbb51e079112df595fd18b",
+  "status": "source-only specification independently reviewed and caller verified; implementation gated on native retirement proof",
+  "implementation_readiness": "blocked on available proven native last-use/removal/quiescence boundary before image/allocator removal",
+  "decision": "retain accepted private data; no deallocation API or implementation selected",
+  "sdk_implementation_changed": false,
+  "sdk_tests_builds_benchmarks_native_executions": 0,
+  "claim_checks": [
+    {
+      "claim": "Scalar accepted handoff suppresses unaccepted Box Drop",
+      "verified": true,
+      "sources": [
+        "src/configuration/registration.rs"
+      ]
+    },
+    {
+      "claim": "Private storage borrowed/static; captures owned callback Box without added Send/Sync",
+      "verified": true,
+      "sources": [
+        "src/configuration.rs"
+      ]
+    },
+    {
+      "claim": "String accepted Box, native reject drop, acceptance-before-track retained",
+      "verified": true,
+      "sources": [
+        "src/configuration.rs"
+      ]
+    },
+    {
+      "claim": "String registry owns reply slots, not private Box owners",
+      "verified": true,
+      "sources": [
+        "src/configuration/string_lifecycle.rs"
+      ]
+    },
+    {
+      "claim": "Registry take precedes cache close and commit clears context",
+      "verified": true,
+      "sources": [
+        "src/configuration/string_lifecycle.rs"
+      ]
+    },
+    {
+      "claim": "Raw scope phase/lifetime obligations explicit",
+      "verified": true,
+      "sources": [
+        "src/configuration/string_lifecycle.rs"
+      ]
+    },
+    {
+      "claim": "Macro user refusal before cache close; success return after",
+      "verified": true,
+      "sources": [
+        "src/macros.rs"
+      ]
+    },
+    {
+      "claim": "Builders delegate with owned callback and borrowed typed storage",
+      "verified": true,
+      "sources": [
+        "src/configuration/config.rs"
+      ]
+    },
+    {
+      "claim": "7.2.8 native creation stores privdata",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 String registration validity precedes capture, no adapter invocation",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 Numeric registration validity precedes capture, no adapter invocation",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 Bool registration validity precedes capture, no adapter invocation",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 Enum registration validity precedes capture, no adapter invocation",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 native wrapper free does not release SDK privdata",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 config removal does not call SDK destructor/adapters",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/config.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 OnUnload before cleanup and dlclose",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 unload refusal returns before cleanup",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 failed OnLoad removes before image close, no OnUnload",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 cleanup auth callback path precedes config removal",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 no exported configuration removal/destructor hook identified",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "7.2.8 post-load forced unload under native assertion",
+      "verified": true,
+      "sources": [
+        "target/f01/servers/redis-7.2.8/src/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 native creation stores privdata",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 String registration validity precedes capture, no adapter invocation",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 Numeric registration validity precedes capture, no adapter invocation",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 Bool registration validity precedes capture, no adapter invocation",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 Enum registration validity precedes capture, no adapter invocation",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 native wrapper free does not release SDK privdata",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 config removal does not call SDK destructor/adapters",
+      "verified": true,
+      "sources": [
+        "target/f18/native-8.10.2/config.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 OnUnload before cleanup and dlclose",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 unload refusal returns before cleanup",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 failed OnLoad removes before image close, no OnUnload",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 cleanup auth callback path precedes config removal",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 no exported configuration removal/destructor hook identified",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "8.10.2 post-load forced unload under native assertion",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "Pinned 8.10 alias removal retained",
+      "verified": true,
+      "sources": [
+        "target/f08/native-8.10.2/module.c"
+      ]
+    },
+    {
+      "claim": "Five pinned source inputs match retained proven origins",
+      "verified": true,
+      "sources": [
+        "target/f21/source-provenance.json"
+      ]
+    },
+    {
+      "claim": "carolina original heads/status/Rust hashes unchanged",
+      "verified": true,
+      "sources": [
+        "target/f21/originals.json"
+      ]
+    },
+    {
+      "claim": "eventstream original heads/status/Rust hashes unchanged",
+      "verified": true,
+      "sources": [
+        "target/f21/originals.json"
+      ]
+    },
+    {
+      "claim": "jmespath original heads/status/Rust hashes unchanged",
+      "verified": true,
+      "sources": [
+        "target/f21/originals.json"
+      ]
+    },
+    {
+      "claim": "streamfilter original heads/status/Rust hashes unchanged",
+      "verified": true,
+      "sources": [
+        "target/f21/originals.json"
+      ]
+    },
+    {
+      "claim": "Five draft fork PRs remain open",
+      "verified": true,
+      "sources": [
+        "target/f21/fork-prs.json"
+      ]
+    },
+    {
+      "claim": "178 protected tracked files unchanged",
+      "verified": true,
+      "sources": [
+        "target/f21/baseline.json"
+      ]
+    },
+    {
+      "claim": "Spec stops before pointer frees and distinguishes unimplemented options",
+      "verified": true,
+      "sources": [
+        "docs/F21_CONFIGURATION_RETIREMENT.md"
+      ]
+    },
+    {
+      "claim": "Existing F20 checkpoint read; current source-only boundary respected",
+      "verified": true,
+      "sources": [
+        "target/f20/checkpoint.json",
+        "docs/evidence/f20-evidence-checkpoint.json"
+      ]
+    }
+  ],
+  "source_receipt_sha256": {
+    "docs/F11_CONFIGURATION_OWNERSHIP.md": "4a61d31327c45589f8b1da55ce363fca307be4874162f1aecfc7b9433709351c",
+    "docs/F13_FALLIBLE_CONFIGURATION.md": "966c2635b12dd7f78308b0dcbfba47bece7b30ae4347de80fb1d0a11c692304c",
+    "docs/F19_LOAD_CONFIGS.md": "37419b339242e4b2fe094b02b66ea31a365ed6d0a957d046dd90023d900b9cc5",
+    "docs/F20_EVIDENCE_CHECKPOINT.md": "7309c2b71438df219d2c0b35545c8aa200f988b7c132410f0b24685ce704dbfd",
+    "docs/F21_CONFIGURATION_RETIREMENT.md": "76dea0fbb10c523aa05b6976f53cbd6b2a6740d4a249f4ff49bc428b7163ac39",
+    "docs/evidence/f20-evidence-checkpoint.json": "517101bb5421ef454cb7ee8ab15dbe581017681770018e1855a45eb4accbbc5a",
+    "src/alloc.rs": "89311411d8d4941b91a7b7f8ca937161a64c1deea89b5e2aadbf6f8cd163dcfc",
+    "src/configuration.rs": "b20a1bf64bb988c60590aa17183fb99535cbd2f1ed56861e9568af0c6c1d42ab",
+    "src/configuration/config.rs": "6ae5aa2e87f2847f1e1e813cdf790106c5ef9d89ee92608992555d55c79358f4",
+    "src/configuration/registration.rs": "31477026fc9b840a65662b4ac228f41205c3fb6fc1de66843437d2e891e199df",
+    "src/configuration/string_lifecycle.rs": "dfd9c80212c23b8c16f484c63afb8c224a39808d12dc03b587fa58a7aec82e18",
+    "src/include/redismodule.h": "c6bd37d49653968f3d37771477426775f2af8563d414e15730bd3debbd74c76a",
+    "src/macros.rs": "ad6662f9d7f26d6b56b260b8050cd7f5391bf3ed49067af82f6f3a6390dd9a20",
+    "target/f01/servers/redis-7.2.8/src/config.c": "5ca98ff62ddc3a19b80b73e67d7149230fa74463b5a90bb4821d3c9d28bdcd32",
+    "target/f01/servers/redis-7.2.8/src/module.c": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+    "target/f08/native-8.10.2/module.c": "bcfad92db0a7be63df49ed981b4ad224b31ab4ff0fdf9752d60b6d0a519d3329",
+    "target/f18/native-8.10.2/config.c": "a600d92c78d1c9afb4fc89ffbc2c5307fc6b4c3ae588a93273071b9b5e3050c4",
+    "target/f20/checkpoint.json": "fe81d37d4755e4a919e8bcb29948fe0f80e78e93b9b97f02aec20a14b5736d89",
+    "target/f21/baseline.json": "ebcf58c33bb366900750f5ae976544adc9c55eeba8a0039c494c6eb78e688f4b",
+    "target/f21/excerpts.json": "e63e6ecf73c1fd18b702ee1f88abe037d84103be650567e543485dcb20f4d357",
+    "target/f21/fork-prs.json": "cf6e9666641655cb783107c41e4f3441f0b290b836870ecab3c98d19c05a17b9",
+    "target/f21/originals.json": "7b3621f21be568ed18c092edee3cdfdf90358653dd52e0b52dd3c24d3cdb598a",
+    "target/f21/sdk-uses.json": "f61ff7526b0f1bc91d069fcbbb052b72f0a539b7a152aa57712d12cef71a09ab",
+    "target/f21/source-provenance.json": "9ec6c57dc29f7e2876b05c549b35b30d5c29a4d3d685edbfa4b6ac455aef4e5a"
+  },
+  "protected_files_unchanged": 178,
+  "originals": {
+    "modules": 4,
+    "heads_status_unchanged": true,
+    "rust_hashes_unchanged": 135
+  },
+  "source_inventory": {
+    "sdk_tracked_rust_files": 86,
+    "lexical_registration_declaration_import_call_sites": 40,
+    "not_unique_registration_count": true,
+    "native_sources_verified": 5,
+    "retained_excerpts": 28
+  },
+  "proposed_api_choices": [
+    "retain stable accepted metadata (selected now)",
+    "early free at SDK close (not implementation-ready)",
+    "stable tombstone/early payload drop (deferred behavior contract)",
+    "managed registry plus proven native retirement capability (conditional later migration)",
+    "host-side boundary prerequisite (no server/API/platform change authorized)"
+  ],
+  "later_validation_gates": [
+    "available native boundary and all last-use/image/allocator proof",
+    "registry-detach-before-drop and acceptance failure bookkeeping",
+    "pure production state/drop probes without Redis",
+    "uninvoked checkout/actual-archive public compiler controls",
+    "corrected legal owned-host failure/unload/reload/accounting after proof",
+    "compatibility/examples/archive/reference and independent review"
+  ],
+  "overlap": {
+    "fork_drafts": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "upstream_prs": 45,
+    "upstream_issues": 55,
+    "matching_narrow_issue_pr_found": false,
+    "issue471_excluded": true,
+    "sdk_push_pr_publication": false,
+    "ci_held": true
+  },
+  "due_provenance": {
+    "sdk_head": "5ee09dd0b8124c89a9bbb51e079112df595fd18b",
+    "sdk_initial_status": "",
+    "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "due_source_status": "",
+    "due_binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "due_binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "due_version": "due 0.1.0",
+    "provider_version": "2.1.296 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "host_app": "Codex desktop",
+    "model_requested": null,
+    "effort_requested": null,
+    "model_observed": "unknown",
+    "effort_observed": "unknown",
+    "compiled_source_identity": "unknown",
+    "deadline": null,
+    "binary_plugin_refresh": false,
+    "comparison_deferred": "One complementary source specification review; equal native provider read/permission controls remain unestablished. No spend solely for cadence.",
+    "sdk_dirty_at_review": "?? docs/F21_CONFIGURATION_RETIREMENT.md\n?? docs/evidence/f21-configuration-retirement.json"
+  },
+  "review": {
+    "actual_exit": 0,
+    "verdict": "approve",
+    "request_result_answer_all_trace_summary_valid": true,
+    "trace_records": 124,
+    "recorded_inputs_unchanged_through_completion": true,
+    "source_only": true,
+    "duration_ms": 151813,
+    "provider_reported_cost_usd": 2.4754902500000004,
+    "activities": {
+      "started": 23,
+      "completed": 23,
+      "failed": 0,
+      "unmatched_starts": [],
+      "completions_without_observed_start": 0,
+      "starts_without_id": 0,
+      "completions_without_id": 0,
+      "duplicate_starts": 0,
+      "completion_status_counts": {
+        "succeeded": 23
+      },
+      "by_kind": {
+        "tool_call": {
+          "started": 23,
+          "completed": 23,
+          "completion_status_counts": {
+            "succeeded": 23
+          }
+        }
+      }
+    },
+    "failed_activity_details": [],
+    "sdk_source_read": true,
+    "findings": [
+      {
+        "action": "Tighten the ranges to 12281\u201312345 and 13766\u201313833 (and mirror in excerpts.json if regenerated) so the table cites only the unload body.",
+        "claim": "The cited moduleUnload ranges 12281\u201312357 (7.2.8) and 13766\u201313843 (8.10.2) overshoot the function bodies, which end at 12345 and 13833 respectively; the tail lines belong to modulePipeReadable.",
+        "file": "docs/F21_CONFIGURATION_RETIREMENT.md",
+        "line": 69,
+        "priority": "nonblocking"
+      },
+      {
+        "action": "Add one sentence noting that 8.10 additionally exports module-side config query/set APIs absent in 7.2, as further reason not to assume quiescence, while keeping the existing disclaimer that no legality of such a call from a cleanup callback is claimed.",
+        "claim": "Redis 8.10.2 exports module-callable ConfigIteratorCreate/Next/Release and ConfigGet*/ConfigSet* APIs (module.c REGISTER_API lines 16072\u201316083) that 7.2.8 does not. This is a pin difference relevant to the paragraph arguing that module code can still run during cleanup and could in principle reach configuration state; the spec mentions alias differences but not these exports.",
+        "file": "docs/F21_CONFIGURATION_RETIREMENT.md",
+        "line": 73,
+        "priority": "nonblocking"
+      },
+      {
+        "action": "Optionally note the NULL errmsg argument alongside the assertion to reinforce the instruction never to execute that path as a test; no change to the decision.",
+        "claim": "The forced post-load rejection calls moduleUnload(name, NULL, 1) in both pins (7.2 module.c 12261; 8.10 13746). Besides the assertion on the return value, any ordinary refusal branch on that path would write through a NULL errmsg pointer, so the path is doubly unsafe to exercise.",
+        "file": "docs/F21_CONFIGURATION_RETIREMENT.md",
+        "line": 104,
+        "priority": "nonblocking"
+      }
+    ],
+    "limits": [
+      "Source-only review; no compile, test, benchmark, or native host execution performed or implied.",
+      "Did not certify any SHA-256/Git blob hashes, tarball match, remote PR/issue snapshots, original module heads/status/135 Rust hashes, or the 178 protected-file baseline; those remain caller-owned.",
+      "Did not recompute the 86 tracked Rust files / 40 lexical sites inventory (sdk-uses.json not read).",
+      "excerpts.json read only through line 146 of 199; the remaining 8.10 excerpts were cross-checked by reading the native source bodies directly rather than the excerpt text.",
+      "Native files read in scoped ranges only; no broad audit of auth/thread/reentry/panic paths, Context/GIL semantics, or other module.c subsystems.",
+      "Reviewed-file 'verified' flags in the evidence JSON were cross-checked against source for claims within scope; originals.json, fork-prs.json, baseline.json, source-provenance.json contents were not opened."
+    ],
+    "disposition": {
+      "verdict": "approve",
+      "nonblocking_findings_applied": 3,
+      "changes": [
+        "Exact unload-body citation ranges; retained excerpts intentionally include neighboring source lines and remain as-reviewed.",
+        "8.10 additional module-side ConfigIterator/Get/Set exports, with no cleanup-call legality claim.",
+        "Forced post-load unload supplies NULL errmsg; pre-OnUnload refusals write through argument, deinit refusal reaches assertion. Source only, excluded execution."
+      ],
+      "sdk_source_changes": false,
+      "sdk_compiler_tests_benchmark_native_runs": 0,
+      "second_review": false
+    }
+  },
+  "limits": [
+    "Selected pinned native sources are source evidence, no new SDK/native execution or memory measurement.",
+    "Authentication callback cleanup chain does not establish legality of arbitrary config query/reentry or a general auth audit.",
+    "Stable accepted Box/captures/Rc distinct from F11 cached native owners, static borrowed storage and native C wrapper.",
+    "No native removal callback window, fabricated Contexts, historical invalid paths/crash/leak samplers.",
+    "No broad native/static-resource/Context/GIL/thread/alias/reentry/panic audit or support/MSRV/package/release decision."
+  ],
+  "next": "No automatic implementation or invented F22 backlog; wait for human focus or new retirement evidence, carry blocker without duplicate review/model spend.",
+  "current_specification_sha256": "76dea0fbb10c523aa05b6976f53cbd6b2a6740d4a249f4ff49bc428b7163ac39",
+  "review_inputs_sha256": {
+    "docs/F11_CONFIGURATION_OWNERSHIP.md": "4a61d31327c45589f8b1da55ce363fca307be4874162f1aecfc7b9433709351c",
+    "docs/F13_FALLIBLE_CONFIGURATION.md": "966c2635b12dd7f78308b0dcbfba47bece7b30ae4347de80fb1d0a11c692304c",
+    "docs/F19_LOAD_CONFIGS.md": "37419b339242e4b2fe094b02b66ea31a365ed6d0a957d046dd90023d900b9cc5",
+    "docs/F20_EVIDENCE_CHECKPOINT.md": "7309c2b71438df219d2c0b35545c8aa200f988b7c132410f0b24685ce704dbfd",
+    "docs/F21_CONFIGURATION_RETIREMENT.md": "7c4903c2085268d633da97807dcc44473c639ab8921a3b101537f86e06112d99",
+    "docs/evidence/f20-evidence-checkpoint.json": "517101bb5421ef454cb7ee8ab15dbe581017681770018e1855a45eb4accbbc5a",
+    "docs/evidence/f21-configuration-retirement.json": "042e6a180665a0d5de521705c768d6b7f52793d072a53431f888ae5d070f4a76",
+    "src/alloc.rs": "89311411d8d4941b91a7b7f8ca937161a64c1deea89b5e2aadbf6f8cd163dcfc",
+    "src/configuration.rs": "b20a1bf64bb988c60590aa17183fb99535cbd2f1ed56861e9568af0c6c1d42ab",
+    "src/configuration/config.rs": "6ae5aa2e87f2847f1e1e813cdf790106c5ef9d89ee92608992555d55c79358f4",
+    "src/configuration/registration.rs": "31477026fc9b840a65662b4ac228f41205c3fb6fc1de66843437d2e891e199df",
+    "src/configuration/string_lifecycle.rs": "dfd9c80212c23b8c16f484c63afb8c224a39808d12dc03b587fa58a7aec82e18",
+    "src/include/redismodule.h": "c6bd37d49653968f3d37771477426775f2af8563d414e15730bd3debbd74c76a",
+    "src/macros.rs": "ad6662f9d7f26d6b56b260b8050cd7f5391bf3ed49067af82f6f3a6390dd9a20",
+    "target/f01/servers/redis-7.2.8/src/config.c": "5ca98ff62ddc3a19b80b73e67d7149230fa74463b5a90bb4821d3c9d28bdcd32",
+    "target/f01/servers/redis-7.2.8/src/module.c": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+    "target/f08/native-8.10.2/module.c": "bcfad92db0a7be63df49ed981b4ad224b31ab4ff0fdf9752d60b6d0a519d3329",
+    "target/f18/native-8.10.2/config.c": "a600d92c78d1c9afb4fc89ffbc2c5307fc6b4c3ae588a93273071b9b5e3050c4",
+    "target/f20/checkpoint.json": "fe81d37d4755e4a919e8bcb29948fe0f80e78e93b9b97f02aec20a14b5736d89",
+    "target/f21/baseline.json": "ebcf58c33bb366900750f5ae976544adc9c55eeba8a0039c494c6eb78e688f4b",
+    "target/f21/excerpts.json": "e63e6ecf73c1fd18b702ee1f88abe037d84103be650567e543485dcb20f4d357",
+    "target/f21/fork-prs.json": "cf6e9666641655cb783107c41e4f3441f0b290b836870ecab3c98d19c05a17b9",
+    "target/f21/originals.json": "7b3621f21be568ed18c092edee3cdfdf90358653dd52e0b52dd3c24d3cdb598a",
+    "target/f21/sdk-uses.json": "f61ff7526b0f1bc91d069fcbbb052b72f0a539b7a152aa57712d12cef71a09ab",
+    "target/f21/source-provenance.json": "9ec6c57dc29f7e2876b05c549b35b30d5c29a4d3d685edbfa4b6ac455aef4e5a"
+  },
+  "verified_utc": "2026-10-15T12:27:23.071903+00:00",
+  "human_focus_question": "Optional next-lane choice posted during independent review; current F21 completion does not depend on an answer. No answer received at checkpoint preparation.",
+  "feedback": "one sanitized aggregate acknowledged by authorized due-expert"
+}
