@@ -31,6 +31,52 @@ fn test_hello() -> Result<()> {
 }
 
 #[test]
+fn test_logging_message_text() -> Result<()> {
+    let mut con = TestConnection::with_log_file("log");
+    for (message, expected) in [
+        ("plain text", "plain text"),
+        ("café 日本語", "café 日本語"),
+        ("100% ready", "100% ready"),
+        ("100%% ready", "100%% ready"),
+        ("a\0\0b", r"a\0\0b"),
+    ] {
+        let reply: String = redis::cmd("log.message").arg(message).query(&mut con)?;
+        assert_eq!(reply, "Logged");
+        let log = con.server_log()?;
+        for route in ["context", "global", "raw", "standard"] {
+            let expected = format!("log-{route}: {expected}");
+            assert!(
+                log.lines().any(|line| line.ends_with(&expected)),
+                "Missing exact log text {expected:?} in {log}"
+            );
+        }
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_logging_io_message_text() -> Result<()> {
+    let mut con = TestConnection::with_log_file("log");
+    for (message, expected) in [
+        ("plain IO", "plain IO"),
+        ("100%% ready", "100%% ready"),
+        ("100% ready\0café", r"100% ready\0café"),
+    ] {
+        let reply: String = redis::cmd("log.io").arg(message).query(&mut con)?;
+        assert_eq!(reply, "Logged IO");
+        let log = con.server_log()?;
+        let expected = format!("log-io: {expected}");
+        assert!(
+            log.lines().any(|line| line.ends_with(&expected)),
+            "Missing exact IO log text {expected:?} in {log}"
+        );
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_keys_pos() -> Result<()> {
     let mut con = TestConnection::new("keys_pos");
 
