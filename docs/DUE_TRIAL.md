@@ -421,3 +421,27 @@ fallback, recursive delegation or extra comparison. A/B deferred for the single
 bounded source review and unestablished equivalent provider tools/permissions.
 Sanitized aggregate feedback routes through due-expert; raw prompts/answers/code/
 logs stay local. See [F16 evidence](evidence/f16-call-reply-conversion.json).
+
+## October 14 — F17 implementation review
+
+One monitored Due/Claude read-only source review approves the new implementation
+and selected fixtures. True exit 0; 160,575 ms; provider-reported USD 1.92202025.
+Request/result/answer, 163 trace records and offline summary validate. All 36
+activities complete successfully, with zero gaps/drops/unmatched activity.
+Reviewed inputs stayed unchanged through completion. Two nonblocking refinements
+added whole-buffer test equality and a strict-text fixture comment; caller
+checked production bytes unchanged and Python AST equivalence. Final pure/fmt
+and fresh archive/consumer/compiler checks pass. The source reviewer did not run
+checks or inspect raw receipts; the caller independently verifies execution,
+archive provenance, remote visibility and unchanged originals.
+
+Due 0.1.0, Claude Code 2.1.296; available clean Due source
+76d33d410319d860425a2dd3609863a4ba5ca565, executable SHA-256
+11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b.
+Requested model/effort omitted; observed settings and compiled-source identity
+remain unknown. No binary/plugin refresh, provider retry, deadline, permission
+expansion, fallback or recursive delegation. A/B comparison deferred because
+equivalent native tools/permissions remain unestablished and complementary SDK
+review is the bounded task. Sanitized aggregate feedback was sent once to the
+authorized due-expert hub and acknowledged. Private prompts/source/raw answers/
+logs remain local. See [F17 evidence](evidence/f17-call-reply.json).

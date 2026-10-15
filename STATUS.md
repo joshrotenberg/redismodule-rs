@@ -10,6 +10,18 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F17 — Call-result bulk strings: validated locally
+
+| Status | Report |
+|---|---|
+| **Done** | Valid-text call results now become BulkString; invalid bytes stay StringBuffer. Value/key helpers reuse one owned buffer, retaining key identity and explicit status policy. Version/enterprise consumers accept bulk text; DUMP expectations use exact native bytes. 35 pure tests, 10 checkout + 10 archived compiler controls, 36 examples both profiles, Clippy/fmt/18 doc tests, four native cells, 16 integration executions, six isolated reference builds/12 flows and four archives/three consumers/six builds pass. Due/Claude approves; two test/comment refinements checked by caller. |
+| **Next** | F18 source-only scope of the known deferred LoadConfigs result/order/error-propagation boundary, unless Josh redirects. Inventory actual macro/manual paths and native contracts, select narrow options and validation gates before implementation. Do not start a second chunk in F17. |
+| **Blockers** | None for local F17. Fork PR5 remains draft for deferred CI/remote handoff alongside drafts1–4. Native/reference coverage is selected macOS arm64 hosts/profiles; Enterprise product, general RESP3/native safety and allocation/throughput claims remain outside it. Accepted metadata and broad native contracts remain deferred. |
+| **Decisions** | Implicit valid text, including wrapped native OK, deliberately changes SimpleString to BulkString and bulk wire framing; explicit module statuses remain. Preserve strict UTF-8 and key variants. Adapt PR93 with exact revision/credit; leaves upstream234/134/246/358/473 open. Required baseline uploaded F11 merge/F12–F16 ancestors; fork master was not pushed. Original modules unchanged; no new support/package/MSRV/release commitment. |
+
+Details: [F17 implementation, migration and validation](docs/F17_CALL_REPLY.md),
+[compact evidence](docs/evidence/f17-call-reply.json).
+
 ## F16 — Call-result conversion scope: reviewed locally
 
 | Status | Report |

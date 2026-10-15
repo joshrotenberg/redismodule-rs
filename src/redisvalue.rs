@@ -206,16 +206,28 @@ impl<K: Into<RedisValueKey>> From<BTreeSet<K>> for RedisValue {
     }
 }
 
+// Copy native reply bytes once before the reply owner goes away. UTF-8 failure
+// returns that same buffer rather than discarding it and copying a second time.
+fn call_string_value(bytes: Vec<u8>) -> RedisValue {
+    match String::from_utf8(bytes) {
+        Ok(text) => RedisValue::BulkString(text),
+        Err(error) => RedisValue::StringBuffer(error.into_bytes()),
+    }
+}
+
+fn call_string_key(bytes: Vec<u8>) -> RedisValueKey {
+    match String::from_utf8(bytes) {
+        Ok(text) => RedisValueKey::String(text),
+        Err(error) => RedisValueKey::BulkString(error.into_bytes()),
+    }
+}
+
 impl<'root> TryFrom<&CallReply<'root>> for RedisValueKey {
     type Error = RedisError;
     fn try_from(reply: &CallReply<'root>) -> Result<Self, Self::Error> {
         match reply {
             CallReply::I64(reply) => Ok(RedisValueKey::Integer(reply.to_i64())),
-            CallReply::String(reply) => Ok(reply
-                .to_string()
-                .map_or(RedisValueKey::BulkString(reply.as_bytes().to_vec()), |v| {
-                    RedisValueKey::String(v)
-                })),
+            CallReply::String(reply) => Ok(call_string_key(reply.as_bytes().to_vec())),
             CallReply::Bool(b) => Ok(RedisValueKey::Bool(b.to_bool())),
             _ => Err(RedisError::String(format!(
                 "Given CallReply can not be used as a map key or a set element, {:?}",
@@ -233,10 +245,7 @@ impl<'root> From<&CallReply<'root>> for RedisValue {
                 RedisValue::Array(reply.iter().map(|v| (&v).into()).collect())
             }
             CallReply::I64(reply) => RedisValue::Integer(reply.to_i64()),
-            CallReply::String(reply) => reply
-                .to_string()
-                .map(RedisValue::SimpleString)
-                .unwrap_or_else(|| RedisValue::StringBuffer(reply.as_bytes().to_vec())),
+            CallReply::String(reply) => call_string_value(reply.as_bytes().to_vec()),
             CallReply::Null(_) => RedisValue::Null,
             CallReply::Map(reply) => RedisValue::Map(
                 reply
@@ -313,7 +322,113 @@ impl<'root> TryFrom<&CallResult<'root>> for RedisValueKey {
 
 #[cfg(test)]
 mod tests {
-    use super::RedisValue;
+    use super::{call_string_key, call_string_value, RedisValue, RedisValueKey};
+    use std::collections::{BTreeSet, HashSet};
+
+    #[test]
+    fn call_strings_preserve_bytes_and_strict_text_policy() {
+        let inputs: &[&[u8]] = &[
+            b"",
+            b"ASCII",
+            "héllo".as_bytes(),
+            b"a\0b",
+            b"\r",
+            b"\n",
+            b"\r\n",
+            &[0xff, 0, 0xfe],
+            &[b'a', 0xf0, 0x9f, 0x92],
+        ];
+        for bytes in inputs {
+            let value = call_string_value(bytes.to_vec());
+            let key = call_string_key(bytes.to_vec());
+            match std::str::from_utf8(bytes) {
+                Ok(text) => {
+                    assert_eq!(value, RedisValue::BulkString(text.to_owned()));
+                    assert_eq!(key, RedisValueKey::String(text.to_owned()));
+                    assert_eq!(String::try_from(value).unwrap(), text);
+                }
+                Err(_) => {
+                    assert_eq!(value, RedisValue::StringBuffer(bytes.to_vec()));
+                    assert_eq!(key, RedisValueKey::BulkString(bytes.to_vec()));
+                    assert!(String::try_from(value).is_err());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn call_string_classification_keeps_the_owned_allocation() {
+        for valid in [true, false] {
+            for key in [true, false] {
+                let mut bytes = Vec::with_capacity(4113);
+                bytes.resize(4096, b'x');
+                if !valid {
+                    bytes[2048] = 0xff;
+                }
+                let expected = bytes.clone();
+                let pointer = bytes.as_ptr();
+                let capacity = bytes.capacity();
+                if key {
+                    match call_string_key(bytes) {
+                        RedisValueKey::String(text) => {
+                            assert!(valid);
+                            assert_eq!(text.as_ptr(), pointer);
+                            assert_eq!(text.capacity(), capacity);
+                            assert_eq!(text.len(), 4096);
+                            assert_eq!(text.as_bytes(), expected);
+                        }
+                        RedisValueKey::BulkString(bytes) => {
+                            assert!(!valid);
+                            assert_eq!(bytes.as_ptr(), pointer);
+                            assert_eq!(bytes.capacity(), capacity);
+                            assert_eq!(bytes[2048], 0xff);
+                            assert_eq!(bytes.as_slice(), expected);
+                        }
+                        _ => panic!("unexpected key variant"),
+                    }
+                } else {
+                    match call_string_value(bytes) {
+                        RedisValue::BulkString(text) => {
+                            assert!(valid);
+                            assert_eq!(text.as_ptr(), pointer);
+                            assert_eq!(text.capacity(), capacity);
+                            assert_eq!(text.len(), 4096);
+                            assert_eq!(text.as_bytes(), expected);
+                        }
+                        RedisValue::StringBuffer(bytes) => {
+                            assert!(!valid);
+                            assert_eq!(bytes.as_ptr(), pointer);
+                            assert_eq!(bytes.capacity(), capacity);
+                            assert_eq!(bytes[2048], 0xff);
+                            assert_eq!(bytes.as_slice(), expected);
+                        }
+                        _ => panic!("unexpected value variant"),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn call_string_keys_keep_text_identity_hashing_and_ordering() {
+        let keys: Vec<_> = ["a", "z", "a\0b", "héllo"]
+            .into_iter()
+            .map(|s| call_string_key(s.as_bytes().to_vec()))
+            .collect();
+        let hashed: HashSet<_> = keys.iter().cloned().collect();
+        let ordered: BTreeSet<_> = keys.iter().cloned().collect();
+        for text in ["a", "z", "a\0b", "héllo"] {
+            let key = RedisValueKey::String(text.to_owned());
+            assert!(hashed.contains(&key));
+            assert!(ordered.contains(&key));
+            assert!(!hashed.contains(&RedisValueKey::BulkString(text.as_bytes().to_vec())));
+        }
+        let expected: BTreeSet<_> = ["a", "z", "a\0b", "héllo"]
+            .into_iter()
+            .map(|s| RedisValueKey::String(s.to_owned()))
+            .collect();
+        assert_eq!(ordered, expected);
+    }
 
     #[test]
     fn from_vec_string() {

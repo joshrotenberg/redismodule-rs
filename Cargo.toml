@@ -240,3 +240,7 @@ crate-type = ["cdylib"]
 [[example]]
 name = "configuration_builders"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "call_reply"
+crate-type = ["cdylib"]

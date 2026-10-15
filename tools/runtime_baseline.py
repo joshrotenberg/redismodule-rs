@@ -34,8 +34,8 @@ CASES = (
 EXCLUDED = {
     "test_test_helper_err": "Uses the hello module for a nonexistent helper command; needs a meaningful replacement.",
     "test_key_space_notification_with_invalid_utf8_event_name": "Specialized event-input contract deferred from the ordinary baseline.",
-    "test_call_dump": "Specialized binary CallReply conversion contract deferred to focused repair validation.",
-    "test_call_binary_data": "Specialized binary CallReply conversion contract deferred to focused repair validation.",
+    "test_call_dump": "F17 corrected byte/framing coverage is retained separately; this historical ordinary-baseline selection remains unchanged.",
+    "test_call_binary_data": "F17 corrected byte/framing coverage is retained separately; this historical ordinary-baseline selection remains unchanged.",
     "test_defrag": "The selected macOS servers use libc; active defragmentation requires a capable allocator/server cell.",
     "test_set_acl_categories": "Not compiled at the selected Redis 7.2 API floor (requires 7.4/8.0).",
     "test_set_acl_categories_commands": "Not compiled at the selected Redis 7.2 API floor (requires 8.0).",
