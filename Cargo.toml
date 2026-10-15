@@ -51,7 +51,7 @@ crate-type = ["cdylib"]
 [[example]]
 name = "call"
 crate-type = ["cdylib"]
-required-features = ["min-redis-compatibility-version-7-2"]
+required-features = ["redis-7-2-examples"]
 
 [[example]]
 name = "call_reply"
@@ -180,12 +180,16 @@ cc = "1"
 default = ["min-redis-compatibility-version-6-0", "bindgen-runtime"]
 
 # xor having minimum compatibility version
-min-redis-compatibility-version-8-0 = ["redis-module/min-redis-compatibility-version-8-0"]
-min-redis-compatibility-version-7-4 = ["redis-module/min-redis-compatibility-version-7-4"]
-min-redis-compatibility-version-7-2 = ["redis-module/min-redis-compatibility-version-7-2"]
+min-redis-compatibility-version-8-0 = ["redis-module/min-redis-compatibility-version-8-0", "redis-7-2-examples"]
+min-redis-compatibility-version-7-4 = ["redis-module/min-redis-compatibility-version-7-4", "redis-7-2-examples"]
+min-redis-compatibility-version-7-2 = ["redis-module/min-redis-compatibility-version-7-2", "redis-7-2-examples"]
 min-redis-compatibility-version-7-0 = ["redis-module/min-redis-compatibility-version-7-0"]
 min-redis-compatibility-version-6-2 = ["redis-module/min-redis-compatibility-version-6-2"]
 min-redis-compatibility-version-6-0 = ["redis-module/min-redis-compatibility-version-6-0"]
+
+# Builds the examples that use Redis 7.2 APIs. Internal: the 7.2 and later floors
+# enable it, and it does not build on its own or with an older floor.
+redis-7-2-examples = []
 
 # Enable static linking to libclang in bindgen (incompatible with `bindgen-runtime`)
 bindgen-static = ["bindgen/static"]

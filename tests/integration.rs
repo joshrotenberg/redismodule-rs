@@ -1063,6 +1063,7 @@ fn test_call_dump() -> Result<()> {
 
 #[test]
 #[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
     feature = "min-redis-compatibility-version-7-4",
     feature = "min-redis-compatibility-version-7-2"
 ))]
