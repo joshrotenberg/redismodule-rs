@@ -109,6 +109,45 @@ macro_rules! redis_command {
     }};
 }
 
+/// Subscribes a keyspace event handler. `redis_module!` calls this for each
+/// entry in `event_handlers`.
+///
+/// The key slice a handler receives is valid only while the handler runs, so a
+/// handler cannot ask to keep it:
+///
+/// ```compile_fail,E0716
+/// use redis_module::{redis_module, Context, NotifyEvent};
+///
+/// fn on_event(_: &Context, _: NotifyEvent, _: &str, _key: &'static [u8]) {}
+///
+/// redis_module! {
+///     name: "keep_key",
+///     version: 1,
+///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+///     data_types: [],
+///     event_handlers: [[@STRING: on_event]],
+/// }
+/// # fn main() {}
+/// ```
+///
+/// A handler that borrows the key for the call compiles:
+///
+/// ```no_run
+/// use redis_module::{redis_module, Context, NotifyEvent};
+///
+/// fn on_event(_: &Context, _: NotifyEvent, _: &str, key: &[u8]) {
+///     let _owned = key.to_vec();
+/// }
+///
+/// redis_module! {
+///     name: "borrow_key",
+///     version: 1,
+///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+///     data_types: [],
+///     event_handlers: [[@STRING: on_event]],
+/// }
+/// # fn main() {}
+/// ```
 #[macro_export]
 macro_rules! redis_event_handler {
     (
@@ -124,7 +163,18 @@ macro_rules! redis_event_handler {
         ) -> c_int {
             let context = $crate::Context::new(ctx);
 
-            let redis_key = $crate::RedisString::string_as_slice(key);
+            fn borrow_key<'key>(_: &'key $crate::Context, key: &'key [u8]) -> &'key [u8] {
+                key
+            }
+            // SAFETY: Redis supplies a live, read-only key for this synchronous
+            // callback. The local anchor bounds this view to the invocation,
+            // including handlers which would otherwise request 'static. It
+            // must not be retained or invalidated through a native alias.
+            // In particular, LOADED-event keys cannot be retained. Do not turn
+            // this borrowed pointer into an owning RedisString.
+            let redis_key = borrow_key(&context, unsafe {
+                $crate::RedisString::string_as_slice(key)
+            });
             let event_str = unsafe { CStr::from_ptr(event) };
             $event_handler(
                 &context,
