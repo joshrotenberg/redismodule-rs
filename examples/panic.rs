@@ -24,10 +24,10 @@ fn panic_proc_macro(_: &Context, _: Vec<RedisString>) -> RedisResult {
 /// comes back out of `scan` and fails this command.
 fn panic_scan(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     let cursor = KeysCursor::new();
-    let callback = |_: &Context, _: &RedisString, _: Option<&RedisKey>| {
+    let mut callback = |_: &Context, _: &RedisString, _: Option<&RedisKey>| {
         panic!("scan callback panicked");
     };
-    while cursor.scan(ctx, &callback) {}
+    while cursor.scan(ctx, &mut callback) {}
     Ok("scan finished".into())
 }
 
