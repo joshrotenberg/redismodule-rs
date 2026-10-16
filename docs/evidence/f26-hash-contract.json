@@ -1,0 +1,254 @@
+{
+  "chunk": "F26",
+  "kind": "source-only hash contract specification",
+  "base": "a6b6735d3b5331c3d5294fd1a60dd3fec612e8f2",
+  "proposal": "Result native updated/deleted count; borrowed existing-string field writer/deleter; unsafe raw writable-key admission; no COUNT_ALL; old preflight and modern immediate errno",
+  "status": "source-verified and independently reviewed for local merge",
+  "source_checks": 50,
+  "native_sources": [
+    {
+      "version": "4.0.14",
+      "commit": "18572a921a8d17881c3de1fc71f56362d63010d9",
+      "blob": "8eb3f8aa5b065a18182ba7e6fcff0a34d7258d30",
+      "url": "https://github.com/redis/redis/blob/18572a921a8d17881c3de1fc71f56362d63010d9/src/module.c",
+      "sha256": "5035bb99d59ef78c1d5c0c6ca381f45bb7fd220dc4e609cb611df7d21a1ebe3a"
+    },
+    {
+      "version": "5.0.14",
+      "commit": "704ba5f5b22ae1ecafbcfb7a3258311c27ff94ff",
+      "blob": "5218071410da9a0475470f31954f464aab6ed136",
+      "url": "https://github.com/redis/redis/blob/704ba5f5b22ae1ecafbcfb7a3258311c27ff94ff/src/module.c",
+      "sha256": "ca6a86653fc8790fd26a7a427f99ad8a15f899aa1431a99d00b67dcb49d3480e"
+    },
+    {
+      "version": "6.0.20",
+      "commit": "de0d9632b52849d9b7ea52408b1d681d771c5b46",
+      "blob": "93517494f04439b7a7ee8d2ed22dab855cebe7e7",
+      "url": "https://github.com/redis/redis/blob/de0d9632b52849d9b7ea52408b1d681d771c5b46/src/module.c",
+      "sha256": "badb47266eb43fc2c44bd7e25d490d8633b3c91a5daee095e1532172f924990f"
+    },
+    {
+      "version": "6.2.19",
+      "commit": "fa00bd2fff1533ad6e8483d9ce8868f383df2fbb",
+      "blob": "0ce9b369ab7de3d45218baa0737f0ecdcdac1dce",
+      "url": "https://github.com/redis/redis/blob/fa00bd2fff1533ad6e8483d9ce8868f383df2fbb/src/module.c",
+      "sha256": "684078d49820698e2dfadc8bf311def986e87fd0706f7a2b61bdd568bcd0a578"
+    },
+    {
+      "version": "7.2.8",
+      "commit": "31d93c592811dce16b2f75222afa6babc5eb9a55",
+      "blob": "d58918201d76373cafde53af06ea59e797f45f4f",
+      "url": "https://github.com/redis/redis/blob/31d93c592811dce16b2f75222afa6babc5eb9a55/src/module.c",
+      "sha256": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc"
+    },
+    {
+      "version": "8.10.2",
+      "commit": "498ecd0d6d007db11ddb3aea9428552598a78622",
+      "blob": "ff646d5934f143699434f34980f7939bc2e5c56d",
+      "url": "https://github.com/redis/redis/blob/498ecd0d6d007db11ddb3aea9428552598a78622/src/module.c",
+      "sha256": "bcfad92db0a7be63df49ed981b4ad224b31ab4ff0fdf9752d60b6d0a519d3329"
+    }
+  ],
+  "hash_sources": [
+    {
+      "version": "4.0.14",
+      "commit": "18572a921a8d17881c3de1fc71f56362d63010d9",
+      "blob": "fa3a893a6f042e70ce198d89920d699135908ced",
+      "path": "src/t_hash.c",
+      "sha256": "12b5233172d4b742944628a0de7aa3a4f045cce593b66599839aca547e73b960"
+    },
+    {
+      "version": "5.0.14",
+      "commit": "704ba5f5b22ae1ecafbcfb7a3258311c27ff94ff",
+      "blob": "109522c1322f8ac59a97cc3cc499ba4edf9168a6",
+      "path": "src/t_hash.c",
+      "sha256": "b019ba8a4bc0dfea7bee0d6932790d70b5f63a71cb3331e429dfa061e64ff353"
+    },
+    {
+      "version": "6.0.20",
+      "commit": "de0d9632b52849d9b7ea52408b1d681d771c5b46",
+      "blob": "13e65502f1454068f5f54722770ef0379f3e8142",
+      "path": "src/t_hash.c",
+      "sha256": "3eb744d027727b8be50df97ae408043b1005544515882c2d59ca58c1d1f0c446"
+    },
+    {
+      "version": "6.2.19",
+      "commit": "fa00bd2fff1533ad6e8483d9ce8868f383df2fbb",
+      "blob": "7e082b3ad93d6f917d11030bd8fcee08c785f4d8",
+      "path": "src/t_hash.c",
+      "sha256": "eda036ac70c160cd3960abfc7724f3925cddcc0ba1e3170f069c30e58b0c7665"
+    },
+    {
+      "version": "7.2.8",
+      "commit": "31d93c592811dce16b2f75222afa6babc5eb9a55",
+      "blob": "b199d8c69c587e6b9e37d199509cd15bb6ce3259",
+      "path": "src/t_hash.c",
+      "sha256": "e506d6f1ce57ea8fa7aa13406865fe1b5c0816357b22ffe97e8b969abe4d24f6"
+    },
+    {
+      "version": "8.10.2",
+      "commit": "498ecd0d6d007db11ddb3aea9428552598a78622",
+      "blob": "09a4632832b13f2d52ef8a93988ce42057864cf7",
+      "path": "src/t_hash.c",
+      "sha256": "b45825a20e1acf92dd1dab67072f4cf8de52f5b805b5ba899753fa0afb725358"
+    }
+  ],
+  "tracked_originals": {
+    "redis-event-stream-module": {
+      "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+      "rust_files": 37
+    },
+    "redis-stream-filter-module": {
+      "head": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+      "rust_files": 40
+    },
+    "redis-jmespath-module": {
+      "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+      "rust_files": 35
+    },
+    "carolina": {
+      "head": "0191175bb18ecf371d49d8b264a514f2c662099c",
+      "rust_files": 23
+    }
+  },
+  "inventory_lexical_sites": 52,
+  "mapped_issues": [
+    134,
+    246,
+    205
+  ],
+  "pr247": {
+    "author": "tBuLi12",
+    "head": "99b56630f7575e20f55a8601d01d3353732199f3",
+    "relationship": "motivation/adaptation context, not accepted port"
+  },
+  "overlap": {
+    "fork_prs": [
+      19,
+      18,
+      17,
+      15,
+      14,
+      13,
+      6
+    ],
+    "direct_adjacent": 18,
+    "ownership_adjacent": 13,
+    "worker": "no owned F26 worker observed; app owning thread active, no other active project thread or due process"
+  },
+  "no_sdk_execution": true,
+  "missing_prior_receipts": "target absent at activation; committed F25 compact evidence historical only, no replay",
+  "due_provenance": {
+    "due_version": "due 0.1.0",
+    "binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "source_status": "",
+    "binary_source": "unknown; no embedded commit proof",
+    "provider_version": "2.1.301 (Claude Code)",
+    "host": "macOS-26.7.1-arm64-arm-64bit-Mach-O",
+    "requested_model": null,
+    "requested_effort": null,
+    "observed_model": "unknown",
+    "observed_effort": "unknown",
+    "comparison": "Deferred: one focused NEW spec review; no useful controlled comparison needed to settle this narrow source contract."
+  },
+  "future_gate": "F27 tracked-issue visibility, review + corrected tests incl selected 6.0 compatibility runtime; F28 final scorecard",
+  "validation": {
+    "source_predicates": 50,
+    "native_git_blobs": 12,
+    "preexisting_files_verified_before_status_edits": 195,
+    "original_rust_files": 135,
+    "original_heads_status_hashes_unchanged": true,
+    "f25_committed_source_hashes_unchanged": true,
+    "SDK_tests_builds_benchmarks_native_execution": false
+  },
+  "review": {
+    "exit": 0,
+    "status": "succeeded",
+    "run_id": "c47771a1-ba96-4298-a4c9-a50bb78839f7",
+    "verdict": "approve",
+    "trace_records": 342,
+    "matched_activities": 74,
+    "unmatched_starts": [],
+    "unmatched_completions": [],
+    "failed_activities": 0,
+    "schemas_valid": true,
+    "fresh_trace_complete": true,
+    "frozen_inputs_unchanged": true,
+    "duration_ms": 406235,
+    "usage": {
+      "input_tokens": 226,
+      "cached_input_tokens": 480103,
+      "cache_write_input_tokens": 121960,
+      "output_tokens": 34091,
+      "reasoning_output_tokens": null,
+      "total_tokens": null
+    },
+    "cost_usd": 4.26603575,
+    "source_review_only": true
+  },
+  "review_limitations": [
+    "Original module working trees (redis-stream-filter-module src/native.rs, redis-event-stream-module, redis-jmespath-module, carolina) were out of tool scope and not read; the claim that the stream-filter `call(ctx, \"HSET\", true, ...)` flag means replicate relies on the caller-verified inventory excerpt and spec text.",
+    "No commands were run: pinned blob SHA-256 values in origins.json/hash-origins.json were not recomputed; the caller separately checks hashes. source-checks.json and inventory.json were treated as caller records and only cross-checked for counts and lexical sites.",
+    "No Redis runtime, compilation or native execution was performed; this review does not certify native runtime behavior, supported hosts, heap/refcount balance, persistence, replication or general FFI/alias/GIL/thread/panic safety.",
+    "version.h is not among the pins; the REDIS_VERSION_NUM packing was taken from the RM_GetServerVersion doc comment in module.c (6.0.20:7986, 8.10.2:15191), not from a pinned version.h.",
+    "hashTypeSet/hashTypeDelete bodies were read in full for 4.0.14, 6.2.19, 7.2.8 and 8.10.2; 5.0.14 and 6.0.20 were verified via grep of the update/deleted assignment and return sites and matching excerpt line numbers rather than full reads.",
+    "PR247 and PR18 were checked only through grep of patch snippets in pr247-files.json/pr18-files.json; broader PR bodies were not treated as authority.",
+    "Historical target receipts for prior chunks (F25 runtime/archive/checkpoint) were absent at activation and were not re-verified; F25 was not reviewed per instruction.",
+    "No tool or permission denials occurred during this review."
+  ],
+  "review_refinements": {
+    "blocking": 0,
+    "applied": [
+      "Raw integer EMPTY/HASH comparison; unknown GCRA/future type error",
+      "Physical stored/expired-field count; no TTL in paired HGET/HEXISTS controls",
+      "Pure DELETE sentinel address==1 assertion",
+      "Final metadata records review status and independent original/hash limits"
+    ],
+    "caller_verified_source": true,
+    "second_review": "Not repeated; nonblocking specification clarifications only"
+  },
+  "sdk_source_hashes": {
+    "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709",
+    "Cargo.toml": "c3802482689c80af61e5ecddc9c9cedaf6d328b94e1dcbfa59c0e6abdb6a3271",
+    "src/context/mod.rs": "7e08a911710a2ae60e6e59369c7c1a80766253842f43602e1a7104e9b324fff2",
+    "src/include/redismodule.h": "c6bd37d49653968f3d37771477426775f2af8563d414e15730bd3debbd74c76a",
+    "src/key.rs": "0fae8e34d1e2b8340fe95736e65c27585868299ecf9df6ac7c87eede0a11cb78",
+    "src/raw.rs": "845931f3f7be3bf384e6de2196ac269f5b2efe1e0db48cf216dfdb015acfb7a6"
+  },
+  "reviewed_input_hashes": {
+    "docs/F26_HASH_CONTRACT.md": "ed71b7d1328803d7d6f3d07226509837ef409a4e2ba84f618fc604cced392a73",
+    "docs/evidence/f26-hash-contract.json": "20be80501ec05b4b2f8ad89985b75d415bc4eae95911a7b01405b30c07ad1bae",
+    "docs/evidence/f26-hash-source-excerpts.md": "3a98770904ff377dd8d68b67d27aa85a0a64da9df267ad791ee3899da27a17ca",
+    "src/raw.rs": "845931f3f7be3bf384e6de2196ac269f5b2efe1e0db48cf216dfdb015acfb7a6",
+    "src/key.rs": "0fae8e34d1e2b8340fe95736e65c27585868299ecf9df6ac7c87eede0a11cb78",
+    "src/context/mod.rs": "7e08a911710a2ae60e6e59369c7c1a80766253842f43602e1a7104e9b324fff2",
+    "src/include/redismodule.h": "c6bd37d49653968f3d37771477426775f2af8563d414e15730bd3debbd74c76a",
+    "target/f26/source/module-7.2.8.c": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+    "target/f26/source/module-6.0.20.c": "badb47266eb43fc2c44bd7e25d490d8633b3c91a5daee095e1532172f924990f",
+    "target/f26/source/t_hash-4.0.14.c": "12b5233172d4b742944628a0de7aa3a4f045cce593b66599839aca547e73b960",
+    "target/f26/source/module-6.2.19.c": "684078d49820698e2dfadc8bf311def986e87fd0706f7a2b61bdd568bcd0a578",
+    "target/f26/source/hash-origins.json": "f89f72ed8ea8e36ebdc33dbdc917b6e9b33a438b6c8f4d464702c4440b01f335",
+    "target/f26/source/module-8.10.2.c": "bcfad92db0a7be63df49ed981b4ad224b31ab4ff0fdf9752d60b6d0a519d3329",
+    "target/f26/source/module-5.0.14.c": "ca6a86653fc8790fd26a7a427f99ad8a15f899aa1431a99d00b67dcb49d3480e",
+    "target/f26/source/t_hash-6.2.19.c": "eda036ac70c160cd3960abfc7724f3925cddcc0ba1e3170f069c30e58b0c7665",
+    "target/f26/source/t_hash-5.0.14.c": "b019ba8a4bc0dfea7bee0d6932790d70b5f63a71cb3331e429dfa061e64ff353",
+    "target/f26/source/t_hash-8.10.2.c": "b45825a20e1acf92dd1dab67072f4cf8de52f5b805b5ba899753fa0afb725358",
+    "target/f26/source/excerpts.json": "904ba9809b1be81fe32d5911a9ea225ece0950849e9188cb7717a2bb26980d53",
+    "target/f26/source/module-4.0.14.c": "5035bb99d59ef78c1d5c0c6ca381f45bb7fd220dc4e609cb611df7d21a1ebe3a",
+    "target/f26/source/origins.json": "0d6e2574e2184fa8a5c70a88ef56c4ac17b00c11d2569bd1fd6a42ca08ea2e03",
+    "target/f26/source/t_hash-6.0.20.c": "3eb744d027727b8be50df97ae408043b1005544515882c2d59ca58c1d1f0c446",
+    "target/f26/source/t_hash-7.2.8.c": "e506d6f1ce57ea8fa7aa13406865fe1b5c0816357b22ffe97e8b969abe4d24f6"
+  },
+  "receipts": {
+    "target/f26/baseline.json": "63d5b55c0d60b86cfa06204569a0213576d59c92638bd3ac8c38ab1385f2c8c6",
+    "target/f26/source-checks.json": "249d199fba36caf5e610ef9be9844a9307afcb38ffe8015cda230b4d256df6bf",
+    "target/f26/inventory.json": "3753a237abd49c3d2ba98ec0052918bb254817866f895eca8724156696808f33",
+    "target/f26/source/blob-verification.json": "050a7aa19d2f152ac845f9b18a27c1bd559433ab03fc831c211b23227ff6ac88",
+    "target/f26/pre-review-effects.json": "4134051fd38ef65f1f8022f65cff8592cb5518031c40a5261ccbbce88d1723f5",
+    "target/f26/review/contracts.json": "1945ec1d5d23c8cf9362f8a6365cd451054323a2fa3bd58d64d57901bc96f861",
+    "target/f26/review/summary.json": "e6bef2319785cbca63f31a3329dd920269944590f30f3c8699e422d06577eb59",
+    "target/f26/hub-reconciliation.json": "0d83091a130375951e74b94238e45320be145ea414eb2ef730ba1a1dbce02c12"
+  }
+}

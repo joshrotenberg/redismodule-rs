@@ -272,3 +272,29 @@ replicated RM_Call writers in stream-filter. One reviewed specification, no SDK
 prototype/test/native run or publication in F26. F27 implementation follows its
 settled contract and tracked-issue visibility, then F28 scorecard removes the
 schedule. No additional lane, original migration, broad audit or release policy.
+
+F26 is source-verified and independently reviewed: read docs/F26_HASH_CONTRACT.md,
+compact evidence and bounded source excerpts, plus target/f26/checkpoint.json.
+No SDK implementation, compilation/test/benchmark/native execution. Fifty source
+predicates, 12 pinned native blobs and original heads/status/135 Rust hashes were
+verified; 195 preexisting files unchanged before status recording. Due/Claude
+approves with four nonblocking clarifications: raw integer type preflight (no enum
+unwrap), physical-expiry count nuance, DELETE sentinel address1 and review limits.
+
+F27 selected contract is Result<usize> native preexisting update/delete counts,
+borrowed RedisString field writer/deleter, NUL Err text wrappers, and narrowly
+unsafe raw mutator admission requiring a genuine live writable key. This source
+break also maps partially to issue205 alongside134/246; all three belong in the
+required visible draft BEFORE code. No COUNT_ALL, batch, write-mode probe or
+support-floor change. Type/NULL preflight and fixed flags resolve legacy ambiguity;
+modern zero captures errno immediately, ENOENT means success0; legacy ignores
+errno, count1 means replacement/deletion, never Status. F27 must satisfy actual
+6.0 compatibility runtime gate alongside selected 7.2/8.10 cells; no source-only
+runtime claim. Keep stream-filter replicated RM_Call writers and all originals.
+
+At F26 activation historical ignored target/ receipts through F25 were missing.
+Committed F25 sources/compact evidence match; old raw receipts were not recreated
+or rerun. F26 pins/snapshots are fresh. No SDK push/PR/CI in F26. Current remote
+adjacent PR18 changes hash API availability; reconcile it before F27 without
+importing broad work. F28 is the final scorecard and must delete the batch schedule.
+No invented next lane, F21 frees, broad audits or release/support choices.
