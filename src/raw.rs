@@ -733,7 +733,8 @@ pub fn load_signed(rdb: *mut RedisModuleIO) -> Result<i64, Error> {
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn load_string(rdb: *mut RedisModuleIO) -> Result<RedisString, Error> {
     let p = unsafe { load(rdb, |rdb| RedisModule_LoadString.unwrap()(rdb))? };
-    Ok(RedisString::from_redis_module_string(ptr::null_mut(), p))
+    // SAFETY: LoadString returns one manually released native owner.
+    Ok(unsafe { RedisString::from_redis_module_string(ptr::null_mut(), p) })
 }
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -788,7 +789,7 @@ pub fn save_string(rdb: *mut RedisModuleIO, buf: &str) {
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 /// Save the `RedisString` into the RDB
 pub fn save_redis_string(rdb: *mut RedisModuleIO, s: &RedisString) {
-    unsafe { RedisModule_SaveString.unwrap()(rdb, s.inner) };
+    unsafe { RedisModule_SaveString.unwrap()(rdb, s.as_ptr()) };
 }
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -860,7 +861,7 @@ pub fn add_info_section(ctx: *mut RedisModuleInfoCtx, name: Option<&str>) -> Sta
 pub fn add_info_field_str(ctx: *mut RedisModuleInfoCtx, name: &str, content: &str) -> Status {
     let name = CString::new(name).unwrap();
     let content = RedisString::create(None, content);
-    unsafe { RedisModule_InfoAddFieldString.unwrap()(ctx, name.as_ptr(), content.inner).into() }
+    unsafe { RedisModule_InfoAddFieldString.unwrap()(ctx, name.as_ptr(), content.as_ptr()).into() }
 }
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -931,8 +932,13 @@ pub unsafe fn notify_keyspace_event(
     keyname: &RedisString,
 ) -> Status {
     let event = CString::new(event).unwrap();
-    RedisModule_NotifyKeyspaceEvent.unwrap()(ctx, event_type.bits(), event.as_ptr(), keyname.inner)
-        .into()
+    RedisModule_NotifyKeyspaceEvent.unwrap()(
+        ctx,
+        event_type.bits(),
+        event.as_ptr(),
+        keyname.as_ptr(),
+    )
+    .into()
 }
 
 /// # Panics

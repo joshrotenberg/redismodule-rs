@@ -499,7 +499,8 @@ pub(crate) fn redis_command(attr: TokenStream, item: TokenStream) -> TokenStream
         ) -> i32 {
             let context = redis_module::Context::new(ctx);
 
-            let args = redis_module::decode_args(ctx, argv, argc);
+            // SAFETY: Redis supplies live callback argv/count with legal retention.
+            let args = unsafe { redis_module::decode_args(ctx, argv, argc) };
             let response = #original_function_name(&context, args);
             context.reply(response.map(|v| v.into())) as i32
         }

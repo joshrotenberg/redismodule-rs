@@ -315,7 +315,7 @@ impl<'a> From<&'a [&RedisString]> for StrCallArgs<'a> {
     fn from(vals: &'a [&RedisString]) -> Self {
         StrCallArgs {
             is_owner: false,
-            args: vals.iter().map(|v| v.inner).collect(),
+            args: vals.iter().map(|v| v.as_ptr()).collect(),
             phantom: std::marker::PhantomData,
         }
     }
@@ -509,7 +509,7 @@ impl Context {
             RedisValueKey::BulkString(b) => {
                 raw::reply_with_string_buffer(self.ctx, b.as_ptr().cast::<c_char>(), b.len())
             }
-            RedisValueKey::BulkRedisString(s) => raw::reply_with_string(self.ctx, s.inner),
+            RedisValueKey::BulkRedisString(s) => raw::reply_with_string(self.ctx, s.as_ptr()),
             RedisValueKey::Bool(b) => raw::reply_with_bool(self.ctx, b.into()),
         }
     }
@@ -548,7 +548,7 @@ impl Context {
                 format.0.as_ptr().cast(),
             ),
 
-            Ok(RedisValue::BulkRedisString(s)) => raw::reply_with_string(self.ctx, s.inner),
+            Ok(RedisValue::BulkRedisString(s)) => raw::reply_with_string(self.ctx, s.as_ptr()),
 
             Ok(RedisValue::StringBuffer(s)) => {
                 raw::reply_with_string_buffer(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
@@ -768,10 +768,14 @@ impl Context {
         })
     }
 
-    /// Return the current user name attached to the context
-    pub fn get_current_user(&self) -> RedisString {
+    /// Return the current user name attached to a legal native user-query context.
+    /// Redis 8.10 can return None when the native API reports no user. Older
+    /// hosts require a client/user; Option does not make arbitrary constructed
+    /// or missing-client contexts legal. A present string is independently owned.
+    pub fn get_current_user(&self) -> Option<RedisString> {
         let user = unsafe { raw::RedisModule_GetCurrentUserName.unwrap()(self.ctx) };
-        RedisString::from_redis_module_string(ptr::null_mut(), user)
+        // SAFETY: native result is owned; self.ctx is its actual producer.
+        unsafe { RedisString::from_owned_ptr_or_none(NonNull::new(self.ctx), user) }
     }
 
     /// Attach the given user to the current context so each operation performed from
@@ -782,7 +786,8 @@ impl Context {
         &self,
         user_name: &RedisString,
     ) -> Result<ContextUserScope<'_>, RedisError> {
-        let user = unsafe { raw::RedisModule_GetModuleUserFromUserName.unwrap()(user_name.inner) };
+        let user =
+            unsafe { raw::RedisModule_GetModuleUserFromUserName.unwrap()(user_name.as_ptr()) };
         if user.is_null() {
             return Err(RedisError::Str("User does not exists or disabled"));
         }
@@ -803,14 +808,15 @@ impl Context {
         key_name: &RedisString,
         permissions: &AclPermissions,
     ) -> Result<(), RedisError> {
-        let user = unsafe { raw::RedisModule_GetModuleUserFromUserName.unwrap()(user_name.inner) };
+        let user =
+            unsafe { raw::RedisModule_GetModuleUserFromUserName.unwrap()(user_name.as_ptr()) };
         if user.is_null() {
             return Err(RedisError::Str("User does not exists or disabled"));
         }
         let acl_permission_result: raw::Status = unsafe {
             raw::RedisModule_ACLCheckKeyPermissions.unwrap()(
                 user,
-                key_name.inner,
+                key_name.as_ptr(),
                 permissions.bits(),
             )
         }
