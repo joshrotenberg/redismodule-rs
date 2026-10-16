@@ -10,6 +10,19 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F26 — Hash count/byte/legacy contract: reviewed source-only specification
+
+| Status | Report |
+|---|---|
+| **Done** | Specifies Result counts, borrowed existing-string fields, text NUL errors, unsafe raw writable admission and pre-6.2/modern errno policy. 50 source predicates and 12 pinned native Git blobs verified; 195 preexisting files unchanged before status edits, four original heads/status/135 Rust hashes unchanged. Due/Claude approves; four nonblocking clarifications applied. No SDK implementation, build/test/benchmark/native execution. |
+| **Next** | F27 implementation after fresh overlap and dedicated baseline/empty kickoff/push/draft listing upstream134/246/205. Then F28 batch scorecard and automation deletion. No second chunk this interval. |
+| **Blockers** | No unresolved F26 design gate. F27 older-host runtime, visibility and validation remain future gates. Historical ignored target/ receipts through F25 were absent at activation; committed compact results remain historical, not freshly reverified. F21 retirement/CI remain parked. |
+| **Decisions** | Native preexisting-field replacement/deletion count, not HSET insertion count; no COUNT_ALL or write-mode probe. Raw integer type check avoids enum unwrap; expired stored fields are not logical-live counts. Originals and replicated stream-filter HSET/HDEL unchanged. Local docs-only, no SDK upload/PR/CI work. |
+
+Details: [F26 specification](docs/F26_HASH_CONTRACT.md),
+[compact evidence](docs/evidence/f26-hash-contract.json),
+[bounded native excerpts](docs/evidence/f26-hash-source-excerpts.md).
+
 ## F25 — Raw-key handoff repair: validated locally
 
 | Status | Report |
