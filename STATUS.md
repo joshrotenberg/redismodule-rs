@@ -10,6 +10,19 @@ Continue local SDK validation independently. Revisit actual server/platform
 coverage, package-consumer jobs, failure handling and retained evidence when
 the CI workstream resumes.
 
+## F27 — Hash result/byte repair: implementation checkpoint, old-host gate open
+
+| Status | Report |
+|---|---|
+| **Done** | Result counts replace Status for selected hash mutators; borrowed byte-field setter/deleter, text NUL errors, unsafe raw writable admission and checked legacy/modern policy implemented on draft PR20. 43 pure tests, 11 checkout/11 actual-archive compiler controls, 41 examples both profiles, Clippy/fmt/18 docs, four modern native cells, two isolated reference builds/eight flows and four archives/three consumers/six builds pass. 96 packaged source files match; originals unchanged. |
+| **Next** | Finish the required corrected-code Redis 6.0.20 runtime cell on a genuinely compatible available host/build. Keep this F27 branch and draft; no local merge or F28 until the gate passes. Independent source review disposition is recorded in the F27 evidence. |
+| **Blockers** | Official 6.0.20 fails to build against current macOS SDK: its configuration selects removed stat64/fstat64 interfaces. Make exit2, no 6.0 native test. Do not patch unrelated server/platform code, narrow support, rerun unchanged passing checks/reviews or invent another chunk. |
+| **Decisions** | Keep native physical preexisting-field counts (insert0, replace/delete1), immediate modern-zero errno, legacy restricted WRITE/type preconditions. Required baseline/kickoff/draft existed before code; upload includes F25 merge/F26 ancestors. No master push, GitHub merge or CI work. F21 remains parked. |
+
+Details: [F27 checkpoint](docs/F27_HASH_MUTATION.md),
+[compact evidence](docs/evidence/f27-hash-mutation.json),
+[draft PR20](https://github.com/joshrotenberg/redismodule-rs/pull/20).
+
 ## F26 — Hash count/byte/legacy contract: reviewed source-only specification
 
 | Status | Report |

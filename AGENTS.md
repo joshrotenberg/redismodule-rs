@@ -298,3 +298,24 @@ or rerun. F26 pins/snapshots are fresh. No SDK push/PR/CI in F26. Current remote
 adjacent PR18 changes hash API availability; reconcile it before F27 without
 importing broad work. F28 is the final scorecard and must delete the batch schedule.
 No invented next lane, F21 frees, broad audits or release/support choices.
+
+
+F27 is an unfinished implementation checkpoint on fix/f27-hash-results-and-bytes,
+draft PR20. Read docs/F27_HASH_MUTATION.md, compact evidence and target/f27/checkpoint.json
+before further work. The baseline at clean post-F26 7929be9 and empty kickoff
+28fe134622266f6aeb6270f5cfd1f7878c91fdfb were pushed and draft20 opened before code;
+this uploads F25 merge/F26 ancestors, not fork master. Partial issues134/246/205
+remain open; PR247 tBuLi12 credit remains exact refreshed99b56630. Adjacent PR18
+availability and historical PR13 ownership do not duplicate this focused repair.
+
+Selected modern validation, public compiler/archive checks and isolated reference
+flows pass. Required Redis6.0.20 runtime remains BLOCKED: official source's Apple
+configuration selects stat64/fstat64 removed from the current SDK; actual make
+exit2, no old-host native execution. Preserve this gate and stable reviewable F27
+branch. No unrelated server/platform patch or support-floor choice. Do not merge,
+start F28, repeat unchanged reviews/tests or invent new work until the runtime
+prerequisite changes or direct human focus supplies a bounded resolution. F28 is
+still the final scorecard and must delete the existing automation when complete.
+Source/pure legacy proof is not old runtime coverage; modern counts are not heap,
+replication or broad safety evidence. Originals/replicated RM_Call writers remain
+unchanged. CI, F21 reclamation and broad audits stay parked.

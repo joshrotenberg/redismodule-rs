@@ -617,43 +617,8 @@ pub fn hash_get_by_string(
     }
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-#[inline]
-pub fn hash_set(key: *mut RedisModuleKey, field: &str, value: *mut RedisModuleString) -> Status {
-    let field = CString::new(field).unwrap();
-
-    unsafe {
-        RedisModule_HashSet.unwrap()(
-            key,
-            REDISMODULE_HASH_CFIELDS as i32,
-            field.as_ptr(),
-            value,
-            ptr::null::<c_char>(),
-        )
-        .into()
-    }
-}
-
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-#[inline]
-pub fn hash_del(key: *mut RedisModuleKey, field: &str) -> Status {
-    let field = CString::new(field).unwrap();
-
-    // TODO: Add hash_del_multi()
-    // Support to pass multiple fields is desired but is complicated.
-    // See hash_get_multi() and https://github.com/redis/redis/issues/7860
-
-    unsafe {
-        RedisModule_HashSet.unwrap()(
-            key,
-            REDISMODULE_HASH_CFIELDS as i32,
-            field.as_ptr(),
-            REDISMODULE_HASH_DELETE,
-            ptr::null::<c_char>(),
-        )
-        .into()
-    }
-}
+mod hash;
+pub use hash::{hash_del, hash_del_by_string, hash_set, hash_set_by_string};
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[inline]

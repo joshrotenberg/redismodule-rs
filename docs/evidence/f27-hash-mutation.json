@@ -1,0 +1,276 @@
+{
+  "chunk": "F27",
+  "status": "implemented and source-reviewed; INCOMPLETE pending required 6.0.20 native runtime gate; unmerged",
+  "base": "7929be9af6593f948e210cbcfe87edda5d6ab749",
+  "kickoff": "28fe134622266f6aeb6270f5cfd1f7878c91fdfb",
+  "draft": {
+    "baseRefName": "review/f27-baseline",
+    "headRefOid": "28fe134622266f6aeb6270f5cfd1f7878c91fdfb",
+    "isDraft": true,
+    "number": 20,
+    "url": "https://github.com/joshrotenberg/redismodule-rs/pull/20"
+  },
+  "history_upload": "Required baseline includes local F25 merge/F26 ancestors; master not pushed",
+  "scoped_upstream_issues": [
+    134,
+    246,
+    205
+  ],
+  "issues_left_open": true,
+  "credit": {
+    "pr247": "tBuLi12",
+    "head": "99b56630f7575e20f55a8601d01d3353732199f3",
+    "use": "motivation/adaptation context, not full accepted port"
+  },
+  "validation": {
+    "source_checks": {
+      "draft_before_code": true,
+      "no_Status_cast": true,
+      "fixed_flags": true,
+      "required_before_keytype": true,
+      "version_snapshot": true,
+      "raw_integer_type": true,
+      "immediate_errno": true,
+      "four_unsafe_mutators": true,
+      "consuming_shape": true,
+      "no_new_dependency": true,
+      "reference_writers_unchanged": true
+    },
+    "originals": {
+      "redis-event-stream-module": {
+        "head": "93022f60502a828a087c6ef8aff935443dcc1823",
+        "status": "",
+        "rust_files": 37,
+        "unchanged": true
+      },
+      "redis-stream-filter-module": {
+        "head": "97ebad3b34fdaba26c9708a771d5425d1aa2ee97",
+        "status": "",
+        "rust_files": 40,
+        "unchanged": true
+      },
+      "redis-jmespath-module": {
+        "head": "0e70ab55dd08823029552faa495b22fd43b2f977",
+        "status": "",
+        "rust_files": 35,
+        "unchanged": true
+      },
+      "carolina": {
+        "head": "0191175bb18ecf371d49d8b264a514f2c662099c",
+        "status": "",
+        "rust_files": 23,
+        "unchanged": true
+      }
+    },
+    "original_rust_files": 135,
+    "protected_preexisting_files": 193,
+    "pure": 43,
+    "compiler": 11,
+    "archive_compiler": 11,
+    "examples": 41,
+    "native_cells": 4,
+    "native_groups_per_cell": 11,
+    "reference_builds": 2,
+    "reference_cells": 4,
+    "reference_flows": 8,
+    "archives": 4,
+    "consumers": 3,
+    "consumer_builds": 6,
+    "archive_source_files": 96,
+    "old_runtime": "blocked, not executed"
+  },
+  "old_host_gate": {
+    "status": "blocked",
+    "required": "focused Redis 6.0.20 runtime cell",
+    "archive_sha256": "173d4c5f44b5d7186da96c4adc5cb20e8018b50ec3a8dfe0d191dbbab53952f0",
+    "build_command": "make -j4 MALLOC=libc BUILD_TLS=no redis-server",
+    "actual_exit": 2,
+    "evidence": "target/f27/servers/build-6.0.20.log",
+    "observed": "Redis 6.0.20 config.h selects removed stat64/fstat64 interfaces with the current macOS SDK; replication.c fails to compile.",
+    "decision": "Do not patch native server/platform headers or substitute a new support floor. Older runtime remains a gate. Legacy source and pure checks are not runtime evidence.",
+    "native_test_executed": false,
+    "alternate_host": {
+      "probe": "docker info --format server identity",
+      "exit": 1,
+      "result": "local Docker daemon unavailable; no service/settings changed"
+    }
+  },
+  "exact_modern_threshold_pin": {
+    "version": "6.2.0",
+    "commit": "445aa844b946a8f1bc21ac8554b44adb1ecb4018",
+    "blob": "fe0cd8345c0d2532480413f3174b4bb03abdf91c",
+    "sha256": "6bc8ea9b54265b2e1a15a4193b1aec94111d2ce2f63a80b35def111cf71b21e0",
+    "url": "https://github.com/redis/redis/blob/445aa844b946a8f1bc21ac8554b44adb1ecb4018/src/module.c",
+    "source_only": true,
+    "count_zero_enoent": true
+  },
+  "native_provenance": {
+    "sources": [
+      {
+        "version": "6.0.20",
+        "url": "https://download.redis.io/releases/redis-6.0.20.tar.gz",
+        "archive_sha256": "173d4c5f44b5d7186da96c4adc5cb20e8018b50ec3a8dfe0d191dbbab53952f0",
+        "module_sha256": "badb47266eb43fc2c44bd7e25d490d8633b3c91a5daee095e1532172f924990f",
+        "hash_sha256": "3eb744d027727b8be50df97ae408043b1005544515882c2d59ca58c1d1f0c446",
+        "selected_source_matches_F26_pin": true,
+        "binary_sha256": null,
+        "build_exit": 2
+      },
+      {
+        "version": "7.2.8",
+        "url": "https://download.redis.io/releases/redis-7.2.8.tar.gz",
+        "archive_sha256": "6be4fdfcdb2e5ac91454438246d00842d2671f792673390e742dfcaf1bf01574",
+        "module_sha256": "75b13cc5f332c3598a8d48494d92a4413b5c4dad77b063fc5d90e14cf1a822bc",
+        "hash_sha256": "e506d6f1ce57ea8fa7aa13406865fe1b5c0816357b22ffe97e8b969abe4d24f6",
+        "selected_source_matches_F26_pin": true,
+        "binary_sha256": "015e4e22c2efa4bbb4a68d77c384b7841315b89c86f2c036d6e359dafe7c6d85",
+        "build_exit": 0
+      }
+    ],
+    "reported_git_limit": "7.2.8 release tarball build reports enclosing SDK Git ID28fe1346, not Redis source revision; archive and native source hashes are authoritative.",
+    "available_alternate_host": "Docker daemon unavailable (read-only info exit1); no daemon started/new platform infrastructure."
+  },
+  "review": {
+    "exit": 0,
+    "status": "succeeded",
+    "run_id": "dd7b27ce-5773-4046-8072-4caac5025bb4",
+    "verdict": "approve",
+    "trace_records": 251,
+    "matched_activities": 46,
+    "unmatched_starts": [],
+    "unmatched_completions": [],
+    "failed_activities": 0,
+    "schemas_valid": true,
+    "fresh_trace_complete": true,
+    "frozen_inputs_unchanged": true,
+    "duration_ms": 350206,
+    "usage": {
+      "input_tokens": 258,
+      "cached_input_tokens": 475864,
+      "cache_write_input_tokens": 98508,
+      "output_tokens": 26567,
+      "reasoning_output_tokens": null,
+      "total_tokens": null
+    },
+    "cost_usd": 3.420056,
+    "source_review_only": true
+  },
+  "review_disposition": {
+    "verdict": "approve",
+    "blocking_findings": 0,
+    "nonblocking": [
+      {
+        "finding": "6.2.0 threshold source pin",
+        "resolution": "Confirmed exact official 6.2.0 module.c at445aa844b946a8f1bc21ac8554b44adb1ecb4018; Git blob identity verified; trailing zero ENOENT and modern error branches present. No code change."
+      },
+      {
+        "finding": "Explicit unsafe operations for edition2024",
+        "resolution": "Deferred: current edition2021, actual Clippy gate passes. No edition/support migration selected; unsafe admission documented at public and private boundaries."
+      },
+      {
+        "finding": "Discriminate preflight rejections",
+        "resolution": "Applied expected error substring per NUL/wrong-type call; fresh four modern runtime cells pass in runtime-reviewed."
+      },
+      {
+        "finding": "Portable runner module suffix",
+        "resolution": "Deferred until a compatible old host is available. Current runner deliberately records selected macOS dylibs; no Linux host/runtime claim or platform adaptation selected."
+      }
+    ],
+    "post_review_changed_inputs": [
+      "tools/hash_mutation.py"
+    ],
+    "reviewed_input_hashes": {
+      "src/raw.rs": "4da226b2d683b2824daa2ab0588c2ecac01ad611783a29ad4c12e3ac7be9970a",
+      "src/raw/hash.rs": "792a5dad52983a566b9d3184a33e7c76fbf3b8fd61d7e7e9fc924951f9ad47dc",
+      "src/key.rs": "d2444126353e4476113a049922557cd71ea79282d2df9b4279743189a36d5859",
+      "examples/hash_mutation.rs": "278a14ac68e4bf28be4db7dfa4be1d8aecd6526d3c59cd817377b0c8a5b428c6",
+      "tools/hash_mutation.py": "bac08250c7e710ab502a012b407c801d7d0a1d0e6e42422853e44937b62f38f7",
+      "tools/hash_contracts.py": "1524a4996c04d0e67aec3a498d4360f006d85c35e1aa929b10c84c8522e13c2e",
+      "Cargo.toml": "44c0070ff64c006344fe792a9c5f540b18545f7d29007c1e15469d6972065900",
+      "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709"
+    },
+    "final_input_hashes": {
+      "src/raw.rs": "4da226b2d683b2824daa2ab0588c2ecac01ad611783a29ad4c12e3ac7be9970a",
+      "src/raw/hash.rs": "792a5dad52983a566b9d3184a33e7c76fbf3b8fd61d7e7e9fc924951f9ad47dc",
+      "src/key.rs": "d2444126353e4476113a049922557cd71ea79282d2df9b4279743189a36d5859",
+      "examples/hash_mutation.rs": "278a14ac68e4bf28be4db7dfa4be1d8aecd6526d3c59cd817377b0c8a5b428c6",
+      "tools/hash_mutation.py": "475bbe9042fdc04d90490aaa209b4382591e713e0ad74c211246cbd473ae71ee",
+      "tools/hash_contracts.py": "1524a4996c04d0e67aec3a498d4360f006d85c35e1aa929b10c84c8522e13c2e",
+      "Cargo.toml": "44c0070ff64c006344fe792a9c5f540b18545f7d29007c1e15469d6972065900",
+      "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709"
+    },
+    "production_fixture_compiler_inputs_unchanged": true,
+    "new_runtime_report": "target/f27/runtime-reviewed/report.json",
+    "completion_gate": "6.0.20 runtime blocked; source approval is not chunk completion"
+  },
+  "due": {
+    "due_version": "due 0.1.0",
+    "provider_version": "2.1.301 (Claude Code)",
+    "due_source": "76d33d410319d860425a2dd3609863a4ba5ca565",
+    "due_dirty": "",
+    "host": "ProductName:\t\tmacOS\nProductVersion:\t\t26.7.1\nBuildVersion:\t\t25G241",
+    "binary": "/Users/josh.rotenberg/.cargo/bin/due",
+    "binary_sha256": "11d68ea7f0a5109cac6757db341aabb2d4c3068206c22254e1be48d696dcb29b",
+    "compiled_source_identity": "unknown",
+    "requested_model": "native default",
+    "requested_effort": "native default",
+    "observed_model": "unknown",
+    "observed_effort": "unknown",
+    "comparison": "Deferred: independent review of changed contract; no useful fair duplicate model spend for this batch."
+  },
+  "receipt_sha256": {
+    "target/f27/visibility.json": "8dc1a49f477cd6416cb1a655b88cc06cc8570aa0aa0608dc5d566a4d850f966d",
+    "target/f27/baseline.json": "c1445a1aab8667203aefe4c0f4461ded679e9688da5ec619ffbfd156daa36e93",
+    "target/f27/fork-prs.json": "626adb1249f7684692f75087ce3732556f9979c09c9efd78997df608486fc0a2",
+    "target/f27/upstream-prs.json": "428a78a51ff0b90bbd908c4e9699fd42e574f6b4b32d9877bf5a37fb6ae3a87b",
+    "target/f27/issue134.json": "e97044bb172885dd86ca4664dba44915db85e5bbdc84a8486f060a1ff4e29061",
+    "target/f27/issue246.json": "58c9ec03f6f1e97f7191961a1129b8185163c2d5538ece9218e9d3df979e43c5",
+    "target/f27/issue205.json": "fa9af0282187b2dac3111746097298d0a97f1790223b1c125e36797c3a2c9b8e",
+    "target/f27/pr247.json": "aac28ec4971a958844cd641f19efc3607094fe19d5847908962afb9873710ac5",
+    "target/f27/pr375.json": "08ebe718da7613c8b998d701edd45f076dd93b7970911f612fa9e7641d81da33",
+    "target/f27/pr18-files.json": "b02a80bc263a18365a8d5e80a8601fff20cdd9efb687b551920c44b1ec6098c3",
+    "target/f27/pr13-files.json": "b09c9ffcd7215874366abd8a15e97d32c16c2e9d7a01360c14d62e3bccaace98",
+    "target/f27/pure.log": "eb211c3f73dac2349057db993e84fddb099610fea3762e78ca0c71b24a808de5",
+    "target/f27/compiler/report.json": "e78ed35bf6e20d2d2bda975907e2e62d0bc52a4fba5a77ce3e88193717eaca22",
+    "target/f27/archive-compiler/report.json": "cfdeba9bdbc79dbaa64ee1b6df03f78071c92bc07019335f221a7b3a29a86c80",
+    "target/f27/examples-debug-final.log": "7f55eb650a155ea32d43d89bcbb6e93ffe9fa25c3d005cd8ec5bd6ca76e6f15f",
+    "target/f27/examples-release-final.log": "ce431e336932f9af4f87c5c8c8a3ee55b38e1dd277ef7ec2ab089b2d726b134c",
+    "target/f27/clippy.log": "46813103bb9a2c9154ab57e440a3ac5bd558397b6d6d4af6793d4c0e8aabf5c4",
+    "target/f27/docs.log": "8d6d44b17a7aafe56da22785d626063dffe6999e84e1633e624f99509da634c4",
+    "target/f27/fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "target/f27/runtime-reviewed/report.json": "760c48650f1d9a4e8e63f15e32b4713b6c6b8b696330f4a4cd32279b327d13c3",
+    "target/f27/references/report.json": "6dd0837e9b59c408c7614ba07f5f7026e455661258c5408cd79e52ae20c6b504",
+    "target/f27/references/streamfilter/f27-migrations.patch": "968e4e125755d85965f2834afb0fb61cf53f76c314eae88d69f4098feeb21fba",
+    "target/f27/references/streamfilter/metadata-f27.json": "71427f7d06ef963c6e235819fb28c73e682fa21838fefdc3d41ccadae57cb009",
+    "target/f27/packages-final/report.json": "4c9d7c50e547a5050dad96032b87b765ebc7fdea10cf6ecf93cc8da94e70133e",
+    "target/f27/archive-source-match.json": "3e1184111a61a397379927f33b3aa5491f1201699678b8b79a2045c882b0d008",
+    "target/f27/caller-validation.json": "a526f132238598fb86083bd544ae66e058c17f00a2cc424dd993f73cb880c6d7",
+    "target/f27/old-host-gate.json": "1715c2edc2a0e9748e9b23460c152e7ddb9c957b76bc4b07463e355cf705fc09",
+    "target/f27/native-provenance.json": "faaf4f73e8d51bbf902b851e0a6606ec65c2a97289ef04f50519618447aac541",
+    "target/f27/source/6.2.0-origin.json": "fd5897bfb476b22940ac2948c801af804f1436505886d2bca459ea3f417708fe",
+    "target/f27/source/module-6.2.0.c": "6bc8ea9b54265b2e1a15a4193b1aec94111d2ce2f63a80b35def111cf71b21e0",
+    "target/f27/review/inputs.json": "21895475ee8af07fd3e68752700623568bb8ef90a8275b6dbb9312b5eed40a60",
+    "target/f27/review/contracts.json": "f518ef9aefcccac9698df2ac62794539ea6bb54d0ff0f6898ff17bfda8fb797b",
+    "target/f27/review/disposition.json": "64cd10d442ec3705877109e84d6ce55834e70997f4fc84a9101413892adcb8d8",
+    "target/f27/due-provenance.json": "feebbdf0ec390446276266633f450d48bc296069526d0fa1c8fc17db0d349c4c",
+    "target/f27/servers/build-6.0.20.log": "ead2c7aeb3531e52cfdc567bee69a0417857bed36f405f6effc20d00cce0c3a1"
+  },
+  "implemented_source_sha256": {
+    "src/raw.rs": "4da226b2d683b2824daa2ab0588c2ecac01ad611783a29ad4c12e3ac7be9970a",
+    "src/raw/hash.rs": "792a5dad52983a566b9d3184a33e7c76fbf3b8fd61d7e7e9fc924951f9ad47dc",
+    "src/key.rs": "d2444126353e4476113a049922557cd71ea79282d2df9b4279743189a36d5859",
+    "examples/hash_mutation.rs": "278a14ac68e4bf28be4db7dfa4be1d8aecd6526d3c59cd817377b0c8a5b428c6",
+    "tools/hash_mutation.py": "475bbe9042fdc04d90490aaa209b4382591e713e0ad74c211246cbd473ae71ee",
+    "tools/hash_contracts.py": "1524a4996c04d0e67aec3a498d4360f006d85c35e1aa929b10c84c8522e13c2e",
+    "Cargo.toml": "44c0070ff64c006344fe792a9c5f540b18545f7d29007c1e15469d6972065900",
+    "Cargo.lock": "79dc4109d729f6e9dfd9a76f3d98840304905e747ce38aa0f0ae340b83c17709"
+  },
+  "limits": [
+    "6.0.20 never native-executed; legacy source/pure policy only",
+    "No raw readonly invalid execution, fake Context, API initialization in pure/compiler checks",
+    "No general alias/GIL/context/heap/refcount/replication/persistence/performance/support claim",
+    "Historical target receipts through F25 absent; no renewed verification claim",
+    "Early compile/harness errors preserved; passing receipts named explicitly; prior as-run hashes retained",
+    "CI/F21/from-scratch parked; no F28 until gate passes"
+  ]
+}
