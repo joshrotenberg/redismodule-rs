@@ -311,14 +311,41 @@ impl RedisKeyWritable {
         StringDMA::new(self)
     }
 
-    #[allow(clippy::must_use_candidate)]
-    pub fn hash_set(&self, field: &str, value: RedisString) -> raw::Status {
-        raw::hash_set(self.key_inner, field, value.as_ptr())
+    /// Set one text field, consuming the value. Interior NUL returns an error.
+    /// Returns preexisting fields replaced: insertion is 0, replacement is 1,
+    /// including replacement with identical bytes. This is not HSET's count.
+    /// Counts describe native physical storage, including lazily expired fields.
+    /// Does not replicate automatically.
+    pub fn hash_set(&self, field: &str, value: RedisString) -> Result<usize, RedisError> {
+        // Writable constructors request WRITE; the owner keeps the value live.
+        unsafe { raw::hash_set(self.key_inner, field, value.as_ptr()) }
     }
 
-    #[allow(clippy::must_use_candidate)]
-    pub fn hash_del(&self, field: &str) -> raw::Status {
-        raw::hash_del(self.key_inner, field)
+    /// Delete one text field. Returns 1 if a stored field was deleted, otherwise 0.
+    /// Interior NUL returns an error. Does not replicate automatically.
+    pub fn hash_del(&self, field: &str) -> Result<usize, RedisError> {
+        // This key was opened with WRITE by its constructor.
+        unsafe { raw::hash_del(self.key_inner, field) }
+    }
+
+    /// Set a byte field using borrowed strings; preserves all field/value bytes.
+    /// Returns preexisting fields replaced (0 or 1), not newly inserted fields.
+    /// Counts concern physical storage, not logical presence under field expiry.
+    /// Both owners remain reusable. Does not replicate automatically.
+    pub fn hash_set_by_string(
+        &self,
+        field: &RedisString,
+        value: &RedisString,
+    ) -> Result<usize, RedisError> {
+        // WRITE comes from construction; borrowed owners keep both inputs live.
+        unsafe { raw::hash_set_by_string(self.key_inner, field.as_ptr(), value.as_ptr()) }
+    }
+
+    /// Delete a byte field using a borrowed string. Returns 0 or 1 stored fields
+    /// deleted. The field remains reusable; this does not replicate automatically.
+    pub fn hash_del_by_string(&self, field: &RedisString) -> Result<usize, RedisError> {
+        // WRITE comes from construction and the borrowed field owner remains live.
+        unsafe { raw::hash_del_by_string(self.key_inner, field.as_ptr()) }
     }
 
     pub fn hash_get(&self, field: &str) -> Result<Option<RedisString>, RedisError> {

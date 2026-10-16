@@ -260,3 +260,7 @@ crate-type = ["cdylib"]
 [[example]]
 name = "raw_key_handoff"
 crate-type = ["cdylib"]
+
+[[example]]
+name = "hash_mutation"
+crate-type = ["cdylib"]
