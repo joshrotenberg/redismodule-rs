@@ -497,12 +497,16 @@ pub(crate) fn redis_command(attr: TokenStream, item: TokenStream) -> TokenStream
             argv: *mut *mut redis_module::raw::RedisModuleString,
             argc: i32,
         ) -> i32 {
-            let context = redis_module::Context::new(ctx);
+            let command = || {
+                let context = redis_module::Context::new(ctx);
 
-            // SAFETY: Redis supplies live callback argv/count with legal retention.
-            let args = unsafe { redis_module::decode_args(ctx, argv, argc) };
-            let response = #original_function_name(&context, args);
-            context.reply(response.map(|v| v.into())) as i32
+                // SAFETY: Redis supplies live callback argv/count with legal retention.
+                let args = unsafe { redis_module::decode_args(ctx, argv, argc) };
+                let response = #original_function_name(&context, args);
+                context.reply(response.map(|v| v.into())) as i32
+            };
+            // SAFETY: ctx is the context Redis passed to this command.
+            unsafe { redis_module::panic::run_command(ctx, command) }
         }
 
         #registration

@@ -197,7 +197,7 @@ extern "C" fn defrag_function(defrag_ctx: *mut raw::RedisModuleDefragCtx) {
         defrag_ctx: NonNull::new(defrag_ctx).expect("defrag_ctx is expected to be no NULL"),
     };
     DEFRAG_FUNCTIONS_LIST.iter().for_each(|callback| {
-        callback(&mut ctx);
+        crate::panic::run_callback("defrag function", || callback(&mut ctx), || ());
     });
 }
 
@@ -206,7 +206,7 @@ extern "C" fn defrag_start_function(defrag_ctx: *mut raw::RedisModuleDefragCtx) 
         defrag_ctx: NonNull::new(defrag_ctx).expect("defrag_ctx is expected to be no NULL"),
     };
     DEFRAG_START_FUNCTIONS_LIST.iter().for_each(|callback| {
-        callback(&mut ctx);
+        crate::panic::run_callback("defrag start function", || callback(&mut ctx), || ());
     });
 }
 
@@ -215,7 +215,7 @@ extern "C" fn defrag_end_function(defrag_ctx: *mut raw::RedisModuleDefragCtx) {
         defrag_ctx: NonNull::new(defrag_ctx).expect("defrag_ctx is expected to be no NULL"),
     };
     DEFRAG_END_FUNCTIONS_LIST.iter().for_each(|callback| {
-        callback(&mut ctx);
+        crate::panic::run_callback("defrag end function", || callback(&mut ctx), || ());
     });
 }
 

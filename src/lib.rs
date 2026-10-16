@@ -14,6 +14,7 @@ mod args;
 pub mod error;
 pub mod io;
 pub mod native_types;
+pub mod panic;
 pub mod raw;
 pub mod rediserror;
 mod redismodule;

@@ -21,12 +21,16 @@ macro_rules! redis_command {
             argv: *mut *mut $crate::raw::RedisModuleString,
             argc: c_int,
         ) -> c_int {
-            let context = $crate::Context::new(ctx);
+            let command = || {
+                let context = $crate::Context::new(ctx);
 
-            // SAFETY: Redis supplies live callback argv/count with legal retention.
-            let args = unsafe { $crate::decode_args(ctx, argv, argc) };
-            let response = $command_handler(&context, args);
-            context.reply(response.map(|v| v.into())) as c_int
+                // SAFETY: Redis supplies live callback argv/count with legal retention.
+                let args = unsafe { $crate::decode_args(ctx, argv, argc) };
+                let response = $command_handler(&context, args);
+                context.reply(response.map(|v| v.into())) as c_int
+            };
+            // SAFETY: ctx is the context Redis passed to this command.
+            unsafe { $crate::panic::run_command(ctx, command) }
         }
         /////////////////////
 
@@ -162,26 +166,32 @@ macro_rules! redis_event_handler {
             event: *const c_char,
             key: *mut $crate::raw::RedisModuleString,
         ) -> c_int {
-            let context = $crate::Context::new(ctx);
-
             fn borrow_key<'key>(_: &'key $crate::Context, key: &'key [u8]) -> &'key [u8] {
                 key
             }
-            // SAFETY: Redis supplies a live, read-only key for this synchronous
-            // callback. The local anchor bounds this view to the invocation,
-            // including handlers which would otherwise request 'static. It
-            // must not be retained or invalidated through a native alias.
-            // In particular, LOADED-event keys cannot be retained. Do not turn
-            // this borrowed pointer into an owning RedisString.
-            let redis_key = borrow_key(&context, unsafe {
-                $crate::RedisString::string_as_slice(key)
-            });
-            let event_str = unsafe { CStr::from_ptr(event) };
-            $event_handler(
-                &context,
-                $crate::NotifyEvent::from_bits_truncate(event_type),
-                &event_str.to_string_lossy(),
-                redis_key,
+            $crate::panic::run_callback(
+                "keyspace event handler",
+                || {
+                    let context = $crate::Context::new(ctx);
+
+                    // SAFETY: Redis supplies a live, read-only key for this synchronous
+                    // callback. The local anchor bounds this view to the invocation,
+                    // including handlers which would otherwise request 'static. It
+                    // must not be retained or invalidated through a native alias.
+                    // In particular, LOADED-event keys cannot be retained. Do not turn
+                    // this borrowed pointer into an owning RedisString.
+                    let redis_key = borrow_key(&context, unsafe {
+                        $crate::RedisString::string_as_slice(key)
+                    });
+                    let event_str = unsafe { CStr::from_ptr(event) };
+                    $event_handler(
+                        &context,
+                        $crate::NotifyEvent::from_bits_truncate(event_type),
+                        &event_str.to_string_lossy(),
+                        redis_key,
+                    );
+                },
+                || (),
             );
 
             $crate::raw::Status::Ok as c_int
@@ -306,7 +316,11 @@ macro_rules! redis_module {
             ctx: *mut $crate::raw::RedisModuleInfoCtx,
             for_crash_report: i32,
         ) {
-            $crate::basic_info_command_handler(&$crate::InfoContext::new(ctx), for_crash_report == 1);
+            $crate::panic::run_callback(
+                "INFO handler",
+                || $crate::basic_info_command_handler(&$crate::InfoContext::new(ctx), for_crash_report == 1),
+                || (),
+            );
         }
 
         #[no_mangle]
@@ -354,165 +368,173 @@ macro_rules! redis_module {
                 raw::REDISMODULE_APIVER_1 as c_int,
             ) } == raw::Status::Err as c_int { return raw::Status::Err as c_int; }
 
-            let context = $crate::Context::new(ctx);
-            unsafe {
-                let _ = $crate::MODULE_CONTEXT.set_context(&context);
-            }
-            // SAFETY: Redis supplies live callback argv/count with legal retention.
-            let args = unsafe { $crate::decode_args(ctx, argv, argc) };
-
-            $(
-                if (&$data_type).create_data_type(ctx).is_err() {
-                    return raw::Status::Err as c_int;
-                }
-            )*
-
-            $(
-                $(
-                    if let Some(RM_AddACLCategory) = raw::RedisModule_AddACLCategory {
-                        let module_acl_category = AclCategory::from($module_acl_category);
-                        if module_acl_category != AclCategory::None {
-                            let category = CString::new(format!("{module_acl_category}")).unwrap();
-                            if RM_AddACLCategory(ctx, category.as_ptr()) == raw::Status::Err as c_int {
-                                raw::redis_log(ctx, &format!("Error: failed to add ACL category `{module_acl_category}`"));
-                                return raw::Status::Err as c_int;
-                            }
-                        }
-                    } else {
-                        raw::redis_log(ctx, "Warning: Redis version does not support adding new ACL categories");
+            // Panics before Init cannot be caught: the Redis allocator, which a
+            // panic needs, is not available until then.
+            $crate::panic::run_callback(
+                "module load",
+                || {
+                    let context = $crate::Context::new(ctx);
+                    unsafe {
+                        let _ = $crate::MODULE_CONTEXT.set_context(&context);
                     }
-                )*
-            )?
+                    // SAFETY: Redis supplies live callback argv/count with legal retention.
+                    let args = unsafe { $crate::decode_args(ctx, argv, argc) };
 
-            $(
-                $(
-                    $crate::redis_command!(ctx, $name, $command, $flags, $firstkey, $lastkey, $keystep, $mandatory_command_acl_categories $(, $optional_command_acl_categories)?);
-                )*
-            )?
-
-            if $crate::commands::register_commands(&context) == raw::Status::Err {
-                return raw::Status::Err as c_int;
-            }
-
-            if let Err(e) = $crate::defrag::register_defrag_functions(&context) {
-                context.log_warning(&format!("{e}"));
-                return raw::Status::Err as c_int;
-            }
-
-            $(
-                $(
-                    $crate::redis_event_handler!(ctx, $(raw::NotifyEvent::$event_type |)+ raw::NotifyEvent::empty(), $event_handler);
-                )*
-            )?
-
-            $(
-                $(
                     $(
-                        let default = if $use_module_args {
-                            match get_i64_default_config_value(&args, $i64_configuration_name, $i64_default) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    context.log_warning(&format!("{e}"));
-                                    return raw::Status::Err as c_int;
-                                }
-                            }
-                        } else {
-                            $i64_default
-                        };
-                        if let Err(error) = register_i64_configuration(&context, $i64_configuration_name, $i64_configuration_val, default, $i64_min, $i64_max, $i64_flags_options, $i64_on_changed) {
-                            context.log_warning(&error.to_string());
+                        if (&$data_type).create_data_type(ctx).is_err() {
                             return raw::Status::Err as c_int;
                         }
                     )*
-                )?
-                $(
+
                     $(
-                        let default = if $use_module_args {
-                            match get_string_default_config_value(&args, $string_configuration_name, $string_default) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    context.log_warning(&format!("{e}"));
+                        $(
+                            if let Some(RM_AddACLCategory) = raw::RedisModule_AddACLCategory {
+                                let module_acl_category = AclCategory::from($module_acl_category);
+                                if module_acl_category != AclCategory::None {
+                                    let category = CString::new(format!("{module_acl_category}")).unwrap();
+                                    if RM_AddACLCategory(ctx, category.as_ptr()) == raw::Status::Err as c_int {
+                                        raw::redis_log(ctx, &format!("Error: failed to add ACL category `{module_acl_category}`"));
+                                        return raw::Status::Err as c_int;
+                                    }
+                                }
+                            } else {
+                                raw::redis_log(ctx, "Warning: Redis version does not support adding new ACL categories");
+                            }
+                        )*
+                    )?
+
+                    $(
+                        $(
+                            $crate::redis_command!(ctx, $name, $command, $flags, $firstkey, $lastkey, $keystep, $mandatory_command_acl_categories $(, $optional_command_acl_categories)?);
+                        )*
+                    )?
+
+                    if $crate::commands::register_commands(&context) == raw::Status::Err {
+                        return raw::Status::Err as c_int;
+                    }
+
+                    if let Err(e) = $crate::defrag::register_defrag_functions(&context) {
+                        context.log_warning(&format!("{e}"));
+                        return raw::Status::Err as c_int;
+                    }
+
+                    $(
+                        $(
+                            $crate::redis_event_handler!(ctx, $(raw::NotifyEvent::$event_type |)+ raw::NotifyEvent::empty(), $event_handler);
+                        )*
+                    )?
+
+                    $(
+                        $(
+                            $(
+                                let default = if $use_module_args {
+                                    match get_i64_default_config_value(&args, $i64_configuration_name, $i64_default) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            context.log_warning(&format!("{e}"));
+                                            return raw::Status::Err as c_int;
+                                        }
+                                    }
+                                } else {
+                                    $i64_default
+                                };
+                                if let Err(error) = register_i64_configuration(&context, $i64_configuration_name, $i64_configuration_val, default, $i64_min, $i64_max, $i64_flags_options, $i64_on_changed) {
+                                    context.log_warning(&error.to_string());
                                     return raw::Status::Err as c_int;
                                 }
-                            }
-                        } else {
-                            $string_default
-                        };
-                        if let Err(error) = register_string_configuration(&context, $string_configuration_name, $string_configuration_val, default, $string_flags_options, $string_on_changed) {
-                            context.log_warning(&error.to_string());
-                            return raw::Status::Err as c_int;
-                        }
-                    )*
-                )?
-                $(
-                    $(
-                        let default = if $use_module_args {
-                            match get_bool_default_config_value(&args, $bool_configuration_name, $bool_default) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    context.log_warning(&format!("{e}"));
+                            )*
+                        )?
+                        $(
+                            $(
+                                let default = if $use_module_args {
+                                    match get_string_default_config_value(&args, $string_configuration_name, $string_default) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            context.log_warning(&format!("{e}"));
+                                            return raw::Status::Err as c_int;
+                                        }
+                                    }
+                                } else {
+                                    $string_default
+                                };
+                                if let Err(error) = register_string_configuration(&context, $string_configuration_name, $string_configuration_val, default, $string_flags_options, $string_on_changed) {
+                                    context.log_warning(&error.to_string());
                                     return raw::Status::Err as c_int;
                                 }
-                            }
-                        } else {
-                            $bool_default
-                        };
-                        if let Err(error) = register_bool_configuration(&context, $bool_configuration_name, $bool_configuration_val, default, $bool_flags_options, $bool_on_changed) {
-                            context.log_warning(&error.to_string());
-                            return raw::Status::Err as c_int;
-                        }
-                    )*
-                )?
-                $(
-                    $(
-                        let default = if $use_module_args {
-                            match get_enum_default_config_value(&args, $enum_configuration_name, $enum_default) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    context.log_warning(&format!("{e}"));
+                            )*
+                        )?
+                        $(
+                            $(
+                                let default = if $use_module_args {
+                                    match get_bool_default_config_value(&args, $bool_configuration_name, $bool_default) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            context.log_warning(&format!("{e}"));
+                                            return raw::Status::Err as c_int;
+                                        }
+                                    }
+                                } else {
+                                    $bool_default
+                                };
+                                if let Err(error) = register_bool_configuration(&context, $bool_configuration_name, $bool_configuration_val, default, $bool_flags_options, $bool_on_changed) {
+                                    context.log_warning(&error.to_string());
                                     return raw::Status::Err as c_int;
                                 }
-                            }
-                        } else {
-                            $enum_default
-                        };
-                        if let Err(error) = register_enum_configuration(&context, $enum_configuration_name, $enum_configuration_val, default, $enum_flags_options, $enum_on_changed) {
-                            context.log_warning(&error.to_string());
-                            return raw::Status::Err as c_int;
+                            )*
+                        )?
+                        $(
+                            $(
+                                let default = if $use_module_args {
+                                    match get_enum_default_config_value(&args, $enum_configuration_name, $enum_default) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            context.log_warning(&format!("{e}"));
+                                            return raw::Status::Err as c_int;
+                                        }
+                                    }
+                                } else {
+                                    $enum_default
+                                };
+                                if let Err(error) = register_enum_configuration(&context, $enum_configuration_name, $enum_configuration_val, default, $enum_flags_options, $enum_on_changed) {
+                                    context.log_warning(&error.to_string());
+                                    return raw::Status::Err as c_int;
+                                }
+                            )*
+                        )?
+                        if let Some(load_config) = raw::RedisModule_LoadConfigs {
+                            load_config(ctx);
+                        }
+
+                        $(
+                            $crate::redis_command!(ctx, $module_config_get_command, |ctx, args: Vec<RedisString>| {
+                                module_config_get(ctx, args, $module_name)
+                            }, "", 0, 0, 0, "");
+                        )?
+
+                        $(
+                            $crate::redis_command!(ctx, $module_config_set_command, |ctx, args: Vec<RedisString>| {
+                                module_config_set(ctx, args, $module_name)
+                            }, "", 0, 0, 0, "");
+                        )?
+                    )?
+
+                    raw::register_info_function(ctx, Some(__info_func));
+
+                    if let Err(e) = register_server_events(&context) {
+                        context.log_warning(&format!("{e}"));
+                        return raw::Status::Err as c_int;
+                    }
+
+                    $(
+                        if $init_func(&context, &args) == $crate::Status::Err {
+                            return $crate::Status::Err as c_int;
                         }
                     )*
-                )?
-                if let Some(load_config) = raw::RedisModule_LoadConfigs {
-                    load_config(ctx);
-                }
 
-                $(
-                    $crate::redis_command!(ctx, $module_config_get_command, |ctx, args: Vec<RedisString>| {
-                        module_config_get(ctx, args, $module_name)
-                    }, "", 0, 0, 0, "");
-                )?
-
-                $(
-                    $crate::redis_command!(ctx, $module_config_set_command, |ctx, args: Vec<RedisString>| {
-                        module_config_set(ctx, args, $module_name)
-                    }, "", 0, 0, 0, "");
-                )?
-            )?
-
-            raw::register_info_function(ctx, Some(__info_func));
-
-            if let Err(e) = register_server_events(&context) {
-                context.log_warning(&format!("{e}"));
-                return raw::Status::Err as c_int;
-            }
-
-            $(
-                if $init_func(&context, &args) == $crate::Status::Err {
-                    return $crate::Status::Err as c_int;
-                }
-            )*
-
-            raw::Status::Ok as c_int
+                    raw::Status::Ok as c_int
+                },
+                || raw::Status::Err as c_int,
+            )
         }
 
         #[no_mangle]
@@ -522,14 +544,20 @@ macro_rules! redis_module {
         ) -> std::os::raw::c_int {
             use std::os::raw::c_int;
 
-            let context = $crate::Context::new(ctx);
-            $(
-                if $deinit_func(&context) == $crate::Status::Err {
-                    return $crate::Status::Err as c_int;
-                }
-            )*
+            $crate::panic::run_callback(
+                "module unload",
+                || {
+                    let context = $crate::Context::new(ctx);
+                    $(
+                        if $deinit_func(&context) == $crate::Status::Err {
+                            return $crate::Status::Err as c_int;
+                        }
+                    )*
 
-            $crate::raw::Status::Ok as c_int
+                    $crate::raw::Status::Ok as c_int
+                },
+                || $crate::raw::Status::Err as c_int,
+            )
         }
     }
 }

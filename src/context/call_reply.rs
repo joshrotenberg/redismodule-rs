@@ -874,7 +874,11 @@ extern "C" fn on_unblock<C: FnOnce(&Context, CallResult<'static>)>(
     let on_unblock = unsafe { Box::from_raw(private_data as *mut C) };
     let ctx = Context::new(ctx);
     let reply = NonNull::new(reply).map_or(Ok(CallReply::Unknown), create_call_reply);
-    on_unblock(&ctx, reply);
+    crate::panic::run_callback(
+        "blocking call unblock handler",
+        || on_unblock(&ctx, reply),
+        || (),
+    );
 }
 
 impl<'ctx> FutureCallReply<'ctx> {
