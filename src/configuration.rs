@@ -2,6 +2,7 @@ use crate::context::thread_safe::{RedisGILGuard, RedisLockIndicator};
 use crate::{raw, CallOptionResp, CallOptionsBuilder, CallResult, RedisValue};
 use crate::{Context, RedisError, RedisString};
 use bitflags::bitflags;
+use std::cell::RefCell;
 use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
 use std::os::raw::{c_char, c_int, c_longlong, c_void};
@@ -289,20 +290,30 @@ extern "C" fn string_configuration_set<T: ConfigurationValue<RedisString> + 'sta
             std::ptr::NonNull::new(val).expect("non-null configuration input"),
         )
     };
-    let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<RedisString, T>) };
-    private_data.set_val(name, new_val, err)
+    let private_data = unsafe { &*(privdata as *const StringConfigurationPrivateData<T>) };
+    private_data.data.set_val(name, new_val, err)
+}
+
+/// Private data of a string configuration.
+///
+/// Redis copies the string a getter returns and never frees it, so the last
+/// returned string is kept here and dropped when the next get replaces it.
+struct StringConfigurationPrivateData<T: ConfigurationValue<RedisString> + 'static> {
+    data: ConfigrationPrivateData<RedisString, T>,
+    last_reply: RefCell<Option<RedisString>>,
 }
 
 extern "C" fn string_configuration_get<T: ConfigurationValue<RedisString> + 'static>(
     _name: *const c_char,
     privdata: *mut c_void,
 ) -> *mut raw::RedisModuleString {
-    let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<RedisString, T>) };
+    let private_data = unsafe { &*(privdata as *const StringConfigurationPrivateData<T>) };
     // we know the GIL is held so it is safe to use Context::dummy().
-    private_data
-        .variable
-        .get(&ConfigurationContext::new())
-        .take()
+    let reply = private_data.data.get_val();
+    let reply_ptr = reply.as_ptr();
+    // Redis copied the previous reply when that get returned, so it can go now.
+    *private_data.last_reply.borrow_mut() = Some(reply);
+    reply_ptr
 }
 
 pub fn register_string_configuration<T: ConfigurationValue<RedisString>>(
@@ -315,10 +326,13 @@ pub fn register_string_configuration<T: ConfigurationValue<RedisString>>(
 ) {
     let name = CString::new(name).unwrap();
     let default = CString::new(default).unwrap();
-    let config_private_data = ConfigrationPrivateData {
-        variable,
-        on_changed,
-        phantom: PhantomData::<RedisString>,
+    let config_private_data = StringConfigurationPrivateData {
+        data: ConfigrationPrivateData {
+            variable,
+            on_changed,
+            phantom: PhantomData::<RedisString>,
+        },
+        last_reply: RefCell::new(None),
     };
     unsafe {
         raw::RedisModule_RegisterStringConfig.unwrap()(

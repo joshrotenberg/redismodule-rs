@@ -1163,6 +1163,34 @@ fn test_configuration() -> Result<()> {
 }
 
 #[test]
+fn test_string_configuration_getter_releases_replies() -> Result<()> {
+    let mut con = TestConnection::new("configuration_getter");
+    redis::cmd("CONFIG")
+        .arg(&["SET", "configuration_getter.text", "value"])
+        .query::<()>(&mut con)?;
+    for _ in 0..100 {
+        let reply: Vec<String> = redis::cmd("CONFIG")
+            .arg(&["GET", "configuration_getter.text"])
+            .query(&mut con)
+            .with_context(|| "failed to run CONFIG GET")?;
+        assert_eq!(reply, ["configuration_getter.text", "value"]);
+    }
+
+    // Each get replaces and frees the previous reply, so only the last one
+    // stays allocated.
+    let counts: Vec<i64> = redis::cmd("configuration_getter.strings").query(&mut con)?;
+    let (returned, live) = (counts[0], counts[1]);
+    assert!(returned >= 100, "{returned} getter strings returned");
+    assert!(
+        live <= 1,
+        "{live} of {returned} getter strings still allocated"
+    );
+
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_response() -> Result<()> {
     let mut con = TestConnection::new("response");
 

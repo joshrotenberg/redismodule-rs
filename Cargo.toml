@@ -45,6 +45,10 @@ name = "configuration"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "configuration_getter"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "proc_macro_commands"
 crate-type = ["cdylib"]
 
