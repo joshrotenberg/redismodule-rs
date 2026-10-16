@@ -419,7 +419,10 @@ macro_rules! redis_module {
                         } else {
                             $i64_default
                         };
-                        register_i64_configuration(&context, $i64_configuration_name, $i64_configuration_val, default, $i64_min, $i64_max, $i64_flags_options, $i64_on_changed);
+                        if let Err(error) = register_i64_configuration(&context, $i64_configuration_name, $i64_configuration_val, default, $i64_min, $i64_max, $i64_flags_options, $i64_on_changed) {
+                            context.log_warning(&error.to_string());
+                            return raw::Status::Err as c_int;
+                        }
                     )*
                 )?
                 $(
@@ -435,7 +438,10 @@ macro_rules! redis_module {
                         } else {
                             $string_default
                         };
-                        register_string_configuration(&context, $string_configuration_name, $string_configuration_val, default, $string_flags_options, $string_on_changed);
+                        if let Err(error) = register_string_configuration(&context, $string_configuration_name, $string_configuration_val, default, $string_flags_options, $string_on_changed) {
+                            context.log_warning(&error.to_string());
+                            return raw::Status::Err as c_int;
+                        }
                     )*
                 )?
                 $(
@@ -451,7 +457,10 @@ macro_rules! redis_module {
                         } else {
                             $bool_default
                         };
-                        register_bool_configuration(&context, $bool_configuration_name, $bool_configuration_val, default, $bool_flags_options, $bool_on_changed);
+                        if let Err(error) = register_bool_configuration(&context, $bool_configuration_name, $bool_configuration_val, default, $bool_flags_options, $bool_on_changed) {
+                            context.log_warning(&error.to_string());
+                            return raw::Status::Err as c_int;
+                        }
                     )*
                 )?
                 $(
@@ -467,7 +476,10 @@ macro_rules! redis_module {
                         } else {
                             $enum_default
                         };
-                        register_enum_configuration(&context, $enum_configuration_name, $enum_configuration_val, default, $enum_flags_options, $enum_on_changed);
+                        if let Err(error) = register_enum_configuration(&context, $enum_configuration_name, $enum_configuration_val, default, $enum_flags_options, $enum_on_changed) {
+                            context.log_warning(&error.to_string());
+                            return raw::Status::Err as c_int;
+                        }
                     )*
                 )?
                 if let Some(load_config) = raw::RedisModule_LoadConfigs {

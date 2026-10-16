@@ -1190,6 +1190,77 @@ fn test_string_configuration_getter_releases_replies() -> Result<()> {
     Ok(())
 }
 
+/// The path of an example module built by `cargo test`.
+fn example_module_path(module_name: &str) -> String {
+    let extension = if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    };
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    std::env::current_dir()
+        .expect("current directory")
+        .join(format!(
+            "target/{profile}/examples/lib{module_name}.{extension}"
+        ))
+        .display()
+        .to_string()
+}
+
+#[test]
+fn test_configuration_registration_errors_fail_the_load() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    let module = example_module_path("configuration_registration");
+
+    for kind in ["i64", "string", "bool", "enum"] {
+        let error = redis::cmd("MODULE")
+            .arg(&["LOAD", module.as_str(), kind])
+            .query::<String>(&mut con)
+            .expect_err("a duplicate configuration loaded");
+        assert!(
+            error.to_string().contains("Error loading the extension"),
+            "duplicate {kind}: {error}"
+        );
+        let configs: Vec<String> = redis::cmd("CONFIG")
+            .arg(&["GET", "configuration_registration.*"])
+            .query(&mut con)?;
+        assert!(configs.is_empty(), "{configs:?}");
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+
+    redis::cmd("MODULE")
+        .arg(&["LOAD", module.as_str(), "valid"])
+        .query::<()>(&mut con)
+        .with_context(|| "failed to load configuration_registration")?;
+    let configs: HashMap<String, String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration_registration.*"])
+        .query(&mut con)?;
+    let expected: HashMap<String, String> = [
+        ("i64", "7"),
+        ("string", "default"),
+        ("bool", "yes"),
+        ("enum", "One"),
+    ]
+    .into_iter()
+    .map(|(name, value)| {
+        (
+            format!("configuration_registration.{name}"),
+            value.to_owned(),
+        )
+    })
+    .collect();
+    assert_eq!(configs, expected);
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "configuration_registration"])
+        .query::<()>(&mut con)?;
+
+    Ok(())
+}
+
 #[test]
 fn test_response() -> Result<()> {
     let mut con = TestConnection::new("response");
