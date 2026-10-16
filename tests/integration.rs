@@ -12,6 +12,338 @@ use redis_module::RedisValue;
 mod utils;
 
 #[test]
+fn test_string_ownership_additional_encodings() -> Result<()> {
+    let mut con = TestConnection::new("string_ownership");
+    redis::cmd("CONFIG")
+        .arg("SET")
+        .arg("set-max-listpack-entries")
+        .arg(128)
+        .query::<String>(&mut con)?;
+    redis::cmd("SADD")
+        .arg("text-set")
+        .arg(&["a", "b"])
+        .query::<i64>(&mut con)?;
+    let encoding: String = redis::cmd("OBJECT")
+        .arg("ENCODING")
+        .arg("text-set")
+        .query(&mut con)?;
+    assert_eq!(encoding, "listpack");
+    for mode in [0, 1] {
+        let response: Value = redis::cmd("owner.scan")
+            .arg(mode)
+            .arg("text-set")
+            .arg(0)
+            .query(&mut con)?;
+        let Value::Bulk(top) = response else {
+            panic!("scan array")
+        };
+        assert_eq!(top[0], Value::Int(2));
+        let Value::Bulk(pairs) = &top[1] else {
+            panic!("pair array")
+        };
+        for row in pairs {
+            let Value::Bulk(pair) = row else {
+                panic!("pair")
+            };
+            assert_eq!(pair[1], Value::Nil);
+        }
+    }
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    if info.lines().any(|line| line == "redis_version:8.10.2") {
+        redis::cmd("HSET")
+            .arg("expires")
+            .arg(&["f", "value"])
+            .query::<i64>(&mut con)?;
+        redis::cmd("HEXPIRE")
+            .arg("expires")
+            .arg(3600)
+            .arg("FIELDS")
+            .arg(1)
+            .arg("f")
+            .query::<Value>(&mut con)?;
+        let encoding: String = redis::cmd("OBJECT")
+            .arg("ENCODING")
+            .arg("expires")
+            .query(&mut con)?;
+        assert_eq!(encoding, "listpackex");
+        for mode in [0, 1] {
+            let response: Value = redis::cmd("owner.scan")
+                .arg(mode)
+                .arg("expires")
+                .arg(0)
+                .query(&mut con)?;
+            let Value::Bulk(top) = response else {
+                panic!("scan array")
+            };
+            assert_eq!(top[0], Value::Int(1));
+            assert_eq!(
+                top[1],
+                Value::Bulk(vec![Value::Bulk(vec![
+                    Value::Data(b"f".to_vec()),
+                    Value::Data(b"value".to_vec())
+                ])])
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn test_string_ownership_rdb_and_transfer() -> Result<()> {
+    let mut con = TestConnection::new("string_ownership");
+    for bytes in [vec![], b"a\0\xff".to_vec(), (0..=255).collect()] {
+        let length: usize = redis::cmd("owner.transfer").arg(&bytes).query(&mut con)?;
+        assert_eq!(length, bytes.len());
+        assert_eq!(
+            redis::cmd("GET")
+                .arg("owner:transfer")
+                .query::<Vec<u8>>(&mut con)?,
+            bytes
+        );
+        redis::cmd("DEL")
+            .arg(&["source", "restored"])
+            .query::<i64>(&mut con)?;
+        redis::cmd("owner.rdbset")
+            .arg("source")
+            .arg(&bytes)
+            .query::<String>(&mut con)?;
+        let encoded: Vec<u8> = redis::cmd("DUMP").arg("source").query(&mut con)?;
+        redis::cmd("RESTORE")
+            .arg("restored")
+            .arg(0)
+            .arg(encoded)
+            .query::<String>(&mut con)?;
+        assert_eq!(
+            redis::cmd("owner.rdbget")
+                .arg("restored")
+                .query::<Vec<u8>>(&mut con)?,
+            bytes
+        );
+        redis::cmd("DEL")
+            .arg(&["source", "restored"])
+            .query::<i64>(&mut con)?;
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_string_ownership_lifecycle() -> Result<()> {
+    let mut con = TestConnection::new("string_ownership");
+    for mode in [0, 1] {
+        let calls: Vec<i64> = redis::cmd("owner.lifecycle").arg(mode).query(&mut con)?;
+        assert_eq!(calls, [3, 1, 2, 5, 1]);
+        // API call counts: create, deep-copy, retain, null-context free, producer free.
+        let version: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+        let version = version
+            .lines()
+            .find_map(|s| s.strip_prefix("redis_version:"))
+            .unwrap()
+            .as_bytes()
+            .to_vec();
+        let binary = (0..=255).cycle().take(8192).collect::<Vec<u8>>();
+        for (origin, key, expected) in [
+            ("argv", binary.clone(), vec![binary]),
+            (
+                "create",
+                b"unused".to_vec(),
+                vec![b"context-created".to_vec()],
+            ),
+            ("owned", b"unused".to_vec(), vec![b"owned".to_vec()]),
+            ("info", b"unused".to_vec(), vec![version]),
+            ("user", b"unused".to_vec(), vec![b"default".to_vec()]),
+            ("hash", b"h".to_vec(), vec![b"hv".to_vec(); 3]),
+            ("list", b"l".to_vec(), vec![b"a".to_vec(), b"b".to_vec()]),
+            ("stream", b"s".to_vec(), vec![b"f".to_vec(), b"sv".to_vec()]),
+        ] {
+            redis::cmd("DEL")
+                .arg(&["h", "l", "s"])
+                .query::<i64>(&mut con)?;
+            redis::cmd("HSET")
+                .arg("h")
+                .arg("f")
+                .arg("hv")
+                .query::<i64>(&mut con)?;
+            redis::cmd("RPUSH")
+                .arg("l")
+                .arg(&["a", "b"])
+                .query::<i64>(&mut con)?;
+            redis::cmd("XADD")
+                .arg("s")
+                .arg("1-0")
+                .arg("f")
+                .arg("sv")
+                .query::<String>(&mut con)?;
+            let count: usize = redis::cmd("owner.store")
+                .arg(origin)
+                .arg(mode)
+                .arg(&key)
+                .query(&mut con)?;
+            assert_eq!(count, expected.len());
+            // This is a separate later command. No old buffer pointer crosses phases.
+            let values: Vec<Vec<u8>> = redis::cmd("owner.read").query(&mut con)?;
+            assert_eq!(values, expected, "{origin}, AM={mode}");
+            assert_eq!(redis::cmd("owner.clear").query::<String>(&mut con)?, "OK");
+            assert!(redis::cmd("owner.read")
+                .query::<Vec<Vec<u8>>>(&mut con)?
+                .is_empty());
+        }
+    }
+    assert!(redis::cmd("owner.lifecycle")
+        .arg(2)
+        .query::<Value>(&mut con)
+        .is_err());
+    assert!(redis::cmd("owner.lifecycle")
+        .query::<Value>(&mut con)
+        .is_err());
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_string_ownership_scans() -> Result<()> {
+    let mut con = TestConnection::new("string_ownership");
+    for mode in [0, 1] {
+        for (kind, compact) in [
+            ("hash", true),
+            ("hash", false),
+            ("zset", true),
+            ("zset", false),
+            ("set", true),
+            ("set", false),
+        ] {
+            redis::cmd("DEL").arg("entries").query::<i64>(&mut con)?;
+            let limit = if compact { 512 } else { 0 };
+            if kind == "hash" {
+                redis::cmd("CONFIG")
+                    .arg("SET")
+                    .arg("hash-max-listpack-entries")
+                    .arg(limit)
+                    .query::<String>(&mut con)?;
+            }
+            if kind == "zset" {
+                redis::cmd("CONFIG")
+                    .arg("SET")
+                    .arg("zset-max-listpack-entries")
+                    .arg(limit)
+                    .query::<String>(&mut con)?;
+            }
+            if kind == "set" && !compact {
+                redis::cmd("CONFIG")
+                    .arg("SET")
+                    .arg("set-max-intset-entries")
+                    .arg(0)
+                    .query::<String>(&mut con)?;
+                redis::cmd("CONFIG")
+                    .arg("SET")
+                    .arg("set-max-listpack-entries")
+                    .arg(0)
+                    .query::<String>(&mut con)?;
+            }
+            if kind == "set" && compact {
+                redis::cmd("CONFIG")
+                    .arg("SET")
+                    .arg("set-max-intset-entries")
+                    .arg(512)
+                    .query::<String>(&mut con)?;
+            }
+            match kind {
+                "hash" => {
+                    redis::cmd("HSET")
+                        .arg("entries")
+                        .arg(&["1", "one", "2", "two"])
+                        .query::<i64>(&mut con)?;
+                }
+                "zset" => {
+                    redis::cmd("ZADD")
+                        .arg("entries")
+                        .arg(&["1", "1", "2", "2"])
+                        .query::<i64>(&mut con)?;
+                }
+                _ => {
+                    redis::cmd("SADD")
+                        .arg("entries")
+                        .arg(&["1", "2"])
+                        .query::<i64>(&mut con)?;
+                }
+            }
+            let encoding: String = redis::cmd("OBJECT")
+                .arg("ENCODING")
+                .arg("entries")
+                .query(&mut con)?;
+            let expected_encoding = match (kind, compact) {
+                ("set", true) => "intset",
+                ("set", false) | ("hash", false) => "hashtable",
+                ("zset", false) => "skiplist",
+                _ => "listpack",
+            };
+            assert_eq!(encoding, expected_encoding);
+            let response: Value = redis::cmd("owner.scan")
+                .arg(mode)
+                .arg("entries")
+                .arg(0)
+                .query(&mut con)?;
+            let Value::Bulk(top) = response else {
+                panic!("scan response must be an array")
+            };
+            let count: usize = redis::from_redis_value(&top[0])?;
+            let Value::Bulk(rows) = &top[1] else {
+                panic!("scan pairs must be an array")
+            };
+            let mut pairs = Vec::new();
+            for row in rows {
+                let Value::Bulk(pair) = row else {
+                    panic!("pair must be an array")
+                };
+                assert_eq!(pair.len(), 2);
+                let field: Vec<u8> = redis::from_redis_value(&pair[0])?;
+                let value: Option<Vec<u8>> = if pair[1] == Value::Nil {
+                    None
+                } else {
+                    Some(redis::from_redis_value(&pair[1])?)
+                };
+                pairs.push((field, value));
+            }
+            pairs.sort();
+            assert_eq!(count, 2);
+            let expected = match kind {
+                "hash" => vec![
+                    (b"1".to_vec(), Some(b"one".to_vec())),
+                    (b"2".to_vec(), Some(b"two".to_vec())),
+                ],
+                "zset" => vec![
+                    (b"1".to_vec(), Some(b"1".to_vec())),
+                    (b"2".to_vec(), Some(b"2".to_vec())),
+                ],
+                _ => vec![(b"1".to_vec(), None), (b"2".to_vec(), None)],
+            };
+            assert_eq!(pairs, expected);
+            redis::cmd("owner.scan")
+                .arg(mode)
+                .arg("entries")
+                .arg(1)
+                .query::<Value>(&mut con)?;
+            // A new completed scan verifies stopped-cursor cleanup/recovery.
+            let response: Value = redis::cmd("owner.scan")
+                .arg(mode)
+                .arg("entries")
+                .arg(0)
+                .query(&mut con)?;
+            let Value::Bulk(top) = response else {
+                panic!("scan response must be an array")
+            };
+            let again: usize = redis::from_redis_value(&top[0])?;
+            assert_eq!(again, 2);
+        }
+    }
+    let (count, keys): (usize, Vec<String>) = redis::cmd("owner.keys").query(&mut con)?;
+    assert_eq!(count, keys.len());
+    assert!(keys.contains(&"entries".to_owned()));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_string_view_contracts() -> Result<()> {
     let mut con = TestConnection::new("string_views");
     for text in ["", "café 日本語", "a\0b"] {

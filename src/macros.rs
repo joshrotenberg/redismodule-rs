@@ -23,7 +23,8 @@ macro_rules! redis_command {
         ) -> c_int {
             let context = $crate::Context::new(ctx);
 
-            let args = $crate::decode_args(ctx, argv, argc);
+            // SAFETY: Redis supplies live callback argv/count with legal retention.
+            let args = unsafe { $crate::decode_args(ctx, argv, argc) };
             let response = $command_handler(&context, args);
             context.reply(response.map(|v| v.into())) as c_int
         }
@@ -357,7 +358,8 @@ macro_rules! redis_module {
             unsafe {
                 let _ = $crate::MODULE_CONTEXT.set_context(&context);
             }
-            let args = $crate::decode_args(ctx, argv, argc);
+            // SAFETY: Redis supplies live callback argv/count with legal retention.
+            let args = unsafe { $crate::decode_args(ctx, argv, argc) };
 
             $(
                 if (&$data_type).create_data_type(ctx).is_err() {
