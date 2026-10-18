@@ -38,7 +38,7 @@ extern "C" fn scan_callback<C: FnMut(&Context, &RedisString, Option<&RedisKey>)>
 
 impl KeysCursor {
     pub fn new() -> Self {
-        let inner_cursor = unsafe { raw::RedisModule_ScanCursorCreate.unwrap()() };
+        let inner_cursor = unsafe { crate::__required_api!(RedisModule_ScanCursorCreate)() };
         Self { inner_cursor }
     }
 
@@ -48,7 +48,7 @@ impl KeysCursor {
         callback: &mut F,
     ) -> bool {
         let res = unsafe {
-            raw::RedisModule_Scan.unwrap()(
+            crate::__required_api!(RedisModule_Scan)(
                 ctx.ctx,
                 self.inner_cursor,
                 Some(scan_callback::<F>),
@@ -60,7 +60,7 @@ impl KeysCursor {
     }
 
     pub fn restart(&self) {
-        unsafe { raw::RedisModule_ScanCursorRestart.unwrap()(self.inner_cursor) };
+        unsafe { crate::__required_api!(RedisModule_ScanCursorRestart)(self.inner_cursor) };
     }
 }
 
@@ -72,6 +72,6 @@ impl Default for KeysCursor {
 
 impl Drop for KeysCursor {
     fn drop(&mut self) {
-        unsafe { raw::RedisModule_ScanCursorDestroy.unwrap()(self.inner_cursor) };
+        unsafe { crate::__required_api!(RedisModule_ScanCursorDestroy)(self.inner_cursor) };
     }
 }

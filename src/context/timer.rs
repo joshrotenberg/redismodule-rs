@@ -39,7 +39,7 @@ impl Context {
         let data = Box::into_raw(data);
 
         unsafe {
-            raw::RedisModule_CreateTimer.unwrap()(
+            crate::__required_api!(RedisModule_CreateTimer)(
                 self.ctx,
                 period
                     .as_millis()
@@ -60,8 +60,10 @@ impl Context {
     pub fn stop_timer<T>(&self, timer_id: RedisModuleTimerID) -> Result<T, RedisError> {
         let mut data: *mut c_void = std::ptr::null_mut();
 
-        let status: raw::Status =
-            unsafe { raw::RedisModule_StopTimer.unwrap()(self.ctx, timer_id, &mut data) }.into();
+        let status: raw::Status = unsafe {
+            crate::__available_api!(RedisModule_StopTimer)(self.ctx, timer_id, &mut data)
+        }
+        .into();
 
         if status != raw::Status::Ok {
             return Err(RedisError::Str(
@@ -87,7 +89,12 @@ impl Context {
         let mut data: *mut c_void = std::ptr::null_mut();
 
         let status: raw::Status = unsafe {
-            raw::RedisModule_GetTimerInfo.unwrap()(self.ctx, timer_id, &mut remaining, &mut data)
+            crate::__available_api!(RedisModule_GetTimerInfo)(
+                self.ctx,
+                timer_id,
+                &mut remaining,
+                &mut data,
+            )
         }
         .into();
 

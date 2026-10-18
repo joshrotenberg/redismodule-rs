@@ -1,3 +1,30 @@
+/// Evaluates to the module API function `$name`, or panics with its name when
+/// the running Redis does not provide it. Use it in an `unsafe` context.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __required_api {
+    ($name:ident) => {
+        match $crate::raw::$name {
+            Some(function) => function,
+            None => $crate::raw::api_unavailable(stringify!($name)),
+        }
+    };
+}
+
+/// Evaluates to the module API function `$name`, or returns `Err` from the
+/// enclosing function, converted with `Into`, when the running Redis does not
+/// provide it. Use it in an `unsafe` context.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __available_api {
+    ($name:ident) => {
+        match $crate::raw::$name {
+            Some(function) => function,
+            None => return Err($crate::raw::api_unavailable_error(stringify!($name)).into()),
+        }
+    };
+}
+
 #[macro_export]
 macro_rules! redis_command {
     ($ctx:expr,
@@ -35,7 +62,7 @@ macro_rules! redis_command {
         /////////////////////
 
         if unsafe {
-            $crate::raw::RedisModule_CreateCommand.unwrap()(
+            $crate::__required_api!(RedisModule_CreateCommand)(
                 $ctx,
                 name.as_ptr(),
                 Some(__do_command),
@@ -56,7 +83,7 @@ macro_rules! redis_command {
         let mandatory = AclCategory::from($mandatory_acl_categories);
         if let Some(RM_SetCommandACLCategories) = $crate::raw::RedisModule_SetCommandACLCategories {
             let command =
-            unsafe { $crate::raw::RedisModule_GetCommand.unwrap()($ctx, name.as_ptr()) };
+            unsafe { $crate::__required_api!(RedisModule_GetCommand)($ctx, name.as_ptr()) };
             if command.is_null() {
                 $crate::raw::redis_log(
                     $ctx,
@@ -207,7 +234,7 @@ macro_rules! redis_event_handler {
         }
 
         if !available_wanted_notification_flags.is_empty() && unsafe {
-            $crate::raw::RedisModule_SubscribeToKeyspaceEvents.unwrap()(
+            $crate::__required_api!(RedisModule_SubscribeToKeyspaceEvents)(
                 $ctx,
                 available_wanted_notification_flags.bits(),
                 Some(__handle_event),

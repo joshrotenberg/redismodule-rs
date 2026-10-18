@@ -180,7 +180,7 @@ impl RedisString {
     ) -> Self {
         if let Some(ctx) = producer_ctx {
             raw::string_retain_string(ptr::null_mut(), owned.as_ptr());
-            unsafe { raw::RedisModule_FreeString.unwrap()(ctx.as_ptr(), owned.as_ptr()) };
+            unsafe { crate::__required_api!(RedisModule_FreeString)(ctx.as_ptr(), owned.as_ptr()) };
         }
         Self { inner: owned }
     }
@@ -254,7 +254,8 @@ impl RedisString {
         s: *const c_char,
         len: libc::size_t,
     ) -> Self {
-        let inner = unsafe { raw::RedisModule_CreateString.unwrap()(ptr::null_mut(), s, len) };
+        let inner =
+            unsafe { crate::__required_api!(RedisModule_CreateString)(ptr::null_mut(), s, len) };
         Self {
             inner: NonNull::new(inner).expect("CreateString returned null"),
         }
@@ -425,7 +426,7 @@ impl RedisString {
     /// ```
     pub unsafe fn string_as_slice<'a>(ptr: *const raw::RedisModuleString) -> &'a [u8] {
         let mut len: libc::size_t = 0;
-        let bytes = unsafe { raw::RedisModule_StringPtrLen.unwrap()(ptr, &mut len) };
+        let bytes = unsafe { crate::__required_api!(RedisModule_StringPtrLen)(ptr, &mut len) };
 
         unsafe { slice::from_raw_parts(bytes.cast::<u8>(), len) }
     }
@@ -474,7 +475,7 @@ impl RedisString {
 impl Drop for RedisString {
     fn drop(&mut self) {
         // The producer's AM entry was resolved on ingress; no stored context.
-        unsafe { raw::RedisModule_FreeString.unwrap()(ptr::null_mut(), self.as_ptr()) };
+        unsafe { crate::__required_api!(RedisModule_FreeString)(ptr::null_mut(), self.as_ptr()) };
     }
 }
 
@@ -524,7 +525,7 @@ impl Clone for RedisString {
             // so we use [std::ptr::null_mut()] instead of the curren RedisString context.
             // We do this because we can not promise the new RedisString will not outlive the current
             // context and we want them to be independent.
-            unsafe { raw::RedisModule_CreateStringFromString.unwrap()(ptr::null_mut(), self.as_ptr()) };
+            unsafe { crate::__required_api!(RedisModule_CreateStringFromString)(ptr::null_mut(), self.as_ptr()) };
         unsafe {
             Self::from_owned_ptr(
                 None,
@@ -632,7 +633,7 @@ impl AsRef<[u8]> for RedisBuffer {
 impl Drop for RedisBuffer {
     fn drop(&mut self) {
         unsafe {
-            raw::RedisModule_Free.unwrap()(self.buffer.cast::<c_void>());
+            crate::__required_api!(RedisModule_Free)(self.buffer.cast::<c_void>());
         }
     }
 }

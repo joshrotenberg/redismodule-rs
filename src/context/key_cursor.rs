@@ -52,13 +52,13 @@ pub struct ScanKeyCursor {
 impl ScanKeyCursor {
     /// Creates a new scan cursor for the given key.
     pub fn new(key: RedisKey) -> Self {
-        let inner_cursor = unsafe { raw::RedisModule_ScanCursorCreate.unwrap()() };
+        let inner_cursor = unsafe { crate::__required_api!(RedisModule_ScanCursorCreate)() };
         Self { key, inner_cursor }
     }
 
     /// Restarts the cursor from the beginning.
     pub fn restart(&self) {
-        unsafe { raw::RedisModule_ScanCursorRestart.unwrap()(self.inner_cursor) };
+        unsafe { crate::__required_api!(RedisModule_ScanCursorRestart)(self.inner_cursor) };
     }
 
     /// Implements a call to `RedisModule_ScanKey` and calls the given closure for each callback invocation by ScanKey.
@@ -101,7 +101,7 @@ impl ScanKeyCursor {
 
         // Safety: The c-side initialized the function ptr and it is is never changed,
         // i.e. after module initialization the function pointers stay valid till the end of the program.
-        let scan_key = unsafe { raw::RedisModule_ScanKey.unwrap() };
+        let scan_key = unsafe { crate::__required_api!(RedisModule_ScanKey) };
 
         let mut data = CallbackData {
             ctx: self.key.ctx,
@@ -131,6 +131,6 @@ impl ScanKeyCursor {
 
 impl Drop for ScanKeyCursor {
     fn drop(&mut self) {
-        unsafe { raw::RedisModule_ScanCursorDestroy.unwrap()(self.inner_cursor) };
+        unsafe { crate::__required_api!(RedisModule_ScanCursorDestroy)(self.inner_cursor) };
     }
 }
