@@ -847,6 +847,79 @@ fn test_scan_key_for_each() -> Result<()> {
 }
 
 #[test]
+fn test_panicking_commands_reply_with_an_error() -> Result<()> {
+    let mut con = TestConnection::new("panic");
+
+    for (command, message) in [
+        ("panic.command", "panic.command was called"),
+        ("panic_proc_macro", "panic_proc_macro was called"),
+    ] {
+        let error = redis::cmd(command)
+            .query::<String>(&mut con)
+            .expect_err("a panicking command replied");
+        let error = error.to_string();
+        assert!(
+            error.contains("command panicked") && error.contains(message),
+            "{command}: {error}"
+        );
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+
+    // A panic in a scan callback comes back out of the scan and fails the
+    // command that started it.
+    redis::cmd("SET")
+        .arg(&["panic:key", "value"])
+        .query::<()>(&mut con)?;
+    let error = redis::cmd("panic.scan")
+        .query::<String>(&mut con)
+        .expect_err("a panicking scan replied");
+    assert!(
+        error.to_string().contains("scan callback panicked"),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    Ok(())
+}
+
+#[test]
+fn test_panicking_callbacks_are_logged() -> Result<()> {
+    let mut con = TestConnection::new("panic");
+
+    // The keyspace event handler panics on this key; the SET still succeeds.
+    redis::cmd("SET")
+        .arg(&["panic:notify", "value"])
+        .query::<()>(&mut con)?;
+    let value: String = redis::cmd("GET").arg("panic:notify").query(&mut con)?;
+    assert_eq!(value, "value");
+
+    let reply: String = redis::cmd("panic.timer").query(&mut con)?;
+    assert_eq!(reply, "timer created");
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    // A panicking setter fails the CONFIG SET; a panicking getter reads as 0.
+    let error = redis::cmd("CONFIG")
+        .arg(&["SET", "panic.number", "7"])
+        .query::<String>(&mut con)
+        .expect_err("a panicking setter was accepted");
+    assert!(
+        error.to_string().contains("configuration setter panicked"),
+        "{error}"
+    );
+    redis::cmd("CONFIG")
+        .arg(&["SET", "panic.number", "13"])
+        .query::<()>(&mut con)?;
+    let value: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "panic.number"])
+        .query(&mut con)?;
+    assert_eq!(value, ["panic.number", "0"]);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    Ok(())
+}
+
+#[test]
 fn test_stream_reader() -> Result<()> {
     let mut con = TestConnection::new("stream");
 

@@ -219,16 +219,24 @@ extern "C" fn i64_configuration_set<T: ConfigurationValue<i64> + 'static>(
     privdata: *mut c_void,
     err: *mut *mut raw::RedisModuleString,
 ) -> c_int {
-    let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<i64, T>) };
-    private_data.set_val(name, val, err)
+    crate::panic::run_config_set(err, || {
+        let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<i64, T>) };
+        private_data.set_val(name, val, err)
+    })
 }
 
 extern "C" fn i64_configuration_get<T: ConfigurationValue<i64> + 'static>(
     _name: *const c_char,
     privdata: *mut c_void,
 ) -> c_longlong {
-    let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<i64, T>) };
-    private_data.get_val()
+    crate::panic::run_callback(
+        "configuration getter",
+        || {
+            let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<i64, T>) };
+            private_data.get_val()
+        },
+        || 0,
+    )
 }
 
 /// Registers a numeric configuration. Call it during module OnLoad.
@@ -301,13 +309,15 @@ extern "C" fn string_configuration_set<T: ConfigurationValue<RedisString> + 'sta
     privdata: *mut c_void,
     err: *mut *mut raw::RedisModuleString,
 ) -> c_int {
-    let new_val = unsafe {
-        RedisString::retain_from_ptr(
-            std::ptr::NonNull::new(val).expect("non-null configuration input"),
-        )
-    };
-    let private_data = unsafe { &*(privdata as *const StringConfigurationPrivateData<T>) };
-    private_data.data.set_val(name, new_val, err)
+    crate::panic::run_config_set(err, || {
+        let new_val = unsafe {
+            RedisString::retain_from_ptr(
+                std::ptr::NonNull::new(val).expect("non-null configuration input"),
+            )
+        };
+        let private_data = unsafe { &*(privdata as *const StringConfigurationPrivateData<T>) };
+        private_data.data.set_val(name, new_val, err)
+    })
 }
 
 /// Private data of a string configuration.
@@ -323,13 +333,20 @@ extern "C" fn string_configuration_get<T: ConfigurationValue<RedisString> + 'sta
     _name: *const c_char,
     privdata: *mut c_void,
 ) -> *mut raw::RedisModuleString {
-    let private_data = unsafe { &*(privdata as *const StringConfigurationPrivateData<T>) };
-    // we know the GIL is held so it is safe to use Context::dummy().
-    let reply = private_data.data.get_val();
-    let reply_ptr = reply.as_ptr();
-    // Redis copied the previous reply when that get returned, so it can go now.
-    *private_data.last_reply.borrow_mut() = Some(reply);
-    reply_ptr
+    // Redis reads a null string as empty.
+    crate::panic::run_callback(
+        "configuration getter",
+        || {
+            let private_data = unsafe { &*(privdata as *const StringConfigurationPrivateData<T>) };
+            // we know the GIL is held so it is safe to use Context::dummy().
+            let reply = private_data.data.get_val();
+            let reply_ptr = reply.as_ptr();
+            // Redis copied the previous reply when that get returned, so it can go now.
+            *private_data.last_reply.borrow_mut() = Some(reply);
+            reply_ptr
+        },
+        std::ptr::null_mut,
+    )
 }
 
 /// Registers a string configuration. Call it during module OnLoad.
@@ -391,16 +408,24 @@ extern "C" fn bool_configuration_set<T: ConfigurationValue<bool> + 'static>(
     privdata: *mut c_void,
     err: *mut *mut raw::RedisModuleString,
 ) -> c_int {
-    let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<bool, T>) };
-    private_data.set_val(name, val != 0, err)
+    crate::panic::run_config_set(err, || {
+        let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<bool, T>) };
+        private_data.set_val(name, val != 0, err)
+    })
 }
 
 extern "C" fn bool_configuration_get<T: ConfigurationValue<bool> + 'static>(
     _name: *const c_char,
     privdata: *mut c_void,
 ) -> c_int {
-    let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<bool, T>) };
-    private_data.get_val() as i32
+    crate::panic::run_callback(
+        "configuration getter",
+        || {
+            let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<bool, T>) };
+            private_data.get_val() as i32
+        },
+        || 0,
+    )
 }
 
 /// Registers a boolean configuration. Call it during module OnLoad.
@@ -461,16 +486,18 @@ extern "C" fn enum_configuration_set<
     privdata: *mut c_void,
     err: *mut *mut raw::RedisModuleString,
 ) -> c_int {
-    let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<G, T>) };
-    let val: Result<G, _> = val.try_into();
-    match val {
-        Ok(val) => private_data.set_val(name, val, err),
-        Err(e) => {
-            let error_msg = RedisString::create(None, e.to_string().as_str());
-            unsafe { *err = error_msg.take() };
-            raw::REDISMODULE_ERR as i32
+    crate::panic::run_config_set(err, || {
+        let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<G, T>) };
+        let val: Result<G, _> = val.try_into();
+        match val {
+            Ok(val) => private_data.set_val(name, val, err),
+            Err(e) => {
+                let error_msg = RedisString::create(None, e.to_string().as_str());
+                unsafe { *err = error_msg.take() };
+                raw::REDISMODULE_ERR as i32
+            }
         }
-    }
+    })
 }
 
 extern "C" fn enum_configuration_get<
@@ -480,8 +507,15 @@ extern "C" fn enum_configuration_get<
     _name: *const c_char,
     privdata: *mut c_void,
 ) -> c_int {
-    let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<G, T>) };
-    private_data.get_val().into()
+    // Redis reports a value that matches no option as "unknown".
+    crate::panic::run_callback(
+        "configuration getter",
+        || {
+            let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<G, T>) };
+            private_data.get_val().into()
+        },
+        || -1,
+    )
 }
 
 /// Registers an enum configuration. Call it during module OnLoad.

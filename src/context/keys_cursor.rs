@@ -30,7 +30,7 @@ extern "C" fn scan_callback<C: FnMut(&Context, &RedisString, Option<&RedisKey>)>
         }))
     };
     let callback = unsafe { &mut *(private_data.cast::<C>()) };
-    callback(&context, &key_name, redis_key.as_deref());
+    crate::panic::defer_panic(|| callback(&context, &key_name, redis_key.as_deref()));
 
     // key_name releases our acquired reference; ManuallyDrop leaves the native
     // callback's borrowed key handle for its original owner to close.
@@ -55,6 +55,7 @@ impl KeysCursor {
                 callback as *mut F as *mut c_void,
             )
         };
+        crate::panic::resume_deferred_panic();
         res != 0
     }
 

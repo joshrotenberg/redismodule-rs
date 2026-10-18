@@ -70,7 +70,7 @@ extern "C" fn cron_callback(
         unsafe { &*(data as *mut raw::RedisModuleConfigChangeV1) };
     let ctx = Context::new(ctx);
     CRON_SERVER_EVENTS_LIST.iter().for_each(|callback| {
-        callback(&ctx, data.version);
+        crate::panic::run_callback("cron event handler", || callback(&ctx, data.version), || ());
     });
 }
 
@@ -87,7 +87,11 @@ extern "C" fn role_changed_callback(
     };
     let ctx = Context::new(ctx);
     ROLE_CHANGED_SERVER_EVENTS_LIST.iter().for_each(|callback| {
-        callback(&ctx, new_role);
+        crate::panic::run_callback(
+            "role changed event handler",
+            || callback(&ctx, new_role),
+            || (),
+        );
     });
 }
 
@@ -106,7 +110,11 @@ extern "C" fn loading_event_callback(
     };
     let ctx = Context::new(ctx);
     LOADING_SERVER_EVENTS_LIST.iter().for_each(|callback| {
-        callback(&ctx, loading_sub_event);
+        crate::panic::run_callback(
+            "loading event handler",
+            || callback(&ctx, loading_sub_event),
+            || (),
+        );
     });
 }
 
@@ -123,7 +131,11 @@ extern "C" fn flush_event_callback(
     };
     let ctx = Context::new(ctx);
     FLUSH_SERVER_EVENTS_LIST.iter().for_each(|callback| {
-        callback(&ctx, flush_sub_event);
+        crate::panic::run_callback(
+            "flush event handler",
+            || callback(&ctx, flush_sub_event),
+            || (),
+        );
     });
 }
 
@@ -142,7 +154,11 @@ extern "C" fn module_change_event_callback(
     MODULE_CHANGED_SERVER_EVENTS_LIST
         .iter()
         .for_each(|callback| {
-            callback(&ctx, module_changed_sub_event);
+            crate::panic::run_callback(
+                "module changed event handler",
+                || callback(&ctx, module_changed_sub_event),
+                || (),
+            );
         });
 }
 
@@ -171,7 +187,11 @@ extern "C" fn config_change_event_callback(
     CONFIG_CHANGED_SERVER_EVENTS_LIST
         .iter()
         .for_each(|callback| {
-            callback(&ctx, config_names.as_slice());
+            crate::panic::run_callback(
+                "config changed event handler",
+                || callback(&ctx, config_names.as_slice()),
+                || (),
+            );
         });
 }
 

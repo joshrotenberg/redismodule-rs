@@ -94,7 +94,7 @@ impl ScanKeyCursor {
             let field =
                 unsafe { RedisString::retain_from_ptr(NonNull::new(field).expect("scan field")) };
             let value = NonNull::new(value).map(|p| unsafe { RedisString::retain_from_ptr(p) });
-            (data.callback)(&key, &field, value.as_ref());
+            crate::panic::defer_panic(|| (data.callback)(&key, &field, value.as_ref()));
             // Release just our retained references. The borrowed key belongs to
             // Redis; set callbacks legally have no value string.
         }
@@ -115,6 +115,7 @@ impl ScanKeyCursor {
                 &mut data as *mut CallbackData<&mut F> as *mut c_void,
             )
         };
+        crate::panic::resume_deferred_panic();
 
         res != 0
     }

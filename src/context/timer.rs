@@ -131,5 +131,9 @@ where
     }
 
     let cb_data: CallbackData<F, T> = take_data(data);
-    (cb_data.callback)(ctx, cb_data.data);
+    crate::panic::run_callback(
+        "timer callback",
+        || (cb_data.callback)(ctx, cb_data.data),
+        || (),
+    );
 }
