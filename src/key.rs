@@ -513,7 +513,7 @@ impl RedisKeyWritable {
         let set_value = unsafe { crate::__available_api!(RedisModule_ModuleTypeSetValue) };
         let value = Box::into_raw(Box::new(value)).cast::<c_void>();
         let status: raw::Status =
-            unsafe { set_value(self.key_inner, *redis_type.raw_type.borrow(), value) }.into();
+            unsafe { set_value(self.key_inner, redis_type.raw_type(), value) }.into();
 
         status.into()
     }
@@ -776,7 +776,7 @@ pub fn verify_type(key_inner: *mut raw::RedisModuleKey, redis_type: &RedisType) 
         // The key exists; check its type
         let raw_type = unsafe { crate::__available_api!(RedisModule_ModuleTypeGetType)(key_inner) };
 
-        if raw_type != *redis_type.raw_type.borrow() {
+        if raw_type != redis_type.raw_type() {
             return Err(RedisError::WrongType);
         }
     }

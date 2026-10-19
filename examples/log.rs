@@ -71,7 +71,7 @@ fn log_io(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         raw::RedisModule_SaveDataTypeToString.unwrap()(
             ctx.get_raw(),
             (&mut message as *mut String).cast(),
-            *LOG_TYPE.raw_type.borrow(),
+            LOG_TYPE.raw_type(),
         )
     };
     if encoded.is_null() {
