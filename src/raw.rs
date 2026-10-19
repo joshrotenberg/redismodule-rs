@@ -1071,6 +1071,9 @@ pub fn is_io_error(rdb: *mut RedisModuleIO) -> bool {
     unsafe { crate::__required_api!(RedisModule_IsIOError)(rdb) != 0 }
 }
 
+/// Logs `msg` at notice level.
+/// Embedded NUL bytes are written as `\0`, which reads the same as a literal
+/// backslash and zero; other text is passed literally.
 pub fn redis_log(ctx: *mut RedisModuleCtx, msg: &str) {
     crate::logging::log_internal(ctx, crate::logging::RedisLogLevel::Notice, msg);
 }

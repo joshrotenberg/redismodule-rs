@@ -83,7 +83,8 @@ pub(crate) fn log_internal<L: Into<RedisLogLevel>>(
 
 /// This function should be used when a callback is returning a critical error
 /// to the caller since cannot load or save the data for some critical reason.
-/// Embedded NUL bytes in the message are rendered as `\0`; other text is passed literally.
+/// Embedded NUL bytes in the message are rendered as `\0`, which reads the same
+/// as a literal backslash and zero; other text is passed literally.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn log_io_error(io: *mut raw::RedisModuleIO, level: RedisLogLevel, message: &str) {
     if cfg!(test) {
@@ -104,7 +105,8 @@ pub fn log_io_error(io: *mut raw::RedisModuleIO, level: RedisLogLevel, message: 
 /// Log a message to the Redis log with the given log level, without
 /// requiring a context. This prevents Redis from including the module
 /// name in the logged message.
-/// Embedded NUL bytes are rendered as `\0`; other text is passed literally.
+/// Embedded NUL bytes are rendered as `\0`, which reads the same as a literal
+/// backslash and zero; other text is passed literally.
 pub fn log<T: AsRef<str>>(level: RedisLogLevel, message: T) {
     log_internal(ptr::null_mut(), level, message.as_ref());
 }
@@ -267,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn preserves_all_nonzero_bytes_of_utf8_text() {
+    fn preserves_code_points_up_to_u_00ff() {
         let input: String = (0..=255).map(char::from).collect();
         assert_eq!(
             sanitize_message(&input).to_bytes(),

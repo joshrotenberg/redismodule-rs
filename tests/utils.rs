@@ -88,6 +88,23 @@ pub struct ChildGuard {
 
 impl Drop for ChildGuard {
     fn drop(&mut self) {
+        // A server with a log file does not write its crash report to the
+        // test output, so print the log if the server failed, or if the test
+        // is failing while the server may still be writing its report.
+        if let Some(log_file) = &self.log_file {
+            let status = self.child.try_wait();
+            let failed = matches!(&status, Ok(Some(status)) if !status.success());
+            if failed || std::thread::panicking() {
+                if std::thread::panicking() {
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                println!("{} log ({status:?}):", self.name);
+                match fs::read_to_string(log_file) {
+                    Ok(log) => println!("{log}"),
+                    Err(e) => println!("Could not read {}: {e}", log_file.display()),
+                }
+            }
+        }
         if let Err(e) = self.child.kill() {
             println!("Could not kill {}: {e}", self.name);
         }

@@ -204,23 +204,30 @@ impl Deref for DetachedContextGuard {
 }
 
 impl DetachedContext {
+    /// Logs `message` at `level` with the module name.
+    /// Embedded NUL bytes are written as `\0`, which reads the same as a literal
+    /// backslash and zero; other text is passed literally.
     pub fn log(&self, level: RedisLogLevel, message: &str) {
         let c = self.ctx.load(Ordering::Relaxed);
         crate::logging::log_internal(c, level, message);
     }
 
+    /// Logs `message` at debug level, like [`Self::log`].
     pub fn log_debug(&self, message: &str) {
         self.log(RedisLogLevel::Debug, message);
     }
 
+    /// Logs `message` at notice level, like [`Self::log`].
     pub fn log_notice(&self, message: &str) {
         self.log(RedisLogLevel::Notice, message);
     }
 
+    /// Logs `message` at verbose level, like [`Self::log`].
     pub fn log_verbose(&self, message: &str) {
         self.log(RedisLogLevel::Verbose, message);
     }
 
+    /// Logs `message` at warning level, like [`Self::log`].
     pub fn log_warning(&self, message: &str) {
         self.log(RedisLogLevel::Warning, message);
     }
@@ -349,22 +356,29 @@ impl Context {
         }
     }
 
+    /// Logs `message` at `level` with the module name.
+    /// Embedded NUL bytes are written as `\0`, which reads the same as a literal
+    /// backslash and zero; other text is passed literally.
     pub fn log(&self, level: RedisLogLevel, message: &str) {
         crate::logging::log_internal(self.ctx, level, message);
     }
 
+    /// Logs `message` at debug level, like [`Self::log`].
     pub fn log_debug(&self, message: &str) {
         self.log(RedisLogLevel::Debug, message);
     }
 
+    /// Logs `message` at notice level, like [`Self::log`].
     pub fn log_notice(&self, message: &str) {
         self.log(RedisLogLevel::Notice, message);
     }
 
+    /// Logs `message` at verbose level, like [`Self::log`].
     pub fn log_verbose(&self, message: &str) {
         self.log(RedisLogLevel::Verbose, message);
     }
 
+    /// Logs `message` at warning level, like [`Self::log`].
     pub fn log_warning(&self, message: &str) {
         self.log(RedisLogLevel::Warning, message);
     }
