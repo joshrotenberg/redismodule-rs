@@ -102,6 +102,11 @@ jobs:
       - name: Test
         run: cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime
 
+      - name: Lint and test the system allocator fallback
+        run: |
+          cargo clippy --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime,system-allocator-fallback -- -D warnings
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime,system-allocator-fallback --test system_allocator_fallback
+
       - name: Doc
         run: cargo doc --no-default-features --features "all-features-but-xor bindgen/runtime min-redis-compatibility-version-${{ matrix.redis-version[0] }}"
 

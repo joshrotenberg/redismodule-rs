@@ -19,7 +19,51 @@ fn allocation_free_panic(message: &'static str) -> ! {
 }
 
 const REDIS_ALLOCATOR_NOT_AVAILABLE_MESSAGE: &str =
-    "Critical error: the Redis Allocator isn't available.\n";
+    "Critical error: the Redis Allocator isn't available. Outside a Redis server, \
+     such as in cargo test, enable the redis-module feature system-allocator-fallback.\n";
+
+/// Picks the allocator once per process for the `system-allocator-fallback`
+/// feature.
+#[cfg(feature = "system-allocator-fallback")]
+mod fallback {
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    use crate::raw;
+
+    const UNDECIDED: u8 = 0;
+    const REDIS: u8 = 1;
+    const SYSTEM: u8 = 2;
+
+    static SOURCE: AtomicU8 = AtomicU8::new(UNDECIDED);
+
+    /// Whether this process allocates from the system allocator. The first call
+    /// decides: the system allocator if `RedisModule_Alloc` is not set then,
+    /// Redis's if it is. Later calls return the same answer, so every block is
+    /// freed by the allocator that allocated it.
+    pub(super) fn use_system() -> bool {
+        match SOURCE.load(Ordering::Acquire) {
+            UNDECIDED => {
+                // SAFETY: a read of the API pointer, which Redis sets once in
+                // RedisModule_Init.
+                let source = if unsafe { raw::RedisModule_Alloc }.is_some() {
+                    REDIS
+                } else {
+                    SYSTEM
+                };
+                match SOURCE.compare_exchange(
+                    UNDECIDED,
+                    source,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    Ok(_) => source == SYSTEM,
+                    Err(decided) => decided == SYSTEM,
+                }
+            }
+            decided => decided == SYSTEM,
+        }
+    }
+}
 
 /// The alignment `RedisModule_Alloc` guarantees, like `malloc`: 16 bytes on
 /// 64-bit targets and 8 bytes on 32-bit targets.
@@ -103,18 +147,63 @@ unsafe fn dealloc_with(block: *mut u8, layout: Layout, free: impl FnOnce(*mut u8
     }
 }
 
+/// Whether [`RedisAlloc`] allocates from the system allocator in this process,
+/// which only the `system-allocator-fallback` feature allows. `redis_module!`
+/// fails the module load when it does, since Redis would not count that memory.
+#[doc(hidden)]
+pub fn __uses_system_allocator() -> bool {
+    #[cfg(feature = "system-allocator-fallback")]
+    {
+        fallback::use_system()
+    }
+    #[cfg(not(feature = "system-allocator-fallback"))]
+    {
+        false
+    }
+}
+
 /// Defines the Redis allocator. This allocator delegates the allocation
 /// and deallocation tasks to the Redis server when available, otherwise
-/// it panics.
+/// it aborts the process.
 ///
 /// `RedisModule_Alloc` aligns memory like `malloc`. Layouts that need more
 /// alignment are over-allocated and aligned within the allocation, so every
 /// alignment that [`Layout`] accepts is honored.
+///
+/// # Outside a Redis server
+///
+/// `redis_module!` installs this allocator as the global allocator, so a
+/// module's `cargo test` aborts at its first allocation: no server has set
+/// `RedisModule_Alloc`. The `system-allocator-fallback` feature makes the first
+/// allocation pick the allocator for the rest of the process: the system
+/// allocator if `RedisModule_Alloc` is not set at that point, Redis's if it is.
+///
+/// Enable it for tests only, through `[dev-dependencies]`. With Cargo's feature
+/// resolver 2, `cargo build` then builds the module without it; `cargo test` and
+/// `cargo build --examples` build it with the feature, which the next paragraph
+/// covers:
+///
+/// ```toml
+/// [dependencies]
+/// redis-module = "2"
+///
+/// [dev-dependencies]
+/// redis-module = { version = "2", features = ["system-allocator-fallback"] }
+/// ```
+///
+/// A module built with the feature still uses Redis's allocator when Redis
+/// loads it. If something in the module allocates before `RedisModule_OnLoad`,
+/// such as a constructor, the system allocator is picked first, and
+/// `redis_module!` fails the module load.
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RedisAlloc;
 
 unsafe impl GlobalAlloc for RedisAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        #[cfg(feature = "system-allocator-fallback")]
+        if fallback::use_system() {
+            return std::alloc::System.alloc(layout);
+        }
         match raw::RedisModule_Alloc {
             Some(alloc) => alloc_with(layout, |size| alloc(size).cast()),
             None => allocation_free_panic(REDIS_ALLOCATOR_NOT_AVAILABLE_MESSAGE),
@@ -122,6 +211,10 @@ unsafe impl GlobalAlloc for RedisAlloc {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        #[cfg(feature = "system-allocator-fallback")]
+        if fallback::use_system() {
+            return std::alloc::System.dealloc(ptr, layout);
+        }
         match raw::RedisModule_Free {
             Some(free) => dealloc_with(ptr, layout, |base| free(base.cast())),
             None => allocation_free_panic(REDIS_ALLOCATOR_NOT_AVAILABLE_MESSAGE),

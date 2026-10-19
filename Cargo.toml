@@ -185,6 +185,10 @@ redis-module-macros-internals = { path = "./redismodule-rs-macros-internals", ve
 log = "0.4"
 common = { path = "./common", package = "redis-module-common", version = "0.1.1" }
 
+[[test]]
+name = "system_allocator_fallback"
+required-features = ["system-allocator-fallback"]
+
 [dev-dependencies]
 anyhow = "1"
 redis = "0.23"
@@ -216,5 +220,9 @@ bindgen-static = ["bindgen/static"]
 # Enable dynamic linking to libclang in bindgen (default, incompatible with `bindgen-static`)
 bindgen-runtime = ["bindgen/runtime"]
 
+# Let RedisAlloc fall back to the system allocator outside a Redis server, such
+# as in cargo test. Enable it in [dev-dependencies] only; see RedisAlloc's docs.
+system-allocator-fallback = []
+
 # List all features here, that are not in a exclusive or relationship
-all-features-but-xor = []
+all-features-but-xor = ["system-allocator-fallback"]

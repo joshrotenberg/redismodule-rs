@@ -395,6 +395,16 @@ macro_rules! redis_module {
                 raw::REDISMODULE_APIVER_1 as c_int,
             ) } == raw::Status::Err as c_int { return raw::Status::Err as c_int; }
 
+            // With the system-allocator-fallback feature, an allocation made
+            // before Init picked the system allocator for the whole process.
+            if $crate::alloc::__uses_system_allocator() {
+                $crate::Context::new(ctx).log_warning(
+                    "The module allocated before RedisModule_OnLoad and uses the system allocator. \
+                     It was built with the system-allocator-fallback feature, which is meant for tests.",
+                );
+                return raw::Status::Err as c_int;
+            }
+
             // Panics before Init cannot be caught: the Redis allocator, which a
             // panic needs, is not available until then.
             $crate::panic::run_callback(
