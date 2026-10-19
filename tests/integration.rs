@@ -840,6 +840,23 @@ fn test_test_helper_err() -> Result<()> {
 }
 
 #[test]
+fn test_key_delete_result() -> Result<()> {
+    let mut con = TestConnection::new("string");
+
+    for command in ["string.del", "string.unlink"] {
+        redis::cmd("SET").arg(&["k", "v"]).query::<()>(&mut con)?;
+        let deleted: i64 = redis::cmd(command).arg("k").query(&mut con)?;
+        assert_eq!(deleted, 1, "{command} of an existing key");
+        let exists: i64 = redis::cmd("EXISTS").arg("k").query(&mut con)?;
+        assert_eq!(exists, 0);
+        let deleted: i64 = redis::cmd(command).arg("k").query(&mut con)?;
+        assert_eq!(deleted, 0, "{command} of a missing key");
+    }
+
+    Ok(())
+}
+
+#[test]
 fn test_string() -> Result<()> {
     let mut con = TestConnection::new("string");
 

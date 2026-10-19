@@ -54,6 +54,21 @@ fn string_create_nul(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     ]))
 }
 
+/// `string.del key` and `string.unlink key`: 1 if the key held a value.
+fn string_del(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter();
+    let command = args.next_string()?;
+    let key = args.next_arg()?;
+    args.done()?;
+    let key = ctx.open_key_writable(&key);
+    let deleted = if command.eq_ignore_ascii_case("string.unlink") {
+        key.unlink()?
+    } else {
+        key.delete()?
+    };
+    Ok(RedisValue::Integer(i64::from(deleted)))
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -64,6 +79,8 @@ redis_module! {
     commands: [
         ["string.set", string_set, "write fast deny-oom", 1, 1, 1, ""],
         ["string.get", string_get, "readonly", 1, 1, 1, ""],
+        ["string.del", string_del, "write", 1, 1, 1, ""],
+        ["string.unlink", string_del, "write", 1, 1, 1, ""],
         ["string.reply", string_reply, "", 0, 0, 0, ""],
         ["string.create_nul", string_create_nul, "", 0, 0, 0, ""],
     ],

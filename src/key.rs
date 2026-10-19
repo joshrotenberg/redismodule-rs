@@ -434,20 +434,35 @@ impl RedisKeyWritable {
         }
     }
 
+    /// Deletes the key. Returns whether it held a value.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the running Redis does not provide `RedisModule_DeleteKey`.
-    pub fn delete(&self) -> RedisResult {
-        unsafe { crate::__available_api!(RedisModule_DeleteKey)(self.key_inner) };
-        REDIS_OK
+    /// Returns an error if Redis does not delete the key, or the running Redis
+    /// does not provide `RedisModule_DeleteKey`.
+    pub fn delete(&self) -> Result<bool, RedisError> {
+        let delete = unsafe { crate::__available_api!(RedisModule_DeleteKey) };
+        let held_value = self.key_type() != KeyType::Empty;
+        if unsafe { delete(self.key_inner) } != raw::REDISMODULE_OK as c_int {
+            return Err(RedisError::Str("ERR Redis did not delete the key"));
+        }
+        Ok(held_value)
     }
 
+    /// Unlinks the key: deletes it and frees its value in the background.
+    /// Returns whether it held a value.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the running Redis does not provide `RedisModule_UnlinkKey`.
-    pub fn unlink(&self) -> RedisResult {
-        unsafe { crate::__available_api!(RedisModule_UnlinkKey)(self.key_inner) };
-        REDIS_OK
+    /// Returns an error if Redis does not unlink the key, or the running Redis
+    /// does not provide `RedisModule_UnlinkKey`.
+    pub fn unlink(&self) -> Result<bool, RedisError> {
+        let unlink = unsafe { crate::__available_api!(RedisModule_UnlinkKey) };
+        let held_value = self.key_type() != KeyType::Empty;
+        if unsafe { unlink(self.key_inner) } != raw::REDISMODULE_OK as c_int {
+            return Err(RedisError::Str("ERR Redis did not unlink the key"));
+        }
+        Ok(held_value)
     }
 
     /// # Panics
