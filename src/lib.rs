@@ -64,6 +64,7 @@ pub use crate::context::Context;
 pub use crate::context::ContextFlags;
 pub use crate::context::DetachedContext;
 pub use crate::context::DetachedContextGuard;
+pub use crate::context::YieldMode;
 pub use crate::context::{
     InfoContextBuilderFieldBottomLevelValue, InfoContextBuilderFieldTopLevelValue,
     InfoContextFieldBottomLevelData, InfoContextFieldTopLevelData, OneInfoSectionData,

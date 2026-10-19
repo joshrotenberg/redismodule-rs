@@ -900,6 +900,46 @@ fn test_hash_mutation_counts() -> Result<()> {
 }
 
 #[test]
+fn test_yield_lets_clients_get_busy_replies() -> Result<()> {
+    let mut con = TestConnection::new("yield");
+    redis::cmd("CONFIG")
+        .arg(&["SET", "busy-reply-threshold", "10"])
+        .query::<()>(&mut con)?;
+
+    let mut runner = con.connection()?;
+    let busy = std::thread::spawn(move || -> redis::RedisResult<i64> {
+        redis::cmd("yield.busy")
+            .arg(&["1000", "clients"])
+            .query(&mut runner)
+    });
+
+    // PING answers PONG until yield.busy starts, then BUSY while it yields.
+    // Without yielding, PING would wait for yield.busy to finish.
+    let mut error = None;
+    for _ in 0..90 {
+        match redis::cmd("PING").query::<String>(&mut con) {
+            Ok(_) => std::thread::sleep(Duration::from_millis(10)),
+            Err(busy_error) => {
+                error = Some(busy_error);
+                break;
+            }
+        }
+    }
+    let error = error.context("PING never got a BUSY reply")?;
+    assert_eq!(error.code(), Some("BUSY"), "{error}");
+    assert!(
+        error.to_string().contains("yield.busy is running"),
+        "{error}"
+    );
+
+    let yields = busy.join().expect("yield.busy thread panicked")?;
+    assert!(yields > 0);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    Ok(())
+}
+
+#[test]
 fn test_string() -> Result<()> {
     let mut con = TestConnection::new("string");
 

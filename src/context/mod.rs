@@ -110,6 +110,18 @@ fn call_failure(errno: Option<i32>) -> Option<String> {
     Some(format!("ERR RedisModule_Call failed: {reason}"))
 }
 
+/// What Redis may do while a command yields with [`Context::yield_now`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum YieldMode {
+    /// Process file events, such as replication traffic and client
+    /// connections, but no client commands. Time events, such as module
+    /// timers and the server cron, do not run.
+    Events,
+    /// Also process client commands. Redis rejects most of them with `-BUSY`
+    /// and runs the ones flagged `allow-busy`.
+    Clients,
+}
+
 impl CallOptionsBuilder {
     pub fn new() -> CallOptionsBuilder {
         Self::default()
@@ -786,6 +798,40 @@ impl Context {
     #[must_use]
     pub const fn get_raw(&self) -> *mut raw::RedisModuleCtx {
         self.ctx
+    }
+
+    /// Lets Redis process events during a long-running command, through
+    /// `RedisModule_Yield`. Call it periodically; Redis limits how often a call
+    /// does any work, and does none until the command has run for
+    /// `busy-reply-threshold`. It also works on a thread-safe context while its
+    /// lock is held.
+    ///
+    /// Module callbacks can run inside this call, for example the module's own
+    /// `allow-busy` commands or a server event handler. Do not hold a lock that
+    /// such a callback takes across the call: the main thread would wait on
+    /// itself.
+    ///
+    /// `busy_reply` replaces the text after `-BUSY` in the replies that other
+    /// clients get under [`YieldMode::Clients`]. CR, LF and NUL in it are
+    /// replaced with spaces.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the running Redis does not provide
+    /// `RedisModule_Yield` (before 7.0).
+    pub fn yield_now(&self, mode: YieldMode, busy_reply: Option<&str>) -> Result<(), RedisError> {
+        let yield_api = unsafe { crate::__available_api!(RedisModule_Yield) };
+        let flags = match mode {
+            YieldMode::Events => raw::REDISMODULE_YIELD_FLAG_NONE,
+            YieldMode::Clients => raw::REDISMODULE_YIELD_FLAG_CLIENTS,
+        };
+        let busy_reply = busy_reply.map(Self::str_as_legal_resp_string);
+        let busy_reply = busy_reply
+            .as_ref()
+            .map_or(ptr::null(), |text| text.as_ptr());
+        // SAFETY: Redis reads busy_reply only during the call.
+        unsafe { yield_api(self.ctx, flags as c_int, busy_reply) };
+        Ok(())
     }
 
     /// # Safety

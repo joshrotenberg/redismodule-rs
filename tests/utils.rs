@@ -22,6 +22,7 @@ pub fn start_redis(module_name: &str, port: u16) -> Result<Vec<ChildGuard>, &'st
 pub struct TestConnection {
     _guards: Vec<ChildGuard>,
     connection: Connection,
+    port: u16,
 }
 
 static TEST_PORT: AtomicU16 = AtomicU16::new(6479);
@@ -35,6 +36,7 @@ impl TestConnection {
         Self {
             _guards: start_redis(module_name, port).expect("Redis instance started."),
             connection: get_redis_connection(port).expect("Established connection to server."),
+            port,
         }
     }
 
@@ -51,7 +53,13 @@ impl TestConnection {
         Self {
             _guards: vec![guard],
             connection: get_redis_connection(port).expect("Established connection to server."),
+            port,
         }
+    }
+
+    /// Opens another connection to the same server.
+    pub fn connection(&self) -> Result<Connection> {
+        get_redis_connection(self.port)
     }
 
     /// Reads the server log of a connection made with [`TestConnection::with_log_file`].

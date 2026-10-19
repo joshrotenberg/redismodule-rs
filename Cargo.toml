@@ -33,6 +33,10 @@ name = "hash"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "yield"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "args"
 crate-type = ["cdylib"]
 
