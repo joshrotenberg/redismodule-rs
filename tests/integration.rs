@@ -343,6 +343,51 @@ fn test_string_ownership_scans() -> Result<()> {
     Ok(())
 }
 
+fn used_memory(con: &mut TestConnection) -> Result<i64> {
+    let info: String = redis::cmd("INFO").arg("memory").query(con)?;
+    info.lines()
+        .find_map(|line| line.strip_prefix("used_memory:"))
+        .context("INFO memory has no used_memory")?
+        .trim()
+        .parse()
+        .context("used_memory is not an integer")
+}
+
+#[test]
+fn test_string_ownership_does_not_leak() -> Result<()> {
+    let mut con = TestConnection::new("string_ownership");
+    redis::cmd("DEBUG")
+        .arg("POPULATE")
+        .arg(10_000)
+        .query::<()>(&mut con)?;
+    // Every leaked string holds at least a 16-byte object header, and each run
+    // produces 100k or more strings, so one leaked string per call exceeds this.
+    const SLACK: i64 = 256 * 1024;
+    for (producer, iterations, produced) in [
+        ("keys", 20, 200_000),
+        ("list", 100_000, 100_000),
+        ("info", 100_000, 100_000),
+    ] {
+        for mode in [0, 1] {
+            let churn = redis::cmd("owner.churn")
+                .arg(producer)
+                .arg(mode)
+                .arg(iterations)
+                .clone();
+            // The first run settles allocations that are made once.
+            assert_eq!(churn.query::<i64>(&mut con)?, produced);
+            let before = used_memory(&mut con)?;
+            assert_eq!(churn.query::<i64>(&mut con)?, produced);
+            let growth = used_memory(&mut con)? - before;
+            assert!(
+                growth < SLACK,
+                "{producer}, AM={mode}: used_memory grew by {growth} bytes over {produced} strings"
+            );
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn test_string_view_contracts() -> Result<()> {
     let mut con = TestConnection::new("string_views");

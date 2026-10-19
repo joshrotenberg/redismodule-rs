@@ -309,6 +309,54 @@ fn keys(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
         RedisValue::Array(result),
     ]))
 }
+// Runs one producer many times and drops every string it returns. The reply is a
+// count only, so a leaked string per call shows up in INFO used_memory.
+fn churn(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
+    let mut args = argv.into_iter().skip(1);
+    let producer = args.next_arg()?;
+    mode(ctx, args.next_i64()?)?;
+    let iterations = args.next_u64()?;
+    args.done()?;
+    let mut produced = 0;
+    match producer.try_as_str()? {
+        "keys" => {
+            let mut callback =
+                |_: &Context, _: &RedisString, _: Option<&redis_module::key::RedisKey>| {
+                    produced += 1;
+                };
+            for _ in 0..iterations {
+                let cursor = KeysCursor::new();
+                while cursor.scan(ctx, &mut callback) {}
+            }
+        }
+        "list" => {
+            let handle = ctx.open_key_writable(&RedisString::from_bytes(b"owner:churn"));
+            for i in 0..iterations {
+                // Longer than an embedded string, so each popped string is two allocations.
+                handle.list_push_tail(RedisString::from_bytes(&[b'v'; 64]));
+                let popped = if i % 2 == 0 {
+                    handle.list_pop_head()
+                } else {
+                    handle.list_pop_tail()
+                };
+                require(popped.is_some(), "ERR churn list empty")?;
+                produced += 1;
+            }
+        }
+        "info" => {
+            let info = ctx.server_info("server");
+            for _ in 0..iterations {
+                require(
+                    info.field("redis_version").is_some(),
+                    "ERR INFO version missing",
+                )?;
+                produced += 1;
+            }
+        }
+        _ => return Err(RedisError::Str("ERR unknown producer")),
+    }
+    Ok(RedisValue::Integer(produced))
+}
 // Ordinary save/load of one string reference, exercised through DUMP/RESTORE.
 unsafe extern "C" fn rdb_save(io: *mut raw::RedisModuleIO, value: *mut std::ffi::c_void) {
     raw::save_redis_string(io, unsafe { &*value.cast::<RedisString>() });
@@ -391,6 +439,7 @@ redis_module! {
         ["owner.clear",clear,"",0,0,0,""],
         ["owner.scan",scan,"readonly",0,0,0,""],
         ["owner.keys",keys,"readonly",0,0,0,""],
+        ["owner.churn",churn,"",0,0,0,""],
         ["owner.rdbset",rdb_set,"write",1,1,1,""],
         ["owner.rdbget",rdb_get,"readonly",1,1,1,""],
         ["owner.transfer",transfer,"readonly",0,0,0,""],
