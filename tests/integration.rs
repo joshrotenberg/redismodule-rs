@@ -1001,6 +1001,44 @@ fn test_stream_reader() -> Result<()> {
 }
 
 #[test]
+fn test_stream_iterator_stops_on_drop() -> Result<()> {
+    let mut con = TestConnection::new("stream");
+
+    for id in ["1-1", "1-2"] {
+        let _: String = redis::cmd("XADD")
+            .arg(&["s", id, "foo", "bar"])
+            .query(&mut con)
+            .with_context(|| "failed to add data to the stream")?;
+    }
+
+    // The second iterator starts only if dropping the first one stopped it.
+    let res: Vec<String> = redis::cmd("STREAM_FIRST_TWICE")
+        .arg(&["s"])
+        .query(&mut con)
+        .with_context(|| "failed to run STREAM_FIRST_TWICE")?;
+    assert_eq!(res, ["1-1", "1-1"]);
+
+    let res: usize = redis::cmd("XLEN")
+        .arg(&["s"])
+        .query(&mut con)
+        .with_context(|| "failed to run XLEN")?;
+    assert_eq!(res, 2);
+
+    let _: () = redis::cmd("DEL").arg(&["s"]).query(&mut con)?;
+    let _: String = redis::cmd("XADD")
+        .arg(&["s", "1-1", "foo", "bar"])
+        .query(&mut con)?;
+    let _: i64 = redis::cmd("XDEL").arg(&["s", "1-1"]).query(&mut con)?;
+    let res: Option<String> = redis::cmd("STREAM_POP")
+        .arg(&["s"])
+        .query(&mut con)
+        .with_context(|| "failed to run STREAM_POP on an empty stream")?;
+    assert_eq!(res, None);
+
+    Ok(())
+}
+
+#[test]
 #[cfg(any(
     feature = "min-redis-compatibility-version-8-0",
     feature = "min-redis-compatibility-version-7-4",
