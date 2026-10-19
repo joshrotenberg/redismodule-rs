@@ -110,7 +110,7 @@ unsafe fn dealloc_with(block: *mut u8, layout: Layout, free: impl FnOnce(*mut u8
 /// `RedisModule_Alloc` aligns memory like `malloc`. Layouts that need more
 /// alignment are over-allocated and aligned within the allocation, so every
 /// alignment that [`Layout`] accepts is honored.
-#[derive(Default, Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RedisAlloc;
 
 unsafe impl GlobalAlloc for RedisAlloc {

@@ -188,6 +188,23 @@ pub fn cron_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream 
     )
 }
 
+/// Proc macro which is set on a function that needs to be called when Redis
+/// shuts down. The function must accept a [Context].
+///
+/// Example:
+///
+/// ```rust,no_run,ignore
+/// #[shutdown_event_handler]
+/// fn shutdown_event_handler(ctx: &Context) { ... }
+/// ```
+#[proc_macro_attribute]
+pub fn shutdown_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::server_events::SHUTDOWN_SERVER_EVENTS_LIST),
+    )
+}
+
 /// The macro auto generate a [From] implementation that can convert the struct into [RedisValue].
 ///
 /// Example:

@@ -37,6 +37,7 @@ pub enum ServerEventHandler {
     Loading(fn(&Context, LoadingSubevent)),
     Flush(fn(&Context, FlushSubevent)),
     ModuleChange(fn(&Context, ModuleChangeSubevent)),
+    Shutdown(fn(&Context)),
 }
 
 #[distributed_slice()]
@@ -56,6 +57,9 @@ pub static CONFIG_CHANGED_SERVER_EVENTS_LIST: [fn(&Context, &[&str])] = [..];
 
 #[distributed_slice()]
 pub static CRON_SERVER_EVENTS_LIST: [fn(&Context, u64)] = [..];
+
+#[distributed_slice()]
+pub static SHUTDOWN_SERVER_EVENTS_LIST: [fn(&Context)] = [..];
 
 #[distributed_slice()]
 pub static INFO_COMMAND_HANDLER_LIST: [fn(&InfoContext, bool) -> RedisResult<()>] = [..];
@@ -162,6 +166,18 @@ extern "C" fn module_change_event_callback(
         });
 }
 
+extern "C" fn shutdown_event_callback(
+    ctx: *mut raw::RedisModuleCtx,
+    _eid: raw::RedisModuleEvent,
+    _subevent: u64,
+    _data: *mut ::std::os::raw::c_void,
+) {
+    let ctx = Context::new(ctx);
+    SHUTDOWN_SERVER_EVENTS_LIST.iter().for_each(|callback| {
+        crate::panic::run_callback("shutdown event handler", || callback(&ctx), || ());
+    });
+}
+
 extern "C" fn config_change_event_callback(
     ctx: *mut raw::RedisModuleCtx,
     _eid: raw::RedisModuleEvent,
@@ -195,9 +211,9 @@ extern "C" fn config_change_event_callback(
         });
 }
 
-fn register_single_server_event_type<T>(
+fn register_single_server_event_type<F>(
     ctx: &Context,
-    callbacks: &[fn(&Context, T)],
+    callbacks: &[F],
     server_event: u64,
     inner_callback: raw::RedisModuleEventCallback,
 ) -> Result<(), RedisError> {
@@ -256,6 +272,12 @@ pub fn register_server_events(ctx: &Context) -> Result<(), RedisError> {
         &CRON_SERVER_EVENTS_LIST,
         raw::REDISMODULE_EVENT_CRON_LOOP,
         Some(cron_callback),
+    )?;
+    register_single_server_event_type(
+        ctx,
+        &SHUTDOWN_SERVER_EVENTS_LIST,
+        raw::REDISMODULE_EVENT_SHUTDOWN,
+        Some(shutdown_event_callback),
     )?;
     Ok(())
 }

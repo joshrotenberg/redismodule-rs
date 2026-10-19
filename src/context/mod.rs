@@ -802,6 +802,15 @@ impl Context {
         unsafe { crate::__required_api!(RedisModule_SetContextUser)(self.ctx, ptr::null_mut()) };
     }
 
+    /// Returns the number of keys in the currently selected database.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the running Redis does not provide `RedisModule_DbSize`.
+    pub fn dbsize(&self) -> u64 {
+        unsafe { crate::__required_api!(RedisModule_DbSize)(self.ctx) }
+    }
+
     /// Verify the the given user has the give ACL permission on the given key.
     /// Return Ok(()) if the user has the permissions or error (with relevant error message)
     /// if the validation failed.

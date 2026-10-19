@@ -1,5 +1,5 @@
 use redis_module::InfoContext;
-use redis_module::{redis_module, Context, RedisError, RedisResult, RedisString};
+use redis_module::{redis_module, Context, RedisError, RedisResult, RedisString, RedisValue};
 
 fn test_helper_version(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
     let ver = ctx.get_redis_version()?;
@@ -30,6 +30,10 @@ fn test_helper_err(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok(().into())
 }
 
+fn test_helper_dbsize(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::Integer(ctx.dbsize() as i64))
+}
+
 fn add_info(ctx: &InfoContext, _for_crash_report: bool) {
     if let Ok(section) = ctx
         .builder()
@@ -56,5 +60,6 @@ redis_module! {
         ["test_helper._version_rm_call", test_helper_version_rm_call, "", 0, 0, 0, ""],
         ["test_helper.name", test_helper_command_name, "", 0, 0, 0, ""],
         ["test_helper.err", test_helper_err, "", 0, 0, 0, ""],
+        ["test_helper.dbsize", test_helper_dbsize, "readonly", 0, 0, 0, ""],
     ],
 }

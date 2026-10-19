@@ -705,6 +705,28 @@ fn test_keys_pos() -> Result<()> {
 }
 
 #[test]
+fn test_dbsize() -> Result<()> {
+    let mut con = TestConnection::new("test_helper");
+
+    let dbsize = |con: &mut TestConnection| -> Result<i64> {
+        redis::cmd("test_helper.dbsize")
+            .query(con)
+            .with_context(|| "failed to run test_helper.dbsize")
+    };
+    assert_eq!(dbsize(&mut con)?, 0);
+    redis::cmd("MSET")
+        .arg(&["a", "1", "b", "2", "c", "3"])
+        .query::<()>(&mut con)?;
+    assert_eq!(dbsize(&mut con)?, 3);
+
+    // dbsize counts the selected database only.
+    redis::cmd("SELECT").arg(1).query::<()>(&mut con)?;
+    assert_eq!(dbsize(&mut con)?, 0);
+
+    Ok(())
+}
+
+#[test]
 fn test_helper_version() -> Result<()> {
     let mut con = TestConnection::new("test_helper");
 
@@ -1243,6 +1265,21 @@ fn test_server_event() -> Result<()> {
     let res: i64 = redis::cmd("num_crons").query(&mut con)?;
 
     assert!(res > 0);
+
+    Ok(())
+}
+
+#[test]
+fn test_shutdown_event() -> Result<()> {
+    let mut con = TestConnection::with_log_file("server_events");
+
+    // The server exits, so the reply is a connection error.
+    let _ = redis::cmd("SHUTDOWN").arg("NOSAVE").query::<()>(&mut con);
+    let log = con.server_log()?;
+    assert!(
+        log.contains("server_events: shutdown event received"),
+        "{log}"
+    );
 
     Ok(())
 }
