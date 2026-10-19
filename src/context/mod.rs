@@ -964,7 +964,9 @@ impl Context {
         let set_context_user = unsafe { crate::__available_api!(RedisModule_SetContextUser) };
         let user = unsafe { get_user(user_name.as_ptr()) };
         if user.is_null() {
-            return Err(RedisError::Str("User does not exists or disabled"));
+            return Err(RedisError::Str(
+                "ERR the user does not exist or is disabled",
+            ));
         }
         unsafe { set_context_user(self.ctx, user) };
         Ok(ContextUserScope::new(self, user))
@@ -997,7 +999,9 @@ impl Context {
         let free_user = unsafe { crate::__available_api!(RedisModule_FreeModuleUser) };
         let user = unsafe { get_user(user_name.as_ptr()) };
         if user.is_null() {
-            return Err(RedisError::Str("User does not exists or disabled"));
+            return Err(RedisError::Str(
+                "ERR the user does not exist or is disabled",
+            ));
         }
         let status = check(user);
         let errno = std::io::Error::last_os_error().raw_os_error();
@@ -1022,7 +1026,9 @@ impl Context {
         if status == raw::REDISMODULE_OK as c_int {
             Ok(())
         } else {
-            Err(RedisError::Str("User does not have permissions on key"))
+            Err(RedisError::Str(
+                "NOPERM User does not have permissions on the key",
+            ))
         }
     }
 

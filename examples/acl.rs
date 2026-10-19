@@ -7,10 +7,7 @@ fn verify_key_access_for_user(ctx: &Context, args: Vec<RedisString>) -> RedisRes
     let mut args = args.into_iter().skip(1);
     let user = args.next_arg()?;
     let key = args.next_arg()?;
-    let res = ctx.acl_check_key_permission(&user, &key, &AclPermissions::all());
-    if let Err(err) = res {
-        return Err(RedisError::String(format!("Err {err}")));
-    }
+    ctx.acl_check_key_permission(&user, &key, &AclPermissions::all())?;
     Ok(RedisValue::SimpleStringStatic("OK"))
 }
 

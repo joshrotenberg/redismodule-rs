@@ -1397,7 +1397,12 @@ fn test_acl_command_and_channel_checks() -> Result<()> {
         &["nobody", "GET", "x"],
     )
     .expect_err("an unknown user passed");
-    assert!(error.to_string().contains("does not exists"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("the user does not exist or is disabled"),
+        "{error}"
+    );
 
     // Channels.
     for (channel, access, allowed) in [
@@ -1462,13 +1467,12 @@ fn test_verify_acl_on_user() -> Result<()> {
         .arg(&["alice", "not_allow"])
         .query(&mut con);
 
-    assert!(res.is_err());
-    if let Err(res) = res {
-        assert_eq!(
-            res.to_string(),
-            "Err: User does not have permissions on key"
-        );
-    }
+    let error = res.expect_err("alice may not access not_allow");
+    assert_eq!(error.code(), Some("NOPERM"), "{error}");
+    assert!(
+        error.to_string().contains("permissions on the key"),
+        "{error}"
+    );
 
     Ok(())
 }
