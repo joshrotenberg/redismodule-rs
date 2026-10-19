@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::mem::ManuallyDrop;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::os::raw::c_void;
@@ -78,11 +79,16 @@ impl RedisKey {
 
     /// Construct a new `RedisKey` from a pointer to a redismodule context and a key.
     ///
+    /// The returned `RedisKey` owns the key: dropping it calls `RedisModule_CloseKey`
+    /// unless `key_inner` is null.
+    ///
     /// # Safety
     ///
     /// The caller must ensure:
     /// 1. The `ctx` pointer remains valid for the lifetime of the `RedisKey`.
-    /// 2. The `key_inner` pointer remains valid for the lifetime of the `RedisKey`.
+    /// 2. `key_inner` is null (a read-only open of a missing key returns null), or a
+    ///    key that is open, remains valid for the lifetime of the `RedisKey`, and has
+    ///    no other owner that will close it.
     /// 3. `ctx` is the actual native opening/producer context for this key; string
     ///    getters use it to resolve any AutoMemory registrations.
     pub const unsafe fn from_raw_parts(
@@ -94,11 +100,17 @@ impl RedisKey {
 
     /// Decomposes a `RedisKey` into its raw components: `(redismodule context pointer, key pointer)`.
     ///
-    /// After calling this function, the caller is responsible for cleaning up the raw key previously managed by the `RedisKey`.
-    /// The only way to do this safely is to convert the raw redismodule context and key pointers back into a `RedisKey` with
-    /// the [`from_raw_parts`][Self::from_raw_parts] function, allowing the destructor to perform the cleanup.
+    /// The key stays open, and closing it becomes the caller's job: either rebuild one
+    /// owner with [`from_raw_parts`][Self::from_raw_parts] and let it drop, or call
+    /// `RedisModule_CloseKey` once. A null key pointer needs no close. Either way the
+    /// key must be closed while the context that opened it is still valid. If the
+    /// caller does neither, the key stays open until Redis frees it with the context's
+    /// AutoMemory, or leaks if AutoMemory is off.
+    #[must_use = "the key stays open; close it or rebuild a RedisKey with from_raw_parts"]
     pub fn to_raw_parts(self) -> (*mut raw::RedisModuleCtx, *mut raw::RedisModuleKey) {
-        (self.ctx, self.key_inner)
+        // Skip Drop, which would close the key being handed over.
+        let key = ManuallyDrop::new(self);
+        (key.ctx, key.key_inner)
     }
 
     /// # Errors
@@ -755,4 +767,38 @@ pub fn verify_type(key_inner: *mut raw::RedisModuleKey, redis_type: &RedisType) 
     }
 
     REDIS_OK
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Outside a Redis server every module API pointer is None, so a RedisKey that
+    // closes its key panics with the name of RedisModule_CloseKey.
+
+    fn open_key_pointer() -> *mut raw::RedisModuleKey {
+        NonNull::dangling().as_ptr()
+    }
+
+    #[test]
+    fn to_raw_parts_leaves_the_key_open() {
+        let key = unsafe { RedisKey::from_raw_parts(ptr::null_mut(), open_key_pointer()) };
+        let parts = std::panic::catch_unwind(|| key.to_raw_parts())
+            .expect("to_raw_parts must not close the key");
+        assert_eq!(parts, (ptr::null_mut(), open_key_pointer()));
+    }
+
+    #[test]
+    fn the_rebuilt_owner_closes_the_key() {
+        let key = unsafe { RedisKey::from_raw_parts(ptr::null_mut(), open_key_pointer()) };
+        let (ctx, key_inner) = key.to_raw_parts();
+        let payload = std::panic::catch_unwind(|| {
+            drop(unsafe { RedisKey::from_raw_parts(ctx, key_inner) });
+        })
+        .unwrap_err();
+        assert_eq!(
+            payload.downcast_ref::<String>().map(String::as_str),
+            Some("RedisModule_CloseKey is not available in this Redis server")
+        );
+    }
 }
