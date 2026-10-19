@@ -1190,6 +1190,86 @@ fn test_set_acl_categories_commands() -> Result<()> {
 }
 
 #[test]
+fn test_acl_command_and_channel_checks() -> Result<()> {
+    let mut con = TestConnection::new("acl");
+
+    redis::cmd("ACL")
+        .arg(&["SETUSER", "bob", "on", ">pass", "~*", "&news:*", "+get"])
+        .query::<()>(&mut con)?;
+
+    let check = |con: &mut TestConnection, cmd: &str, args: &[&str]| {
+        redis::cmd(cmd).arg(args).query::<String>(con)
+    };
+
+    // Commands.
+    assert_eq!(
+        check(
+            &mut con,
+            "verify_command_access_for_user",
+            &["bob", "GET", "x"]
+        )?,
+        "OK"
+    );
+    let error = check(
+        &mut con,
+        "verify_command_access_for_user",
+        &["bob", "SET", "x", "1"],
+    )
+    .expect_err("bob may not run SET");
+    assert_eq!(error.code(), Some("NOPERM"), "{error}");
+    let error = check(
+        &mut con,
+        "verify_command_access_for_user",
+        &["bob", "NOSUCHCMD"],
+    )
+    .expect_err("an unknown command passed");
+    assert!(error.to_string().contains("unknown command"), "{error}");
+    let error = check(
+        &mut con,
+        "verify_command_access_for_user",
+        &["nobody", "GET", "x"],
+    )
+    .expect_err("an unknown user passed");
+    assert!(error.to_string().contains("does not exists"), "{error}");
+
+    // Channels.
+    for (channel, access, allowed) in [
+        ("news:1", "publish", true),
+        ("news:1", "subscribe", true),
+        ("news:*", "psubscribe", true),
+        ("sports:1", "publish", false),
+        ("*", "psubscribe", false),
+    ] {
+        let res = check(
+            &mut con,
+            "verify_channel_access_for_user",
+            &["bob", channel, access],
+        );
+        match (res, allowed) {
+            (Ok(reply), true) => assert_eq!(reply, "OK"),
+            (Err(error), false) => assert_eq!(error.code(), Some("NOPERM"), "{error}"),
+            (res, _) => panic!("{access} {channel}: unexpected {res:?}"),
+        }
+    }
+
+    // The ACL log.
+    assert_eq!(
+        check(&mut con, "log_channel_denial", &["bob", "sports:1"])?,
+        "OK"
+    );
+    let log: Vec<HashMap<String, redis::Value>> =
+        redis::cmd("ACL").arg(&["LOG", "1"]).query(&mut con)?;
+    let entry = &log[0];
+    let text = |field: &str| redis::from_redis_value::<String>(&entry[field]).unwrap();
+    assert_eq!(text("username"), "bob");
+    assert_eq!(text("object"), "sports:1");
+    assert_eq!(text("reason"), "channel");
+    assert_eq!(text("context"), "module");
+
+    Ok(())
+}
+
+#[test]
 fn test_verify_acl_on_user() -> Result<()> {
     let mut con = TestConnection::new("acl");
 

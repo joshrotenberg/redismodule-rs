@@ -48,6 +48,8 @@ pub use crate::context::keys_cursor::KeysCursor;
 pub use crate::context::server_events;
 pub use common::AclCategory;
 
+pub use crate::context::AclChannelPermissions;
+pub use crate::context::AclLogReason;
 pub use crate::context::AclPermissions;
 #[cfg(any(
     feature = "min-redis-compatibility-version-8-0",

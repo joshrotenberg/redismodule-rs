@@ -822,6 +822,28 @@ impl Context {
         unsafe { crate::__required_api!(RedisModule_DbSize)(self.ctx) }
     }
 
+    /// Runs `check` with the ACL user named `user_name`, and returns its result
+    /// with the `errno` it left.
+    ///
+    /// Callers look up the API that `check` uses before calling this, so a
+    /// missing API cannot leave the user allocated.
+    fn with_acl_user(
+        &self,
+        user_name: &RedisString,
+        check: impl FnOnce(*mut raw::RedisModuleUser) -> c_int,
+    ) -> Result<(c_int, Option<i32>), RedisError> {
+        let get_user = unsafe { crate::__available_api!(RedisModule_GetModuleUserFromUserName) };
+        let free_user = unsafe { crate::__available_api!(RedisModule_FreeModuleUser) };
+        let user = unsafe { get_user(user_name.as_ptr()) };
+        if user.is_null() {
+            return Err(RedisError::Str("User does not exists or disabled"));
+        }
+        let status = check(user);
+        let errno = std::io::Error::last_os_error().raw_os_error();
+        unsafe { free_user(user) };
+        Ok((status, errno))
+    }
+
     /// Verify the the given user has the give ACL permission on the given key.
     /// Return Ok(()) if the user has the permissions or error (with relevant error message)
     /// if the validation failed.
@@ -831,20 +853,119 @@ impl Context {
         key_name: &RedisString,
         permissions: &AclPermissions,
     ) -> Result<(), RedisError> {
-        // Look up every API first, so a missing one cannot leave `user` allocated.
-        let get_user = unsafe { crate::__available_api!(RedisModule_GetModuleUserFromUserName) };
         let check_key_permissions =
             unsafe { crate::__available_api!(RedisModule_ACLCheckKeyPermissions) };
-        let free_user = unsafe { crate::__available_api!(RedisModule_FreeModuleUser) };
-        let user = unsafe { get_user(user_name.as_ptr()) };
-        if user.is_null() {
-            return Err(RedisError::Str("User does not exists or disabled"));
+        let (status, _) = self.with_acl_user(user_name, |user| unsafe {
+            check_key_permissions(user, key_name.as_ptr(), permissions.bits())
+        })?;
+        if status == raw::REDISMODULE_OK as c_int {
+            Ok(())
+        } else {
+            Err(RedisError::Str("User does not have permissions on key"))
         }
-        let acl_permission_result: raw::Status =
-            unsafe { check_key_permissions(user, key_name.as_ptr(), permissions.bits()) }.into();
-        unsafe { free_user(user) };
-        let acl_permission_result: Result<(), &str> = acl_permission_result.into();
-        acl_permission_result.map_err(|_e| RedisError::Str("User does not have permissions on key"))
+    }
+
+    /// Checks whether the user named `user_name` may run the command in `args`,
+    /// its name followed by its arguments, as `RedisModule_ACLCheckCommandPermissions`
+    /// does. The arguments matter for the key permissions of the command and for
+    /// rules on subcommands.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error starting with `NOPERM` if the user may not run the
+    /// command, and an error if the user does not exist or is disabled, `args`
+    /// is empty, the command does not exist, or the running Redis does not
+    /// provide the API (before 7.0).
+    pub fn acl_check_command_permission(
+        &self,
+        user_name: &RedisString,
+        args: &[RedisString],
+    ) -> Result<(), RedisError> {
+        let check_command_permissions =
+            unsafe { crate::__available_api!(RedisModule_ACLCheckCommandPermissions) };
+        if args.is_empty() {
+            return Err(RedisError::Str("ERR no command to check"));
+        }
+        let argc = c_int::try_from(args.len())
+            .map_err(|_| RedisError::Str("ERR too many command arguments"))?;
+        let mut argv: Vec<*mut raw::RedisModuleString> =
+            args.iter().map(RedisString::as_ptr).collect();
+        let (status, errno) = self.with_acl_user(user_name, |user| unsafe {
+            check_command_permissions(user, argv.as_mut_ptr(), argc)
+        })?;
+        match (status == raw::REDISMODULE_OK as c_int, errno) {
+            (true, _) => Ok(()),
+            (false, Some(libc::ENOENT)) => Err(RedisError::Str("ERR unknown command")),
+            (false, _) => Err(RedisError::Str(
+                "NOPERM User does not have permissions to run the command",
+            )),
+        }
+    }
+
+    /// Checks whether the user named `user_name` may access the pub/sub
+    /// `channel` as `permissions` describe, as
+    /// `RedisModule_ACLCheckChannelPermissions` does. Unsubscribing is always
+    /// allowed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error starting with `NOPERM` if the user may not access the
+    /// channel, and an error if the user does not exist or is disabled, or the
+    /// running Redis does not provide the API (before 7.0).
+    pub fn acl_check_channel_permission(
+        &self,
+        user_name: &RedisString,
+        channel: &RedisString,
+        permissions: AclChannelPermissions,
+    ) -> Result<(), RedisError> {
+        let check_channel_permissions =
+            unsafe { crate::__available_api!(RedisModule_ACLCheckChannelPermissions) };
+        // Redis sets errno for invalid flags but not for a denial, so the
+        // flags are checked here and errno is not read.
+        if !AclChannelPermissions::all().contains(permissions) {
+            return Err(RedisError::Str("ERR invalid channel permission flags"));
+        }
+        let (status, _) = self.with_acl_user(user_name, |user| unsafe {
+            check_channel_permissions(user, channel.as_ptr(), permissions.bits())
+        })?;
+        if status == raw::REDISMODULE_OK as c_int {
+            Ok(())
+        } else {
+            Err(RedisError::Str(
+                "NOPERM User does not have permissions on the channel",
+            ))
+        }
+    }
+
+    /// Adds an entry to the ACL log, which `ACL LOG` lists, for the user named
+    /// `user_name` and the denied `object` (a command, key or channel name), as
+    /// `RedisModule_ACLAddLogEntryByUserName` does. The entry records the
+    /// client of this context, so call it from a command or another context
+    /// with a client.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the context has no client, or the running Redis does
+    /// not provide the API (before 7.2).
+    pub fn acl_add_log_entry(
+        &self,
+        user_name: &RedisString,
+        object: &RedisString,
+        reason: AclLogReason,
+    ) -> Result<(), RedisError> {
+        let add_log_entry =
+            unsafe { crate::__available_api!(RedisModule_ACLAddLogEntryByUserName) };
+        let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
+        // Redis records the context's client in the entry, and crashes without one.
+        if unsafe { client_id(self.ctx) } == 0 {
+            return Err(RedisError::Str(
+                "ERR an ACL log entry needs a context with a client",
+            ));
+        }
+        // The vendored header declares no result. Redis fails only for an
+        // unknown reason, and every AclLogReason is a known one.
+        unsafe { add_log_entry(self.ctx, user_name.as_ptr(), object.as_ptr(), reason.into()) };
+        Ok(())
     }
 
     api!(
@@ -1007,6 +1128,49 @@ bitflags! {
 
         /// User can update existing data inside the key.
         const UPDATE = raw::REDISMODULE_CMD_KEY_UPDATE as c_int;
+    }
+}
+
+bitflags! {
+    /// How a user accesses a pub/sub channel, for
+    /// [`Context::acl_check_channel_permission`].
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct AclChannelPermissions : c_int {
+        /// The channel name is a pattern, as for `PSUBSCRIBE`.
+        const PATTERN = raw::REDISMODULE_CMD_CHANNEL_PATTERN as c_int;
+
+        /// Publish to the channel.
+        const PUBLISH = raw::REDISMODULE_CMD_CHANNEL_PUBLISH as c_int;
+
+        /// Subscribe to the channel.
+        const SUBSCRIBE = raw::REDISMODULE_CMD_CHANNEL_SUBSCRIBE as c_int;
+
+        /// Unsubscribe from the channel, which is always allowed.
+        const UNSUBSCRIBE = raw::REDISMODULE_CMD_CHANNEL_UNSUBSCRIBE as c_int;
+    }
+}
+
+/// Why an ACL log entry from [`Context::acl_add_log_entry`] was recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AclLogReason {
+    /// An authentication failure.
+    Auth,
+    /// A command the user may not run.
+    Command,
+    /// A key the user may not access.
+    Key,
+    /// A channel the user may not access.
+    Channel,
+}
+
+impl From<AclLogReason> for raw::RedisModuleACLLogEntryReason {
+    fn from(reason: AclLogReason) -> Self {
+        match reason {
+            AclLogReason::Auth => raw::RedisModuleACLLogEntryReason_REDISMODULE_ACL_LOG_AUTH,
+            AclLogReason::Command => raw::RedisModuleACLLogEntryReason_REDISMODULE_ACL_LOG_CMD,
+            AclLogReason::Key => raw::RedisModuleACLLogEntryReason_REDISMODULE_ACL_LOG_KEY,
+            AclLogReason::Channel => raw::RedisModuleACLLogEntryReason_REDISMODULE_ACL_LOG_CHANNEL,
+        }
     }
 }
 
