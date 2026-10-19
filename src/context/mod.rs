@@ -22,7 +22,7 @@ use std::ops::Deref;
 
 use std::ffi::CStr;
 
-use self::call_reply::{create_promise_call_reply, CallResult, PromiseCallReply};
+use self::call_reply::{create_promise_call_reply, CallResult, ErrorReply, PromiseCallReply};
 use self::thread_safe::RedisLockIndicator;
 
 mod timer;
@@ -69,6 +69,45 @@ pub enum CallOptionResp {
     Resp2,
     Resp3,
     Auto,
+}
+
+/// Sets `errno` to 0.
+fn clear_errno() {
+    // SAFETY: each returns a pointer to this thread's errno.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    unsafe {
+        *libc::__errno_location() = 0;
+    }
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+    unsafe {
+        *libc::__error() = 0;
+    }
+}
+
+/// The error for a `RedisModule_Call` that returned null with `errno` set, as
+/// its documentation lists them; `None` when `errno` is 0, as after a dry run
+/// that would succeed.
+fn call_failure(errno: Option<i32>) -> Option<String> {
+    let reason = match errno? {
+        0 => return None,
+        libc::EBADF => "wrong format specifiers",
+        libc::EINVAL => "wrong number of arguments",
+        libc::ENOENT => "unknown command",
+        libc::EPERM => "a key is in a slot this node does not serve",
+        libc::EROFS => "a write in a read-only cluster state",
+        libc::ENETDOWN => "the cluster is down",
+        libc::ENOTSUP => "no ACL user for this context",
+        libc::EACCES => "the ACL rules deny the command",
+        libc::ENOSPC => "the command is not allowed: out of memory or not enough replicas",
+        libc::ESPIPE => "the command is not allowed in script mode",
+        other => {
+            return Some(format!(
+                "ERR RedisModule_Call failed: {}",
+                std::io::Error::from_raw_os_error(other)
+            ))
+        }
+    };
+    Some(format!("ERR RedisModule_Call failed: {reason}"))
 }
 
 impl CallOptionsBuilder {
@@ -118,6 +157,32 @@ impl CallOptionsBuilder {
     /// Enable this option will cause the command to be replicaed to the replica and AOF
     pub fn replicate(mut self) -> CallOptionsBuilder {
         self.add_flag("!");
+        self
+    }
+
+    /// Replicate the command to replicas but not to the AOF. Includes
+    /// [`Self::replicate`], and replaces [`Self::replicate_to_aof_only`].
+    pub fn replicate_to_replicas_only(mut self) -> CallOptionsBuilder {
+        self.options = self.options.replace('R', "");
+        self.add_flag("!A");
+        self
+    }
+
+    /// Replicate the command to the AOF but not to replicas. Includes
+    /// [`Self::replicate`], and replaces [`Self::replicate_to_replicas_only`].
+    pub fn replicate_to_aof_only(mut self) -> CallOptionsBuilder {
+        self.options = self.options.replace('A', "");
+        self.add_flag("!R");
+        self
+    }
+
+    /// Check the command without running it (Redis 7.2 and later). The other
+    /// options, such as ACL and OOM checks, still apply. A command that would
+    /// run returns [`CallReply::Unknown`](crate::CallReply::Unknown); one that
+    /// would fail returns the error it would return. An older Redis rejects the
+    /// flag, and the call returns an error.
+    pub fn dry_run(mut self) -> CallOptionsBuilder {
+        self.add_flag("D");
         self
     }
 
@@ -431,6 +496,10 @@ impl Context {
         let final_args = call_args.args_mut();
 
         let cmd = CString::new(command).unwrap();
+        // RedisModule_Call returns null both for a dry run that would succeed
+        // and, without the E flag, for a call that failed; errno tells them
+        // apart, so clear it first.
+        clear_errno();
         let reply: *mut raw::RedisModuleCallReply = unsafe {
             let p_call = crate::__required_api!(RedisModule_Call);
             p_call(
@@ -441,16 +510,21 @@ impl Context {
                 final_args.len(),
             )
         };
+        if reply.is_null() {
+            if let Some(error) = call_failure(std::io::Error::last_os_error().raw_os_error()) {
+                return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(error))));
+            }
+        }
         let promise = create_promise_call_reply(self, NonNull::new(reply));
         R::from(promise)
     }
 
     /// Call a command and copy its result into an owned value.
     ///
-    /// String results are bulk text for valid UTF-8, or a byte buffer otherwise.
-    /// This includes native status strings; explicit module status replies keep
-    /// their separate variants. Use `call_ext` for typed reply access and borrow
-    /// bytes from that reply's owner.
+    /// A simple-string reply, such as `+OK`, is a `SimpleString`. A bulk-string
+    /// reply is bulk text for valid UTF-8, or a byte buffer otherwise. Use
+    /// `call_ext` for typed reply access and borrow bytes from that reply's
+    /// owner, and [`Self::reply_with_call_reply`] to pass a reply on as it is.
     pub fn call<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> RedisResult {
         self.call_internal::<_, CallResult>(command, raw::FMT, args)
             .map_or_else(|e| Err(e.into()), |v| Ok((&v).into()))
@@ -672,6 +746,36 @@ impl Context {
     /// Replicate command to the replica and AOF.
     pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) {
         raw::replicate(self.ctx, command, args);
+    }
+
+    /// Replies to the client with `result` exactly as Redis sent it to the
+    /// call: a simple string stays a simple string, and an error reply is
+    /// passed on as an error. Uses `RedisModule_ReplyWithCallReply` for replies,
+    /// and an error reply for an error message the crate built.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error, without replying, if `result` holds no reply (such as
+    /// the result of a dry run), if Redis cannot send it to this client (RESP3
+    /// types to a RESP2 client), or if the running Redis lacks the API.
+    pub fn reply_with_call_reply(&self, result: &CallResult) -> Result<(), RedisError> {
+        let reply_with_call_reply =
+            unsafe { crate::__available_api!(RedisModule_ReplyWithCallReply) };
+        let reply = match result {
+            Ok(reply) => reply.get_raw(),
+            Err(ErrorReply::RedisError(error)) => Some(error.get_raw()),
+            Err(ErrorReply::Message(message)) => {
+                self.reply_error_string(message);
+                return Ok(());
+            }
+        };
+        let reply = reply.ok_or(RedisError::Str("ERR the call result holds no reply"))?;
+        if unsafe { reply_with_call_reply(self.ctx, reply) } != raw::REDISMODULE_OK as c_int {
+            return Err(RedisError::Str(
+                "ERR Redis cannot send this reply to the client, for example RESP3 types to a RESP2 client",
+            ));
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -1650,5 +1754,23 @@ mod resp_text_tests {
     fn simple_reply_text_keeps_non_ascii_and_replaces_line_breaks_and_nul() {
         let text = Context::str_as_legal_resp_string("caf\u{e9} \u{65e5}\u{672c}\r\n+OK\0end");
         assert_eq!(text.to_str(), Ok("caf\u{e9} \u{65e5}\u{672c}  +OK end"));
+    }
+}
+
+#[cfg(test)]
+mod call_failure_tests {
+    use super::call_failure;
+
+    #[test]
+    fn errno_maps_to_the_documented_reason() {
+        assert_eq!(call_failure(None), None);
+        assert_eq!(call_failure(Some(0)), None);
+        assert_eq!(
+            call_failure(Some(libc::ENOENT)).as_deref(),
+            Some("ERR RedisModule_Call failed: unknown command")
+        );
+        assert!(call_failure(Some(libc::EIO))
+            .unwrap()
+            .starts_with("ERR RedisModule_Call failed: "));
     }
 }

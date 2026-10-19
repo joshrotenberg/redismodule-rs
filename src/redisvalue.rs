@@ -245,6 +245,12 @@ impl<'root> From<&CallReply<'root>> for RedisValue {
                 RedisValue::Array(reply.iter().map(|v| (&v).into()).collect())
             }
             CallReply::I64(reply) => RedisValue::Integer(reply.to_i64()),
+            CallReply::String(reply) if reply.is_simple_string() => {
+                match String::from_utf8(reply.as_bytes().to_vec()) {
+                    Ok(text) => RedisValue::SimpleString(text),
+                    Err(error) => RedisValue::StringBuffer(error.into_bytes()),
+                }
+            }
             CallReply::String(reply) => call_string_value(reply.as_bytes().to_vec()),
             CallReply::Null(_) => RedisValue::Null,
             CallReply::Map(reply) => RedisValue::Map(

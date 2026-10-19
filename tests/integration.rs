@@ -1183,6 +1183,70 @@ fn test_call_verbatim_reply() -> Result<()> {
 }
 
 #[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_call_reply_kinds_and_dry_run() -> Result<()> {
+    use redis::Value;
+
+    let mut con = TestConnection::new("call");
+
+    // Forwarded and converted replies keep simple versus bulk strings.
+    for command in ["call.forward", "call.convert"] {
+        let res: Value = redis::cmd(command)
+            .arg(&["SET", "k", "v"])
+            .query(&mut con)?;
+        assert_eq!(res, Value::Okay, "{command} SET");
+        let res: Value = redis::cmd(command).arg(&["GET", "k"]).query(&mut con)?;
+        assert_eq!(res, Value::Data(b"v".to_vec()), "{command} GET");
+        let res: Value = redis::cmd(command).arg(&["PING"]).query(&mut con)?;
+        assert_eq!(res, Value::Status("PONG".to_owned()), "{command} PING");
+    }
+    let error = redis::cmd("call.forward")
+        .arg(&["INCR", "k"])
+        .query::<Value>(&mut con)
+        .expect_err("INCR on a non-number replied with a value");
+    assert!(error.to_string().contains("not an integer"), "{error}");
+
+    // Without the E flag a failed call is an error, not an empty reply.
+    let error = redis::cmd("call.convert")
+        .arg(&["NOSUCHCMD"])
+        .query::<Value>(&mut con)
+        .expect_err("an unknown command returned a value");
+    assert!(error.to_string().contains("unknown command"), "{error}");
+
+    // A RESP3 map cannot go to this RESP2 client as it is.
+    redis::cmd("HSET")
+        .arg(&["h", "f", "v"])
+        .query::<()>(&mut con)?;
+    let error = redis::cmd("call.forward3")
+        .arg(&["HGETALL", "h"])
+        .query::<Value>(&mut con)
+        .expect_err("a RESP3 map was forwarded to a RESP2 client");
+    assert!(
+        error.to_string().contains("cannot send this reply"),
+        "{error}"
+    );
+
+    // A dry run checks the command without running it.
+    let res: String = redis::cmd("call.dry_run")
+        .arg(&["SET", "dry", "v"])
+        .query(&mut con)?;
+    assert_eq!(res, "would run");
+    let exists: i64 = redis::cmd("EXISTS").arg("dry").query(&mut con)?;
+    assert_eq!(exists, 0);
+    let error = redis::cmd("call.dry_run")
+        .arg(&["NOSUCHCMD"])
+        .query::<String>(&mut con)
+        .expect_err("a dry run of an unknown command passed");
+    assert!(error.to_string().contains("unknown command"), "{error}");
+
+    Ok(())
+}
+
+#[test]
 fn test_ctx_flags() -> Result<()> {
     let mut con = TestConnection::new("ctx_flags");
 
@@ -2010,13 +2074,13 @@ fn test_call_reply_status_and_collections() -> Result<()> {
     let mut con = TestConnection::new("call_reply");
     let inputs = call_reply_inputs();
 
-    // A typed call reply cannot tell status from bulk, so a forwarded native
-    // status arrives as bulk text. A module's own status reply stays a status.
+    // A converted call reply keeps a native status as a status, like a
+    // module's own status reply.
     let forwarded: Value = redis::cmd("call_reply.status")
         .arg("call_reply:status")
         .arg("value")
         .query(&mut con)?;
-    assert_eq!(forwarded, Value::Data(b"OK".to_vec()));
+    assert_eq!(forwarded, Value::Okay);
     let explicit: Value = redis::cmd("call_reply.explicit_status").query(&mut con)?;
     assert_eq!(explicit, Value::Okay);
 

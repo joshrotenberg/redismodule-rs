@@ -231,6 +231,55 @@ fn call_verbatim(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     ]))
 }
 
+/// `call.forward command [arg ...]`: runs the command and passes its reply
+/// on unchanged.
+fn call_forward(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
+    let args: Vec<&RedisString> = args.iter().collect();
+    let options = CallOptionsBuilder::new().errors_as_replies().build();
+    let result: CallResult = ctx.call_ext(command.try_as_str()?, &options, args.as_slice());
+    ctx.reply_with_call_reply(&result)?;
+    Ok(RedisValue::NoReply)
+}
+
+/// `call.forward3 command [arg ...]`: like `call.forward`, with RESP3 replies.
+fn call_forward3(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
+    let args: Vec<&RedisString> = args.iter().collect();
+    let options = CallOptionsBuilder::new()
+        .resp(CallOptionResp::Resp3)
+        .errors_as_replies()
+        .build();
+    let result: CallResult = ctx.call_ext(command.try_as_str()?, &options, args.as_slice());
+    ctx.reply_with_call_reply(&result)?;
+    Ok(RedisValue::NoReply)
+}
+
+/// `call.convert command [arg ...]`: runs the command with `Context::call` and
+/// replies with the converted value.
+fn call_convert(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
+    let args: Vec<&RedisString> = args.iter().collect();
+    ctx.call(command.try_as_str()?, args.as_slice())
+}
+
+/// `call.dry_run command [arg ...]`: checks the command without running it.
+fn call_dry_run(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
+    let args: Vec<&RedisString> = args.iter().collect();
+    let options = CallOptionsBuilder::new()
+        .dry_run()
+        .errors_as_replies()
+        .build();
+    match ctx.call_ext::<_, CallResult>(command.try_as_str()?, &options, args.as_slice()) {
+        Ok(CallReply::Unknown) => Ok(RedisValue::SimpleStringStatic("would run")),
+        Ok(reply) => Err(RedisError::String(format!(
+            "ERR dry run returned a reply: {reply}"
+        ))),
+        Err(error) => Err(error.into()),
+    }
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -245,5 +294,9 @@ redis_module! {
         ["call.dump_test", call_dump_test, "", 0, 0, 0, ""],
         ["call.binary_data_test", call_binary_data_test, "", 0, 0, 0, ""],
         ["call.verbatim", call_verbatim, "", 0, 0, 0, ""],
+        ["call.forward", call_forward, "", 0, 0, 0, ""],
+        ["call.forward3", call_forward3, "", 0, 0, 0, ""],
+        ["call.convert", call_convert, "", 0, 0, 0, ""],
+        ["call.dry_run", call_dry_run, "", 0, 0, 0, ""],
     ],
 }

@@ -23,6 +23,18 @@ impl<'root> StringCallReply<'root> {
         String::from_utf8(self.as_bytes().to_vec()).ok()
     }
 
+    /// Whether Redis sent this reply as a simple string, such as `+OK`, rather
+    /// than a bulk string. Read from the reply's protocol through
+    /// `RedisModule_CallReplyProto`.
+    pub fn is_simple_string(&self) -> bool {
+        let mut len: usize = 0;
+        let proto = unsafe {
+            crate::__required_api!(RedisModule_CallReplyProto)(self.reply.as_ptr(), &mut len)
+        };
+        // SAFETY: Redis returns `len` readable protocol bytes for the reply.
+        !proto.is_null() && len > 0 && unsafe { *proto } as u8 == b'+'
+    }
+
     /// Return the StringCallReply data as &[u8]
     pub fn as_bytes(&self) -> &[u8] {
         let mut len: usize = 0;
