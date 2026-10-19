@@ -7,7 +7,7 @@ const NOT_INITIALISED_MESSAGE: &str = "Redis module hasn't been initialised.";
 
 /// [RedisLogLevel] is a level of logging which can be used when
 /// logging with Redis. See [raw::RedisModule_Log] and the official
-/// redis [reference](https://redis.io/docs/reference/modules/modules-api-ref/).
+/// redis [reference](https://redis.io/docs/latest/develop/reference/modules/modules-api-ref/).
 #[derive(Clone, Copy, Debug, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum RedisLogLevel {
