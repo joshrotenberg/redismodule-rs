@@ -725,3 +725,121 @@ pub fn register_commands(ctx: &Context) -> Status {
         },
     )
 }
+
+/// The command flags `RedisModule_CreateCommand` accepts: those of Redis 7.2 and
+/// 8.0, plus `internal` and `touches-arbitrary-keys` from later versions.
+const COMMAND_FLAGS: [&str; 22] = [
+    "write",
+    "readonly",
+    "admin",
+    "deny-oom",
+    "deny-script",
+    "allow-loading",
+    "pubsub",
+    "random",
+    "blocking",
+    "allow-stale",
+    "no-monitor",
+    "no-slowlog",
+    "fast",
+    "no-auth",
+    "may-replicate",
+    "getkeys-api",
+    "getchannels-api",
+    "no-cluster",
+    "no-mandatory-keys",
+    "allow-busy",
+    "internal",
+    "touches-arbitrary-keys",
+];
+
+/// Whether `token` equals `flag`, ignoring ASCII case.
+const fn is_flag(token: &[u8], flag: &[u8]) -> bool {
+    if token.len() != flag.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < token.len() {
+        if token[i].to_ascii_lowercase() != flag[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// Checks a command flags string the way Redis parses it: tokens separated by
+/// single spaces, compared without case, each a known flag or a Redis
+/// Enterprise flag starting with `_`. An empty string has no flags. `redis_command!` evaluates it in a `const` item, so a bad string
+/// fails to compile.
+///
+/// # Panics
+///
+/// Panics if `flags` has an unknown or empty token.
+#[doc(hidden)]
+pub const fn __check_command_flags(flags: &str) {
+    let bytes = flags.as_bytes();
+    if bytes.is_empty() {
+        return;
+    }
+    let mut start = 0;
+    while start <= bytes.len() {
+        let mut end = start;
+        while end < bytes.len() && bytes[end] != b' ' {
+            end += 1;
+        }
+        let (_, rest) = bytes.split_at(start);
+        let (token, _) = rest.split_at(end - start);
+        // Redis Enterprise adds flags that start with `_`, such as the
+        // `_proxy-filtered` flag `#[command]` emits; they pass unchecked.
+        let mut known = token.len() > 1 && token[0] == b'_';
+        let mut i = 0;
+        while i < COMMAND_FLAGS.len() {
+            if is_flag(token, COMMAND_FLAGS[i].as_bytes()) {
+                known = true;
+            }
+            i += 1;
+        }
+        assert!(
+            known,
+            "unknown command flag: flags are a known flag name or names separated by single spaces"
+        );
+        start = end + 1;
+    }
+}
+
+#[cfg(test)]
+mod command_flag_tests {
+    use super::__check_command_flags;
+
+    #[test]
+    fn known_flags_pass_in_any_case() {
+        for flags in [
+            "",
+            "write",
+            "readonly fast",
+            "WRITE Deny-OOM",
+            "allow-busy",
+            "write _proxy-filtered",
+        ] {
+            __check_command_flags(flags);
+        }
+    }
+
+    #[test]
+    fn unknown_or_empty_tokens_panic() {
+        for flags in [
+            "wrte",
+            "write  fast",
+            " write",
+            "write ",
+            "write,fast",
+            "write _",
+        ] {
+            assert!(
+                std::panic::catch_unwind(|| __check_command_flags(flags)).is_err(),
+                "{flags:?} passed"
+            );
+        }
+    }
+}

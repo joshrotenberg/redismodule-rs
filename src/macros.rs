@@ -25,6 +25,44 @@ macro_rules! __available_api {
     };
 }
 
+/// Registers a command. `redis_module!` calls this for each entry in `commands`.
+///
+/// The flags are a constant string of flag names separated by single spaces,
+/// checked when the module compiles:
+///
+/// ```compile_fail,E0080
+/// use redis_module::{redis_module, Context, RedisResult, RedisString};
+///
+/// fn ping(_: &Context, _: Vec<RedisString>) -> RedisResult {
+///     Ok("pong".into())
+/// }
+///
+/// redis_module! {
+///     name: "typo",
+///     version: 1,
+///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+///     data_types: [],
+///     commands: [["typo.ping", ping, "readonly fsat", 0, 0, 0, ""]],
+/// }
+/// # fn main() {}
+/// ```
+///
+/// ```no_run
+/// use redis_module::{redis_module, Context, RedisResult, RedisString};
+///
+/// fn ping(_: &Context, _: Vec<RedisString>) -> RedisResult {
+///     Ok("pong".into())
+/// }
+///
+/// redis_module! {
+///     name: "typo",
+///     version: 1,
+///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+///     data_types: [],
+///     commands: [["typo.ping", ping, "readonly fast", 0, 0, 0, ""]],
+/// }
+/// # fn main() {}
+/// ```
 #[macro_export]
 macro_rules! redis_command {
     ($ctx:expr,
@@ -39,6 +77,8 @@ macro_rules! redis_command {
     ) => {{
         use $crate::AclCategory;
 
+        // A misspelled flag fails to compile here instead of at load.
+        const _: () = $crate::commands::__check_command_flags($command_flags);
         let name = CString::new($command_name).unwrap();
         let flags = CString::new($command_flags).unwrap();
 
