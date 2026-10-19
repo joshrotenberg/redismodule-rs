@@ -13,6 +13,10 @@ jobs:
   test:
     name: Build and run the unit tests using the latest rust.
     runs-on: ${{ matrix.os }}
+    env:
+      # One job checks that the committed bindings are what bindgen generates;
+      # the others would depend on each runner's LLVM version.
+      REDISMODULE_RS_CHECK_BINDINGS: ${{ matrix.os == 'ubuntu-latest' && matrix.redis-version[0] == '8-0' && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
@@ -108,9 +112,11 @@ jobs:
           cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime,system-allocator-fallback --test system_allocator_fallback
 
       - name: Doc
-        run: cargo doc --no-default-features --features "all-features-but-xor bindgen/runtime min-redis-compatibility-version-${{ matrix.redis-version[0] }}"
+        run: cargo doc --no-default-features --features "all-features-but-xor bindgen-runtime min-redis-compatibility-version-${{ matrix.redis-version[0] }}"
 
   msrv:
+    # Without clang installed, so the default build with the committed
+    # bindings is checked too.
     name: Check and run the unit tests with the minimum supported Rust (1.87).
     runs-on: ubuntu-latest
     steps:
@@ -118,11 +124,6 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: recursive
-
-      - name: Install Clang (for bindgen)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libclang-dev
 
       - name: Install toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1

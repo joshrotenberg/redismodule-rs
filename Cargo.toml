@@ -205,11 +205,11 @@ redis-module-macros = { path = "./redismodule-rs-macros" }
 redis-module = { path = "./", default-features = false }
 
 [build-dependencies]
-bindgen = { version = "0.72.1", default-features = false, features = ["logging", "prettyplease"]}
+bindgen = { version = "0.72.1", optional = true, default-features = false, features = ["logging", "prettyplease"]}
 cc = "1"
 
 [features]
-default = ["min-redis-compatibility-version-6-0", "bindgen-runtime"]
+default = ["min-redis-compatibility-version-6-0"]
 
 # xor having minimum compatibility version
 min-redis-compatibility-version-8-0 = ["redis-module/min-redis-compatibility-version-8-0", "redis-7-2-examples"]
@@ -223,10 +223,11 @@ min-redis-compatibility-version-6-0 = ["redis-module/min-redis-compatibility-ver
 # enable it, and it does not build on its own or with an older floor.
 redis-7-2-examples = []
 
-# Enable static linking to libclang in bindgen (incompatible with `bindgen-runtime`)
-bindgen-static = ["bindgen/static"]
-# Enable dynamic linking to libclang in bindgen (default, incompatible with `bindgen-static`)
-bindgen-runtime = ["bindgen/runtime"]
+# Generate the bindings with bindgen instead of using the pregenerated ones in
+# src/redisraw/bindings.rs. Both need libclang: bindgen-static links it
+# statically, bindgen-runtime loads it at build time. Use one, not both.
+bindgen-static = ["dep:bindgen", "bindgen/static"]
+bindgen-runtime = ["dep:bindgen", "bindgen/runtime"]
 
 # Let RedisAlloc fall back to the system allocator outside a Redis server, such
 # as in cargo test. Enable it in [dev-dependencies] only; see RedisAlloc's docs.
