@@ -4,6 +4,7 @@ authors = ["Meir Shpilraien <meir@redis.com>"]
 description = "A macros crate for redismodule-rs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 keywords = ["redis", "plugin"]

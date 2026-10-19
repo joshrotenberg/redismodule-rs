@@ -1,6 +1,13 @@
 name: CI
 
-on: [pull_request]
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -21,6 +28,16 @@ jobs:
           - [8-0, "8.0"]
         toolchain:
           - stable
+        # macOS runs the lowest and highest floors; Linux runs them all.
+        exclude:
+          - os: macos-latest
+            redis-version: [6-2, "7.2"]
+          - os: macos-latest
+            redis-version: [7-0, "7.2"]
+          - os: macos-latest
+            redis-version: [7-2, "7.2"]
+          - os: macos-latest
+            redis-version: [7-4, "7.4"]
 
     steps:
       - name: Checkout sources
@@ -59,8 +76,8 @@ jobs:
             # Install LLVM which provides libclang
             brew install llvm
             # Set environment variables for bindgen to find libclang
-            echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> $GITHUB_ENV
-            echo "LLVM_CONFIG_PATH=$(brew --prefix llvm)/bin/llvm-config" >> $GITHUB_ENV
+            echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
+            echo "LLVM_CONFIG_PATH=$(brew --prefix llvm)/bin/llvm-config" >> "$GITHUB_ENV"
           fi
 
       - name: Install toolchain
@@ -87,3 +104,31 @@ jobs:
 
       - name: Doc
         run: cargo doc --no-default-features --features "all-features-but-xor bindgen/runtime min-redis-compatibility-version-${{ matrix.redis-version[0] }}"
+
+  msrv:
+    name: Check and run the unit tests with the minimum supported Rust (1.87).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Clang (for bindgen)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+
+      - name: Install toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.87"
+          # The stable jobs deny warnings. Here a lint added after 1.87, named
+          # in an allow attribute, would fail as an unknown lint.
+          rustflags: ""
+
+      - name: Check
+        run: cargo check --workspace --all-targets
+
+      - name: Unit tests
+        run: cargo test --lib
