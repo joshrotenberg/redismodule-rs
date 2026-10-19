@@ -70,11 +70,12 @@ extern "C" fn cron_callback(
     _subevent: u64,
     data: *mut ::std::os::raw::c_void,
 ) {
-    let data: &raw::RedisModuleConfigChangeV1 =
-        unsafe { &*(data as *mut raw::RedisModuleConfigChangeV1) };
+    // SAFETY: Redis passes a RedisModuleCronLoopV1 with the cron loop event.
+    let data: &raw::RedisModuleCronLoopV1 = unsafe { &*(data as *mut raw::RedisModuleCronLoopV1) };
+    let hz = data.hz as u64;
     let ctx = Context::new(ctx);
     CRON_SERVER_EVENTS_LIST.iter().for_each(|callback| {
-        crate::panic::run_callback("cron event handler", || callback(&ctx, data.version), || ());
+        crate::panic::run_callback("cron event handler", || callback(&ctx, hz), || ());
     });
 }
 

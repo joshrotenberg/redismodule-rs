@@ -1296,6 +1296,27 @@ fn test_server_event() -> Result<()> {
 }
 
 #[test]
+fn test_cron_event_hz() -> Result<()> {
+    let mut con = TestConnection::new("server_events");
+
+    redis::cmd("CONFIG")
+        .arg(&["SET", "hz", "50"])
+        .query::<()>(&mut con)?;
+    // At 50 Hz a cron event follows within 20 ms; allow a second.
+    let mut hz = 0;
+    for _ in 0..100 {
+        hz = redis::cmd("last_cron_hz").query(&mut con)?;
+        if hz == 50 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(hz, 50);
+
+    Ok(())
+}
+
+#[test]
 fn test_shutdown_event() -> Result<()> {
     let mut con = TestConnection::with_log_file("server_events");
 

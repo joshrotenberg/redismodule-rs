@@ -9,6 +9,7 @@ use redis_module_macros::{
 
 static NUM_FLUSHES: AtomicI64 = AtomicI64::new(0);
 static NUM_CRONS: AtomicI64 = AtomicI64::new(0);
+static LAST_CRON_HZ: AtomicI64 = AtomicI64::new(0);
 static NUM_MAX_MEMORY_CONFIGURATION_CHANGES: AtomicI64 = AtomicI64::new(0);
 
 #[flush_event_handler]
@@ -27,8 +28,9 @@ fn config_changed_event_handler(_ctx: &Context, changed_configs: &[&str]) {
 }
 
 #[cron_event_handler]
-fn cron_event_handler(_ctx: &Context, _hz: u64) {
+fn cron_event_handler(_ctx: &Context, hz: u64) {
     NUM_CRONS.fetch_add(1, Ordering::SeqCst);
+    LAST_CRON_HZ.store(hz as i64, Ordering::SeqCst);
 }
 
 #[shutdown_event_handler]
@@ -42,6 +44,10 @@ fn num_flushed(_ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
 
 fn num_crons(_ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Integer(NUM_CRONS.load(Ordering::SeqCst)))
+}
+
+fn last_cron_hz(_ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::Integer(LAST_CRON_HZ.load(Ordering::SeqCst)))
 }
 
 fn num_maxmemory_changes(_ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
@@ -61,5 +67,6 @@ redis_module! {
         ["num_flushed", num_flushed, "readonly", 0, 0, 0, ""],
         ["num_max_memory_changes", num_maxmemory_changes, "readonly", 0, 0, 0, ""],
         ["num_crons", num_crons, "readonly", 0, 0, 0, ""],
+        ["last_cron_hz", last_cron_hz, "readonly", 0, 0, 0, ""],
     ],
 }
