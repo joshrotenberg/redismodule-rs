@@ -1567,13 +1567,14 @@ fn test_response() -> Result<()> {
         .arg(&["s", "v"])
         .query::<()>(&mut con)
         .with_context(|| "failed to run set")?;
-    for cmd in ["map.hget", "map.hget_writable"] {
+    for cmd in ["map.hget", "map.hget_writable", "map.mget"] {
         let err = redis::cmd(cmd)
             .arg(&["s", "c"])
-            .query::<Option<String>>(&mut con)
+            .query::<redis::Value>(&mut con)
             .expect_err("hash lookup on a string key must fail");
-        assert!(
-            err.to_string().contains("not a hash"),
+        assert_eq!(
+            err.code(),
+            Some("WRONGTYPE"),
             "{cmd}: unexpected error: {err}"
         );
     }
@@ -2034,6 +2035,29 @@ fn test_defrag() -> Result<()> {
         if duration > Duration::from_secs(30) {
             return Err(anyhow::Error::msg("Failed waiting for defrag cycle"));
         }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_module_type_wrongtype() -> Result<()> {
+    let mut con = TestConnection::new("data_type");
+
+    redis::cmd("set")
+        .arg(&["s", "v"])
+        .query::<()>(&mut con)
+        .with_context(|| "failed to run set")?;
+    for (cmd, args) in [("alloc.get", &["s"][..]), ("alloc.set", &["s", "1"][..])] {
+        let err = redis::cmd(cmd)
+            .arg(args)
+            .query::<redis::Value>(&mut con)
+            .expect_err("a module type lookup on a string key must fail");
+        assert_eq!(
+            err.code(),
+            Some("WRONGTYPE"),
+            "{cmd}: unexpected error: {err}"
+        );
     }
 
     Ok(())

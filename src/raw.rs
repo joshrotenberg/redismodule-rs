@@ -610,7 +610,7 @@ where
 
     match res {
         Status::Ok => Ok(()),
-        Status::Err => Err(RedisError::Str("ERR key is not a hash value")),
+        Status::Err => Err(RedisError::WrongType),
     }
 }
 
@@ -623,6 +623,8 @@ where
 ///
 /// Returns a null pointer when the hash has no such field. A non-null result is an owned
 /// string the caller must release with `RedisModule_FreeString`.
+///
+/// Returns [`RedisError::WrongType`] when the key holds a value that is not a hash.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[inline]
 pub fn hash_get_by_string(
@@ -641,7 +643,7 @@ pub fn hash_get_by_string(
     });
     match res {
         Status::Ok => Ok(value),
-        Status::Err => Err(RedisError::Str("ERR key is not a hash value")),
+        Status::Err => Err(RedisError::WrongType),
     }
 }
 

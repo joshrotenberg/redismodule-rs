@@ -737,7 +737,9 @@ fn to_raw_mode(mode: KeyMode) -> raw::KeyMode {
 
 /// # Errors
 ///
-/// Returns an error if the running Redis does not provide `RedisModule_KeyType` or `RedisModule_ModuleTypeGetType`.
+/// Returns [`RedisError::WrongType`] if the key exists and holds a value of
+/// another type, and an error if the running Redis does not provide
+/// `RedisModule_KeyType` or `RedisModule_ModuleTypeGetType`.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn verify_type(key_inner: *mut raw::RedisModuleKey, redis_type: &RedisType) -> RedisResult {
     let key_type: KeyType =
@@ -748,7 +750,7 @@ pub fn verify_type(key_inner: *mut raw::RedisModuleKey, redis_type: &RedisType) 
         let raw_type = unsafe { crate::__available_api!(RedisModule_ModuleTypeGetType)(key_inner) };
 
         if raw_type != *redis_type.raw_type.borrow() {
-            return Err(RedisError::Str("Existing key has wrong Redis type"));
+            return Err(RedisError::WrongType);
         }
     }
 
