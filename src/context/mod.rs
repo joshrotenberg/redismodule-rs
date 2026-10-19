@@ -684,6 +684,17 @@ impl Context {
                 raw::Status::Ok
             }
 
+            Ok(RedisValue::InsertionOrderedMap(entries)) => {
+                raw::reply_with_map(self.ctx, entries.len() as c_long);
+
+                for (key, value) in entries {
+                    self.reply_with_key(key);
+                    self.reply(Ok(value));
+                }
+
+                raw::Status::Ok
+            }
+
             Ok(RedisValue::Set(set)) => {
                 raw::reply_with_set(self.ctx, set.len() as c_long);
                 set.into_iter().for_each(|e| {

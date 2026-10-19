@@ -95,6 +95,16 @@ fn map_hget_writable(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     })
 }
 
+/// `map.ordered`: a map whose keys reply in the order they were added.
+fn map_ordered(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::InsertionOrderedMap(
+        [("zebra", 1), ("apple", 2), ("mango", 3)]
+            .into_iter()
+            .map(|(key, value)| (key.to_owned().into(), RedisValue::Integer(value)))
+            .collect(),
+    ))
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -107,5 +117,6 @@ redis_module! {
         ["map.unique", map_unique, "readonly", 1, 1, 1, ""],
         ["map.hget", map_hget, "readonly", 1, 1, 1, ""],
         ["map.hget_writable", map_hget_writable, "write", 1, 1, 1, ""],
+        ["map.ordered", map_ordered, "readonly", 0, 0, 0, ""],
     ],
 }

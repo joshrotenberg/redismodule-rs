@@ -34,6 +34,11 @@ pub enum RedisValue {
     Set(HashSet<RedisValueKey>),
     OrderedMap(BTreeMap<RedisValueKey, RedisValue>),
     OrderedSet(BTreeSet<RedisValueKey>),
+    /// A map replied in the order of its entries: a RESP3 map, or for RESP2 a
+    /// flat array of keys and values. `Map` replies in hash order and
+    /// `OrderedMap` sorted by key.
+    /// Duplicate keys are sent as they are.
+    InsertionOrderedMap(Vec<(RedisValueKey, RedisValue)>),
     Null,
     NoReply, // No reply at all (as opposed to a Null reply)
 }

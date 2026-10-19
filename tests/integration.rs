@@ -935,6 +935,26 @@ fn test_yield_lets_clients_get_busy_replies() -> Result<()> {
     let yields = busy.join().expect("yield.busy thread panicked")?;
     assert!(yields > 0);
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_insertion_ordered_map() -> Result<()> {
+    let mut con = TestConnection::new("response");
+
+    // RESP2 receives the map as a flat array of keys and values, in order.
+    let res: Vec<redis::Value> = redis::cmd("map.ordered").query(&mut con)?;
+    assert_eq!(
+        res,
+        [
+            redis::Value::Data(b"zebra".to_vec()),
+            redis::Value::Int(1),
+            redis::Value::Data(b"apple".to_vec()),
+            redis::Value::Int(2),
+            redis::Value::Data(b"mango".to_vec()),
+            redis::Value::Int(3),
+        ]
+    );
 
     Ok(())
 }
