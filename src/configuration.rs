@@ -244,7 +244,7 @@ extern "C" fn i64_configuration_get<T: ConfigurationValue<i64> + 'static>(
 /// Returns an error if the Redis API is missing or Redis rejects the
 /// registration (for example a duplicate or invalid name); the private data and
 /// `on_changed` callback of a rejected registration are dropped. Outside the
-/// `configurations` block of `redis_module!`, call `RedisModule_LoadConfigs`
+/// `configurations` block of `redis_module!`, call [`load_configurations`]
 /// after the last registration.
 #[expect(clippy::too_many_arguments)]
 pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
@@ -354,7 +354,7 @@ extern "C" fn string_configuration_get<T: ConfigurationValue<RedisString> + 'sta
 /// Returns an error if the Redis API is missing or Redis rejects the
 /// registration (for example a duplicate or invalid name); the private data and
 /// `on_changed` callback of a rejected registration are dropped. Outside the
-/// `configurations` block of `redis_module!`, call `RedisModule_LoadConfigs`
+/// `configurations` block of `redis_module!`, call [`load_configurations`]
 /// after the last registration.
 pub fn register_string_configuration<T: ConfigurationValue<RedisString>>(
     ctx: &Context,
@@ -433,7 +433,7 @@ extern "C" fn bool_configuration_get<T: ConfigurationValue<bool> + 'static>(
 /// Returns an error if the Redis API is missing or Redis rejects the
 /// registration (for example a duplicate or invalid name); the private data and
 /// `on_changed` callback of a rejected registration are dropped. Outside the
-/// `configurations` block of `redis_module!`, call `RedisModule_LoadConfigs`
+/// `configurations` block of `redis_module!`, call [`load_configurations`]
 /// after the last registration.
 pub fn register_bool_configuration<T: ConfigurationValue<bool>>(
     ctx: &Context,
@@ -523,7 +523,7 @@ extern "C" fn enum_configuration_get<
 /// Returns an error if the Redis API is missing or Redis rejects the
 /// registration (for example a duplicate or invalid name); the private data and
 /// `on_changed` callback of a rejected registration are dropped. Outside the
-/// `configurations` block of `redis_module!`, call `RedisModule_LoadConfigs`
+/// `configurations` block of `redis_module!`, call [`load_configurations`]
 /// after the last registration.
 pub fn register_enum_configuration<G: EnumConfigurationValue, T: ConfigurationValue<G>>(
     ctx: &Context,
@@ -587,6 +587,37 @@ pub fn get_enum_default_config_value<G: EnumConfigurationValue>(
             )))?;
         G::try_from(vals[index])
     })
+}
+
+/// Applies the values given for the module's configurations at load time, from
+/// `MODULE LOADEX ... CONFIG` or the server's configuration file, and the defaults
+/// of the configurations that were not given one.
+///
+/// Call it once, from the module's load, after the last registration. Redis
+/// applies defaults only on the first call, so a configuration registered after
+/// it keeps no default. The `configurations` block of `redis_module!` calls it
+/// for its own registrations before `init`, so a module that uses that block
+/// should not register more configurations in `init`.
+///
+/// # Errors
+///
+/// Returns an error if Redis rejects a value, for example one out of range or one
+/// a setter refuses, or if the running Redis does not provide
+/// `RedisModule_LoadConfigs`. Redis logs which value it rejected. The module load
+/// should fail: Redis unloads a module whose values were not applied. Setters
+/// that ran before the rejected value are not undone.
+///
+/// Also returns an error, with nothing in the Redis log, when called outside the
+/// module's load.
+pub fn load_configurations(ctx: &Context) -> Result<(), RedisError> {
+    let load_configs = unsafe { crate::__available_api!(RedisModule_LoadConfigs) };
+    if unsafe { load_configs(ctx.ctx) } == raw::REDISMODULE_OK as c_int {
+        Ok(())
+    } else {
+        Err(RedisError::Str(
+            "Redis rejected a module configuration value; see the Redis log",
+        ))
+    }
 }
 
 pub fn module_config_get(

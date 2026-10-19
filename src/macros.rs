@@ -528,8 +528,13 @@ macro_rules! redis_module {
                                 }
                             )*
                         )?
-                        if let Some(load_config) = raw::RedisModule_LoadConfigs {
-                            load_config(ctx);
+                        // A Redis without LoadConfigs (before 7.0) has no module
+                        // configurations, so nothing was registered to load.
+                        if raw::RedisModule_LoadConfigs.is_some() {
+                            if let Err(error) = $crate::configuration::load_configurations(&context) {
+                                context.log_warning(&error.to_string());
+                                return raw::Status::Err as c_int;
+                            }
                         }
 
                         $(

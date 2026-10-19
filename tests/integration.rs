@@ -1455,6 +1455,44 @@ fn test_configuration_registration_errors_fail_the_load() -> Result<()> {
 }
 
 #[test]
+fn test_configuration_load_errors_fail_the_load() -> Result<()> {
+    let mut con = TestConnection::with_log_file("hello");
+    let module = example_module_path("configuration");
+
+    // configuration.i64 accepts 0 to 1000.
+    let error = redis::cmd("MODULE")
+        .arg(&["LOADEX", &module, "CONFIG", "configuration.i64", "5000"])
+        .query::<()>(&mut con)
+        .expect_err("an out of range configuration value loaded");
+    assert!(
+        error.to_string().contains("Error loading the extension"),
+        "{error}"
+    );
+    let log = con.server_log()?;
+    assert!(
+        !log.contains("configuration init:"),
+        "init ran for a failed load: {log}"
+    );
+    assert!(
+        log.contains("Redis rejected a module configuration value"),
+        "{log}"
+    );
+
+    redis::cmd("MODULE")
+        .arg(&["LOADEX", &module, "CONFIG", "configuration.i64", "500"])
+        .query::<()>(&mut con)
+        .with_context(|| "failed to load configuration")?;
+    let config: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.i64"])
+        .query(&mut con)?;
+    assert_eq!(config, ["configuration.i64", "500"]);
+    let log = con.server_log()?;
+    assert!(log.contains("configuration init: i64 is 500"), "{log}");
+
+    Ok(())
+}
+
+#[test]
 fn test_response() -> Result<()> {
     let mut con = TestConnection::new("response");
 

@@ -7,7 +7,7 @@ use lazy_static::lazy_static;
 use redis_module::{
     configuration::{ConfigurationContext, ConfigurationFlags},
     enum_configuration, redis_module, ConfigurationValue, Context, RedisGILGuard, RedisResult,
-    RedisString, RedisValue,
+    RedisString, RedisValue, Status,
 };
 
 enum_configuration! {
@@ -47,6 +47,13 @@ fn num_changes(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Integer(*val))
 }
 
+/// Runs after the configuration values are applied, so it sees the loaded value.
+fn init(ctx: &Context, _: &[RedisString]) -> Status {
+    let value = *CONFIGURATION_I64.lock(ctx);
+    ctx.log_notice(&format!("configuration init: i64 is {value}"));
+    Status::Ok
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -54,6 +61,7 @@ redis_module! {
     version: 1,
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
+    init: init,
     commands: [
         ["configuration.num_changes", num_changes, "", 0, 0, 0, ""],
     ],

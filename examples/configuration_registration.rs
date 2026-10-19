@@ -10,10 +10,10 @@ use std::sync::Mutex;
 
 use redis_module::{
     configuration::{
-        register_bool_configuration, register_enum_configuration, register_i64_configuration,
-        register_string_configuration, ConfigurationFlags,
+        load_configurations, register_bool_configuration, register_enum_configuration,
+        register_i64_configuration, register_string_configuration, ConfigurationFlags,
     },
-    enum_configuration, raw, redis_module, Context, RedisError, RedisString, Status,
+    enum_configuration, redis_module, Context, RedisError, RedisString, Status,
 };
 
 enum_configuration! {
@@ -41,28 +41,17 @@ fn register(ctx: &Context, kind: &str, name: &str) -> Result<(), RedisError> {
     }
 }
 
-/// Applies the registered configurations. Redis requires this after the last
-/// registration, and the `redis_module!` call to it runs before `init`.
-fn load_configs(ctx: &Context) -> Result<(), RedisError> {
-    let load_configs = unsafe { raw::RedisModule_LoadConfigs }
-        .ok_or(RedisError::Str("LoadConfigs is unavailable"))?;
-    match unsafe { load_configs(ctx.get_raw()) } {
-        status if status == raw::REDISMODULE_OK as i32 => Ok(()),
-        _ => Err(RedisError::Str("LoadConfigs failed")),
-    }
-}
-
 fn init(ctx: &Context, args: &[RedisString]) -> Status {
     let result = match args.first().map(RedisString::try_as_str) {
         Some(Ok("valid")) => ["i64", "string", "bool", "enum"]
             .into_iter()
             .try_for_each(|kind| register(ctx, kind, kind))
-            .and_then(|()| load_configs(ctx)),
-        // LoadConfigs runs here too, so a rejection that was not reported would
+            .and_then(|()| load_configurations(ctx)),
+        // Configurations are loaded here too, so a rejection that was not reported would
         // let the module load and the test would see it.
         Some(Ok(kind)) => register(ctx, kind, "duplicate")
             .and_then(|()| register(ctx, kind, "duplicate"))
-            .and_then(|()| load_configs(ctx)),
+            .and_then(|()| load_configurations(ctx)),
         _ => Err(RedisError::Str("expected a mode argument")),
     };
     match result {
