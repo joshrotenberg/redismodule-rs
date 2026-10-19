@@ -93,7 +93,7 @@ fn alloc_set(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     ctx.log_debug(format!("key: {key}, size: {size}").as_str());
 
-    let key = ctx.open_key_writable(&key);
+    let mut key = ctx.open_key_writable(&key);
 
     if let Some(value) = key.get_value::<MyType>(&MY_REDIS_TYPE)? {
         value.data = "B".repeat(size as usize);

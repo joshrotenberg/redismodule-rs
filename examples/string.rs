@@ -11,7 +11,7 @@ fn string_set(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let key_name = args.next_arg()?;
     let value = args.next_arg()?;
 
-    let key = ctx.open_key_writable(&key_name);
+    let mut key = ctx.open_key_writable(&key_name);
     let mut dma = key.as_string_dma()?;
     dma.write(value.as_slice())
         .map(|_| RedisValue::SimpleStringStatic("OK"))

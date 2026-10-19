@@ -282,7 +282,7 @@ impl RedisKeyWritable {
     /// use redis_module::key::RedisKeyWritable;
     /// use redis_module::RedisError;
     ///
-    /// fn is_empty_old(key: &RedisKeyWritable) -> Result<bool, RedisError> {
+    /// fn is_empty_old(key: &mut RedisKeyWritable) -> Result<bool, RedisError> {
     ///     let mut s = key.as_string_dma()?;
     ///     let is_empty = s.write(b"new value")?.is_empty();
     ///     Ok(is_empty)
@@ -293,7 +293,10 @@ impl RedisKeyWritable {
         self.key_type() == KeyType::Empty
     }
 
-    pub fn as_string_dma(&self) -> Result<StringDMA<'_>, RedisError> {
+    /// Direct access to the string value's buffer. The view borrows the key
+    /// mutably, so no other call on this handle can resize or delete the value
+    /// while it is live.
+    pub fn as_string_dma(&mut self) -> Result<StringDMA<'_>, RedisError> {
         StringDMA::new(self)
     }
 
@@ -485,12 +488,33 @@ impl RedisKeyWritable {
     ///
     /// Returns an error if the running Redis does not provide `RedisModule_ModuleTypeGetValue`.
     ///
-    /// TODO Avoid clippy warning about needless lifetime as a temporary workaround
-    #[allow(clippy::needless_lifetimes)]
-    pub fn get_value<'a, 'b, T>(
-        &'a self,
-        redis_type: &RedisType,
-    ) -> Result<Option<&'b mut T>, RedisError> {
+    /// The reference borrows the key mutably, so only one can be live at a time,
+    /// and only while this handle is open. The borrow covers this handle only:
+    /// another handle to the same key, or a command run through
+    /// [`Context::call`](crate::Context::call), can delete or replace the value,
+    /// so do not use the reference after either.
+    ///
+    /// ```compile_fail,E0499
+    /// # use redis_module::{native_types::RedisType, Context, RedisError, RedisString};
+    /// # fn two(ctx: &Context, name: &RedisString, kind: &RedisType) -> Result<(), RedisError> {
+    /// let mut key = ctx.open_key_writable(name);
+    /// let first = key.get_value::<u64>(kind)?;
+    /// let second = key.get_value::<u64>(kind)?;
+    /// first.map(|value| *value += 1);
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// ```compile_fail,E0597
+    /// # use redis_module::{native_types::RedisType, Context, RedisError, RedisString};
+    /// # fn closed(ctx: &Context, name: &RedisString, kind: &RedisType) -> Result<(), RedisError> {
+    /// let value = {
+    ///     let mut key = ctx.open_key_writable(name);
+    ///     key.get_value::<u64>(kind)?
+    /// };
+    /// value.map(|value| *value += 1);
+    /// # Ok(()) }
+    /// ```
+    pub fn get_value<T>(&mut self, redis_type: &RedisType) -> Result<Option<&mut T>, RedisError> {
         verify_type(self.key_inner, redis_type)?;
         let value = unsafe {
             crate::__available_api!(RedisModule_ModuleTypeGetValue)(self.key_inner).cast::<T>()
