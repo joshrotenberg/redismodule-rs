@@ -2,9 +2,7 @@
 // point.
 #![allow(dead_code)]
 
-extern crate enum_primitive_derive;
 extern crate libc;
-extern crate num_traits;
 
 use std::cmp::Ordering;
 use std::ffi::{c_ulonglong, CStr, CString};
@@ -14,9 +12,7 @@ use std::slice;
 
 use crate::RedisResult;
 use bitflags::bitflags;
-use enum_primitive_derive::Primitive;
 use libc::size_t;
-use num_traits::FromPrimitive;
 
 use crate::error::Error;
 pub use crate::redisraw::bindings::*;
@@ -58,62 +54,97 @@ bitflags! {
     }
 }
 
-#[derive(Primitive, Debug, PartialEq, Eq)]
-pub enum KeyType {
-    Empty = REDISMODULE_KEYTYPE_EMPTY,
-    String = REDISMODULE_KEYTYPE_STRING,
-    List = REDISMODULE_KEYTYPE_LIST,
-    Hash = REDISMODULE_KEYTYPE_HASH,
-    Set = REDISMODULE_KEYTYPE_SET,
-    ZSet = REDISMODULE_KEYTYPE_ZSET,
-    Module = REDISMODULE_KEYTYPE_MODULE,
-    Stream = REDISMODULE_KEYTYPE_STREAM,
+/// Defines a C-valued enum and its `From<c_int>`, mapping a value the enum
+/// does not list to the `$unknown` variant instead of panicking.
+macro_rules! c_enum {
+    (
+        $(#[$meta:meta])*
+        $name:ident { $($(#[$variant_meta:meta])* $variant:ident = $value:expr,)* }
+        unknown $unknown:ident
+    ) => {
+        $(#[$meta])*
+        #[repr(i32)]
+        #[non_exhaustive]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum $name {
+            $($(#[$variant_meta])* $variant = $value as i32,)*
+        }
+
+        impl From<c_int> for $name {
+            fn from(value: c_int) -> Self {
+                $(
+                    if value == $value as c_int {
+                        return Self::$variant;
+                    }
+                )*
+                Self::$unknown
+            }
+        }
+    };
 }
 
-impl From<c_int> for KeyType {
-    fn from(v: c_int) -> Self {
-        Self::from_i32(v).unwrap()
+c_enum! {
+    /// The type of a key, from `RedisModule_KeyType`.
+    KeyType {
+        Empty = REDISMODULE_KEYTYPE_EMPTY,
+        String = REDISMODULE_KEYTYPE_STRING,
+        List = REDISMODULE_KEYTYPE_LIST,
+        Hash = REDISMODULE_KEYTYPE_HASH,
+        Set = REDISMODULE_KEYTYPE_SET,
+        ZSet = REDISMODULE_KEYTYPE_ZSET,
+        Module = REDISMODULE_KEYTYPE_MODULE,
+        Stream = REDISMODULE_KEYTYPE_STREAM,
+        /// The GCRA rate limiter type of recent Redis versions.
+        Gcra = REDISMODULE_KEYTYPE_GCRA,
+        /// A key type this crate does not know yet. Not a value Redis uses.
+        Unknown = -1,
     }
+    unknown Unknown
 }
 
-#[derive(Primitive, Debug, PartialEq, Eq)]
+/// The end of a list to push to or pop from.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Where {
-    ListHead = REDISMODULE_LIST_HEAD,
-    ListTail = REDISMODULE_LIST_TAIL,
+    ListHead = REDISMODULE_LIST_HEAD as i32,
+    ListTail = REDISMODULE_LIST_TAIL as i32,
 }
 
-#[derive(Primitive, Debug, PartialEq, Eq)]
-pub enum ReplyType {
-    Unknown = REDISMODULE_REPLY_UNKNOWN,
-    String = REDISMODULE_REPLY_STRING,
-    Error = REDISMODULE_REPLY_ERROR,
-    Integer = REDISMODULE_REPLY_INTEGER,
-    Array = REDISMODULE_REPLY_ARRAY,
-    Null = REDISMODULE_REPLY_NULL,
-    Map = REDISMODULE_REPLY_MAP,
-    Set = REDISMODULE_REPLY_SET,
-    Bool = REDISMODULE_REPLY_BOOL,
-    Double = REDISMODULE_REPLY_DOUBLE,
-    BigNumber = REDISMODULE_REPLY_BIG_NUMBER,
-    VerbatimString = REDISMODULE_REPLY_VERBATIM_STRING,
-}
-
-impl From<c_int> for ReplyType {
-    fn from(v: c_int) -> Self {
-        Self::from_i32(v).unwrap()
+c_enum! {
+    /// The type of a call reply, from `RedisModule_CallReplyType`.
+    ReplyType {
+        Unknown = REDISMODULE_REPLY_UNKNOWN,
+        String = REDISMODULE_REPLY_STRING,
+        Error = REDISMODULE_REPLY_ERROR,
+        Integer = REDISMODULE_REPLY_INTEGER,
+        Array = REDISMODULE_REPLY_ARRAY,
+        Null = REDISMODULE_REPLY_NULL,
+        Map = REDISMODULE_REPLY_MAP,
+        Set = REDISMODULE_REPLY_SET,
+        Bool = REDISMODULE_REPLY_BOOL,
+        Double = REDISMODULE_REPLY_DOUBLE,
+        BigNumber = REDISMODULE_REPLY_BIG_NUMBER,
+        VerbatimString = REDISMODULE_REPLY_VERBATIM_STRING,
+        Attribute = REDISMODULE_REPLY_ATTRIBUTE,
+        Promise = REDISMODULE_REPLY_PROMISE,
     }
+    unknown Unknown
 }
 
-#[derive(Primitive, Debug, PartialEq, Eq)]
+/// When an aux RDB callback runs, relative to the keyspace.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Aux {
-    Before = REDISMODULE_AUX_BEFORE_RDB,
-    After = REDISMODULE_AUX_AFTER_RDB,
+    Before = REDISMODULE_AUX_BEFORE_RDB as i32,
+    After = REDISMODULE_AUX_AFTER_RDB as i32,
 }
 
-#[derive(Primitive, Debug, PartialEq, Eq)]
+/// The result of most Redis module API calls.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Status {
-    Ok = REDISMODULE_OK,
-    Err = REDISMODULE_ERR,
+    Ok = REDISMODULE_OK as i32,
+    Err = REDISMODULE_ERR as i32,
 }
 
 impl From<Status> for RedisResult<()> {
@@ -126,8 +157,13 @@ impl From<Status> for RedisResult<()> {
 }
 
 impl From<c_int> for Status {
+    /// `REDISMODULE_OK` is `Ok`; any other value is `Err`.
     fn from(v: c_int) -> Self {
-        Self::from_i32(v).unwrap()
+        if v == REDISMODULE_OK as c_int {
+            Self::Ok
+        } else {
+            Self::Err
+        }
     }
 }
 
@@ -1215,5 +1251,30 @@ mod hash_tests {
         assert_eq!(hash_count(0).unwrap(), 0);
         assert_eq!(hash_count(1).unwrap(), 1);
         assert!(hash_count(-1).is_err());
+    }
+}
+
+#[cfg(test)]
+mod c_enum_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_values_map_to_unknown_instead_of_panicking() {
+        assert_eq!(
+            KeyType::from(REDISMODULE_KEYTYPE_HASH as c_int),
+            KeyType::Hash
+        );
+        assert_eq!(
+            KeyType::from(REDISMODULE_KEYTYPE_GCRA as c_int),
+            KeyType::Gcra
+        );
+        assert_eq!(KeyType::from(99), KeyType::Unknown);
+        assert_eq!(
+            ReplyType::from(REDISMODULE_REPLY_ATTRIBUTE as c_int),
+            ReplyType::Attribute
+        );
+        assert_eq!(ReplyType::from(99), ReplyType::Unknown);
+        assert_eq!(Status::from(REDISMODULE_OK as c_int), Status::Ok);
+        assert_eq!(Status::from(7), Status::Err);
     }
 }

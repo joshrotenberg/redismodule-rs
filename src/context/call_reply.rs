@@ -764,7 +764,12 @@ impl<'root> Display for CallReply<'root> {
 fn create_call_reply<'root>(reply: NonNull<RedisModuleCallReply>) -> CallResult<'root> {
     let ty = call_reply_type(reply.as_ptr());
     match ty {
-        ReplyType::Unknown => Ok(CallReply::Unknown), // unknown means NULL so no need to free free anything
+        // A reply of a type the crate does not wrap: an attribute reply, a
+        // promise (handled before this point), or a type Redis adds later.
+        ReplyType::Unknown | ReplyType::Attribute | ReplyType::Promise => {
+            free_call_reply(reply.as_ptr());
+            Ok(CallReply::Unknown)
+        }
         ReplyType::Integer => Ok(CallReply::I64(I64CallReply {
             reply,
             _dummy: PhantomData,

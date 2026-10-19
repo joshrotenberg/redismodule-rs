@@ -1,5 +1,4 @@
 pub use crate::context::InfoContext;
-extern crate num_traits;
 
 // Paths used by generated registration attributes. Consumers do not need to
 // declare the SDK's registration implementation dependency themselves.
