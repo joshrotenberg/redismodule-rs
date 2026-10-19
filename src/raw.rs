@@ -645,42 +645,129 @@ pub fn hash_get_by_string(
     }
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-#[inline]
-pub fn hash_set(key: *mut RedisModuleKey, field: &str, value: *mut RedisModuleString) -> Status {
-    let field = CString::new(field).unwrap();
+/// Checks that `key` is empty or holds a hash, before `RedisModule_HashSet`.
+fn verify_hash_key(key: *mut RedisModuleKey) -> Result<(), RedisError> {
+    let key_type = unsafe { crate::__available_api!(RedisModule_KeyType)(key) };
+    if key_type == REDISMODULE_KEYTYPE_EMPTY as c_int
+        || key_type == REDISMODULE_KEYTYPE_HASH as c_int
+    {
+        Ok(())
+    } else {
+        Err(RedisError::WrongType)
+    }
+}
 
-    unsafe {
-        crate::__required_api!(RedisModule_HashSet)(
+fn hash_field(field: &str) -> Result<CString, RedisError> {
+    CString::new(field).map_err(|_| {
+        RedisError::Str("ERR the hash field contains a NUL byte; pass it as a RedisString")
+    })
+}
+
+/// The count `RedisModule_HashSet` returns for one field: the existing fields
+/// it replaced or deleted.
+fn hash_count(count: c_int) -> Result<usize, RedisError> {
+    usize::try_from(count)
+        .map_err(|_| RedisError::String(format!("ERR unexpected HashSet result {count}")))
+}
+
+/// Sets `field` to `value` in the hash at `key`, which must be open for
+/// writing. Returns the number of existing fields replaced: 0 for a new field,
+/// 1 for a replaced one.
+///
+/// # Errors
+///
+/// Returns [`RedisError::WrongType`] if the key holds another type, and an error
+/// if `field` contains a NUL byte or the running Redis lacks the API.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn hash_set(
+    key: *mut RedisModuleKey,
+    field: &str,
+    value: *mut RedisModuleString,
+) -> Result<usize, RedisError> {
+    verify_hash_key(key)?;
+    let field = hash_field(field)?;
+    let hash_set = unsafe { crate::__available_api!(RedisModule_HashSet) };
+    hash_count(unsafe {
+        hash_set(
             key,
-            REDISMODULE_HASH_CFIELDS as i32,
+            REDISMODULE_HASH_CFIELDS as c_int,
             field.as_ptr(),
             value,
             ptr::null::<c_char>(),
         )
-        .into()
-    }
+    })
 }
 
+/// Like [`hash_set`], with the field as a Redis string, so it can hold any bytes.
+///
+/// # Errors
+///
+/// Returns [`RedisError::WrongType`] if the key holds another type, and an error
+/// if the running Redis lacks the API.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-#[inline]
-pub fn hash_del(key: *mut RedisModuleKey, field: &str) -> Status {
-    let field = CString::new(field).unwrap();
-
-    // TODO: Add hash_del_multi()
-    // Support to pass multiple fields is desired but is complicated.
-    // See hash_get_multi() and https://github.com/redis/redis/issues/7860
-
-    unsafe {
-        crate::__required_api!(RedisModule_HashSet)(
+pub fn hash_set_by_string(
+    key: *mut RedisModuleKey,
+    field: *mut RedisModuleString,
+    value: *mut RedisModuleString,
+) -> Result<usize, RedisError> {
+    verify_hash_key(key)?;
+    let hash_set = unsafe { crate::__available_api!(RedisModule_HashSet) };
+    hash_count(unsafe {
+        hash_set(
             key,
-            REDISMODULE_HASH_CFIELDS as i32,
+            REDISMODULE_HASH_NONE as c_int,
+            field,
+            value,
+            ptr::null::<RedisModuleString>(),
+        )
+    })
+}
+
+/// Deletes `field` from the hash at `key`, which must be open for writing.
+/// Returns the number of fields deleted: 0 or 1.
+///
+/// # Errors
+///
+/// Returns [`RedisError::WrongType`] if the key holds another type, and an error
+/// if `field` contains a NUL byte or the running Redis lacks the API.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn hash_del(key: *mut RedisModuleKey, field: &str) -> Result<usize, RedisError> {
+    verify_hash_key(key)?;
+    let field = hash_field(field)?;
+    let hash_set = unsafe { crate::__available_api!(RedisModule_HashSet) };
+    hash_count(unsafe {
+        hash_set(
+            key,
+            REDISMODULE_HASH_CFIELDS as c_int,
             field.as_ptr(),
             REDISMODULE_HASH_DELETE,
             ptr::null::<c_char>(),
         )
-        .into()
-    }
+    })
+}
+
+/// Like [`hash_del`], with the field as a Redis string, so it can hold any bytes.
+///
+/// # Errors
+///
+/// Returns [`RedisError::WrongType`] if the key holds another type, and an error
+/// if the running Redis lacks the API.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub fn hash_del_by_string(
+    key: *mut RedisModuleKey,
+    field: *mut RedisModuleString,
+) -> Result<usize, RedisError> {
+    verify_hash_key(key)?;
+    let hash_set = unsafe { crate::__available_api!(RedisModule_HashSet) };
+    hash_count(unsafe {
+        hash_set(
+            key,
+            REDISMODULE_HASH_NONE as c_int,
+            field,
+            REDISMODULE_HASH_DELETE,
+            ptr::null::<RedisModuleString>(),
+        )
+    })
 }
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -1109,5 +1196,24 @@ mod api_availability_tests {
             payload.downcast_ref::<String>().map(String::as_str),
             Some("RedisModule_CreateString is not available in this Redis server")
         );
+    }
+}
+
+#[cfg(test)]
+mod hash_tests {
+    use super::{hash_count, hash_field};
+
+    #[test]
+    fn a_nul_in_a_text_field_is_an_error() {
+        let error = hash_field("a\0b").unwrap_err();
+        assert!(error.to_string().contains("NUL"), "{error}");
+        assert_eq!(hash_field("field").unwrap().to_bytes(), b"field");
+    }
+
+    #[test]
+    fn hash_counts_are_not_negative() {
+        assert_eq!(hash_count(0).unwrap(), 0);
+        assert_eq!(hash_count(1).unwrap(), 1);
+        assert!(hash_count(-1).is_err());
     }
 }

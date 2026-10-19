@@ -300,14 +300,51 @@ impl RedisKeyWritable {
         StringDMA::new(self)
     }
 
-    #[allow(clippy::must_use_candidate)]
-    pub fn hash_set(&self, field: &str, value: RedisString) -> raw::Status {
+    /// Sets `field` to `value`. Returns the number of existing fields replaced:
+    /// 0 for a new field, 1 for a replaced one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RedisError::WrongType`] if the key holds another type, and an
+    /// error if `field` contains a NUL byte; use [`Self::hash_set_by_string`]
+    /// for such fields.
+    pub fn hash_set(&self, field: &str, value: RedisString) -> Result<usize, RedisError> {
         raw::hash_set(self.key_inner, field, value.as_ptr())
     }
 
-    #[allow(clippy::must_use_candidate)]
-    pub fn hash_del(&self, field: &str) -> raw::Status {
+    /// Like [`Self::hash_set`], with the field and value borrowed as Redis
+    /// strings, so the field can hold any bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RedisError::WrongType`] if the key holds another type.
+    pub fn hash_set_by_string(
+        &self,
+        field: &RedisString,
+        value: &RedisString,
+    ) -> Result<usize, RedisError> {
+        raw::hash_set_by_string(self.key_inner, field.as_ptr(), value.as_ptr())
+    }
+
+    /// Deletes `field`. Returns the number of fields deleted: 0 or 1.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RedisError::WrongType`] if the key holds another type, and an
+    /// error if `field` contains a NUL byte; use [`Self::hash_del_by_string`]
+    /// for such fields.
+    pub fn hash_del(&self, field: &str) -> Result<usize, RedisError> {
         raw::hash_del(self.key_inner, field)
+    }
+
+    /// Like [`Self::hash_del`], with the field as a Redis string, so it can hold
+    /// any bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RedisError::WrongType`] if the key holds another type.
+    pub fn hash_del_by_string(&self, field: &RedisString) -> Result<usize, RedisError> {
+        raw::hash_del_by_string(self.key_inner, field.as_ptr())
     }
 
     pub fn hash_get(&self, field: &str) -> Result<Option<RedisString>, RedisError> {

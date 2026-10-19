@@ -857,6 +857,49 @@ fn test_key_delete_result() -> Result<()> {
 }
 
 #[test]
+fn test_hash_mutation_counts() -> Result<()> {
+    let mut con = TestConnection::new("hash");
+    let run = |con: &mut TestConnection, cmd: &str, args: &[&[u8]]| -> Result<i64> {
+        Ok(redis::cmd(cmd).arg(args).query(con)?)
+    };
+
+    // A new field replaces nothing; setting it again replaces one.
+    assert_eq!(run(&mut con, "hash.set", &[b"h", b"f", b"v1"])?, 0);
+    assert_eq!(run(&mut con, "hash.set", &[b"h", b"f", b"v2"])?, 1);
+    let value: String = redis::cmd("HGET").arg(&["h", "f"]).query(&mut con)?;
+    assert_eq!(value, "v2");
+    assert_eq!(run(&mut con, "hash.del", &[b"h", b"f"])?, 1);
+    assert_eq!(run(&mut con, "hash.del", &[b"h", b"f"])?, 0);
+
+    // Byte fields and values keep every byte.
+    let field: &[u8] = b"a\0b\r\n";
+    let value: &[u8] = b"\0\xff value";
+    assert_eq!(run(&mut con, "hash.set_bytes", &[b"h", field, value])?, 0);
+    assert_eq!(run(&mut con, "hash.set_bytes", &[b"h", field, value])?, 1);
+    let stored: Vec<u8> = redis::cmd("HGET").arg(b"h").arg(field).query(&mut con)?;
+    assert_eq!(stored, value);
+    assert_eq!(run(&mut con, "hash.del_bytes", &[b"h", field])?, 1);
+    assert_eq!(run(&mut con, "hash.del_bytes", &[b"h", field])?, 0);
+
+    // A key of another type is WRONGTYPE.
+    redis::cmd("SET").arg(&["s", "v"]).query::<()>(&mut con)?;
+    for (cmd, args) in [
+        ("hash.set", &[&b"s"[..], b"f", b"v"][..]),
+        ("hash.del", &[b"s", b"f"]),
+        ("hash.set_bytes", &[b"s", b"f", b"v"]),
+        ("hash.del_bytes", &[b"s", b"f"]),
+    ] {
+        let error = redis::cmd(cmd)
+            .arg(args)
+            .query::<i64>(&mut con)
+            .expect_err("a string key accepted a hash mutation");
+        assert_eq!(error.code(), Some("WRONGTYPE"), "{cmd}: {error}");
+    }
+
+    Ok(())
+}
+
+#[test]
 fn test_string() -> Result<()> {
     let mut con = TestConnection::new("string");
 
