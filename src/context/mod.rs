@@ -476,17 +476,20 @@ impl Context {
         self.call_internal(command, options.options.as_ptr() as *const c_char, args)
     }
 
+    /// Converts text for a simple string or error reply, which cannot carry CR,
+    /// LF or NUL, by replacing each of those bytes with a space. Other text,
+    /// non-ASCII included, is kept: no UTF-8 multibyte sequence contains them.
     #[must_use]
     pub fn str_as_legal_resp_string(s: &str) -> CString {
         CString::new(
-            s.chars()
-                .map(|c| match c {
-                    '\r' | '\n' | '\0' => b' ',
-                    _ => c as u8,
+            s.bytes()
+                .map(|b| match b {
+                    b'\r' | b'\n' | b'\0' => b' ',
+                    b => b,
                 })
                 .collect::<Vec<_>>(),
         )
-        .unwrap()
+        .expect("NUL bytes were replaced")
     }
 
     #[allow(clippy::must_use_candidate)]
@@ -524,15 +527,9 @@ impl Context {
             Ok(RedisValue::Bool(v)) => raw::reply_with_bool(self.ctx, v.into()),
             Ok(RedisValue::Integer(v)) => raw::reply_with_long_long(self.ctx, v),
             Ok(RedisValue::Float(v)) => raw::reply_with_double(self.ctx, v),
-            Ok(RedisValue::SimpleStringStatic(s)) => {
-                let msg = CString::new(s).unwrap();
-                raw::reply_with_simple_string(self.ctx, msg.as_ptr())
-            }
+            Ok(RedisValue::SimpleStringStatic(s)) => self.reply_simple_string(s),
 
-            Ok(RedisValue::SimpleString(s)) => {
-                let msg = CString::new(s).unwrap();
-                raw::reply_with_simple_string(self.ctx, msg.as_ptr())
-            }
+            Ok(RedisValue::SimpleString(s)) => self.reply_simple_string(&s),
 
             Ok(RedisValue::BulkString(s)) => {
                 raw::reply_with_string_buffer(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
@@ -1464,5 +1461,16 @@ bitflags! {
 
         /// Redis is currently async loading database for diskless replication.
         const ASYNC_LOADING = raw::REDISMODULE_CTX_FLAGS_ASYNC_LOADING as c_int;
+    }
+}
+
+#[cfg(test)]
+mod resp_text_tests {
+    use super::Context;
+
+    #[test]
+    fn simple_reply_text_keeps_non_ascii_and_replaces_line_breaks_and_nul() {
+        let text = Context::str_as_legal_resp_string("caf\u{e9} \u{65e5}\u{672c}\r\n+OK\0end");
+        assert_eq!(text.to_str(), Ok("caf\u{e9} \u{65e5}\u{672c}  +OK end"));
     }
 }

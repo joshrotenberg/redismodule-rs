@@ -1,6 +1,5 @@
 use std::borrow::Borrow;
 use std::convert::TryFrom;
-use std::ffi::CString;
 use std::fmt::Display;
 use std::ops::Deref;
 use std::os::raw::{c_char, c_int, c_void};
@@ -228,13 +227,12 @@ impl RedisString {
         unsafe { Self::retain_from_ptr(self.inner) }
     }
 
-    /// Compatibility text constructor. The context no longer controls lifetime
-    /// or AutoMemory; the independent string is created with a null context.
-    /// Existing CString/interior-NUL behavior is preserved. Use `from_bytes` for
-    /// binary data. Requires initialized APIs and legal native access.
+    /// Compatibility constructor. The context no longer controls lifetime or
+    /// AutoMemory; the independent string is created with a null context. The
+    /// bytes are copied as they are, interior NUL bytes included, like
+    /// [`Self::from_bytes`]. Requires initialized APIs and legal native access.
     pub fn create<T: Into<Vec<u8>>>(_ctx: Option<NonNull<raw::RedisModuleCtx>>, s: T) -> Self {
-        let text = CString::new(s).unwrap();
-        Self::from_bytes(text.as_bytes())
+        Self::from_bytes(&s.into())
     }
 
     /// Copy a byte slice into an independent native string. No text conversion.

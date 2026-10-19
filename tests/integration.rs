@@ -856,6 +856,32 @@ fn test_string() -> Result<()> {
 }
 
 #[test]
+fn test_string_text_and_bytes() -> Result<()> {
+    let mut con = TestConnection::new("string");
+
+    // CR and LF would end a simple string early; they become spaces.
+    let res: String = redis::cmd("string.reply")
+        .arg(&["simple", "caf\u{e9}\r\n+OK"])
+        .query(&mut con)
+        .with_context(|| "failed to run string.reply simple")?;
+    assert_eq!(res, "caf\u{e9}  +OK");
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    let error = redis::cmd("string.reply")
+        .arg(&["error", "ERR caf\u{e9}"])
+        .query::<String>(&mut con)
+        .expect_err("string.reply error replied with a value");
+    assert!(error.to_string().contains("caf\u{e9}"), "{error}");
+
+    let res: Vec<Vec<u8>> = redis::cmd("string.create_nul")
+        .query(&mut con)
+        .with_context(|| "failed to run string.create_nul")?;
+    assert_eq!(res, [b"a\0b".to_vec(), b"c\0d".to_vec()]);
+
+    Ok(())
+}
+
+#[test]
 fn test_scan() -> Result<()> {
     let mut con = TestConnection::new("scan_keys");
 

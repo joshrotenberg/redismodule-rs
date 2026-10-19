@@ -32,6 +32,28 @@ fn string_get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok(res)
 }
 
+/// `string.reply simple|error text`: replies with `text` as a simple string or
+/// as an error.
+fn string_reply(_: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let kind = args.next_string()?;
+    let text = args.next_string()?;
+    args.done()?;
+    match kind.as_str() {
+        "simple" => Ok(RedisValue::SimpleString(text)),
+        "error" => Err(RedisError::String(text)),
+        _ => Err(RedisError::Str("ERR expected simple or error")),
+    }
+}
+
+/// `string.create_nul`: creates strings with an interior NUL byte.
+fn string_create_nul(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::Array(vec![
+        RedisValue::BulkRedisString(ctx.create_string(b"a\0b".to_vec())),
+        RedisValue::BulkRedisString(RedisString::create(None, "c\0d")),
+    ]))
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -42,5 +64,7 @@ redis_module! {
     commands: [
         ["string.set", string_set, "write fast deny-oom", 1, 1, 1, ""],
         ["string.get", string_get, "readonly", 1, 1, 1, ""],
+        ["string.reply", string_reply, "", 0, 0, 0, ""],
+        ["string.create_nul", string_create_nul, "", 0, 0, 0, ""],
     ],
 }
