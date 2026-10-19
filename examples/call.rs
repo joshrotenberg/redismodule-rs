@@ -1,5 +1,5 @@
 use redis_module::{
-    redis_module, BlockedClient, CallOptionResp, CallOptionsBuilder, CallReply, CallResult,
+    raw, redis_module, BlockedClient, CallOptionResp, CallOptionsBuilder, CallReply, CallResult,
     Context, FutureCallReply, PromiseCallReply, RedisError, RedisResult, RedisString, RedisValue,
     ThreadSafeContext,
 };
@@ -202,6 +202,35 @@ fn call_binary_data_test(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok("pass".into())
 }
 
+/// `call.verbatim`: reads the RESP3 verbatim reply of `INFO server` through
+/// `VerbatimStringCallReply::as_parts` and `raw::call_reply_verbatim_string`.
+fn call_verbatim(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let call_options = CallOptionsBuilder::new()
+        .resp(CallOptionResp::Resp3)
+        .errors_as_replies()
+        .build();
+    let res: CallReply = ctx
+        .call_ext::<_, CallResult>("INFO", &call_options, &["server"])
+        .map_err(|e| -> RedisError { e.into() })?;
+    let CallReply::VerbatimString(reply) = res else {
+        return Err(RedisError::Str(
+            "ERR INFO did not reply with a verbatim string",
+        ));
+    };
+    let (format, data) = reply
+        .as_parts()
+        .ok_or(RedisError::Str("ERR as_parts returned None"))?;
+    let (raw_format, raw_data) = raw::call_reply_verbatim_string(reply.get_raw()).ok_or(
+        RedisError::Str("ERR call_reply_verbatim_string returned None"),
+    )?;
+    Ok(RedisValue::Array(vec![
+        RedisValue::BulkString(format.to_owned()),
+        RedisValue::BulkString(raw_format),
+        RedisValue::Integer(i64::from(raw_data == data)),
+        RedisValue::Integer(i64::from(data.starts_with(b"# Server"))),
+    ]))
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -215,5 +244,6 @@ redis_module! {
         ["call.blocking_from_detached_ctx", call_blocking_from_detach_ctx, "", 0, 0, 0, ""],
         ["call.dump_test", call_dump_test, "", 0, 0, 0, ""],
         ["call.binary_data_test", call_binary_data_test, "", 0, 0, 0, ""],
+        ["call.verbatim", call_verbatim, "", 0, 0, 0, ""],
     ],
 }

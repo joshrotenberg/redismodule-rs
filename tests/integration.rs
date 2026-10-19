@@ -1105,6 +1105,24 @@ fn test_call() -> Result<()> {
 }
 
 #[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_call_verbatim_reply() -> Result<()> {
+    let mut con = TestConnection::new("call");
+
+    // [as_parts format, raw format, same data, data starts with "# Server"]
+    let res: (String, String, i64, i64) = redis::cmd("call.verbatim")
+        .query(&mut con)
+        .with_context(|| "failed to run call.verbatim")?;
+    assert_eq!(res, ("txt".to_owned(), "txt".to_owned(), 1, 1));
+
+    Ok(())
+}
+
+#[test]
 fn test_ctx_flags() -> Result<()> {
     let mut con = TestConnection::new("ctx_flags");
 

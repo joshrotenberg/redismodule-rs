@@ -655,10 +655,12 @@ impl<'root> VerbatimStringCallReply<'root> {
                 &mut format,
             ) as *mut u8
         };
+        if reply_string.is_null() || format.is_null() {
+            return None;
+        }
         Some((
             std::str::from_utf8(unsafe { slice::from_raw_parts(format as *const u8, FORMAT_LEN) })
-                .ok()
-                .unwrap(),
+                .ok()?,
             unsafe { slice::from_raw_parts(reply_string, len) },
         ))
     }

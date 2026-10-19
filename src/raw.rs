@@ -287,21 +287,19 @@ pub fn call_reply_big_number(reply: *mut RedisModuleCallReply) -> Option<String>
 /// # Panics
 ///
 /// Panics if the Redis server doesn't support replying with bool (since RESP3).
-#[allow(clippy::not_unsafe_ptr_arg_deref, invalid_null_arguments)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn call_reply_verbatim_string(reply: *mut RedisModuleCallReply) -> Option<(String, Vec<u8>)> {
     unsafe {
         let mut len: size_t = 0;
-        let format: *const u8 = ptr::null();
-        let reply_string: *mut u8 = crate::__required_api!(RedisModule_CallReplyVerbatim)(
-            reply,
-            &mut len,
-            &mut (format as *const c_char),
-        ) as *mut u8;
-        if reply_string.is_null() {
+        let mut format: *const c_char = ptr::null();
+        let reply_string =
+            crate::__required_api!(RedisModule_CallReplyVerbatim)(reply, &mut len, &mut format)
+                .cast::<u8>();
+        if reply_string.is_null() || format.is_null() {
             return None;
         }
         Some((
-            String::from_utf8(slice::from_raw_parts(format, 3).to_vec()).ok()?,
+            String::from_utf8(slice::from_raw_parts(format.cast::<u8>(), 3).to_vec()).ok()?,
             slice::from_raw_parts(reply_string, len).to_vec(),
         ))
     }
