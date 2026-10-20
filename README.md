@@ -101,7 +101,7 @@ applies to it.
 Legacy command tuples remain supported. Builder expressions may appear in the
 same `commands` list, with no flags, keys, or ACL categories by default:
 
-Inside `redis_module!`:
+Import `redis_command` from `redis_module`. Inside `redis_module!`:
 
 ```rust
 commands: [
@@ -133,8 +133,9 @@ settings. Dynamic discovery uses `CommandFlags::GETKEYS_API` and the existing
 Required ACL categories fail the load if unsupported or rejected. Optional
 categories are tried alongside the required set; on failure, registration warns
 and falls back to the required set. Optional categories are skipped on servers
-without command ACL support. Builders reject empty or NUL-containing names, unknown flag bits, invalid key ranges, and explicit
-empty optional categories with load diagnostics. Legacy tuples retain their
+without command ACL support. Builders reject empty or NUL-containing names,
+unknown flag bits, invalid key ranges, and explicit empty optional categories
+with load diagnostics. Legacy tuples retain their
 native key-position semantics. Handlers still check
 their own argument counts. The `#[command]` attribute remains available for
 arity, detailed key specifications, summaries, and other rich metadata.

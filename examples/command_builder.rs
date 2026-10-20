@@ -1,7 +1,7 @@
 //! Fluent and legacy command definitions may share the same module.
 use redis_module::{
-    AclCategory, CommandFlags, Context, KeyRange, RedisError, RedisResult, RedisString, RedisValue,
-    Status, redis_command, redis_module,
+    CommandFlags, Context, KeyRange, RedisError, RedisResult, RedisString, RedisValue, Status,
+    redis_command, redis_module,
 };
 
 fn callback(_: &Context, _: Vec<RedisString>) -> RedisResult {
@@ -87,7 +87,7 @@ redis_module! {
         [&b"builder.binary_\xff"[..], ping, "readonly", 0, 0, 0, ""],
         redis_command!("builder.dynamic", keys).flags(CommandFlags::GETKEYS_API),
         redis_command!("builder.acl", ping).read_only()
-            .acl_categories(AclCategory::Read)
+            .acl_categories(redis_module::AclCategory::Read)
             .optional_acl_categories("nonexistent_builder_category"),
         redis_command!("builder.optional", ping)
             .optional_acl_categories("nonexistent_builder_category"),

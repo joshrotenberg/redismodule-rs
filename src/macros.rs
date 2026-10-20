@@ -83,6 +83,21 @@ macro_rules! __available_api {
 ///     ],
 /// }
 /// ```
+/// A malformed legacy entry in a mixed list is rejected too:
+///
+/// ```compile_fail
+/// use redis_module::{Context, RedisResult, RedisString, redis_command, redis_module};
+/// fn ping(_: &Context, _: Vec<RedisString>) -> RedisResult { Ok("PONG".into()) }
+/// redis_module! {
+///     name: "bad_mixed_entry", version: 1,
+///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+///     data_types: [],
+///     commands: [
+///         redis_command!("valid.ping", ping),
+///         ["invalid.ping", ping, "readonly", 0, 0, 0],
+///     ],
+/// }
+/// ```
 #[macro_export]
 macro_rules! redis_command {
     ($name:expr, $handler:expr $(,)?) => {
