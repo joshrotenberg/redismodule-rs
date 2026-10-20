@@ -126,7 +126,8 @@ macro_rules! redis_command {
         }
 
         let mandatory = AclCategory::from($mandatory_acl_categories);
-        if let Some(RM_SetCommandACLCategories) = $crate::raw::RedisModule_SetCommandACLCategories {
+        // SAFETY: Redis sets the API pointers before OnLoad runs.
+        if let Some(RM_SetCommandACLCategories) = unsafe { $crate::raw::RedisModule_SetCommandACLCategories } {
             let command =
             unsafe { $crate::__required_api!(RedisModule_GetCommand)(__module_ctx, name.as_ptr()) };
             if command.is_null() {
@@ -149,7 +150,8 @@ macro_rules! redis_command {
                     acl_categories = CString::new(format!("{optional}")).unwrap();
                 }
                 // Warn if optional ACL categories are not set, but don't fail.
-                if RM_SetCommandACLCategories(command, acl_categories.as_ptr()) == $crate::raw::Status::Err as c_int {
+                // SAFETY: command is the command just created; the string outlives the call.
+                if unsafe { RM_SetCommandACLCategories(command, acl_categories.as_ptr()) } == $crate::raw::Status::Err as c_int {
                     optional_failed = true;
                     // SAFETY: __module_ctx comes from the load Context.
                     unsafe { $crate::raw::redis_log(
@@ -165,7 +167,8 @@ macro_rules! redis_command {
                 acl_categories = CString::new(format!("{mandatory}")).unwrap();
 
                 // Fail if mandatory ACL categories are not set.
-                if RM_SetCommandACLCategories(command, acl_categories.as_ptr())
+                // SAFETY: as above.
+                if unsafe { RM_SetCommandACLCategories(command, acl_categories.as_ptr()) }
                     == $crate::raw::Status::Err as c_int
                 {
                     // SAFETY: __module_ctx comes from the load Context.
@@ -403,7 +406,7 @@ macro_rules! redis_module {
             );
         }
 
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         #[allow(non_snake_case)]
         pub unsafe extern "C" fn RedisModule_OnLoad(
             ctx: *mut $crate::raw::RedisModuleCtx,
@@ -478,11 +481,13 @@ macro_rules! redis_module {
 
                     $(
                         $(
-                            if let Some(RM_AddACLCategory) = raw::RedisModule_AddACLCategory {
+                            // SAFETY: Redis sets the API pointers before OnLoad runs.
+                            if let Some(RM_AddACLCategory) = unsafe { raw::RedisModule_AddACLCategory } {
                                 let module_acl_category = AclCategory::from($module_acl_category);
                                 if module_acl_category != AclCategory::None {
                                     let category = CString::new(format!("{module_acl_category}")).unwrap();
-                                    if RM_AddACLCategory(ctx, category.as_ptr()) == raw::Status::Err as c_int {
+                                    // SAFETY: ctx is the load context; the string outlives the call.
+                                    if unsafe { RM_AddACLCategory(ctx, category.as_ptr()) } == raw::Status::Err as c_int {
                                         // SAFETY: ctx is the module's load context.
                                         unsafe { raw::redis_log(ctx, &format!("Error: failed to add ACL category `{module_acl_category}`")) };
                                         return raw::Status::Err as c_int;
@@ -595,7 +600,8 @@ macro_rules! redis_module {
                         )?
                         // A Redis without LoadConfigs (before 7.0) has no module
                         // configurations, so nothing was registered to load.
-                        if raw::RedisModule_LoadConfigs.is_some() {
+                        // SAFETY: read the API pointer by value, not by reference.
+                        if unsafe { raw::RedisModule_LoadConfigs }.is_some() {
                             if let Err(error) = $crate::configuration::load_configurations(&context) {
                                 context.log_warning(&error.to_string());
                                 return raw::Status::Err as c_int;
@@ -635,7 +641,7 @@ macro_rules! redis_module {
             )
         }
 
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         #[allow(non_snake_case)]
         pub unsafe extern "C" fn RedisModule_OnUnload(
             ctx: *mut $crate::raw::RedisModuleCtx

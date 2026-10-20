@@ -1,14 +1,14 @@
 mod api_versions;
 
-use api_versions::{get_feature_flags, API_OLDEST_VERSION, API_VERSION_MAPPING};
+use api_versions::{API_OLDEST_VERSION, API_VERSION_MAPPING, get_feature_flags};
 use proc_macro::TokenStream;
 use quote::quote;
+use syn::Ident;
+use syn::ItemFn;
 use syn::parse::{Parse, ParseStream, Result};
 use syn::punctuated::Punctuated;
 use syn::token::{self, Paren, RArrow};
-use syn::Ident;
-use syn::ItemFn;
-use syn::{self, bracketed, parse_macro_input, ReturnType, Token, Type, TypeTuple};
+use syn::{self, ReturnType, Token, Type, TypeTuple, bracketed, parse_macro_input};
 
 #[derive(Debug)]
 struct Args {
@@ -136,7 +136,7 @@ pub fn api(item: TokenStream) -> TokenStream {
 
     let (all_lower_features, all_upper_features) = get_feature_flags(minimum_require_version);
 
-    let gen = quote! {
+    let r#gen = quote! {
         cfg_if::cfg_if! {
             if #[cfg(any(#(#all_lower_features, )*))] {
                 #old_ver_func
@@ -147,5 +147,5 @@ pub fn api(item: TokenStream) -> TokenStream {
             }
         }
     };
-    gen.into()
+    r#gen.into()
 }

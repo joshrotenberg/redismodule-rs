@@ -1,5 +1,5 @@
 use redis_module::InfoContext;
-use redis_module::{redis_module, Context, RedisError, RedisResult, RedisString, RedisValue};
+use redis_module::{Context, RedisError, RedisResult, RedisString, RedisValue, redis_module};
 
 fn test_helper_version(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
     let ver = ctx.get_redis_version()?;

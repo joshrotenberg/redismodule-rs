@@ -1,4 +1,4 @@
-use redis_module::{redis_module, Context, RedisError, RedisResult, RedisString};
+use redis_module::{Context, RedisError, RedisResult, RedisString, redis_module};
 
 fn hello_mul(_: &Context, args: Vec<RedisString>) -> RedisResult {
     if args.len() < 2 {

@@ -1,5 +1,5 @@
 use redis_module::InfoContext;
-use redis_module::{redis_module, RedisResult};
+use redis_module::{RedisResult, redis_module};
 use redis_module_macros::info_command_handler;
 
 #[info_command_handler]

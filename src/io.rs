@@ -1,6 +1,6 @@
+use crate::RedisBuffer;
 use crate::error::Error;
 use crate::raw;
-use crate::RedisBuffer;
 
 /// Wrapper around RedisModuleIO for type-safe serialization/deserialization.
 ///

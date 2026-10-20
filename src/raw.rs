@@ -1,7 +1,7 @@
 extern crate libc;
 
 use std::cmp::Ordering;
-use std::ffi::{c_ulonglong, CString};
+use std::ffi::{CString, c_ulonglong};
 use std::os::raw::{c_char, c_double, c_int, c_long, c_longlong, c_void};
 use std::ptr;
 use std::slice;
@@ -12,8 +12,8 @@ use libc::size_t;
 
 use crate::error::Error;
 pub use crate::redisraw::bindings::*;
-use crate::{context::StrCallArgs, RedisString};
 use crate::{RedisBuffer, RedisError};
+use crate::{RedisString, context::StrCallArgs};
 
 /// Panics because the running Redis does not provide the module API `name`.
 ///
@@ -223,7 +223,7 @@ pub enum CommandFlag {
 // bindgen does not generate it for us (probably since it's defined as static in redismodule.h).
 #[allow(improper_ctypes)]
 #[link(name = "redismodule", kind = "static")]
-extern "C" {
+unsafe extern "C" {
     pub fn Export_RedisModule_Init(
         ctx: *mut RedisModuleCtx,
         module_name: *const c_char,
@@ -1106,14 +1106,16 @@ pub unsafe fn notify_keyspace_event(
     event: &str,
     keyname: &RedisString,
 ) -> Status {
-    let event = CString::new(event).unwrap();
-    crate::__required_api!(RedisModule_NotifyKeyspaceEvent)(
-        ctx,
-        event_type.bits(),
-        event.as_ptr(),
-        keyname.as_ptr(),
-    )
-    .into()
+    unsafe {
+        let event = CString::new(event).unwrap();
+        crate::__required_api!(RedisModule_NotifyKeyspaceEvent)(
+            ctx,
+            event_type.bits(),
+            event.as_ptr(),
+            keyname.as_ptr(),
+        )
+        .into()
+    }
 }
 
 /// # Panics

@@ -7,9 +7,9 @@
 // 3. `scan_key_for_each <key>` - scans all fields and values in a hash key using a closure that stores the field/value pairs as an array of RedisString.
 
 use redis_module::{
+    Context, KeysCursor, RedisError, RedisResult, RedisString, RedisValue, ScanKeyCursor,
     key::{KeyFlags, RedisKey},
-    redis_module, Context, KeysCursor, RedisError, RedisResult, RedisString, RedisValue,
-    ScanKeyCursor,
+    redis_module,
 };
 
 /// Scans all keys in the database and returns their names as an array of RedisString.

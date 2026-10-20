@@ -2,7 +2,7 @@ use std::ffi::CString;
 use std::ptr::NonNull;
 
 use crate::Context;
-use crate::{raw, RedisString};
+use crate::{RedisString, raw};
 
 pub struct ServerInfo {
     ctx: *mut raw::RedisModuleCtx,

@@ -17,8 +17,7 @@ fn allocation_free_panic(message: &'static str) -> ! {
     std::process::abort();
 }
 
-const REDIS_ALLOCATOR_NOT_AVAILABLE_MESSAGE: &str =
-    "Critical error: the Redis Allocator isn't available. Outside a Redis server, \
+const REDIS_ALLOCATOR_NOT_AVAILABLE_MESSAGE: &str = "Critical error: the Redis Allocator isn't available. Outside a Redis server, \
      such as in cargo test, enable the redis-module feature system-allocator-fallback.\n";
 
 /// Picks the allocator once per process for the `system-allocator-fallback`
@@ -123,12 +122,14 @@ unsafe fn alloc_with(layout: Layout, alloc: impl FnOnce(usize) -> *mut u8) -> *m
         return base;
     }
 
-    // The block starts at least HEADER bytes into the allocation and ends
-    // within it, and it is aligned to more than HEADER, so the header slot
+    // SAFETY: the block starts at least HEADER bytes into the allocation and
+    // ends within it, and it is aligned to more than HEADER, so the header slot
     // below it is in bounds and aligned for a pointer.
-    let block = base.add(over_aligned_offset(base as usize, layout.align()));
-    block.sub(HEADER).cast::<*mut u8>().write(base);
-    block
+    unsafe {
+        let block = base.add(over_aligned_offset(base as usize, layout.align()));
+        block.sub(HEADER).cast::<*mut u8>().write(base);
+        block
+    }
 }
 
 /// Releases a block returned by [`alloc_with`] for the same `layout`, passing
@@ -142,7 +143,9 @@ unsafe fn dealloc_with(block: *mut u8, layout: Layout, free: impl FnOnce(*mut u8
     if !is_over_aligned(layout) {
         free(block);
     } else {
-        free(block.sub(HEADER).cast::<*mut u8>().read());
+        // SAFETY: alloc_with wrote the allocation's base pointer in the header
+        // slot below an over-aligned block.
+        free(unsafe { block.sub(HEADER).cast::<*mut u8>().read() });
     }
 }
 
@@ -201,10 +204,15 @@ unsafe impl GlobalAlloc for RedisAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         #[cfg(feature = "system-allocator-fallback")]
         if fallback::use_system() {
-            return std::alloc::System.alloc(layout);
+            // SAFETY: the caller's GlobalAlloc contract carries over.
+            return unsafe { std::alloc::System.alloc(layout) };
         }
-        match raw::RedisModule_Alloc {
-            Some(alloc) => alloc_with(layout, |size| alloc(size).cast()),
+        // SAFETY: Redis sets the API pointers once, before the module runs.
+        match unsafe { raw::RedisModule_Alloc } {
+            // SAFETY: the caller's GlobalAlloc contract gives a non-zero
+            // size; RedisModule_Alloc is callable once set and has malloc
+            // semantics and alignment, as alloc_with requires.
+            Some(alloc) => unsafe { alloc_with(layout, |size| alloc(size).cast()) },
             None => allocation_free_panic(REDIS_ALLOCATOR_NOT_AVAILABLE_MESSAGE),
         }
     }
@@ -212,10 +220,14 @@ unsafe impl GlobalAlloc for RedisAlloc {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         #[cfg(feature = "system-allocator-fallback")]
         if fallback::use_system() {
-            return std::alloc::System.dealloc(ptr, layout);
+            // SAFETY: the caller's GlobalAlloc contract carries over.
+            return unsafe { std::alloc::System.dealloc(ptr, layout) };
         }
-        match raw::RedisModule_Free {
-            Some(free) => dealloc_with(ptr, layout, |base| free(base.cast())),
+        // SAFETY: Redis sets the API pointers once, before the module runs.
+        match unsafe { raw::RedisModule_Free } {
+            // SAFETY: GlobalAlloc passes a block this allocator returned for
+            // `layout`, and its base came from RedisModule_Alloc.
+            Some(free) => unsafe { dealloc_with(ptr, layout, |base| free(base.cast())) },
             None => allocation_free_panic(REDIS_ALLOCATOR_NOT_AVAILABLE_MESSAGE),
         };
     }
@@ -234,8 +246,10 @@ unsafe impl GlobalAlloc for RedisAlloc {
 /// or `RedisModule_Realloc` returned. For a block from [`RedisAlloc`], use
 /// [`redis_alloc_size`].
 pub unsafe fn malloc_size(ptr: *mut std::ffi::c_void) -> Result<usize, crate::RedisError> {
-    let malloc_size = crate::__available_api!(RedisModule_MallocSize);
-    Ok(malloc_size(ptr))
+    // SAFETY: Redis sets the API pointers once, before the module runs.
+    let malloc_size = unsafe { crate::__available_api!(RedisModule_MallocSize) };
+    // SAFETY: the caller passes a live Redis allocation.
+    Ok(unsafe { malloc_size(ptr) })
 }
 
 /// The usable size of `ptr`, through `RedisModule_MallocUsableSize`.
@@ -248,8 +262,10 @@ pub unsafe fn malloc_size(ptr: *mut std::ffi::c_void) -> Result<usize, crate::Re
 ///
 /// The requirements of [`malloc_size`] apply.
 pub unsafe fn malloc_usable_size(ptr: *mut std::ffi::c_void) -> Result<usize, crate::RedisError> {
-    let malloc_usable_size = crate::__available_api!(RedisModule_MallocUsableSize);
-    Ok(malloc_usable_size(ptr))
+    // SAFETY: Redis sets the API pointers once, before the module runs.
+    let malloc_usable_size = unsafe { crate::__available_api!(RedisModule_MallocUsableSize) };
+    // SAFETY: the caller passes a live Redis allocation.
+    Ok(unsafe { malloc_usable_size(ptr) })
 }
 
 /// The memory Redis allocated for a block that [`RedisAlloc`] returned for
@@ -272,7 +288,8 @@ pub unsafe fn redis_alloc_size(
     block: *const u8,
     layout: Layout,
 ) -> Result<usize, crate::RedisError> {
-    let malloc_size = crate::__available_api!(RedisModule_MallocSize);
+    // SAFETY: Redis sets the API pointers once, before the module runs.
+    let malloc_size = unsafe { crate::__available_api!(RedisModule_MallocSize) };
     // A block from the system allocator, under the system-allocator-fallback
     // feature, has no header and is not Redis's to measure.
     if __uses_system_allocator() {
@@ -281,11 +298,14 @@ pub unsafe fn redis_alloc_size(
         ));
     }
     let base = if is_over_aligned(layout) {
-        block.sub(HEADER).cast::<*mut u8>().read()
+        // SAFETY: RedisAlloc wrote the allocation's base in the header slot
+        // below an over-aligned block.
+        unsafe { block.sub(HEADER).cast::<*mut u8>().read() }
     } else {
         block.cast_mut()
     };
-    Ok(malloc_size(base.cast()))
+    // SAFETY: base is the live allocation RedisModule_Alloc returned.
+    Ok(unsafe { malloc_size(base.cast()) })
 }
 
 #[cfg(test)]

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use redis_module::InfoContext;
-use redis_module::{redis_module, RedisResult};
-use redis_module_macros::{info_command_handler, InfoSection};
+use redis_module::{RedisResult, redis_module};
+use redis_module_macros::{InfoSection, info_command_handler};
 
 #[derive(Debug, Clone, InfoSection)]
 struct Info {

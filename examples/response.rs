@@ -1,6 +1,6 @@
 use redis_module::{
-    redis_module, redisvalue::RedisValueKey, Context, NextArg, RedisError, RedisResult,
-    RedisString, RedisValue,
+    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
+    redisvalue::RedisValueKey,
 };
 use std::collections::{BTreeMap, BTreeSet};
 

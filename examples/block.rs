@@ -1,5 +1,5 @@
 use redis_module::{
-    redis_module, Context, NextArg, RedisResult, RedisString, RedisValue, ThreadSafeContext,
+    Context, NextArg, RedisResult, RedisString, RedisValue, ThreadSafeContext, redis_module,
 };
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::thread;

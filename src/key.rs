@@ -12,14 +12,14 @@ use std::os::raw::c_int;
 
 use raw::KeyType;
 
+use crate::RedisError;
+use crate::RedisResult;
+use crate::RedisString;
 use crate::native_types::RedisType;
 use crate::raw;
 use crate::redismodule::REDIS_OK;
 pub use crate::redisraw::bindings::*;
 use crate::stream::StreamIterator;
-use crate::RedisError;
-use crate::RedisResult;
-use crate::RedisString;
 use bitflags::bitflags;
 
 /// `RedisKey` is an abstraction over a Redis key that allows readonly
@@ -686,7 +686,7 @@ where
                         a.expect("field and value slices not of same length")
                             .clone(),
                         rs.into(),
-                    ))
+                    ));
                 }
             }
         }

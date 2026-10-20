@@ -188,8 +188,10 @@ impl<T: Send + 'static> Drop for ReplyingBlockedClient<T> {
 /// `ctx` must be the context of a reply or timeout callback of a client blocked
 /// by [`Context::block_client_on_reply`] with this `T`.
 unsafe fn payload<'a, T>(ctx: *mut raw::RedisModuleCtx) -> Option<&'a Payload<T>> {
-    let payload = crate::__required_api!(RedisModule_GetBlockedClientPrivateData)(ctx);
-    payload.cast::<Payload<T>>().as_ref()
+    unsafe {
+        let payload = crate::__required_api!(RedisModule_GetBlockedClientPrivateData)(ctx);
+        payload.cast::<Payload<T>>().as_ref()
+    }
 }
 
 extern "C" fn reply_callback<T: Send + 'static>(

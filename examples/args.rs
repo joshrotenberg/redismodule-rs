@@ -3,8 +3,8 @@ use std::alloc::{GlobalAlloc, Layout};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use redis_module::{
-    alloc::RedisAlloc, redis_module, ArgCursor, Context, NextArg, RedisError, RedisResult,
-    RedisString, RedisValue,
+    ArgCursor, Context, NextArg, RedisError, RedisResult, RedisString, RedisValue,
+    alloc::RedisAlloc, redis_module,
 };
 
 // Count Rust allocations only. Command decoding and replies happen outside the
@@ -15,13 +15,17 @@ static BYTES: AtomicUsize = AtomicUsize::new(0);
 
 unsafe impl GlobalAlloc for CountingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        BYTES.fetch_add(layout.size(), Ordering::Relaxed);
-        RedisAlloc.alloc(layout)
+        unsafe {
+            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+            BYTES.fetch_add(layout.size(), Ordering::Relaxed);
+            RedisAlloc.alloc(layout)
+        }
     }
 
     unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        RedisAlloc.dealloc(pointer, layout);
+        unsafe {
+            RedisAlloc.dealloc(pointer, layout);
+        }
     }
 }
 

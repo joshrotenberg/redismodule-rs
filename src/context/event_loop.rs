@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use bitflags::bitflags;
 
-use crate::{raw, Context, RedisError, MODULE_CONTEXT};
+use crate::{Context, MODULE_CONTEXT, RedisError, raw};
 
 bitflags! {
     /// Which events on a file descriptor a callback from [`add`] handles.

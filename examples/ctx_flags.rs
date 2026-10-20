@@ -1,4 +1,4 @@
-use redis_module::{redis_module, Context, ContextFlags, RedisResult, RedisString, RedisValue};
+use redis_module::{Context, ContextFlags, RedisResult, RedisString, RedisValue, redis_module};
 
 fn role(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::SimpleStringStatic(

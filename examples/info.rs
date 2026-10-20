@@ -1,5 +1,5 @@
 use redis_module::{
-    redis_module, ArgCursor, Context, RedisError, RedisResult, RedisString, RedisValue,
+    ArgCursor, Context, RedisError, RedisResult, RedisString, RedisValue, redis_module,
 };
 
 fn info_cmd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {

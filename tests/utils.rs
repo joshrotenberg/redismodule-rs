@@ -11,12 +11,10 @@ use std::time::Duration;
 /// and a port, returns the connection guards (`ChildGuard`) through
 /// which the redis instance can be interacted with.
 pub fn start_redis(module_name: &str, port: u16) -> Result<Vec<ChildGuard>, &'static str> {
-    Ok(vec![start_redis_server_with_module(
-        module_name,
-        port,
-        None,
-    )
-    .map_err(|_| "failed to start redis server")?])
+    Ok(vec![
+        start_redis_server_with_module(module_name, port, None)
+            .map_err(|_| "failed to start redis server")?,
+    ])
 }
 
 pub struct TestConnection {
@@ -153,9 +151,11 @@ pub fn start_redis_server_with_module(
     .iter()
     .collect();
 
-    assert!(fs::metadata(&module_path)
-        .with_context(|| format!("Loading redis module: {}", module_path.display()))?
-        .is_file());
+    assert!(
+        fs::metadata(&module_path)
+            .with_context(|| format!("Loading redis module: {}", module_path.display()))?
+            .is_file()
+    );
 
     let module_path = format!("{}", module_path.display());
 

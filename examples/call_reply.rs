@@ -1,8 +1,8 @@
 //! Forwards native command replies through `Context::call`, so tests can check
 //! the framing and bytes that reach the client.
 use redis_module::{
-    redis_module, redisvalue::RedisValueKey, CallOptionResp, CallOptionsBuilder, CallReply,
-    CallResult, Context, RedisError, RedisResult, RedisString, RedisValue,
+    CallOptionResp, CallOptionsBuilder, CallReply, CallResult, Context, RedisError, RedisResult,
+    RedisString, RedisValue, redis_module, redisvalue::RedisValueKey,
 };
 
 fn forward(ctx: &Context, args: Vec<RedisString>, command: &str) -> RedisResult {

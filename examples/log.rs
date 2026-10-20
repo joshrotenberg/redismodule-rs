@@ -2,7 +2,7 @@
 //! check the exact text that reaches the server log.
 use redis_module::logging::{self, RedisLogLevel};
 use redis_module::native_types::RedisType;
-use redis_module::{raw, redis_module, Context, RedisError, RedisResult, RedisString, Status};
+use redis_module::{Context, RedisError, RedisResult, RedisString, Status, raw, redis_module};
 use std::os::raw::c_void;
 
 fn init(_ctx: &Context, _args: &[RedisString]) -> Status {
@@ -31,9 +31,11 @@ fn log_message(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 // This type is never stored in a key. SaveDataTypeToString supplies a real IO
 // handle and calls this callback synchronously while the command owns its String.
 unsafe extern "C" fn save_message(io: *mut raw::RedisModuleIO, value: *mut c_void) {
-    let message = &*value.cast::<String>();
-    logging::log_io_error(io, RedisLogLevel::Warning, &format!("log-io: {message}"));
-    raw::RedisModule_SaveStringBuffer.unwrap()(io, message.as_ptr().cast(), message.len());
+    unsafe {
+        let message = &*value.cast::<String>();
+        logging::log_io_error(io, RedisLogLevel::Warning, &format!("log-io: {message}"));
+        raw::RedisModule_SaveStringBuffer.unwrap()(io, message.as_ptr().cast(), message.len());
+    }
 }
 
 static LOG_TYPE: RedisType = RedisType::new(

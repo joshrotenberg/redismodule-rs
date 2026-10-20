@@ -6,7 +6,7 @@ use crate::raw::{
     RedisModule_DefragAlloc, RedisModule_DefragCursorGet, RedisModule_DefragCursorSet,
     RedisModule_DefragRedisModuleString, RedisModule_DefragShouldStop,
 };
-use crate::{raw, Context, RedisString, Status};
+use crate::{Context, RedisString, Status, raw};
 use crate::{RedisError, RedisLockIndicator};
 use linkme::distributed_slice;
 
@@ -137,16 +137,18 @@ impl DefragContext {
     /// of the old one and update any reference to the old pointer, which must not
     /// be used again.
     pub unsafe fn defrag_realloc<T>(&self, mut ptr: *mut T) -> *mut T {
-        let new_ptr: *mut T = RedisModule_DefragAlloc
-            .expect("RedisModule_DefragAlloc should be available.")(
-            self.defrag_ctx.as_ptr(),
-            ptr.cast(),
-        )
-        .cast();
-        if !new_ptr.is_null() {
-            ptr = new_ptr;
+        unsafe {
+            let new_ptr: *mut T = RedisModule_DefragAlloc
+                .expect("RedisModule_DefragAlloc should be available.")(
+                self.defrag_ctx.as_ptr(),
+                ptr.cast(),
+            )
+            .cast();
+            if !new_ptr.is_null() {
+                ptr = new_ptr;
+            }
+            ptr
         }
-        ptr
     }
 
     /// Allocates `layout` with the global allocator. Returns null when

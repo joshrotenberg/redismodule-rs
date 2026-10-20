@@ -3,7 +3,7 @@
 use std::time::{Duration, Instant};
 
 use redis_module::{
-    redis_module, Context, NextArg, RedisError, RedisResult, RedisString, YieldMode,
+    Context, NextArg, RedisError, RedisResult, RedisString, YieldMode, redis_module,
 };
 
 fn busy(ctx: &Context, args: Vec<RedisString>) -> RedisResult {

@@ -12,10 +12,10 @@ use std::{fmt, ptr};
 
 use serde::de::{Error, SeqAccess};
 
+use crate::Context;
 pub use crate::raw;
 pub use crate::rediserror::RedisError;
 pub use crate::redisvalue::RedisValue;
-use crate::Context;
 
 /// A short-hand type that stores a [std::result::Result] with custom
 /// type and [RedisError].

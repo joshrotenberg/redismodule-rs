@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut};
 use std::ptr;
 
 use crate::context::blocked::BlockedClient;
-use crate::{raw, Context, RedisResult};
+use crate::{Context, RedisResult, raw};
 
 pub struct RedisGILGuardScope<'ctx, 'mutex, T, G: RedisLockIndicator> {
     _context: &'ctx G,
@@ -228,10 +228,12 @@ mod tests {
         {
             let mut scope = guard.lock(&Locked);
             *scope += 1;
-            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _second = guard.lock(&Locked);
-            }))
-            .is_err());
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _second = guard.lock(&Locked);
+                }))
+                .is_err()
+            );
         }
         assert_eq!(*guard.lock(&Locked), 2);
     }

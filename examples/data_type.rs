@@ -4,7 +4,7 @@ use redis_module::defrag::DefragContext;
 use redis_module::native_types::RedisType;
 use redis_module::redisvalue::RedisValueKey;
 use redis_module::{
-    raw, redis_module, Context, NextArg, RedisGILGuard, RedisResult, RedisString, RedisValue,
+    Context, NextArg, RedisGILGuard, RedisResult, RedisString, RedisValue, raw, redis_module,
 };
 use redis_module_macros::{defrag_end_function, defrag_function, defrag_start_function};
 use std::os::raw::c_void;
@@ -54,7 +54,9 @@ static MY_REDIS_TYPE: RedisType = RedisType::new(
 );
 
 unsafe extern "C" fn free(value: *mut c_void) {
-    drop(Box::from_raw(value.cast::<MyType>()));
+    unsafe {
+        drop(Box::from_raw(value.cast::<MyType>()));
+    }
 }
 
 unsafe extern "C" fn defrag(
@@ -62,10 +64,12 @@ unsafe extern "C" fn defrag(
     _key: *mut raw::RedisModuleString,
     _value: *mut *mut c_void,
 ) -> c_int {
-    let defrag_ctx = DefragContext::new(ctx);
-    let mut num_keys_defrag = NUM_KEYS_DEFRAG.lock(&defrag_ctx);
-    *num_keys_defrag += 1;
-    0
+    unsafe {
+        let defrag_ctx = DefragContext::new(ctx);
+        let mut num_keys_defrag = NUM_KEYS_DEFRAG.lock(&defrag_ctx);
+        *num_keys_defrag += 1;
+        0
+    }
 }
 
 #[defrag_start_function]

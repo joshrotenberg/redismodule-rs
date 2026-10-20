@@ -1,6 +1,6 @@
 use crate::{
-    context::call_reply::{CallResult, VerbatimStringFormat},
     CallReply, RedisError, RedisString,
+    context::call_reply::{CallResult, VerbatimStringFormat},
 };
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -333,7 +333,7 @@ impl<'root> TryFrom<&CallResult<'root>> for RedisValueKey {
 
 #[cfg(test)]
 mod tests {
-    use super::{call_string_key, call_string_value, RedisValue, RedisValueKey};
+    use super::{RedisValue, RedisValueKey, call_string_key, call_string_value};
     use std::collections::{BTreeSet, HashSet};
 
     #[test]

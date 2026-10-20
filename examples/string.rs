@@ -1,5 +1,5 @@
 use redis_module::{
-    redis_module, Context, NextArg, RedisError, RedisResult, RedisString, RedisValue,
+    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
 };
 
 fn string_set(ctx: &Context, args: Vec<RedisString>) -> RedisResult {

@@ -4,9 +4,9 @@ use quote::quote;
 use serde::Deserialize;
 use serde_syn::{config, from_stream};
 use syn::{
-    parse,
+    Data, DataEnum, DataStruct, DeriveInput, Fields, parse,
     parse::{Parse, ParseStream},
-    parse_macro_input, Data, DataEnum, DataStruct, DeriveInput, Fields,
+    parse_macro_input,
 };
 
 /// Generate [From] implementation for [RedisValue] for Enum.

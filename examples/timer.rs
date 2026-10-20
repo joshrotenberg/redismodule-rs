@@ -1,4 +1,4 @@
-use redis_module::{redis_module, Context, NextArg, RedisResult, RedisString};
+use redis_module::{Context, NextArg, RedisResult, RedisString, redis_module};
 use std::time::Duration;
 
 fn callback(ctx: &Context, data: String) {

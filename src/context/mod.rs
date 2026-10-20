@@ -9,20 +9,20 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::key::{KeyFlags, RedisKey, RedisKeyWritable};
 use crate::logging::RedisLogLevel;
+use crate::raw::{ModuleOptions, Version};
 use crate::raw::{
     add_info_begin_dict_field, add_info_end_dict_field, add_info_field_double,
     add_info_field_long_long, add_info_field_str, add_info_field_unsigned_long_long,
     add_info_section,
 };
-use crate::raw::{ModuleOptions, Version};
 use crate::redisvalue::RedisValueKey;
-use crate::{raw, RedisResult, Status};
 use crate::{RedisError, RedisString, RedisValue};
+use crate::{RedisResult, Status, raw};
 use std::ops::Deref;
 
 use std::ffi::CStr;
 
-use self::call_reply::{create_promise_call_reply, CallResult, ErrorReply, PromiseCallReply};
+use self::call_reply::{CallResult, ErrorReply, PromiseCallReply, create_promise_call_reply};
 use self::thread_safe::RedisLockIndicator;
 
 mod timer;
@@ -105,7 +105,7 @@ fn call_failure(errno: Option<i32>) -> Option<String> {
             return Some(format!(
                 "ERR RedisModule_Call failed: {}",
                 std::io::Error::from_raw_os_error(other)
-            ))
+            ));
         }
     };
     Some(format!("ERR RedisModule_Call failed: {reason}"))
@@ -1514,7 +1514,7 @@ impl<'a> InfoContextBuilderDictionaryBuilder<'a> {
         name: &str,
         value: F,
     ) -> RedisResult<Self> {
-        if self.fields.iter().any(|k| k.0 .0 == name) {
+        if self.fields.iter().any(|k| k.0.0 == name) {
             return Err(RedisError::String(format!(
                 "Found duplicate key '{name}' in the info dictionary '{}'",
                 self.name
@@ -1711,7 +1711,7 @@ impl<'a> InfoContextBuilder<'a> {
                 ))?;
                 fields
                     .iter()
-                    .try_for_each(|f| self.add_bottom_level_field(&f.0 .0, &f.0 .1))?;
+                    .try_for_each(|f| self.add_bottom_level_field(&f.0.0, &f.0.1))?;
                 add_info_end_dict_field(self.context.ctx).into()
             }
         })
@@ -1921,8 +1921,10 @@ mod call_failure_tests {
             call_failure(Some(libc::ENOENT)).as_deref(),
             Some("ERR RedisModule_Call failed: unknown command")
         );
-        assert!(call_failure(Some(libc::EIO))
-            .unwrap()
-            .starts_with("ERR RedisModule_Call failed: "));
+        assert!(
+            call_failure(Some(libc::EIO))
+                .unwrap()
+                .starts_with("ERR RedisModule_Call failed: ")
+        );
     }
 }

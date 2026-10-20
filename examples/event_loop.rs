@@ -5,8 +5,8 @@ use std::thread;
 
 use redis_module::event_loop::{self, EventLoopMask};
 use redis_module::{
-    redis_module, Context, NextArg, RedisError, RedisResult, RedisString, RedisValue,
-    MODULE_CONTEXT,
+    Context, MODULE_CONTEXT, NextArg, RedisError, RedisResult, RedisString, RedisValue,
+    redis_module,
 };
 
 /// `eventloop.set_later key value`: a thread schedules a one-shot, which sets

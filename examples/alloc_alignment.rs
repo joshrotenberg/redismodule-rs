@@ -1,7 +1,7 @@
 //! Boxes values with alignments above 16 bytes through `RedisAlloc` and
 //! reports how many of them landed on a misaligned address.
 
-use redis_module::{redis_module, Context, RedisResult, RedisString, RedisValue};
+use redis_module::{Context, RedisResult, RedisString, RedisValue, redis_module};
 use std::hint::black_box;
 
 #[repr(align(32))]

@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use redis_module::{
+    ConfigurationValue, Context, RedisError, RedisResult, RedisString, RedisValue, Status,
     configuration::{ConfigurationContext, ConfigurationFlags},
-    raw, redis_module, ConfigurationValue, Context, RedisError, RedisResult, RedisString,
-    RedisValue, Status,
+    raw, redis_module,
 };
 
 type FreeString = unsafe extern "C" fn(*mut raw::RedisModuleCtx, *mut raw::RedisModuleString);
@@ -24,9 +24,11 @@ unsafe extern "C" fn counting_free_string(
     ctx: *mut raw::RedisModuleCtx,
     string: *mut raw::RedisModuleString,
 ) {
-    LIVE.lock().unwrap().remove(&(string as usize));
-    let free_string = FREE_STRING.get().expect("FreeString saved at load");
-    free_string(ctx, string);
+    unsafe {
+        LIVE.lock().unwrap().remove(&(string as usize));
+        let free_string = FREE_STRING.get().expect("FreeString saved at load");
+        free_string(ctx, string);
+    }
 }
 
 struct Text;
