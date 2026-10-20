@@ -55,7 +55,7 @@ so these are now `unsafe fn`, each with a `# Safety` section:
 - `logging::setup_for_context`, `logging::log_io_error`,
   `DefragContext::defrag_dealloc`
 - in `raw`: the RDB `save_*` and `load_*` helpers, `is_io_error`, `redis_log`,
-  `call_reply_verbatim_string`, `notify_keyspace_event` and `export_shared_api`
+  `call_reply_verbatim_string`, and the doc-hidden `register_info_function`
 
 Inside a command or callback there is usually a `&Context` already; use its safe
 methods instead:
@@ -89,10 +89,11 @@ as long as the server runs.
   or `next_arg` followed by `try_as_str`.
 - The `inner` field is private; use `as_ptr()`.
 - `Context::get_current_user` returns `Option<RedisString>`.
-- `ScanKeyCursor::scan` callbacks receive the value as `Option<&RedisString>`,
-  and `KeysCursor::scan` takes the callback as `&mut F`.
-- The key passed to a keyspace event handler is bound to the callback's
-  `Context`, so a handler cannot keep it.
+- `ScanKeyCursor::scan` and `for_each` callbacks receive the value as
+  `Option<&RedisString>`, and `KeysCursor::scan` takes the callback as `&mut F`.
+- A keyspace event handler gets the event name and key borrowed for the
+  callback, so a handler declared with `&'static str` or `&'static [u8]` no
+  longer compiles; declare plain `&str` and `&[u8]` and copy what it keeps.
 
 ```rust
 // 2.x
@@ -189,9 +190,10 @@ take `&Context` instead of a raw pointer.
 
 ### Raw enums
 
-- `KeyType` and `ReplyType` are `#[non_exhaustive]`, have an `Unknown`
-  variant for values a newer Redis may return, and convert from an `i32`
-  with `From` instead of panicking.
+- `KeyType` and `ReplyType` are `#[non_exhaustive]`, so a `match` on them
+  needs a wildcard arm. `KeyType` gains `Gcra` and `Unknown` (for values a newer
+  Redis may return), and `ReplyType` gains `Attribute` and `Promise`. Both
+  convert from an `i32` with `From` instead of panicking.
 - The raw enums are `#[repr(i32)]` and no longer have the `FromPrimitive`
   methods; the `enum-primitive-derive` and `num-traits` dependencies are gone.
 - `Status::from(c_int)` maps every value other than `REDISMODULE_OK` to `Err`.
@@ -229,9 +231,9 @@ text, may notice them.
 - **Logging.** Messages go to Redis through a fixed `%s` format, so `%` in
   logged text is printed as is; an embedded NUL is written as `\0`.
 - **Cron events.** Cron event handlers receive the server's `hz`; 2.x passed 1.
-- **Crash reports.** The `trace` field of the module's crash report section is
-  `std::backtrace::Backtrace` output (one line, no column numbers) instead of
-  the `backtrace` crate's numbered frames.
+- **Crash reports.** The `backtrace` field of the crash report's `trace`
+  section is `std::backtrace::Backtrace` output (one line, no column numbers)
+  instead of the `backtrace` crate's numbered frames.
 
 ## Testing a module with `cargo test`
 
