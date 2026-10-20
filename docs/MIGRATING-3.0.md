@@ -238,6 +238,16 @@ text.
   fails the load, before `init` runs, when `LoadConfigs` rejects a value given
   at load time; 2.x ran `init` with the default values, and then Redis
   unloaded the module.
+- **Numeric configuration defaults.** `register_i64_configuration` rejects a
+  default outside its inclusive `min` and `max`, before registering it with
+  Redis. This applies to hard-coded defaults and values supplied through
+  `module_args_as_configuration`; memory values are checked after unit
+  conversion. Use a valid default even if `LOADEX CONFIG` will override it.
+- **Module arguments as configuration.** Configuration names are read only
+  from the name positions in name/value pairs, so a string value matching
+  another configuration's name no longer overrides it. Boolean values must
+  be `yes` or `no`, ignoring ASCII case. Other values fail the load before
+  `init`, where 2.x silently treated them as false.
 - **Status values.** `Status::from(c_int)` maps every value other than
   `REDISMODULE_OK` to `Err`.
 - **Keys.** `RedisKey::to_raw_parts` leaves the key open for the caller to

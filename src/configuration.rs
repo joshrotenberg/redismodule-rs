@@ -247,11 +247,13 @@ extern "C" fn i64_configuration_get<T: ConfigurationValue<i64> + 'static>(
 
 /// Registers a numeric configuration. Call it during module OnLoad.
 ///
-/// Returns an error if the Redis API is missing or Redis rejects the
-/// registration (for example a duplicate or invalid name); the private data and
-/// `on_changed` callback of a rejected registration are dropped. Outside the
-/// `configurations` block of `redis_module!`, call [`load_configurations`]
-/// after the last registration.
+/// The default must be within the inclusive `min` and `max`, even when a
+/// load-time configuration will override it. Returns an error if it is outside
+/// those bounds, the Redis API is missing, or Redis rejects the registration
+/// (for example a duplicate or invalid name); the private data and `on_changed`
+/// callback of a rejected registration are dropped. Outside the `configurations`
+/// block of `redis_module!`, call [`load_configurations`] after the last
+/// registration.
 #[expect(clippy::too_many_arguments)]
 pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
     ctx: &Context,
@@ -263,6 +265,11 @@ pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
     flags: ConfigurationFlags,
     on_changed: Option<OnUpdatedCallback<T>>,
 ) -> Result<(), RedisError> {
+    if default < min || default > max {
+        return Err(RedisError::String(format!(
+            "Numeric configuration '{name}' default must be between {min} and {max}"
+        )));
+    }
     let name = CString::new(name).unwrap();
     let config_private_data = ConfigrationPrivateData {
         variable,
@@ -292,9 +299,9 @@ pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
 }
 
 fn find_config_value<'a>(args: &'a [RedisString], name: &str) -> Option<&'a RedisString> {
-    args.iter()
-        .skip_while(|item| !item.as_slice().eq(name.as_bytes()))
-        .nth(1)
+    args.chunks_exact(2)
+        .find(|pair| pair[0].as_slice() == name.as_bytes())
+        .map(|pair| &pair[1])
 }
 
 pub fn get_i64_default_config_value(
@@ -514,12 +521,25 @@ pub fn register_bool_configuration<T: ConfigurationValue<bool>>(
     pending.finish(status)
 }
 
+/// Reads a boolean module argument as `yes` or `no`, ignoring ASCII case.
+/// Other values are errors; an absent name uses `default`.
 pub fn get_bool_default_config_value(
     args: &[RedisString],
     name: &str,
     default: bool,
 ) -> Result<bool, RedisError> {
-    find_config_value(args, name).map_or(Ok(default), |arg| Ok(arg.try_as_str()? == "yes"))
+    find_config_value(args, name).map_or(Ok(default), |arg| {
+        let value = arg.try_as_str()?;
+        if value.eq_ignore_ascii_case("yes") {
+            Ok(true)
+        } else if value.eq_ignore_ascii_case("no") {
+            Ok(false)
+        } else {
+            Err(RedisError::String(format!(
+                "Boolean configuration '{name}' must be 'yes' or 'no'"
+            )))
+        }
+    })
 }
 
 extern "C" fn enum_configuration_set<

@@ -2014,6 +2014,133 @@ fn test_memory_configuration_takes_units() -> Result<()> {
     Ok(())
 }
 
+fn assert_configuration_module_args(args: &[&str], expected: &[(&str, &str)]) -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    let module = utils::module_path("configuration")?;
+    redis::cmd("MODULE")
+        .arg(&["LOAD", module.as_str()])
+        .arg(args)
+        .query::<()>(&mut con)
+        .with_context(|| format!("failed to load configuration with {args:?}"))?;
+    for (name, value) in expected {
+        let name = format!("configuration.{name}");
+        let config: Vec<String> = redis::cmd("CONFIG")
+            .arg(&["GET", name.as_str()])
+            .query(&mut con)?;
+        assert_eq!(config, [name, (*value).to_owned()], "{args:?}");
+    }
+    Ok(())
+}
+
+fn assert_configuration_module_arg_rejected(
+    name: &str,
+    value: &str,
+    diagnostic: &[&str],
+) -> Result<()> {
+    let mut con = TestConnection::with_log_file("hello");
+    let module = utils::module_path("configuration")?;
+    let error = redis::cmd("MODULE")
+        .arg(&["LOAD", module.as_str(), name, value])
+        .query::<()>(&mut con)
+        .expect_err("an invalid module argument loaded");
+    assert!(
+        error.to_string().contains("Error loading the extension"),
+        "{name} {value}: {error}"
+    );
+    let log = con.server_log()?;
+    assert!(
+        !log.contains("configuration init:"),
+        "init ran for a failed load: {log}"
+    );
+    assert!(
+        log.lines().any(|line| {
+            line.contains(name) && diagnostic.iter().all(|part| line.contains(part))
+        }),
+        "missing diagnostic for {name} {value}: {log}"
+    );
+    let configs: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.*"])
+        .query(&mut con)?;
+    assert!(configs.is_empty(), "{configs:?}");
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    // A rejected load must leave the server able to load the same module.
+    redis::cmd("MODULE")
+        .arg(&["LOAD", module.as_str()])
+        .query::<()>(&mut con)?;
+    let config: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.i64"])
+        .query(&mut con)?;
+    assert_eq!(config, ["configuration.i64", "10"]);
+    assert!(
+        con.server_log()?.contains("configuration init: i64 is 10"),
+        "init did not run after the valid load"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_configuration_module_args_validate_numeric_range() -> Result<()> {
+    for value in ["-1", "1001"] {
+        assert_configuration_module_arg_rejected("i64", value, &["0", "1000"])?;
+    }
+    for value in ["0", "1000"] {
+        assert_configuration_module_args(&["i64", value], &[("i64", value)])?;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_configuration_module_args_bool_is_case_insensitive() -> Result<()> {
+    for (input, expected) in [
+        ("YES", "yes"),
+        ("Yes", "yes"),
+        ("yes", "yes"),
+        ("NO", "no"),
+        ("No", "no"),
+        ("no", "no"),
+    ] {
+        assert_configuration_module_args(&["bool", input], &[("bool", expected)])?;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_configuration_module_args_reject_invalid_bool() -> Result<()> {
+    for value in ["true", "1", "nope", ""] {
+        assert_configuration_module_arg_rejected("bool", value, &["yes", "no"])?;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_configuration_module_args_keep_names_and_values_paired() -> Result<()> {
+    // A string value can equal a different configuration's name. It must not
+    // override that configuration or hide a later explicit value for it.
+    assert_configuration_module_args(
+        &["string", "i64", "bool", "no"],
+        &[("string", "i64"), ("i64", "10"), ("bool", "no")],
+    )?;
+    assert_configuration_module_args(
+        &["string", "i64", "i64", "25"],
+        &[("string", "i64"), ("i64", "25")],
+    )?;
+    Ok(())
+}
+
+#[test]
+fn test_configuration_module_args_validate_memory_range_after_units() -> Result<()> {
+    // The example accepts 1024 through 8 MiB. Decimal 1k is below the
+    // minimum, while binary 1kb is exactly the minimum.
+    for input in ["1k", "9mb"] {
+        assert_configuration_module_arg_rejected("memory", input, &["1024", "8388608"])?;
+    }
+    for (input, bytes) in [("1kb", "1024"), ("8mb", "8388608")] {
+        assert_configuration_module_args(&["memory", input], &[("memory", bytes)])?;
+    }
+    Ok(())
+}
+
 #[test]
 fn test_configuration_registration_errors_fail_the_load() -> Result<()> {
     let mut con = TestConnection::new("hello");

@@ -71,7 +71,7 @@ redis_module! {
             ["i64", &*CONFIGURATION_I64, 10, 0, 1000, ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed))],
             ["atomic_i64", &*CONFIGURATION_ATOMIC_I64, 10, 0, 1000, ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed))],
             // Takes units, such as 8mb, in CONFIG SET and in module arguments.
-            ["memory", &*CONFIGURATION_MEMORY, 1024, 0, i64::MAX, ConfigurationFlags::MEMORY, None],
+            ["memory", &*CONFIGURATION_MEMORY, 1024, 1024, 8 << 20, ConfigurationFlags::MEMORY, None],
         ],
         string: [
             ["redis_string", &*CONFIGURATION_REDIS_STRING, "default", ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed))],
