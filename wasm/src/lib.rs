@@ -556,10 +556,6 @@ redis_module! {
                 None
             ],
         ],
-        // The macro needs every group listed. Module arguments would be parsed
-        // without units, so `max-memory 8mb` would fail the load: set it with
-        // `wasm.max-memory` in the configuration or `CONFIG SET` instead.
-        string: [],
         bool: [
             [
                 "persist",
@@ -569,7 +565,6 @@ redis_module! {
                 None
             ],
         ],
-        enum: [],
-        module_args_as_configuration: false,
+        module_args_as_configuration: true,
     ]
 }

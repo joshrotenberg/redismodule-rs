@@ -286,10 +286,10 @@ fn load_call_list_and_delete_a_library() {
         error_text(call(&mut con, &["fail", "0"])),
         "ERR this function always fails"
     );
-    // The map key goes out as a bulk string: see `to_key` in src/reply.rs.
+    // The map key keeps its type: a simple string.
     assert_eq!(
         raw_reply(server.port, &["WASM.CALL", "nested", "0"]),
-        "*3\r\n*2\r\n$6\r\nanswer\r\n:42\r\n$-1\r\n-ERR an error inside an array\r\n"
+        "*3\r\n*2\r\n+answer\r\n:42\r\n$-1\r\n-ERR an error inside an array\r\n"
     );
     let recurse = error_text(call(&mut con, &["recurse", "0"]));
     assert!(recurse.contains("not allowed"), "{recurse}");
@@ -566,7 +566,7 @@ fn a_javascript_library_behaves_like_the_rust_one() {
     );
     assert_eq!(
         raw_reply(server.port, &["WASM.CALL", "nested", "0"]),
-        "*3\r\n*2\r\n$6\r\nanswer\r\n:42\r\n$-1\r\n-ERR an error inside an array\r\n"
+        "*3\r\n*2\r\n+answer\r\n:42\r\n$-1\r\n-ERR an error inside an array\r\n"
     );
     assert_eq!(
         error_text(call(&mut con, &["fail", "0"])),
@@ -1323,6 +1323,18 @@ fn the_module_unloads_when_persistence_is_off() {
     assert!(list(&mut con).is_empty());
     load(&mut con, "hello");
     assert_eq!(counter(&mut con), 1);
+    assert_eq!(unload(&mut con).unwrap(), Value::Okay);
+
+    // Module arguments set the configuration too, with units.
+    let _: () = redis::cmd("MODULE")
+        .arg(&["LOAD", module, "persist", "no", "max-memory", "8mb"])
+        .query(&mut con)
+        .unwrap();
+    let max_memory: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "wasm.max-memory"])
+        .query(&mut con)
+        .unwrap();
+    assert_eq!(max_memory, ["wasm.max-memory", "8388608"]);
     assert_eq!(unload(&mut con).unwrap(), Value::Okay);
 
     // With persistence on, the default, the data type keeps it loaded.

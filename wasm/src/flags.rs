@@ -7,10 +7,7 @@
 //! (`MISCONF`) or by `min-replicas-to-write` (`NOREPLICAS`). For those a function
 //! that writes starts, and its first write command fails with that error.
 
-use std::ffi::c_int;
-use std::ptr;
-
-use redis_module::{Context, ContextFlags, RedisError, RedisString, RedisValue, raw};
+use redis_module::{Context, ContextFlags, RedisError, RedisString, RedisValue, cluster};
 
 use crate::host::FunctionFlags;
 
@@ -60,7 +57,7 @@ pub(crate) fn check(
             "ERR Can not run function on cluster, 'no-cluster' flag is set.",
         ));
     }
-    if !flags.contains(FunctionFlags::ALLOW_STALE) && running_stale(ctx, &state) {
+    if !flags.contains(FunctionFlags::ALLOW_STALE) && running_stale(ctx, state) {
         return Err(RedisError::Str(
             "MASTERDOWN Link with MASTER is down, replica-serve-stale-data is set to 'no' \
              and 'allow-stale' flag is not set on the function.",
@@ -94,7 +91,7 @@ pub(crate) fn check(
         one_slot,
         // Redis has already refused declared keys in different slots.
         slot: if one_slot {
-            keys.first().and_then(|key| key_slot(ctx, key))
+            keys.first().map(|key| cluster::key_slot(key))
         } else {
             None
         },
@@ -103,7 +100,7 @@ pub(crate) fn check(
 
 /// Whether this is a replica that has lost its primary and must not serve
 /// stale data.
-fn running_stale(ctx: &Context, state: &ContextFlags) -> bool {
+fn running_stale(ctx: &Context, state: ContextFlags) -> bool {
     if !state.contains(ContextFlags::SLAVE | ContextFlags::REPLICA_IS_STALE) {
         return false;
     }
@@ -117,61 +114,16 @@ fn running_stale(ctx: &Context, state: &ContextFlags) -> bool {
     }
 }
 
-/// The hash slot of `key`, or `None` on a Redis without
-/// `RedisModule_ClusterKeySlot`.
-fn key_slot(ctx: &Context, key: &[u8]) -> Option<u16> {
-    let key = ctx.create_string(key);
-    // SAFETY: Redis fills the API table when the module loads, before any
-    // command runs, and nothing writes it after.
-    let key_slot = unsafe { raw::RedisModule_ClusterKeySlot }?;
-    // SAFETY: key is a live string; ClusterKeySlot only reads it.
-    u16::try_from(unsafe { key_slot(key.as_ptr()) }).ok()
-}
-
 /// The hash slot of the keys `command` would use with `args`, or `None` if it
-/// uses none. Redis refuses a command whose own keys are in different slots,
-/// so the first key's slot stands for all of them.
+/// uses none or Redis does not know it. Redis refuses a command whose own keys
+/// are in different slots, so the first key's slot stands for all of them.
 pub(crate) fn command_slot(ctx: &Context, command: &str, args: &[&[u8]]) -> Option<u16> {
-    // SAFETY: as in key_slot.
-    let (get_keys, free) = unsafe {
-        (
-            raw::RedisModule_GetCommandKeysWithFlags,
-            raw::RedisModule_Free,
-        )
-    };
-    let (get_keys, free) = (get_keys?, free?);
     let argv: Vec<RedisString> = std::iter::once(command.as_bytes())
         .chain(args.iter().copied())
         .map(|arg| ctx.create_string(arg))
         .collect();
-    let mut argv_ptrs: Vec<*mut raw::RedisModuleString> =
-        argv.iter().map(RedisString::as_ptr).collect();
-    let argc = c_int::try_from(argv_ptrs.len()).ok()?;
-    let mut num_keys: c_int = 0;
-    // SAFETY: the context is the running command's, the argument vector holds
-    // live strings, and the returned positions are freed below; out_flags may
-    // be null.
-    let positions = unsafe {
-        get_keys(
-            ctx.get_raw(),
-            argv_ptrs.as_mut_ptr(),
-            argc,
-            &mut num_keys,
-            ptr::null_mut(),
-        )
-    };
-    if positions.is_null() {
-        return None;
-    }
-    // SAFETY: Redis returned num_keys positions into argv.
-    let first = (num_keys > 0).then(|| unsafe { *positions });
-    // SAFETY: the positions were allocated by Redis for this caller.
-    unsafe { free(positions.cast()) };
-    let key = argv.get(usize::try_from(first?).ok()?)?;
-    // SAFETY: as in key_slot.
-    let key_slot = unsafe { raw::RedisModule_ClusterKeySlot }?;
-    // SAFETY: key is a live string; ClusterKeySlot only reads it.
-    u16::try_from(unsafe { key_slot(key.as_ptr()) }).ok()
+    let first = *ctx.get_command_keys(&argv).ok()?.first()?;
+    Some(cluster::key_slot(argv.get(first)?.as_slice()))
 }
 
 /// The flags in the order and spelling of `FUNCTION LIST`.

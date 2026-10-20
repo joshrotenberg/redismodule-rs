@@ -104,7 +104,8 @@ the default, `yes`, does.
 
 The libraries are aux data, which needs a data type, and Redis does not unload
 a module with one. `wasm.persist no` (set at load time: `--wasm.persist no`,
-or `MODULE LOADEX <path> CONFIG wasm.persist no`) leaves persistence off: the
+`MODULE LOAD <path> persist no`, or
+`MODULE LOADEX <path> CONFIG wasm.persist no`) leaves persistence off: the
 RDB does not keep the libraries, loading an RDB leaves them alone, and
 `MODULE UNLOAD` works. `WASM.LOAD` and `WASM.DELETE` still replicate.
 

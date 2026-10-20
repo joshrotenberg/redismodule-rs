@@ -159,18 +159,19 @@ avoids both instantiating and tearing down, and was adopted.
 ## Repository
 
 Found by an audit of fork master outside the crates' sources (2026-10-20).
-These are ordinary fork PRs; none depends on the wasm host.
+These are ordinary fork PRs; none depends on the wasm host. All are merged;
+the commit is master's.
 
 | ID | status | item |
 |---|---|---|
-| R1 | todo | Delete `Dockerfile`, `.dockerignore`, `build/docker/` and `.gitmodules`: they run the `readies` setup and `Makefile` that upstream deleted in October 2024, and cannot build. |
-| R2 | todo | CI (`ci.yml`): drop `submodules: recursive` (no submodules) and the Python setup (no Python); run the matrix on the default features, so the tests use the committed bindings, and keep `bindgen-runtime`, clang and the bindings drift check in one job; use the pinned 1.94.0 toolchain or say why CI uses stable. |
-| R3 | todo | Release workflows: `release-pr.yml` is still enabled and would open a release-plz PR that rewrites the 3.0.0 changelog sections and bumps versions. Delete `release.yml` and `release-pr.yml`, or limit them to the upstream repository. |
-| R4 | todo | `dependabot.yml`: remove the ignore entry for bindgen 0.56; consider adding the `github-actions` ecosystem. |
-| R5 | todo | `deny.toml`: nothing runs it since upstream's `Makefile` went. Add a cargo-deny CI job (its license list likely needs `Unicode-3.0` for `unicode-ident`) or delete it. |
-| R6 | todo | `docs/MIGRATING-3.0.md`: the `system-allocator-fallback` dev-dependency example uses `version = "3"`, which does not resolve while 3.0 is unpublished; use the git and `rev` form. |
-| R7 | todo | `README.upstream.md` keeps upstream's dead `redis.io/topics/modules-intro` links: leave it verbatim, or say at its top that it is. |
-| R8 | todo | `build.sh` and `test.sh`: `--all` is the old spelling of `--workspace` (cosmetic). |
+| R1 | done, 9b0f605 | Delete `Dockerfile`, `.dockerignore`, `build/docker/` and `.gitmodules`: they run the `readies` setup and `Makefile` that upstream deleted in October 2024, and cannot build. |
+| R2 | done, 848824a | CI (`ci.yml`): drop `submodules: recursive` (no submodules) and the Python setup (no Python); run the matrix on the default features, so the tests use the committed bindings, and keep `bindgen-runtime`, clang and the bindings drift check in one job; use the pinned 1.94.0 toolchain or say why CI uses stable. |
+| R3 | done, cb78fec | Release workflows: `release-pr.yml` is still enabled and would open a release-plz PR that rewrites the 3.0.0 changelog sections and bumps versions. Delete `release.yml` and `release-pr.yml`, or limit them to the upstream repository. |
+| R4 | done, 686f84c | `dependabot.yml`: remove the ignore entry for bindgen 0.56; consider adding the `github-actions` ecosystem. |
+| R5 | done, 1353e52 | `deny.toml`: nothing runs it since upstream's `Makefile` went. Add a cargo-deny CI job (its license list likely needs `Unicode-3.0` for `unicode-ident`) or delete it. |
+| R6 | done, 8ddccf1 | `docs/MIGRATING-3.0.md`: the `system-allocator-fallback` dev-dependency example uses `version = "3"`, which does not resolve while 3.0 is unpublished; use the git and `rev` form. |
+| R7 | done, e4c5d1c | `README.upstream.md` keeps upstream's dead `redis.io/topics/modules-intro` links: leave it verbatim, or say at its top that it is. |
+| R8 | done, 9e5ff10 | `build.sh` and `test.sh`: `--all` is the old spelling of `--workspace` (cosmetic). |
 
 The audit found nothing to change in `examples/`, `tests/`, `.gitignore`,
 `rust-toolchain.toml`, the changelogs and the side crates' manifests. The
@@ -179,21 +180,21 @@ The audit found nothing to change in `examples/`, `tests/`, `.gitignore`,
 ## SDK changes the spike found
 
 These are in this repository's SDK and do not depend on the wasm host; each
-can be an ordinary PR.
+can be an ordinary PR. A done item names its commit on master.
 
 | ID | status | item |
 |---|---|---|
-| S1 | done here, not on master | `RedisValue::Error(String)`, an error reply with an owned message that can sit inside an array (the `feat!: add RedisValue::Error ...` commit on this branch). Open as its own PR. |
-| S2 | todo | `RedisValueKey` has no simple string, so a map key sent as a simple string goes out as a bulk string. |
+| S1 | done, dad8637 and 9258efb | `RedisValue::Error(String)`, an error reply with an owned message that can sit inside an array; a call reply's error converts to it. |
+| S2 | done, a5eb60d | `RedisValueKey` had no simple string, so a map key sent as a simple string went out as a bulk string. `RedisValueKey::SimpleString` keeps it. |
 | S3 | todo | No lifetime-safe way to hand a `Context` to code that needs `'static` data, such as a runtime's store. |
 | S4 | todo | Replies can only be built as a `RedisValue` tree; the low-level reply functions are crate-private since 3.0, so nothing streams a reply. |
 | S5 | todo | The `min-redis-compatibility-*` floors are mutually exclusive, and Cargo unifies features across a workspace, so a second module crate in the workspace must use the root's floor. |
 | S6 | worked around | On macOS a stripped release build of the host fails to load ("mis-aligned LINKEDIT string pool"); the workspace sets `strip = "none"` for it. Check with a newer toolchain. |
-| S7 | todo | `ServerInfo::field` panics on a field name with a NUL byte; upstream returns `None`. |
-| S8 | todo | `Cargo.toml`'s `repository` field still names upstream. |
-| S10 | todo | No safe wrappers for `RedisModule_GetCommandKeysWithFlags` and `RedisModule_ClusterKeySlot`; the host calls them through `raw`. `ContextFlags` is not `Copy`. |
-| S11 | todo | Registering commands from the `#[command]` macro requires `RedisModule_SetCommandACLCategories` (Redis 7.2) even when no command declares ACL categories, so a module using the macro does not load on Redis 7.0 ("RedisModule_SetCommandACLCategories does not exists"). |
-| S9 | todo | `redis_module!`'s `configurations` block compiles only with all four groups (`i64`, `string`, `bool`, `enum`) and `module_args_as_configuration` listed, and module arguments are parsed as plain integers, so a memory config given as `8mb` fails the load. |
+| S7 | done, 9ea85f4 | `ServerInfo::field` panicked on a field name with a NUL byte; upstream returns `None`, and so does it now. |
+| S8 | done, 6d21760 | `Cargo.toml`'s `repository` field named upstream. |
+| S10 | done, d100d13 | No safe wrappers for `RedisModule_GetCommandKeysWithFlags` and `RedisModule_ClusterKeySlot`, and `ContextFlags` was not `Copy`. `Context::get_command_keys` and `cluster::key_slot` (computed in Rust, so it works before Redis 7.4) replace the host's `raw` calls. |
+| S11 | done, 955e3d4 | Registering commands from the `#[command]` macro required `RedisModule_SetCommandACLCategories` (Redis 7.2) even when no command declares ACL categories, so a module using the macro did not load on Redis 7.0. It is now needed only by a command that declares categories; this host's do (`@scripting`), so it still needs 7.2. |
+| S9 | done, dabad65 | `redis_module!`'s `configurations` block compiled only with all four groups (`i64`, `string`, `bool`, `enum`) and `module_args_as_configuration` listed, and module arguments were parsed as plain integers, so a memory config given as `8mb` failed the load. The host now lists only its groups and takes module arguments as configuration. |
 
 ## Module API gaps
 
@@ -215,10 +216,17 @@ evidence as the host meets them.
 
 | ID | question |
 |---|---|
-| Q1 | Where the crate lives so others can use it: a private repository, a bundle, or a branch. |
+| Q1 | Where the crate lives so others can use it. Answered: the fork's `experiment/wasm-host` branch, kept rebased on master. |
 
 ## Log
 
+- 2026-10-20: moved to the fork's `experiment/wasm-host` branch, rebased on
+  master df36fea, and moved onto the SDK changes there: `cluster::key_slot`
+  and `Context::get_command_keys` replace the `raw` calls (S10), so the
+  one-slot rule no longer needs `RedisModule_ClusterKeySlot` and should hold
+  on 7.2 too (not yet run there); a simple-string map key stays one (S2); the
+  configurations list only their groups, and module arguments set them, with
+  units (S9). R1 to R8 and S1, S2, S7 to S11 are merged on master.
 - 2026-10-20: final smoke test of the night's build on Linux: every feature
   (calls, flags, `call`/`pcall`, flat replies, dump and restore, stats, kill,
   restart) and a cluster `MOVED` passed on Redis 7.2.16, 7.4.11, 8.0.6, 8.2.10

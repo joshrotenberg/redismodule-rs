@@ -231,13 +231,11 @@ fn next_value(rest: &mut &[Node]) -> Result<RedisValue, String> {
     })
 }
 
-/// A map key. `RedisValueKey` has no simple string, so a simple string key is
-/// replied as a bulk string.
+/// A map key.
 fn to_key(value: RedisValue) -> Result<RedisValueKey, String> {
     match value {
-        RedisValue::SimpleString(text) | RedisValue::BulkString(text) => {
-            Ok(RedisValueKey::String(text))
-        }
+        RedisValue::SimpleString(text) => Ok(RedisValueKey::SimpleString(text)),
+        RedisValue::BulkString(text) => Ok(RedisValueKey::String(text)),
         RedisValue::StringBuffer(bytes) => Ok(RedisValueKey::BulkString(bytes)),
         RedisValue::Integer(value) => Ok(RedisValueKey::Integer(value)),
         RedisValue::Bool(value) => Ok(RedisValueKey::Bool(value)),
@@ -291,7 +289,7 @@ mod tests {
             Ok(RedisValue::Array(vec![
                 RedisValue::Integer(1),
                 RedisValue::InsertionOrderedMap(vec![(
-                    RedisValueKey::String("k".into()),
+                    RedisValueKey::SimpleString("k".into()),
                     RedisValue::BulkString("v".into()),
                 )]),
                 RedisValue::Error("ERR inner".into()),
