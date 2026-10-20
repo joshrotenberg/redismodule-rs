@@ -105,6 +105,16 @@ fn map_ordered(_: &Context, _: Vec<RedisString>) -> RedisResult {
     ))
 }
 
+/// `errors.in_array`: an array holding an error with a computed message.
+fn errors_in_array(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    let failed = 2;
+    Ok(RedisValue::Array(vec![
+        RedisValue::Integer(1),
+        RedisValue::Error(format!("ERR item {failed} failed")),
+        RedisValue::BulkString("three".to_owned()),
+    ]))
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -118,5 +128,6 @@ redis_module! {
         ["map.hget", map_hget, "readonly", 1, 1, 1, ""],
         ["map.hget_writable", map_hget_writable, "write", 1, 1, 1, ""],
         ["map.ordered", map_ordered, "readonly", 0, 0, 0, ""],
+        ["errors.in_array", errors_in_array, "readonly", 0, 0, 0, ""],
     ],
 }

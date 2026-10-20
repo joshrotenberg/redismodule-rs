@@ -130,9 +130,10 @@ if let Some(value) = key.get_value::<MyType>(&MY_TYPE)? {
 
 ### Replies
 
-`RedisValue` has a new variant, `InsertionOrderedMap`, which replies with the
-entries in the order the module added them. An exhaustive `match` on
-`RedisValue` needs another arm.
+`RedisValue` has two new variants: `InsertionOrderedMap`, which replies with
+the entries in the order the module added them, and `Error(String)`, an error
+reply with an owned message, which can sit inside an array, set or map. An
+exhaustive `match` on `RedisValue` needs two more arms.
 
 ### Errors
 
