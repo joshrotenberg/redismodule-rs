@@ -104,6 +104,7 @@ fn generate_bindings(out_path: &std::path::Path, experimental_api: &str) {
         .allowlist_type("RedisModule.*")
         .parse_callbacks(Box::new(RedisModuleCallback))
         .size_t_is_usize(true)
+        .wrap_unsafe_ops(true)
         .generate()
         .expect("error generating bindings");
 
