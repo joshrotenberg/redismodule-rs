@@ -18,6 +18,14 @@ WASM.KILL                                       stop the running function, as FU
 
 Function names are global across libraries, as with `FUNCTION`.
 
+`WASM.CALL` declares its keys as `FCALL` does: the `numkeys` keys after the
+function name. `COMMAND GETKEYS`, ACL key patterns and cluster routing use
+them, so in a cluster a call is redirected to the node that serves its keys,
+and keys in different slots get `CROSSSLOT`. As in Lua, a function should use
+only the keys it is given; the host does not check that yet. Each node has its
+own libraries: in a cluster, load a library on every primary, as with
+`FUNCTION LOAD`; replicas get it from their primary.
+
 Each library keeps one instance between calls, so a guest's memory and globals
 persist from one call to the next; creating an instance per call made a call
 about eight times slower. A call that fails, for example one that traps or is
@@ -154,4 +162,3 @@ workspace `Cargo.toml`); unoptimized, loading the JavaScript component took
 
 - Function flags, read-only calls, and ACL and RESP helpers for guests.
 - Memory limits per instance and an `INFO` section.
-- Key specs on `WASM.CALL`, so a cluster can route it by its keys.

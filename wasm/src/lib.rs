@@ -25,6 +25,7 @@ use redis_module::{
     ArgCursor, Context, ModuleOptions, RedisError, RedisResult, RedisString, RedisValue, Status,
     redis_module,
 };
+use redis_module_macros::command;
 
 mod busy;
 mod host;
@@ -125,6 +126,25 @@ fn load_timed_out(_ctx: &Context) -> RedisResult {
 }
 
 /// `WASM.CALL <function> <numkeys> [key ...] [arg ...]`
+///
+/// Like `FCALL`'s, its key spec reads the keys from `numkeys`, so `COMMAND
+/// GETKEYS`, ACL key patterns and cluster routing see them. A function may do
+/// anything with a key, so the spec assumes it reads and updates each one.
+#[command(
+    {
+        name: "wasm.call",
+        flags: [Write, DenyScript, NoMandatoryKeys],
+        arity: -3,
+        key_spec: [
+            {
+                notes: "the function may read and update any of its keys",
+                flags: [ReadWrite, Access, Update],
+                begin_search: Index({ index : 2 }),
+                find_keys: Keynum({ key_num_idx : 0, first_key : 1, key_step : 1 }),
+            }
+        ]
+    }
+)]
 fn wasm_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = ArgCursor::new(&args[1..]);
     let function = args.next_str()?;
@@ -235,7 +255,6 @@ redis_module! {
     deinit: deinit,
     commands: [
         ["wasm.load", wasm_load, "write deny-oom deny-script", 0, 0, 0, ""],
-        ["wasm.call", wasm_call, "write deny-script", 0, 0, 0, ""],
         ["wasm.list", wasm_list, "readonly deny-script", 0, 0, 0, ""],
         ["wasm.delete", wasm_delete, "write deny-script", 0, 0, 0, ""],
         ["wasm.kill", wasm_kill, "allow-busy deny-script fast", 0, 0, 0, ""],

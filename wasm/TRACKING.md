@@ -26,6 +26,9 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   restart, `DEBUG RELOAD` or a replica's full sync brings them back, and
   `WASM.LOAD` and `WASM.DELETE` go to replicas and the AOF as they are. Because
   aux data needs a data type, `MODULE UNLOAD` now refuses the module (H16).
+- `WASM.CALL` declares its keys with a key spec like `FCALL`'s, so `COMMAND
+  GETKEYS`, ACL key patterns and a cluster's `MOVED` and `CROSSSLOT` checks see
+  them.
 - Guests in Rust (`guests/hello`) and JavaScript (`guests/js`, componentize-js);
   the same integration tests pass against both.
 - Reply types survive both ways, including simple versus bulk strings, maps,
@@ -38,7 +41,7 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   moves 1000 strings into the guest, 1.4 times faster.
 - The host is about 790 lines of code, not counting comments and unit tests.
   The example guest is 22 KB as a core module and 23 KB as a component. The
-  ten integration tests take about 11 seconds.
+  twelve integration tests take about 9 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
@@ -109,7 +112,7 @@ avoids both instantiating and tearing down, and was adopted.
 
 | ID | status | item | done when |
 |---|---|---|---|
-| H6 | todo | **Key specs for `WASM.CALL`.** A keynum key spec so a cluster routes it by its keys. `redis_module!`'s command table cannot express one; check the `#[command]` macro or `RedisModule_SetCommandInfo`. | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
+| H6 | done | **Key specs for `WASM.CALL`.** Declared with the `#[command]` macro and a key spec like `FCALL`'s: `numkeys` at argument 2, the keys after it, flags `RW`, `access` and `update`; `no-mandatory-keys`, arity -3. `COMMAND GETKEYS`, ACL key patterns and cluster routing (`MOVED`, `CROSSSLOT`) see the keys. | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
 | H7 | done | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread; the main thread instantiates and adds the library. Precompiled components (`Engine::precompile_component`) would skip the compile entirely, but loading one is `unsafe`: only for trusted input. | The server answers other clients while a large component compiles. |
 | H8 | todo | **Memory.** A memory limit per instance (wasmtime resource limiter), refusing writes when `used_memory_ratio` is at 1, and an `INFO` section with the host's memory. Kept instances (H2) only grow, so also replace an instance whose memory passes a size. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
 | H9 | todo | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`), `WASM.CALL_RO`, a `call` that fails where `pcall` returns the error, and `acl-check-command` and `set-resp` imports. | Each has a test matching what Lua does. |
@@ -178,6 +181,14 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H6 done: `WASM.CALL` moved from the `redis_module!` table to
+  the `#[command]` macro, which registers a keynum key spec through
+  `RedisModule_SetCommandInfo`. Redis adds `movablekeys`; `COMMAND GETKEYS`
+  with no keys returns an empty array, as for `FCALL`. Tests: `GETKEYS` and
+  `GETKEYSANDFLAGS`, an ACL user limited to `~a*`, and a two-node cluster where
+  a key on the other node gets `MOVED`, keys in two slots get `CROSSSLOT`, and
+  a local key or no key runs. Both tests fail with the old registration, which
+  declared no keys.
 - 2026-10-20: H5 done: libraries are aux data in the RDB (data type
   `wasm-libs`, encoding version 0, saved before the keyspace). `aux_save2`
   saves nothing when there are no libraries, so such an RDB loads in a server

@@ -773,3 +773,127 @@ fn a_replica_gets_the_libraries_and_their_changes() {
     let value: String = redis::cmd("GET").arg("counter").query(&mut r).unwrap();
     assert_eq!(value, "4");
 }
+
+/// Parses each entry of an array reply on its own; see `list`.
+fn entries<T: redis::FromRedisValue>(reply: Value) -> Vec<T> {
+    let Value::Bulk(entries) = reply else {
+        panic!("an array reply, not {reply:?}");
+    };
+    entries
+        .iter()
+        .map(|entry| redis::from_redis_value(entry).expect("an entry"))
+        .collect()
+}
+
+#[test]
+fn wasm_call_declares_its_keys() {
+    let server = Server::start(6622, &[]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+
+    let getkeys = |con: &mut Connection, args: &[&str]| -> Vec<String> {
+        redis::cmd("COMMAND")
+            .arg("GETKEYS")
+            .arg("WASM.CALL")
+            .arg(args)
+            .query(con)
+            .unwrap()
+    };
+    assert_eq!(
+        getkeys(&mut con, &["hello", "2", "a", "b", "x"]),
+        ["a", "b"]
+    );
+    assert!(getkeys(&mut con, &["hello", "0", "x"]).is_empty());
+
+    // A function may do anything with a key, so the flags assume the worst,
+    // as FCALL's do.
+    let flags: Vec<(String, Vec<String>)> = entries(
+        redis::cmd("COMMAND")
+            .arg(&["GETKEYSANDFLAGS", "WASM.CALL", "hello", "1", "a"])
+            .query(&mut con)
+            .unwrap(),
+    );
+    assert_eq!(
+        flags,
+        [(
+            "a".to_string(),
+            vec!["RW".into(), "access".into(), "update".into()]
+        )]
+    );
+
+    // ACL key patterns apply to the keys WASM.CALL declares.
+    let _: () = redis::cmd("ACL")
+        .arg(&["SETUSER", "limited", "on", "nopass", "~a*", "+@all"])
+        .query(&mut con)
+        .unwrap();
+    let mut limited = server.connection();
+    let _: () = redis::cmd("AUTH")
+        .arg(&["limited", "any"])
+        .query(&mut limited)
+        .unwrap();
+    assert_eq!(
+        call(&mut limited, &["hello", "1", "a1"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+    assert!(error_text(call(&mut limited, &["hello", "1", "b1"])).starts_with("NOPERM"));
+}
+
+#[test]
+fn a_cluster_routes_wasm_call_by_its_keys() {
+    // Two primaries, each serving half the slots.
+    let args = ["--cluster-enabled", "yes"];
+    let a = Server::start(6623, &args);
+    let b = Server::start(6624, &args);
+    let mut ca = a.connection();
+    let mut cb = b.connection();
+    for (con, first, last) in [(&mut ca, "0", "8191"), (&mut cb, "8192", "16383")] {
+        let _: () = redis::cmd("CLUSTER")
+            .arg(&["ADDSLOTSRANGE", first, last])
+            .query(con)
+            .unwrap();
+    }
+    let _: () = redis::cmd("CLUSTER")
+        .arg(&["MEET", "127.0.0.1", "6624"])
+        .query(&mut ca)
+        .unwrap();
+    for con in [&mut ca, &mut cb] {
+        wait_for("the cluster to form", || {
+            let info: String = redis::cmd("CLUSTER").arg("INFO").query(con).ok()?;
+            info.contains("cluster_state:ok").then_some(())
+        });
+    }
+    load(&mut ca, "hello");
+
+    // Keys and their slots: two served by a in different slots, one by b.
+    let mut keys = (0..100).map(|i| {
+        let key = format!("k{i}");
+        let slot: i64 = redis::cmd("CLUSTER")
+            .arg(&["KEYSLOT", &key])
+            .query(&mut ca)
+            .unwrap();
+        (key, slot)
+    });
+    let (on_a, slot_a) = keys.by_ref().find(|(_, slot)| *slot < 8192).unwrap();
+    let (on_a_too, _) = keys
+        .by_ref()
+        .find(|(_, slot)| *slot < 8192 && *slot != slot_a)
+        .unwrap();
+    let (on_b, slot_b) = keys.find(|(_, slot)| *slot >= 8192).unwrap();
+
+    // Redis redirects or refuses before the function runs.
+    assert_eq!(
+        error_text(call(&mut ca, &["incr_twice", "1", &on_b])),
+        format!("MOVED {slot_b} 127.0.0.1:6624")
+    );
+    assert!(error_text(call(&mut ca, &["hello", "2", &on_a, &on_a_too])).starts_with("CROSSSLOT"));
+
+    // A key a serves, or no key at all, runs on a.
+    assert_eq!(
+        call(&mut ca, &["incr_twice", "1", &on_a]).unwrap(),
+        Value::Bulk(vec![Value::Int(1), Value::Int(2)])
+    );
+    assert_eq!(
+        call(&mut ca, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+}
