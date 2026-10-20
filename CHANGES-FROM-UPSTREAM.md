@@ -18,9 +18,13 @@ For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 - Upstream commits since then that this fork does not have:
   - [cca5360](https://github.com/RedisLabsModules/redismodule-rs/commit/cca5360)
     (2026-10-16, [upstream PR 488][p488]): fixes `ServerInfo::field` leaking its
-    string. This fork has the same fix in [813cfa0]. One difference: upstream's
-    `field` returns `None` for a field name containing a NUL byte, where this
-    fork's panics (and the panic guard turns it into an error reply).
+    string. This fork has the same fix in [813cfa0], and `field` returns `None`
+    for a field name containing a NUL byte, as upstream's does, since
+    [9ea85f4].
+  - [4ab88e7](https://github.com/RedisLabsModules/redismodule-rs/commit/4ab88e7)
+    (2026-10-20, [upstream PR 489][p489]): adds
+    `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` to `redismodule.h`. This
+    fork's header and committed bindings do not have it.
 
 ## Upstream issues this fork fixes
 
@@ -68,7 +72,7 @@ Redis's errors and frees the private data Redis rejects ([c3432c5]).
 | [476][p476] | fix: make logging total on messages with interior NUL bytes | closed | Adapted, and the message no longer passes as a format string ([3700a31]). |
 | [477][p477] | Add example and support for shutdown server event | open | Ported ([b0135e0]). |
 | [483][p483] | [MOD-17680] Honour layouts requiring more than 16-byte alignment | open | The same bug is fixed here ([e81393d]). |
-| [487][p487], [488][p488] | Fix ServerInfo::field leak with a null context.; Fix ServerInfo field string leaks with and without auto-memory | closed; 488 merged | The same fix ([813cfa0]); see Base. |
+| [487][p487], [488][p488] | Fix ServerInfo::field leak with a null context.; Fix ServerInfo field string leaks with and without auto-memory | closed; 488 merged | The same fix ([813cfa0]), and 488's `None` for a field name with a NUL byte ([9ea85f4]); see Base. |
 | [85][p85], [348][p348], [360][p360], [361][p361] | dependency updates | open | Superseded: `enum-primitive-derive` removed ([5dbf237]), `nix` and `strum_macros` removed ([86b8113]), bindgen at 0.73 ([0e1d8f2]). |
 
 ## Fixes with no upstream issue or pull request
@@ -100,6 +104,9 @@ these in October 2026.
 | [5dbf237] | Converting an unlisted key type, reply type or status from `c_int` panicked. |
 | [3de40d8] | `logging::setup_for_context` replaced the logger's context even when it failed, and `DefragContext::defrag_alloc` passed a zero-size layout to the allocator. |
 | [86b8113] | Version parsing panicked on a number that overflows. |
+| [955e3d4] | Under a floor below 7.2, a module whose commands come from `#[command]` did not load on Redis 7.0: registration required `RedisModule_SetCommandACLCategories`, which Redis 7.2 added (and which registration has used since [upstream PR 432][p432]), even for commands without ACL categories. Under the 7.0 floor, a command that failed to register was also ignored. |
+| [dabad65] | The `configurations` block of `redis_module!` compiled only with all four groups and `module_args_as_configuration` listed, and a memory configuration given as a module argument with a unit, such as `8mb`, failed the load. |
+| [9ea85f4] | `Context::server_info` panicked on a section name with a NUL byte (upstream still does); see the 488 row for `field`. |
 
 ## Additions
 
@@ -122,6 +129,10 @@ these in October 2026.
 | [813cfa0] | `RedisString::from_bytes`, `from_owned_ptr`, `retain_from_ptr` and `as_ptr`. |
 | [3de40d8] | `InfoContext::get_raw`. |
 | [09acfb4] | docs/MIGRATING-3.0.md. |
+| [dad8637] | `RedisValue::Error(String)`, an error reply with an owned message, which can be an array element or a map value. |
+| [a5eb60d] | `RedisValueKey::SimpleString`, a map key or set element replied as a simple string. |
+| [d100d13] | `Context::get_command_keys` (`RedisModule_GetCommandKeysWithFlags`), `cluster::key_slot`, which computes a key's hash slot without the server, and `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq` and `Hash` for `ContextFlags`. |
+| [dabad65] | `configuration::get_memory_default_config_value`. |
 
 ## Changes that break compatibility with upstream
 
@@ -138,7 +149,8 @@ A module written against upstream needs changes for these; the
 | [dd25376] | `hash_set` and `hash_del` return `Result<usize, RedisError>`. |
 | [72eaf1a] | `RedisKeyWritable::get_value` and `as_string_dma` take `&mut self`, so the reference they return borrows the key. Code that keeps that reference in the same struct as the key, the pattern upstream PR 277 kept the unbound lifetime for, no longer compiles. |
 | [b29cd45], [41238c3] | `Context::call` returns `BulkString` for bulk replies, and an error for a call that fails without the `E` flag. |
-| [bd4e81d] | `RedisValue` has a new variant. |
+| [bd4e81d], [dad8637] | `RedisValue` has new variants, `InsertionOrderedMap` and `Error`. |
+| [a5eb60d] | `RedisValueKey` has a new variant, `SimpleString`. |
 | [eaaf9b2] | `RedisError` converts with `From` only from a list of standard library errors. |
 | [c3432c5] | The `register_*_configuration` functions return `Result<(), RedisError>`. |
 | [24cd5ff] | `RedisGILGuard<T>` is `Send` only when `T` is; `ConfigurationContext` is neither `Send` nor `Sync`, and `ConfigurationValue` no longer has `Send` as a supertrait; `redis_command!` and `redis_event_handler!` take `&Context`. |
@@ -164,11 +176,16 @@ These compile unchanged but behave differently:
 | [a83e6d3] | Dropping a stream iterator stops it instead of deleting the current entry. |
 | [c3432c5], [762ab77] | `redis_module!` fails the load when a configuration registration fails or `LoadConfigs` rejects a value. |
 | [86b8113] | The crash report's `backtrace` field is `std::backtrace::Backtrace` output. |
+| [a5eb60d] | A call reply's simple-string map key or set element converts to `RedisValueKey::SimpleString` instead of `String`, so a forwarded reply keeps it a simple string. |
+| [9258efb] | An error in a call reply, also inside an array or map, converts to `RedisValue::Error` instead of `StringBuffer`, so a forwarded reply keeps it an error. |
+| [955e3d4] | Under the 7.0 floor, a `#[command]` command that fails to register fails the module load, as under the other floors. |
 
 ## Build, tooling and documentation
 
 - Edition 2024, with `rust-version = "1.87"` declared and tested in CI ([cfebad5], [2daa0ea]).
-- CI runs on pushes to master, builds every API floor, and tests against Redis 7.2, 7.4 and 8.0 ([e7d39ce], [2daa0ea]).
+- CI runs on pushes to master, builds every API floor, and tests against Redis 7.2, 7.4 and 8.0 ([e7d39ce], [2daa0ea]). The test matrix builds the default way, with the committed bindings, on the toolchain `rust-toolchain.toml` pins, and one job checks the committed bindings against bindgen ([848824a]). A job runs cargo-deny, with `Unicode-3.0` allowed ([1353e52]).
+- The Docker build, which ran the `Makefile` and `sbin/` that [upstream PR 389][p389] deleted, and the `deps/readies` submodule are removed ([9b0f605]). The release workflows run only in the upstream repository ([cb78fec]). Dependabot no longer ignores bindgen 0.56 and also updates the workflow actions ([686f84c]). The build and test scripts use `--workspace` ([9e5ff10]). The crates' `repository` field names this repository ([6d21760]).
+- The migration guide shows the `system-allocator-fallback` dev-dependency in the git form ([8ddccf1]), and the README says that README.upstream.md is upstream's README unchanged ([e4c5d1c]). Notes and tests corrected after a review ([ee02544]).
 - Committed bindings, with bindgen optional and at 0.73 ([c1dc312], [0e1d8f2]).
 - Six fewer dependencies: `nix`, `strum_macros`, `regex`, `backtrace`, `enum-primitive-derive`, `num-traits` ([86b8113], [5dbf237]).
 - Version 3.0.0 for `redis-module`, `redis-module-macros` and `redis-module-macros-internals`, and 0.1.2 for `redis-module-common` ([af6611a]).
@@ -182,6 +199,7 @@ These compile unchanged but behave differently:
 [0d63e82]: https://github.com/joshrotenberg/redismodule-rs/commit/0d63e82
 [0e1d8f2]: https://github.com/joshrotenberg/redismodule-rs/commit/0e1d8f2
 [113216b]: https://github.com/joshrotenberg/redismodule-rs/commit/113216b
+[1353e52]: https://github.com/joshrotenberg/redismodule-rs/commit/1353e52
 [1c57c65]: https://github.com/joshrotenberg/redismodule-rs/commit/1c57c65
 [1cf82af]: https://github.com/joshrotenberg/redismodule-rs/commit/1cf82af
 [1d7aab1]: https://github.com/joshrotenberg/redismodule-rs/commit/1d7aab1
@@ -199,14 +217,24 @@ These compile unchanged but behave differently:
 [54cde09]: https://github.com/joshrotenberg/redismodule-rs/commit/54cde09
 [5c4d6b3]: https://github.com/joshrotenberg/redismodule-rs/commit/5c4d6b3
 [5dbf237]: https://github.com/joshrotenberg/redismodule-rs/commit/5dbf237
+[686f84c]: https://github.com/joshrotenberg/redismodule-rs/commit/686f84c
 [68b33ab]: https://github.com/joshrotenberg/redismodule-rs/commit/68b33ab
+[6d21760]: https://github.com/joshrotenberg/redismodule-rs/commit/6d21760
 [72eaf1a]: https://github.com/joshrotenberg/redismodule-rs/commit/72eaf1a
 [7333dba]: https://github.com/joshrotenberg/redismodule-rs/commit/7333dba
 [752b2a7]: https://github.com/joshrotenberg/redismodule-rs/commit/752b2a7
 [762ab77]: https://github.com/joshrotenberg/redismodule-rs/commit/762ab77
 [813cfa0]: https://github.com/joshrotenberg/redismodule-rs/commit/813cfa0
+[848824a]: https://github.com/joshrotenberg/redismodule-rs/commit/848824a
 [86b8113]: https://github.com/joshrotenberg/redismodule-rs/commit/86b8113
+[8ddccf1]: https://github.com/joshrotenberg/redismodule-rs/commit/8ddccf1
+[9258efb]: https://github.com/joshrotenberg/redismodule-rs/commit/9258efb
+[955e3d4]: https://github.com/joshrotenberg/redismodule-rs/commit/955e3d4
+[9b0f605]: https://github.com/joshrotenberg/redismodule-rs/commit/9b0f605
+[9e5ff10]: https://github.com/joshrotenberg/redismodule-rs/commit/9e5ff10
+[9ea85f4]: https://github.com/joshrotenberg/redismodule-rs/commit/9ea85f4
 [a3b0f3d]: https://github.com/joshrotenberg/redismodule-rs/commit/a3b0f3d
+[a5eb60d]: https://github.com/joshrotenberg/redismodule-rs/commit/a5eb60d
 [a6841fb]: https://github.com/joshrotenberg/redismodule-rs/commit/a6841fb
 [a83e6d3]: https://github.com/joshrotenberg/redismodule-rs/commit/a83e6d3
 [af6611a]: https://github.com/joshrotenberg/redismodule-rs/commit/af6611a
@@ -217,15 +245,21 @@ These compile unchanged but behave differently:
 [c1dc312]: https://github.com/joshrotenberg/redismodule-rs/commit/c1dc312
 [c3432c5]: https://github.com/joshrotenberg/redismodule-rs/commit/c3432c5
 [c478791]: https://github.com/joshrotenberg/redismodule-rs/commit/c478791
+[cb78fec]: https://github.com/joshrotenberg/redismodule-rs/commit/cb78fec
 [ce0c36d]: https://github.com/joshrotenberg/redismodule-rs/commit/ce0c36d
 [cfebad5]: https://github.com/joshrotenberg/redismodule-rs/commit/cfebad5
+[d100d13]: https://github.com/joshrotenberg/redismodule-rs/commit/d100d13
 [d2f790a]: https://github.com/joshrotenberg/redismodule-rs/commit/d2f790a
 [d742fec]: https://github.com/joshrotenberg/redismodule-rs/commit/d742fec
+[dabad65]: https://github.com/joshrotenberg/redismodule-rs/commit/dabad65
+[dad8637]: https://github.com/joshrotenberg/redismodule-rs/commit/dad8637
 [dd25376]: https://github.com/joshrotenberg/redismodule-rs/commit/dd25376
 [e074cdb]: https://github.com/joshrotenberg/redismodule-rs/commit/e074cdb
+[e4c5d1c]: https://github.com/joshrotenberg/redismodule-rs/commit/e4c5d1c
 [e7d39ce]: https://github.com/joshrotenberg/redismodule-rs/commit/e7d39ce
 [e81393d]: https://github.com/joshrotenberg/redismodule-rs/commit/e81393d
 [eaaf9b2]: https://github.com/joshrotenberg/redismodule-rs/commit/eaaf9b2
+[ee02544]: https://github.com/joshrotenberg/redismodule-rs/commit/ee02544
 [i7]: https://github.com/RedisLabsModules/redismodule-rs/issues/7
 [i89]: https://github.com/RedisLabsModules/redismodule-rs/issues/89
 [i134]: https://github.com/RedisLabsModules/redismodule-rs/issues/134
@@ -245,18 +279,20 @@ These compile unchanged but behave differently:
 [p85]: https://github.com/RedisLabsModules/redismodule-rs/pull/85
 [p93]: https://github.com/RedisLabsModules/redismodule-rs/pull/93
 [p247]: https://github.com/RedisLabsModules/redismodule-rs/pull/247
-[p348]: https://github.com/RedisLabsModules/redismodule-rs/pull/348
-[p360]: https://github.com/RedisLabsModules/redismodule-rs/pull/360
 [p269]: https://github.com/RedisLabsModules/redismodule-rs/pull/269
 [p277]: https://github.com/RedisLabsModules/redismodule-rs/pull/277
+[p348]: https://github.com/RedisLabsModules/redismodule-rs/pull/348
+[p360]: https://github.com/RedisLabsModules/redismodule-rs/pull/360
 [p361]: https://github.com/RedisLabsModules/redismodule-rs/pull/361
 [p368]: https://github.com/RedisLabsModules/redismodule-rs/pull/368
 [p375]: https://github.com/RedisLabsModules/redismodule-rs/pull/375
 [p386]: https://github.com/RedisLabsModules/redismodule-rs/pull/386
+[p389]: https://github.com/RedisLabsModules/redismodule-rs/pull/389
 [p397]: https://github.com/RedisLabsModules/redismodule-rs/pull/397
 [p417]: https://github.com/RedisLabsModules/redismodule-rs/pull/417
 [p420]: https://github.com/RedisLabsModules/redismodule-rs/pull/420
 [p427]: https://github.com/RedisLabsModules/redismodule-rs/pull/427
+[p432]: https://github.com/RedisLabsModules/redismodule-rs/pull/432
 [p467]: https://github.com/RedisLabsModules/redismodule-rs/pull/467
 [p476]: https://github.com/RedisLabsModules/redismodule-rs/pull/476
 [p477]: https://github.com/RedisLabsModules/redismodule-rs/pull/477
@@ -264,3 +300,4 @@ These compile unchanged but behave differently:
 [p486]: https://github.com/RedisLabsModules/redismodule-rs/pull/486
 [p487]: https://github.com/RedisLabsModules/redismodule-rs/pull/487
 [p488]: https://github.com/RedisLabsModules/redismodule-rs/pull/488
+[p489]: https://github.com/RedisLabsModules/redismodule-rs/pull/489
