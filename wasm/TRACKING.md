@@ -48,8 +48,8 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   about twice Lua's server time, a call with no Redis calls slightly less, and
   the checksum and the sieve run 9 and 16 times faster, and `median`, which
   moves 1000 strings into the guest, 1.4 times faster.
-- The host is about 790 lines of code, not counting comments and unit tests.
-  The example guest is 22 KB as a core module and 23 KB as a component. The
+- The host is about 790 lines of code at H5, more since, not counting
+  comments and unit tests. The example guest is 37 KB as a core module. The
   nineteen integration tests take about 10 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
@@ -143,7 +143,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H7 | done | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread; the main thread instantiates and adds the library. Precompiled components (`Engine::precompile_component`) would skip the compile entirely, but loading one is `unsafe`: only for trusted input. | The server answers other clients while a large component compiles. |
 | H8 | done | **Memory.** `wasm.max-memory` (default 64 MiB) limits each instance's linear memory through a wasmtime `ResourceLimiter`; a guest that grows past it traps and its call fails, which drops the instance. A function does not start while Redis is over `maxmemory`, and its calls use `RedisModule_Call`'s `M` flag. `INFO wasm` reports libraries, functions, component and compiled code bytes, live instances and their linear memory, and the limit. Not done: replacing a kept instance that grew large but stays under the limit; a failed call already drops it. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
 | H9 | done | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`) in the WIT, `WASM.CALL_RO`, Lua's checks before a function starts, read-only calls that refuse write and may-replicate commands, one slot per call on a cluster node, no calls while a library loads, flags in `WASM.LIST` and the RDB (H9a); `call`, which fails the function on an error reply, next to `pcall`, and `acl-check-command` and `set-resp` imports (H9b). Differences left: G5, G6, and RESP3 as the default. | Each has a test matching what Lua does. |
-| H10 | todo | **Guest helper library.** A small Rust crate that builds the pre-order node list from typed values, so guests do not build it by hand. | The example guest uses it. |
+| H10 | done | **Guest helper library.** `wasm/guest-sdk`, crate `redis-wasm-guest`: a `Value` type that converts to and from pre-order node lists and flat replies, `From` conversions, and `call`, `pcall` and `log` that take and return `Value`s. It generates bindings for a `guest-imports` world (the host's interface alone), and a library's own bindings share its types through wit-bindgen's `with`. | The example guest uses it. |
 | H11 | done | **Bounds check cost.** Decided: keep signal-based traps off, so guests get explicit bounds checks. With H3's benchmark, turning them on made `primes` 18% faster (185 against 226 µs, old sieve loop) and `median` 6%. On Linux they are not safe in a module: wasmtime installs `SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE` handlers that chain to Redis's crash handler, but `CONFIG SET crash-log-enabled` (either value) reinstalls Redis's handlers or the defaults over them, and the next out-of-bounds guest access kills the server: silently after `no`, with a crash report after `yes` (G7). On macOS wasmtime takes faults through Mach exception ports, so the same steps are safe there. A crash outside wasm (`DEBUG SEGFAULT`) still produced Redis's crash report with wasmtime's handlers installed. | A decision, with a crash report checked with handlers on. |
 | H12 | done | **Context in the store.** The store holds a raw pointer to the command's `Context`. The safety argument is written down in `host.rs` ("The context pointer"): set and cleared around each guest run, re-entrant calls use their own instance, a panic drops the instance with the stale pointer, and instances stay on the main thread. No SDK pattern replaces it yet (S3). | Reviewed and documented, or replaced. |
 | H13 | todo | **Footprint.** The release dylib is 12.4 MB (macOS). Loading the JavaScript component (release build, macOS): `INFO wasm` accounts for 95 MB of compiled code and 7.7 MB of linear memory, and RSS reached 0.97 GB, then 1.35 GB after a delete and two more loads. The compiler allocates through the module's global allocator, Redis's, so `used_memory_peak` reached 1.05 GB during the load, and 57.7 MB stayed counted after `WASM.DELETE` (not growing on later loads: caches, not a leak). With `std::alloc::System` as the module's allocator, `used_memory` stayed near 1 MB (peak 25 MB, the argument itself) and RSS behaved the same. Decision needed: count wasmtime's heap in `used_memory`, so a load's transient 1 GB counts against `maxmemory`, or not, so 70 MB of lasting heap per JavaScript library is invisible to it. | Sizes recorded before and after. |
@@ -214,6 +214,11 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H10 done: `wasm/guest-sdk` with four unit tests that run on the
+  host, and the example guest rewritten on it (its replies are `Value`s; the
+  same nineteen integration tests pass). The WIT gained the `guest-imports`
+  world for it. The core module grew to 37 KB with the functions added since
+  milestone 1 and the helper.
 - 2026-10-20: H15 done: `call-flat` and `pcall-flat` in the WIT, the reply
   walk shared by both encodings (a `Sink` per encoding), `median_flat` and
   `lrange_flat` in the benchmark (the Lua library has the same functions under

@@ -38,17 +38,22 @@
 //! WASM.CALL resp_shape 1 key resp    HGETALL with RESP 2 or 3: replies map or array
 //! WASM.CALL oob 0                reads past the end of its memory, which traps
 //! WASM.CALL run_flat 0 cmd arg ...  runs a command with `pcall-flat` and
-//!                                replies with what it got, as typed nodes
+//!                                replies with what it got
 //! ```
+//!
+//! It builds its replies as `redis_wasm_guest::Value`s (`../../guest-sdk`),
+//! not as node lists.
 
 wit_bindgen::generate!({
     path: "../../wit",
     world: "library",
+    // The host's interface comes from the helper library, so its Value works
+    // with these bindings' types.
+    with: { "redis-module-wasm:host/redis@0.1.0": redis_wasm_guest::redis },
 });
 
-use redis_module_wasm::host::redis::{
-    FlatNode, LogLevel, acl_check_command, call, log, pcall, pcall_flat, set_resp,
-};
+use redis_wasm_guest::redis::{acl_check_command, pcall_flat, set_resp};
+use redis_wasm_guest::{LogLevel, Value, call, log, pcall};
 
 /// The functions and their flags. A function that does not write says so, as
 /// a Lua function would.
@@ -103,151 +108,126 @@ impl Guest for Hello {
     }
 
     fn invoke(name: String, keys: Vec<Vec<u8>>, args: Vec<Vec<u8>>) -> Vec<Node> {
-        match name.as_str() {
-            "hello" => {
-                let who = args
-                    .first()
-                    .map(|name| String::from_utf8_lossy(name).into_owned())
-                    .unwrap_or_else(|| "world".to_owned());
-                log(LogLevel::Notice, &format!("hello called for {who}"));
-                vec![Node::Simple(format!("hello, {who}"))]
-            }
-            "incr_twice" => match keys.first() {
-                Some(key) => {
-                    let mut reply = vec![Node::Array(2)];
-                    reply.extend(pcall("INCR", std::slice::from_ref(key)));
-                    reply.extend(pcall("INCR", std::slice::from_ref(key)));
-                    reply
-                }
-                None => vec![Node::Error("ERR incr_twice needs a key".into())],
-            },
-            "hash_pairs" => match keys.first() {
-                Some(key) => pcall("HGETALL", std::slice::from_ref(key)),
-                None => vec![Node::Error("ERR hash_pairs needs a key".into())],
-            },
-            "set" => match (keys.first(), args.first()) {
-                (Some(key), Some(value)) => pcall("SET", &[key.clone(), value.clone()]),
-                _ => vec![Node::Error("ERR set needs a key and a value".into())],
-            },
-            "nested" => vec![
-                Node::Array(3),
-                Node::Map(1),
-                Node::Simple("answer".into()),
-                Node::Integer(42),
-                Node::Nil,
-                Node::Error("ERR an error inside an array".into()),
-            ],
-            "fail" => vec![Node::Error("ERR this function always fails".into())],
-            "recurse" => pcall("WASM.LIST", &[]),
-            "spin" => spin(),
-            "counter" => vec![Node::Integer(
-                COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
-            )],
-            "grow" => {
-                let bytes = args
-                    .first()
-                    .and_then(|n| std::str::from_utf8(n).ok()?.parse().ok())
-                    .unwrap_or(0);
-                std::hint::black_box(vec![1u8; bytes]);
-                vec![Node::Integer(
-                    (core::arch::wasm32::memory_size(0) * 65536) as i64,
-                )]
-            }
-            "run_ro" => match args.split_first() {
-                Some((command, args)) => pcall(&String::from_utf8_lossy(command), args),
-                None => vec![Node::Error("ERR run_ro needs a command".into())],
-            },
-            "set_oom" => match keys.first() {
-                Some(key) => pcall(
-                    "SET",
-                    &[key.clone(), args.first().cloned().unwrap_or_default()],
-                ),
-                None => vec![Node::Error("ERR set_oom needs a key".into())],
-            },
-            "stale_ok" | "local_only" => vec![Node::Simple("ok".into())],
-            "get_args" | "get_args_cross" => {
-                let mut reply = vec![Node::Array(args.len() as u32)];
-                for key in &args {
-                    reply.extend(pcall("GET", std::slice::from_ref(key)));
-                }
-                reply
-            }
-            "run" => match args.split_first() {
-                Some((command, args)) => {
-                    call(&String::from_utf8_lossy(command), args);
-                    vec![Node::Simple("ran".into())]
-                }
-                None => vec![Node::Error("ERR run needs a command".into())],
-            },
-            "acl_check" => match args.split_first() {
-                Some((command, args)) => {
-                    match acl_check_command(&String::from_utf8_lossy(command), args) {
-                        Ok(allowed) => vec![Node::Boolean(allowed)],
-                        Err(message) => vec![Node::Error(message)],
-                    }
-                }
-                None => vec![Node::Error("ERR acl_check needs a command".into())],
-            },
-            "resp_shape" => {
-                let version = args
-                    .first()
-                    .and_then(|v| std::str::from_utf8(v).ok()?.parse().ok())
-                    .unwrap_or(0);
-                set_resp(version);
-                let reply = pcall("HGETALL", &keys);
-                let shape = match reply.first() {
-                    Some(Node::Map(_)) => "map",
-                    Some(Node::Array(_)) => "array",
-                    _ => "other",
-                };
-                vec![Node::Simple(shape.into())]
-            }
-            "oob" => {
-                // The last byte of the 4 GiB address space, far past the end
-                // of the instance's memory.
-                let byte = unsafe { core::ptr::read_volatile(usize::MAX as *const u8) };
-                vec![Node::Integer(i64::from(byte))]
-            }
-            "run_flat" => match args.split_first() {
-                Some((command, args)) => {
-                    let reply = pcall_flat(&String::from_utf8_lossy(command), args);
-                    let bytes = |span: &redis_module_wasm::host::redis::Span| {
-                        reply.data[span.offset as usize..][..span.len as usize].to_vec()
-                    };
-                    let text = |span| String::from_utf8_lossy(&bytes(span)).into_owned();
-                    reply
-                        .nodes
-                        .iter()
-                        .map(|node| match node {
-                            FlatNode::Nil => Node::Nil,
-                            FlatNode::Integer(n) => Node::Integer(*n),
-                            FlatNode::Double(d) => Node::Double(*d),
-                            FlatNode::Boolean(b) => Node::Boolean(*b),
-                            FlatNode::Simple(span) => Node::Simple(text(span)),
-                            FlatNode::Bulk(span) => Node::Bulk(bytes(span)),
-                            FlatNode::Error(span) => Node::Error(text(span)),
-                            FlatNode::Array(n) => Node::Array(*n),
-                            FlatNode::Set(n) => Node::Set(*n),
-                            FlatNode::Map(n) => Node::Map(*n),
-                        })
-                        .collect()
-                }
-                None => vec![Node::Error("ERR run_flat needs a command".into())],
-            },
-            "write_then_spin" => match keys.first() {
-                Some(key) => {
-                    pcall("SET", &[key.clone(), b"1".to_vec()]);
-                    spin()
-                }
-                None => vec![Node::Error("ERR write_then_spin needs a key".into())],
-            },
-            _ => vec![Node::Error(format!("ERR unknown function '{name}'"))],
-        }
+        run(&name, &keys, &args).into_nodes()
     }
 }
 
+fn error(message: impl Into<String>) -> Value {
+    Value::Error(message.into())
+}
+
+/// The first of `items`, or an error naming what `function` needs.
+fn first<'a>(items: &'a [Vec<u8>], function: &str, what: &str) -> Result<&'a [u8], Value> {
+    items
+        .first()
+        .map(Vec::as_slice)
+        .ok_or_else(|| error(format!("ERR {function} needs {what}")))
+}
+
+/// Runs a command given as the first argument, with the rest as its
+/// arguments.
+fn command_of(args: &[Vec<u8>]) -> Option<(String, &[Vec<u8>])> {
+    let (command, rest) = args.split_first()?;
+    Some((String::from_utf8_lossy(command).into_owned(), rest))
+}
+
+fn run(name: &str, keys: &[Vec<u8>], args: &[Vec<u8>]) -> Value {
+    let result = match name {
+        "hello" => {
+            let who = args
+                .first()
+                .map(|name| String::from_utf8_lossy(name).into_owned())
+                .unwrap_or_else(|| "world".to_owned());
+            log(LogLevel::Notice, &format!("hello called for {who}"));
+            Ok(Value::Simple(format!("hello, {who}")))
+        }
+        "incr_twice" => first(keys, name, "a key")
+            .map(|key| Value::Array(vec![pcall("INCR", &[key]), pcall("INCR", &[key])])),
+        "hash_pairs" => first(keys, name, "a key").map(|key| pcall("HGETALL", &[key])),
+        "set" => first(keys, name, "a key").and_then(|key| {
+            let value = first(args, name, "a value")?;
+            Ok(pcall("SET", &[key, value]))
+        }),
+        "nested" => Ok(Value::Array(vec![
+            Value::Map(vec![(Value::Simple("answer".into()), Value::Integer(42))]),
+            Value::Nil,
+            error("ERR an error inside an array"),
+        ])),
+        "fail" => Ok(error("ERR this function always fails")),
+        "recurse" => Ok(pcall("WASM.LIST", &[] as &[&[u8]])),
+        "spin" => spin(),
+        "counter" => Ok(Value::Integer(
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
+        )),
+        "grow" => {
+            let bytes = args
+                .first()
+                .and_then(|n| std::str::from_utf8(n).ok()?.parse().ok())
+                .unwrap_or(0);
+            std::hint::black_box(vec![1u8; bytes]);
+            Ok(Value::Integer(
+                (core::arch::wasm32::memory_size(0) * 65536) as i64,
+            ))
+        }
+        "run_ro" => command_of(args)
+            .map(|(command, args)| pcall(&command, args))
+            .ok_or_else(|| error("ERR run_ro needs a command")),
+        "set_oom" => first(keys, name, "a key").map(|key| {
+            let value = args.first().map(Vec::as_slice).unwrap_or_default();
+            pcall("SET", &[key, value])
+        }),
+        "stale_ok" | "local_only" => Ok(Value::Simple("ok".into())),
+        "get_args" | "get_args_cross" => Ok(Value::Array(
+            args.iter().map(|key| pcall("GET", &[key])).collect(),
+        )),
+        "run" => command_of(args)
+            .map(|(command, args)| {
+                call(&command, args);
+                Value::Simple("ran".into())
+            })
+            .ok_or_else(|| error("ERR run needs a command")),
+        "acl_check" => command_of(args)
+            .map(|(command, args)| match acl_check_command(&command, args) {
+                Ok(allowed) => Value::Boolean(allowed),
+                Err(message) => error(message),
+            })
+            .ok_or_else(|| error("ERR acl_check needs a command")),
+        "resp_shape" => {
+            let version = args
+                .first()
+                .and_then(|v| std::str::from_utf8(v).ok()?.parse().ok())
+                .unwrap_or(0);
+            set_resp(version);
+            let shape = match pcall("HGETALL", keys) {
+                Value::Map(_) => "map",
+                Value::Array(_) => "array",
+                _ => "other",
+            };
+            Ok(Value::Simple(shape.into()))
+        }
+        "oob" => {
+            // The last byte of the 4 GiB address space, far past the end of
+            // the instance's memory.
+            let byte = unsafe { core::ptr::read_volatile(usize::MAX as *const u8) };
+            Ok(Value::Integer(i64::from(byte)))
+        }
+        "run_flat" => command_of(args)
+            .map(|(command, args)| {
+                let reply = pcall_flat(&command, args);
+                Value::from_flat(&reply).unwrap_or_else(|| error("ERR a malformed flat reply"))
+            })
+            .ok_or_else(|| error("ERR run_flat needs a command")),
+        "write_then_spin" => first(keys, name, "a key").and_then(|key| {
+            pcall("SET", &[key, b"1"]);
+            spin()
+        }),
+        _ => Err(error(format!("ERR unknown function '{name}'"))),
+    };
+    result.unwrap_or_else(|error| error)
+}
+
 /// Loops until the host stops the guest.
-fn spin() -> Vec<Node> {
+fn spin() -> Result<Value, Value> {
     loop {
         std::hint::black_box(());
     }

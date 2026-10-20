@@ -120,3 +120,9 @@ world library {
     /// Runs function `name` with its keys and arguments, and returns the reply.
     export invoke: func(name: string, keys: list<list<u8>>, args: list<list<u8>>) -> list<node>;
 }
+
+/// The host's interface alone, for a library that guests share, such as
+/// `guest-sdk`, so that their bindings use its types.
+world guest-imports {
+    import redis;
+}

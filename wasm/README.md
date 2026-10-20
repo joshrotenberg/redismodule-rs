@@ -157,7 +157,15 @@ recursive types: `array(n)`, `set(n)` and `map(n)` are followed by their
 elements. A reply from `call` keeps its type, so a function can pass it through
 unchanged.
 
-[`guests/hello`](guests/hello) is a library in Rust. From the repository root,
+In Rust, [`guest-sdk`](guest-sdk) (crate `redis-wasm-guest`) turns node
+lists into `Value`s and back and wraps `call`, `pcall` and `log` to take and
+return them, so a library replies with
+`Value::Array(vec![first, second]).into_nodes()` rather than building nodes by
+hand. A library's bindings share its types through wit-bindgen's `with` option
+(see the example's `generate!`). Its unit tests run on the host:
+`cargo test --manifest-path wasm/guest-sdk/Cargo.toml`.
+
+[`guests/hello`](guests/hello) is a library in Rust, built on `guest-sdk`. From the repository root,
 build the module and the guest, and turn the guest into a component with
 [wasm-tools](https://github.com/bytecodealliance/wasm-tools) 1.236, the release
 wasmtime 36 reads:
@@ -227,4 +235,4 @@ workspace `Cargo.toml`); unoptimized, loading the JavaScript component took
 
 [TRACKING.md](TRACKING.md) has every open item, with IDs and what done means. The main ones:
 
-- A guest helper library, so a guest need not build reply nodes by hand.
+- Loading an RDB compiles each library before the server serves (H17).

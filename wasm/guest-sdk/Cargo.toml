@@ -1,0 +1,13 @@
+[package]
+name = "redis-wasm-guest"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Helpers for writing redis-module-wasm libraries in Rust: replies as values"
+
+# A standalone workspace, like the guests that use it.
+[workspace]
+
+[dependencies]
+# The same wasm-tools release as the host's wasmtime 36.
+wit-bindgen = "0.44"

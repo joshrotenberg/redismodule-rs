@@ -13,6 +13,7 @@ crate-type = ["cdylib"]
 [dependencies]
 # The same wasm-tools release as the host's wasmtime 36.
 wit-bindgen = "0.44"
+redis-wasm-guest = { path = "../../guest-sdk" }
 
 [profile.release]
 opt-level = "s"
