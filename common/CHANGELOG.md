@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - unreleased
+
+### Changed
+
+- Edition 2024; declares `rust-version = "1.87"`. No API change.
+
 ## [0.1.1](https://github.com/RedisLabsModules/redismodule-rs/compare/redis-module-common-v0.1.0...redis-module-common-v0.1.1) - 2026-05-04
 
 ### Other
