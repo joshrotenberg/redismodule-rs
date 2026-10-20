@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-20.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `efad730`, ACL category reload fix merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `2f8e2a9`, integration harness improvements merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `efad730` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `2f8e2a9` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -80,12 +80,13 @@ git fetch fork && git fetch origin
    cargo fmt --all -- --check
    cargo clippy --workspace --all-targets -- -D warnings
    cargo clippy --workspace --all-targets --no-default-features --features min-redis-compatibility-version-7-2 -- -D warnings
+   cargo build --examples
    cargo test --workspace --no-fail-fast
    ```
 
-   The integration tests load the example modules from `./target`, and
-   `cargo test --test integration` alone does not rebuild them: run the full
-   `cargo test --workspace`.
+   The integration tests load example modules beside their executable's build
+   profile, including with `CARGO_TARGET_DIR`. Build examples explicitly before
+   running filtered integration tests to avoid loading stale modules.
 5. Append a Results table of the gates to the PR body, mark it ready, and have
    it reviewed.
 6. Squash-merge once every check passes, with the PR title as the subject and
@@ -107,11 +108,14 @@ reused only when Redis reports `EBUSY`. Invalid names and other registration
 failures still reject the module load. Regression tests verify retained user
 permissions across two reloads and rejection of invalid names.
 
-1. Test harness: pass module arguments, assert a load failure with the server
-   log, a `wait_until` helper, start a replica, restart on the same data.
-2. `Context::select_db` and `get_selected_db`, with a guard that restores the
+The integration harness improvements merged in `2f8e2a9`: module arguments,
+fallible startup with retained logs, bounded probes and polling, replica startup,
+and graceful persistent restarts. Fresh launches retry confirmed bind collisions
+with isolated directories and logs; restarts retain their original port.
+
+1. `Context::select_db` and `get_selected_db`, with a guard that restores the
    database.
-3. An accessor for the error code of a call's error reply, and
+2. An accessor for the error code of a call's error reply, and
    `notify_keyspace_event` with a byte event name.
 
 Then: subscribing to keyspace events after load, the server-event payloads for

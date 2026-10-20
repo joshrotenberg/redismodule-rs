@@ -220,6 +220,14 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: rebased onto SDK master `2f8e2a9`, which extends the integration
+  harness with module arguments, bounded startup diagnostics, replicas,
+  persistent restarts, and confirmed bind-collision retries. No host adaptation
+  needed. Rust 1.94.0 and Redis 8.10.2: workspace and guest formatting, default
+  workspace Clippy, separate SDK 7.2 Clippy, example builds, and guest Clippy
+  passed. The full workspace suite passed, including 83 SDK integration tests,
+  four standalone harness cases, seven host unit tests, and 21 host integration
+  tests with JavaScript; the guest helper's four tests passed.
 - 2026-10-20: rebased onto SDK master `efad730`, which reuses existing custom
   ACL categories while rejecting other registration errors. No host adaptation
   needed. Rust 1.94.0 and Redis 8.10.2: workspace and guest formatting, default
