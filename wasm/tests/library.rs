@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use redis::{Connection, RedisResult, Value};
 
 /// The functions the example guest provides, in its order.
-const FUNCTIONS: [&str; 20] = [
+const FUNCTIONS: [&str; 21] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -34,6 +34,7 @@ const FUNCTIONS: [&str; 20] = [
     "run",
     "acl_check",
     "resp_shape",
+    "oob",
 ];
 
 /// The workspace's `target` directory, from this test binary's path
@@ -1277,4 +1278,21 @@ fn the_module_unloads_when_persistence_is_off() {
         .query(&mut con)
         .unwrap();
     assert!(error_text(unload(&mut con)).contains("module-side data types"));
+}
+
+#[test]
+fn an_out_of_bounds_access_traps_and_the_server_keeps_serving() {
+    let server = Server::start(6631, &[]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    assert_eq!([counter(&mut con), counter(&mut con)], [1, 2]);
+    let trapped = error_text(call(&mut con, &["oob", "0"]));
+    assert!(
+        trapped.starts_with("ERR function 'oob' failed:")
+            && trapped.contains("out of bounds memory access"),
+        "{trapped}"
+    );
+    // The trap dropped the instance, and the server is fine.
+    assert_eq!(counter(&mut con), 1);
+    let _: String = redis::cmd("PING").query(&mut con).unwrap();
 }

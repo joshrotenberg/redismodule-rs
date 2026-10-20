@@ -36,6 +36,7 @@
 //!                                then replies ran
 //! WASM.CALL acl_check 0 cmd arg ...  whether the caller may run the command
 //! WASM.CALL resp_shape 1 key resp    HGETALL with RESP 2 or 3: replies map or array
+//! WASM.CALL oob 0                reads past the end of its memory, which traps
 //! ```
 
 wit_bindgen::generate!({
@@ -47,7 +48,7 @@ use redis_module_wasm::host::redis::{LogLevel, acl_check_command, call, log, pca
 
 /// The functions and their flags. A function that does not write says so, as
 /// a Lua function would.
-const FUNCTIONS: [(&str, FunctionFlags); 20] = [
+const FUNCTIONS: [(&str, FunctionFlags); 21] = [
     ("hello", FunctionFlags::NO_WRITES),
     ("incr_twice", FunctionFlags::empty()),
     ("hash_pairs", FunctionFlags::NO_WRITES),
@@ -77,6 +78,7 @@ const FUNCTIONS: [(&str, FunctionFlags); 20] = [
     ("run", FunctionFlags::empty()),
     ("acl_check", FunctionFlags::NO_WRITES),
     ("resp_shape", FunctionFlags::NO_WRITES),
+    ("oob", FunctionFlags::NO_WRITES),
 ];
 
 /// Calls of `counter` that this instance has served.
@@ -194,6 +196,12 @@ impl Guest for Hello {
                     _ => "other",
                 };
                 vec![Node::Simple(shape.into())]
+            }
+            "oob" => {
+                // The last byte of the 4 GiB address space, far past the end
+                // of the instance's memory.
+                let byte = unsafe { core::ptr::read_volatile(usize::MAX as *const u8) };
+                vec![Node::Integer(i64::from(byte))]
             }
             "write_then_spin" => match keys.first() {
                 Some(key) => {
