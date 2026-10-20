@@ -196,8 +196,10 @@ These compile unchanged but behave differently:
   startup diagnostics, polls with a deadline, starts replicas, and restarts
   after saving while preserving the data directory and launch settings. It
   uses OS-selected ports, isolated directories, bounded socket probes before
-  protocol traffic, and child PID verification. TEST_REDIS_SERVER_BIN selects
-  the Redis executable.
+  protocol traffic, and child PID verification. Fresh launches retry confirmed
+  port collisions up to five times with separate directories and logs;
+  restarts keep their original port. TEST_REDIS_SERVER_BIN selects the Redis
+  executable.
 - Logging docs that say how NUL bytes are written ([4e8efc7]), and the changelog for 3.0.0 ([1eb962a]).
 
 [a808377]: https://github.com/RedisLabsModules/redismodule-rs/commit/a808377

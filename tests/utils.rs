@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(200);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const PORT_ATTEMPTS: usize = 5;
 static INSTANCE_ID: AtomicUsize = AtomicUsize::new(0);
 
 /// A test-local RESP connection with timeouts installed before any commands.
@@ -249,15 +250,40 @@ impl TestConnection {
 
     /// Returns startup failures with the server's exit status or timeout and log.
     pub fn try_with_args(module_name: &str, args: &[&str]) -> Result<Self> {
-        Self::launch(LaunchSpec::fresh(
-            module_path(module_name)?.into(),
-            args.iter().map(|arg| (*arg).to_owned()).collect(),
-        )?)
+        let module: PathBuf = module_path(module_name)?.into();
+        let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+        Self::start_fresh(|| LaunchSpec::fresh(module.clone(), args.clone()))
     }
 
     /// Kept for existing tests; all constructors now capture server logs.
     pub fn with_log_file(module_name: &str) -> Self {
         Self::new(module_name)
+    }
+
+    fn start_fresh(mut create_spec: impl FnMut() -> Result<LaunchSpec>) -> Result<Self> {
+        let mut collisions = Vec::new();
+        for _ in 0..PORT_ATTEMPTS {
+            let spec = create_spec()?;
+            match Self::launch(spec.clone()) {
+                Ok(connection) => return Ok(connection),
+                Err(error) => {
+                    let log = fs::read_to_string(&spec.log_file).unwrap_or_default();
+                    // Port-zero selection cannot reserve a socket for Redis.
+                    // Retry only a confirmed TCP bind collision, after launch
+                    // has dropped and reaped the child. Other errors propagate.
+                    if !log.contains("bind: Address already in use")
+                        || !log.contains(&format!("Failed listening on port {} (tcp)", spec.port))
+                    {
+                        return Err(error);
+                    }
+                    collisions.push(format!("{error:#}"));
+                }
+            }
+        }
+        bail!(
+            "Redis could not bind a port after {PORT_ATTEMPTS} attempts:\n{}",
+            collisions.join("\n")
+        )
     }
 
     fn launch(spec: LaunchSpec) -> Result<Self> {
@@ -298,10 +324,13 @@ impl TestConnection {
     /// Starts the same module and arguments in a separate replica and waits for
     /// initial synchronization. Later writes can be acknowledged with WAIT.
     pub fn replica(&self) -> Result<Self> {
-        let mut spec = LaunchSpec::fresh(self.spec.module.clone(), self.spec.module_args.clone())?;
-        spec.binary = self.spec.binary.clone();
-        spec.replica_of = Some(self.spec.port);
-        let mut replica = Self::launch(spec)?;
+        let mut replica = Self::start_fresh(|| {
+            let mut spec =
+                LaunchSpec::fresh(self.spec.module.clone(), self.spec.module_args.clone())?;
+            spec.binary = self.spec.binary.clone();
+            spec.replica_of = Some(self.spec.port);
+            Ok(spec)
+        })?;
         let sync = wait_until(STARTUP_TIMEOUT, "replica initial synchronization", || {
             if let Some(status) = replica.server.child.try_wait()? {
                 bail!("Replica exited with {status} during synchronization");
@@ -470,6 +499,55 @@ fn get_redis_connection(port: u16, expected_pid: u32) -> Result<Connection> {
 mod connection_tests {
     use super::*;
     use std::io::Read;
+
+    #[test]
+    fn test_harness_retries_a_confirmed_port_collision() -> Result<()> {
+        let occupied = TcpListener::bind(("127.0.0.1", 0))?;
+        let occupied_port = occupied.local_addr()?.port();
+        let mut attempts = 0;
+        let mut failed_log = PathBuf::new();
+        let mut con = TestConnection::start_fresh(|| {
+            attempts += 1;
+            let mut spec = LaunchSpec::fresh(module_path("hello")?.into(), Vec::new())?;
+            if attempts == 1 {
+                spec.port = occupied_port;
+                failed_log = spec.log_file.clone();
+            }
+            Ok(spec)
+        })?;
+        assert!((2..=PORT_ATTEMPTS).contains(&attempts));
+        assert_ne!(con.port(), occupied_port);
+        assert!(
+            fs::read_to_string(failed_log)?.contains("bind: Address already in use"),
+            "the failed attempt's diagnostics were lost"
+        );
+        assert_eq!(
+            redis::cmd("hello.mul")
+                .arg(&[2, 3])
+                .query::<Vec<i64>>(&mut con)?,
+            [2, 3, 6]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_harness_does_not_retry_module_initialization_errors() -> Result<()> {
+        let mut attempts = 0;
+        let result = TestConnection::start_fresh(|| {
+            attempts += 1;
+            LaunchSpec::fresh(
+                module_path("configuration")?.into(),
+                vec!["bool".into(), "invalid".into()],
+            )
+        });
+        assert_eq!(attempts, 1);
+        let error = match result {
+            Ok(_) => bail!("an invalid module configuration loaded"),
+            Err(error) => error,
+        };
+        assert!(format!("{error:#}").contains("Boolean configuration 'bool'"));
+        Ok(())
+    }
 
     #[test]
     fn test_harness_rejects_a_different_process_on_the_port() -> Result<()> {

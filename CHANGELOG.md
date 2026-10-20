@@ -38,7 +38,8 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - docs/MIGRATING-3.0.md.
 - The fork's integration harness supports module arguments, fallible startup
   with server logs, bounded polling, replica startup, and graceful restarts on
-  saved data. Test servers use OS-selected ports and isolated directories;
+  saved data. Test servers use OS-selected ports and isolated directories,
+  with bounded retries for confirmed port collisions on fresh launches;
   TEST_REDIS_SERVER_BIN selects another Redis binary.
 
 ### Changed
