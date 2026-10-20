@@ -15,6 +15,12 @@ fn check_runtime(ctx: &Context) -> Result<(), RedisError> {
     Ok(())
 }
 
+// Runtime-only hooks keep their existing Context signature through coercion.
+fn runtime_init(ctx: &Context, _: &[RedisString]) -> Status {
+    ctx.log_notice("registration runtime init hook succeeded");
+    Status::Ok
+}
+
 fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
     let result = (|| {
         ctx.set_module_options(ModuleOptions::HANDLE_IO_ERRORS);
@@ -39,6 +45,7 @@ redis_module! {
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
     init: init,
+    init: runtime_init,
     commands: [
         ["registration.legacy", ping, "readonly fast", 0, 0, 0, ""],
         redis_command!("registration.builder", ping).read_only().fast(),

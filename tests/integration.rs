@@ -27,6 +27,10 @@ fn test_registration_context_registers_load_time_and_declarative_commands() -> R
             con.server_log()?
                 .contains("registration runtime helper succeeded")
         );
+        assert!(
+            con.server_log()?
+                .contains("registration runtime init hook succeeded")
+        );
     }
     Ok(())
 }
