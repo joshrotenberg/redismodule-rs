@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-20.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `df36fea`, CI green, no open PRs |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `5bf61ff`, configuration validation merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `df36fea` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `5bf61ff` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -98,18 +98,19 @@ From a survey of
 [redis-developer/redis-event-stream-module](https://github.com/redis-developer/redis-event-stream-module)
 (commit `f0ebe1f`), a module built on this SDK, in the order to take them:
 
-1. Module arguments as configuration: `i64` values skip the min and max check,
-   a `bool` is true only for the exact string `yes`, and names and values are
-   not read as pairs. One integration test per bug first.
-2. ACL categories: the module reports that `RedisModule_AddACLCategory` fails on
+Module-argument configuration fixes merged in `5bf61ff`: numeric bounds are
+enforced after memory-unit conversion, booleans accept case-insensitive
+`yes`/`no`, and arguments are read as pairs.
+
+1. ACL categories: the module reports that `RedisModule_AddACLCategory` fails on
    a second `MODULE LOAD` in the same process, which fails the load. Test a
-   load, unload and reload of an example that declares `acl_categories`; if it
-   fails, treat "already exists" as success.
-3. Test harness: pass module arguments, assert a load failure with the server
+   load, unload and reload of an example that declares `acl_categories`;
+   distinguish an existing category from other registration errors.
+2. Test harness: pass module arguments, assert a load failure with the server
    log, a `wait_until` helper, start a replica, restart on the same data.
-4. `Context::select_db` and `get_selected_db`, with a guard that restores the
+3. `Context::select_db` and `get_selected_db`, with a guard that restores the
    database.
-5. An accessor for the error code of a call's error reply, and
+4. An accessor for the error code of a call's error reply, and
    `notify_keyspace_event` with a byte event name.
 
 Then: subscribing to keyspace events after load, the server-event payloads for
@@ -150,14 +151,19 @@ State (wasm/TRACKING.md has each item and the log):
   pushes and PRs only.
 - Module API gaps G1 to G8 are recorded with what each costs the host.
 - Run: the whole suite on macOS with Redis 8.10.2 and on Linux arm64 with
-  8.0.2; a smoke test of every feature and a two-node cluster on 7.2.16,
+  8.0.2 (JavaScript tests skipped on that Linux run without Node); a smoke
+  test of every feature and a two-node cluster on 7.2.16,
   7.4.11, 8.0.6, 8.2.10 and 8.10.2. Redis 7.0 does not load the module, since
   its commands declare `@scripting`. The one-slot rule has not been run on 7.2
   since it moved to `cluster::key_slot`.
 
-Gates on this branch: the four above, plus the guest crates:
+Gates on this branch: the four above, except that the Redis 7.2 Clippy check
+excludes the wasm crate. Its SDK dependency enables the default 6.0 floor;
+combining it with another floor in the same build fails (S5). The full
+workspace Clippy and test runs use the default floor. Then check the guests:
 
 ```bash
+cargo clippy --workspace --exclude redis-module-wasm --all-targets --no-default-features --features min-redis-compatibility-version-7-2 -- -D warnings
 for m in wasm/guest-sdk wasm/guests/hello wasm/bench/guest; do cargo fmt --manifest-path $m/Cargo.toml -- --check; done
 cargo clippy --manifest-path wasm/guest-sdk/Cargo.toml --all-targets -- -D warnings
 cargo clippy --manifest-path wasm/guests/hello/Cargo.toml --target wasm32-unknown-unknown -- -D warnings

@@ -188,7 +188,7 @@ can be an ordinary PR. A done item names its commit on master.
 | S2 | done, a5eb60d | `RedisValueKey` had no simple string, so a map key sent as a simple string went out as a bulk string. `RedisValueKey::SimpleString` keeps it. |
 | S3 | todo | No lifetime-safe way to hand a `Context` to code that needs `'static` data, such as a runtime's store. |
 | S4 | todo | Replies can only be built as a `RedisValue` tree; the low-level reply functions are crate-private since 3.0, so nothing streams a reply. |
-| S5 | todo | The `min-redis-compatibility-*` floors are mutually exclusive, and Cargo unifies features across a workspace, so a second module crate in the workspace must use the root's floor. |
+| S5 | todo | The `min-redis-compatibility-*` floors are mutually exclusive, and Cargo unifies features across a workspace, so a second module crate in the workspace must use the root's floor. The full-workspace 7.2 Clippy check combines that floor with the host's default 6.0 floor and fails. Run alternate-floor SDK checks with `--exclude redis-module-wasm`; check the host in the default-floor workspace build. |
 | S6 | worked around | On macOS a stripped release build of the host fails to load ("mis-aligned LINKEDIT string pool"); the workspace sets `strip = "none"` for it. Check with a newer toolchain. |
 | S7 | done, 9ea85f4 | `ServerInfo::field` panicked on a field name with a NUL byte; upstream returns `None`, and so does it now. |
 | S8 | done, 6d21760 | `Cargo.toml`'s `repository` field named upstream. |
@@ -220,6 +220,14 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: rebased onto SDK master `5bf61ff`, which validates numeric
+  configuration defaults, parses boolean arguments as case-insensitive
+  `yes`/`no`, and reads module arguments in pairs. No host adaptation needed.
+  On Rust 1.94.0 and Redis 8.10.2, workspace and guest formatting and Clippy
+  passed, as did the full workspace suite (21 host integration tests,
+  including JavaScript) and the guest helper's four tests. The full-workspace
+  7.2 Clippy command exposed S5; the separate SDK 7.2 check with the host
+  excluded passed. HANDOFF.md now documents that split.
 - 2026-10-20: moved to the fork's `experiment/wasm-host` branch, rebased on
   master df36fea, and moved onto the SDK changes there: `cluster::key_slot`
   and `Context::get_command_keys` replace the `raw` calls (S10), so the
