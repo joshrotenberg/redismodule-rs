@@ -1,7 +1,7 @@
 [workspace]
 members = [".", "redismodule-rs-macros", "redismodule-rs-macros-internals", "wasm"]
 # Guests build for wasm32 with their own manifests.
-exclude = ["wasm/guests"]
+exclude = ["wasm/guests", "wasm/bench/guest"]
 # Prefer dependency versions that support rust-version.
 resolver = "3"
 

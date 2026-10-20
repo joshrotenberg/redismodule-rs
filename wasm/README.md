@@ -66,6 +66,9 @@ cargo build --release --target wasm32-unknown-unknown --manifest-path wasm/guest
 wasm-tools component new wasm/guests/hello/target/wasm32-unknown-unknown/release/hello_guest.wasm -o hello.wasm
 ```
 
+Without wasm-tools, the `componentize` example does the same:
+`cargo run -p redis-module-wasm --example componentize -- <module.wasm> <component.wasm>`.
+
 Then load it and call it (the module is `libredis_module_wasm.so` on Linux):
 
 ```bash
@@ -75,6 +78,12 @@ redis-cli WASM.CALL hello 0 redis
 ```
 
 Guests get no WASI imports: no clocks, randomness, files or network.
+
+## Benchmark
+
+[`bench/`](bench) compares the same functions in wasm and in Lua: calls into
+Redis, replies, a checksum, a sort and a sieve. Run `wasm/bench/run.sh`; the
+latest numbers are in [TRACKING.md](TRACKING.md).
 
 ## Tests
 

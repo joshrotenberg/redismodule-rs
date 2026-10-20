@@ -23,8 +23,11 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
 - Reply types survive both ways, including simple versus bulk strings, maps,
   sets, nil, and errors inside arrays. A guest cannot run `WASM.*` commands.
 - Each library keeps one instance between calls, so guest state persists
-  across calls; a failed call, `REPLACE` or `DELETE` drops it. A call costs
-  about the same server time as the equivalent Lua function (see Numbers).
+  across calls; a failed call, `REPLACE` or `DELETE` drops it.
+- Against the same functions in Lua (see Numbers): a call into Redis costs
+  about twice Lua's server time, a call with no Redis calls slightly less, and
+  the checksum and the sieve run 9 and 16 times faster, and `median`, which
+  moves 1000 strings into the guest, 1.4 times faster.
 - The host is about 400 lines. The example guest is 22 KB as a core module and
   23 KB as a component. The integration test runs in about 1.3 seconds.
 
@@ -33,6 +36,23 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 `wit-bindgen` 0.44.
 
 ### Numbers
+
+`wasm/bench/run.sh` (see `wasm/bench/README.md`), two runs, Apple M4 Pro,
+Redis 8.10.2, release build, 50 clients. Server time per call from
+`INFO commandstats`:
+
+| function | Lua µs/call | wasm µs/call | wasm / Lua |
+|---|---|---|---|
+| `incr_twice`: two INCRs | 1.28 to 1.37 | 2.45 to 2.47 | 1.8 to 1.9 |
+| `nested`: a reply, no calls | 1.48 to 1.56 | 1.27 to 1.40 | 0.86 to 0.90 |
+| `adler32`: checksum of a 16 KiB value | 569 to 574 | 61 | 0.11 |
+| `median`: LRANGE 1000 integers, sort | 246 to 247 | 175 to 178 | 0.71 to 0.73 |
+| `primes`: sieve up to 10000 | 423 to 429 | 26 to 27 | 0.06 |
+
+The sieve's time grows linearly with n in both (wasm 4.3, 28 and 309 µs for n
+of 1000, 10000 and 100000; Lua 34, 433 and 3863 µs).
+
+#### Before H2
 
 Server time per call from `INFO commandstats` (`usec_per_call`), with 50
 `redis-benchmark` clients, release build, Redis 8.10.2 on a laptop; two runs
@@ -72,8 +92,8 @@ avoids both instantiating and tearing down, and was adopted.
 |---|---|---|---|
 | H1 | done | **Time limit and kill.** wasmtime epoch interruption; at each epoch the host calls `Context::yield_now(YieldMode::Clients, ..)`, so other clients get `-BUSY` past `busy-reply-threshold`. `WASM.KILL`, flagged `allow-busy`, stops a running guest that has not written, as `FUNCTION KILL` does. | A test runs a guest that loops forever, sees `-BUSY` from another client, kills it, and the server keeps serving. |
 | H2 | done | **Per-call cost.** Measure where the 26 µs goes, then reuse instances per library or use wasmtime's pooling allocator. | The benchmark table is updated, with the cause named. |
-| H3 | next | **A fair benchmark.** Add a compute-heavy function next to the two-INCR one, in both wasm and Lua, and keep the script in the repository. | `wasm/bench/` reproduces both rows on one command. |
-| H4 | todo | **A guest in another language.** JavaScript (componentize-js), Python (componentize-py) or Go (TinyGo), whichever produces components wasmtime 36 loads. | The integration test loads and calls a non-Rust guest. |
+| H3 | done | **A fair benchmark.** Add a compute-heavy function next to the two-INCR one, in both wasm and Lua, and keep the script in the repository. | `wasm/bench/` reproduces both rows on one command. |
+| H4 | next | **A guest in another language.** JavaScript (componentize-js), Python (componentize-py) or Go (TinyGo), whichever produces components wasmtime 36 loads. | The integration test loads and calls a non-Rust guest. |
 | H5 | todo | **Persistence and replication.** Save libraries in aux data (`aux_save`, `aux_load`) and replicate `WASM.LOAD` and `WASM.DELETE` verbatim. | Tests with a restart and with a replica see the same libraries. |
 
 ### Then
@@ -85,10 +105,11 @@ avoids both instantiating and tearing down, and was adopted.
 | H8 | todo | **Memory.** A memory limit per instance (wasmtime resource limiter), refusing writes when `used_memory_ratio` is at 1, and an `INFO` section with the host's memory. Kept instances (H2) only grow, so also replace an instance whose memory passes a size. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
 | H9 | todo | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`), `WASM.CALL_RO`, a `call` that fails where `pcall` returns the error, and `acl-check-command` and `set-resp` imports. | Each has a test matching what Lua does. |
 | H10 | todo | **Guest helper library.** A small Rust crate that builds the pre-order node list from typed values, so guests do not build it by hand. | The example guest uses it. |
-| H11 | todo | **Bounds check cost.** Signal-based traps are off so wasmtime installs no signal handlers over Redis's crash handler; measure what explicit bounds checks cost. | A number for a memory-heavy guest with traps on and off. |
+| H11 | todo | **Bounds check cost.** Signal-based traps are off so wasmtime installs no signal handlers over Redis's crash handler. Measured with H3's benchmark: turning them on made `primes` 18% faster (185 against 226 µs, with the old sieve loop), `median` 6%, `adler32` no different. Left: whether wasmtime's handlers and Redis's crash handler can coexist, and whether 18% is worth it. | A decision, with a crash report checked with handlers on. |
 | H12 | todo | **Context in the store.** The store holds a raw pointer to the command's `Context`. Write down the safety argument or replace it with an SDK pattern (S3). | Reviewed and documented, or replaced. |
 | H13 | todo | **Footprint.** Trim wasmtime features and measure the dylib and RSS. | Sizes recorded before and after. |
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
+| H15 | todo | **Large replies into the guest.** `median` is only 1.4 times faster than Lua although sorting 1000 integers is cheap: the 1000 strings of its `LRANGE` reply are copied into nodes, then into the guest's memory. Measure how much of its 177 µs that is, then copy less (for example, give the guest a handle to read the reply from). | `median`'s time split, and a lower number. |
 
 ## SDK changes the spike found
 
@@ -125,6 +146,14 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H3 done: `wasm/bench/` with a guest, the same functions in
+  Lua, and `run.sh`, which checks both give the same results and prints server
+  time per call. Computation is 9 to 16 times faster than Lua; calls into Redis
+  cost about twice Lua's. The first sieve used `step_by` on an inclusive range
+  and was seven times slower than with `while` loops, and its `i * i`
+  overflowed `usize` on wasm32 past n of 65535; both fixed, results checked up
+  to n of 1000000. A run with signal-based traps on gave H11 its first numbers.
+  Added H15.
 - 2026-10-20: H2 done: phase timers showed instantiating and dropping a
   fresh instance took about 16 of 22 µs per call. The pooling allocator cut a
   call to 14 µs; keeping one instance per library cut it to about 2.7 µs
