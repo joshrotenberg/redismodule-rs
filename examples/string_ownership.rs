@@ -2,15 +2,15 @@
 //! ServerInfo, RDB), statics, and AutoMemory on and off.
 use lazy_static::lazy_static;
 use redis_module::{
-    raw, redis_module, Context, KeysCursor, NextArg, RedisError, RedisGILGuard, RedisResult,
-    RedisString, RedisValue, ScanKeyCursor, Status,
+    Context, KeysCursor, NextArg, RedisError, RedisGILGuard, RedisResult, RedisString, RedisValue,
+    ScanKeyCursor, Status, raw, redis_module,
 };
 use std::{
     os::raw::c_char,
     ptr::{self, NonNull},
     sync::{
-        atomic::{AtomicU64, Ordering},
         OnceLock,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
@@ -360,15 +360,18 @@ fn churn(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
 }
 // Ordinary save/load of one string reference, exercised through DUMP/RESTORE.
 unsafe extern "C" fn rdb_save(io: *mut raw::RedisModuleIO, value: *mut std::ffi::c_void) {
-    raw::save_redis_string(io, unsafe { &*value.cast::<RedisString>() });
+    // SAFETY: Redis passes this type's own IO and value.
+    unsafe { raw::save_redis_string(io, &*value.cast::<RedisString>()) };
 }
 unsafe extern "C" fn rdb_load(io: *mut raw::RedisModuleIO, version: i32) -> *mut std::ffi::c_void {
-    if version != 0 {
-        return ptr::null_mut();
-    }
-    match raw::load_string(io) {
-        Ok(s) => Box::into_raw(Box::new(s)).cast(),
-        Err(_) => ptr::null_mut(),
+    unsafe {
+        if version != 0 {
+            return ptr::null_mut();
+        }
+        match raw::load_string(io) {
+            Ok(s) => Box::into_raw(Box::new(s)).cast(),
+            Err(_) => ptr::null_mut(),
+        }
     }
 }
 unsafe extern "C" fn rdb_free(value: *mut std::ffi::c_void) {

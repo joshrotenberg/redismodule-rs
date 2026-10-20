@@ -9,7 +9,7 @@ use std::{
 
 use libc::c_void;
 
-use crate::{deallocate_pointer, raw::*, Context, RedisError, RedisLockIndicator};
+use crate::{Context, RedisError, RedisLockIndicator, deallocate_pointer, raw::*};
 
 pub struct StringCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,

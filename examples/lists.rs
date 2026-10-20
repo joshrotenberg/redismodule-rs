@@ -1,6 +1,6 @@
 use redis_module::raw::KeyType;
 use redis_module::{
-    redis_module, Context, NextArg, RedisError, RedisResult, RedisString, RedisValue,
+    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
 };
 
 // LPOPRPUSH source destination

@@ -5,9 +5,9 @@ use quote::quote;
 use serde::Deserialize;
 use serde_syn::{config, from_stream};
 use syn::{
-    parse,
+    ItemFn, parse,
     parse::{Parse, ParseStream},
-    parse_macro_input, ItemFn,
+    parse_macro_input,
 };
 
 #[derive(Debug, Deserialize)]
@@ -489,7 +489,7 @@ pub(crate) fn redis_command(attr: TokenStream, item: TokenStream) -> TokenStream
 
     let registration =
         crate::registration::attributes(syn::parse_quote!(::redis_module::commands::COMMANDS_LIST));
-    let gen = quote! {
+    let r#gen = quote! {
         #func
 
         extern "C" fn #c_function_name(
@@ -538,5 +538,5 @@ pub(crate) fn redis_command(attr: TokenStream, item: TokenStream) -> TokenStream
             ))
         }
     };
-    gen.into()
+    r#gen.into()
 }

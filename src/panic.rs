@@ -15,7 +15,7 @@ use std::any::Any;
 use std::cell::Cell;
 use std::ffi::CString;
 use std::os::raw::c_int;
-use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::ptr::{self, NonNull};
 
 use crate::raw;

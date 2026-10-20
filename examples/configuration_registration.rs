@@ -5,15 +5,16 @@
 //! - `valid` registers one configuration of each type.
 //! - `i64`, `string`, `bool` or `enum` registers a configuration of that type
 //!   twice under the same name; Redis rejects the second one.
-use std::sync::atomic::{AtomicBool, AtomicI64};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicI64};
 
 use redis_module::{
+    Context, RedisError, RedisString, Status,
     configuration::{
-        load_configurations, register_bool_configuration, register_enum_configuration,
-        register_i64_configuration, register_string_configuration, ConfigurationFlags,
+        ConfigurationFlags, load_configurations, register_bool_configuration,
+        register_enum_configuration, register_i64_configuration, register_string_configuration,
     },
-    enum_configuration, redis_module, Context, RedisError, RedisString, Status,
+    enum_configuration, redis_module,
 };
 
 enum_configuration! {

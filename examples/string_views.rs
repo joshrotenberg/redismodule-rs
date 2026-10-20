@@ -3,8 +3,8 @@
 use std::sync::Mutex;
 
 use redis_module::{
-    redis_module, Context, NextArg, NotifyEvent, RedisError, RedisResult, RedisString, RedisValue,
-    Status,
+    Context, NextArg, NotifyEvent, RedisError, RedisResult, RedisString, RedisValue, Status,
+    redis_module,
 };
 
 static LAST_KEY: Mutex<Vec<u8>> = Mutex::new(Vec::new());

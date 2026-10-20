@@ -132,6 +132,8 @@ pub fn init_api(ctx: &Context) {
 }
 
 pub(crate) unsafe fn deallocate_pointer<P>(p: *mut P) {
-    std::ptr::drop_in_place(p);
-    std::alloc::dealloc(p as *mut u8, std::alloc::Layout::new::<P>());
+    unsafe {
+        std::ptr::drop_in_place(p);
+        std::alloc::dealloc(p as *mut u8, std::alloc::Layout::new::<P>());
+    }
 }

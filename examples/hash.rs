@@ -1,6 +1,6 @@
 //! Commands that set and delete hash fields through `RedisKeyWritable`, and
 //! reply with the count each call returns.
-use redis_module::{redis_module, Context, NextArg, RedisResult, RedisString, RedisValue};
+use redis_module::{Context, NextArg, RedisResult, RedisString, RedisValue, redis_module};
 
 fn count(count: usize) -> RedisResult {
     Ok(RedisValue::Integer(count as i64))

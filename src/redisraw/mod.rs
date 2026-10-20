@@ -4,7 +4,9 @@
 #![allow(dead_code)]
 
 // Workaround for https://github.com/rust-lang/rust-bindgen/issues/1651#issuecomment-848479168
-#[allow(deref_nullptr)]
+// for deref_nullptr. The bindgen helper types call unsafe functions in unsafe
+// fn bodies without unsafe blocks, which edition 2024 warns about.
+#[allow(deref_nullptr, unsafe_op_in_unsafe_fn)]
 pub mod bindings {
     #![expect(
         clippy::missing_safety_doc,

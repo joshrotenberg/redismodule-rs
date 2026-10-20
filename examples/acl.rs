@@ -1,6 +1,6 @@
 use redis_module::{
-    redis_module, AclCategory, AclChannelPermissions, AclLogReason, AclPermissions, Context,
-    NextArg, RedisError, RedisResult, RedisString, RedisValue,
+    AclCategory, AclChannelPermissions, AclLogReason, AclPermissions, Context, NextArg, RedisError,
+    RedisResult, RedisString, RedisValue, redis_module,
 };
 
 fn verify_key_access_for_user(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -32,7 +32,7 @@ fn verify_channel_access_for_user(ctx: &Context, args: Vec<RedisString>) -> Redi
         _ => {
             return Err(RedisError::Str(
                 "ERR expected publish, subscribe or psubscribe",
-            ))
+            ));
         }
     };
     args.done()?;

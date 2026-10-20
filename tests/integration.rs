@@ -184,18 +184,24 @@ fn test_string_ownership_lifecycle() -> Result<()> {
             let values: Vec<Vec<u8>> = redis::cmd("owner.read").query(&mut con)?;
             assert_eq!(values, expected, "{origin}, AM={mode}");
             assert_eq!(redis::cmd("owner.clear").query::<String>(&mut con)?, "OK");
-            assert!(redis::cmd("owner.read")
-                .query::<Vec<Vec<u8>>>(&mut con)?
-                .is_empty());
+            assert!(
+                redis::cmd("owner.read")
+                    .query::<Vec<Vec<u8>>>(&mut con)?
+                    .is_empty()
+            );
         }
     }
-    assert!(redis::cmd("owner.lifecycle")
-        .arg(2)
-        .query::<Value>(&mut con)
-        .is_err());
-    assert!(redis::cmd("owner.lifecycle")
-        .query::<Value>(&mut con)
-        .is_err());
+    assert!(
+        redis::cmd("owner.lifecycle")
+            .arg(2)
+            .query::<Value>(&mut con)
+            .is_err()
+    );
+    assert!(
+        redis::cmd("owner.lifecycle")
+            .query::<Value>(&mut con)
+            .is_err()
+    );
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
@@ -406,10 +412,12 @@ fn test_string_view_contracts() -> Result<()> {
         .arg(b"\xff".as_slice())
         .query::<Value>(&mut con)
         .unwrap_err();
-    assert!(error
-        .detail()
-        .unwrap_or_default()
-        .contains("parse as UTF-8 string"));
+    assert!(
+        error
+            .detail()
+            .unwrap_or_default()
+            .contains("parse as UTF-8 string")
+    );
     for command in ["views.text", "views.bytes", "views.notify"] {
         for args in [vec![], vec!["one", "extra"]] {
             let error = redis::cmd(command)
@@ -455,10 +463,12 @@ fn test_info_string_view_migration() -> Result<()> {
         .arg("redis_version")
         .query::<Value>(&mut con)
         .unwrap_err();
-    assert!(error
-        .detail()
-        .unwrap_or_default()
-        .contains("parse as UTF-8 string"));
+    assert!(
+        error
+            .detail()
+            .unwrap_or_default()
+            .contains("parse as UTF-8 string")
+    );
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
@@ -478,17 +488,21 @@ fn test_static_data_string_view_migration() -> Result<()> {
         .arg(b"\xff".as_slice())
         .query::<Value>(&mut con)
         .unwrap_err();
-    assert!(error
-        .detail()
-        .unwrap_or_default()
-        .contains("parse as UTF-8 string"));
+    assert!(
+        error
+            .detail()
+            .unwrap_or_default()
+            .contains("parse as UTF-8 string")
+    );
     assert_eq!(
         redis::cmd("get_static_data").query::<String>(&mut con)?,
         "a\0b"
     );
-    assert!(redis::cmd("set_static_data")
-        .query::<Value>(&mut con)
-        .is_err());
+    assert!(
+        redis::cmd("set_static_data")
+            .query::<Value>(&mut con)
+            .is_err()
+    );
     let reply: String = redis::cmd("set_static_data")
         .arg(&["valid", "extra"][..])
         .query(&mut con)?;
@@ -574,10 +588,12 @@ fn test_borrowed_arguments() -> Result<()> {
         .arg(1)
         .query::<Value>(&mut con)
         .unwrap_err();
-    assert!(error
-        .detail()
-        .unwrap_or_default()
-        .contains("parse as UTF-8 string"));
+    assert!(
+        error
+            .detail()
+            .unwrap_or_default()
+            .contains("parse as UTF-8 string")
+    );
     let error = redis::cmd("args.borrowed")
         .arg("expression")
         .arg("OTHER")
@@ -764,11 +780,12 @@ fn test_command_name() -> Result<()> {
         {
             assert_eq!(res.unwrap(), String::from("test_helper.name"));
         } else {
-            assert!(res
-                .err()
-                .unwrap()
-                .to_string()
-                .contains("RedisModule_GetCurrentCommandName is not available"));
+            assert!(
+                res.err()
+                    .unwrap()
+                    .to_string()
+                    .contains("RedisModule_GetCurrentCommandName is not available")
+            );
         }
     }
 

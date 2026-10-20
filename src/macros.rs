@@ -403,7 +403,7 @@ macro_rules! redis_module {
             );
         }
 
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         #[allow(non_snake_case)]
         pub unsafe extern "C" fn RedisModule_OnLoad(
             ctx: *mut $crate::raw::RedisModuleCtx,
@@ -635,7 +635,7 @@ macro_rules! redis_module {
             )
         }
 
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         #[allow(non_snake_case)]
         pub unsafe extern "C" fn RedisModule_OnUnload(
             ctx: *mut $crate::raw::RedisModuleCtx

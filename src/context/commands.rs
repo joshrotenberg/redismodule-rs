@@ -1,7 +1,7 @@
-use crate::raw;
 use crate::Context;
 use crate::RedisError;
 use crate::Status;
+use crate::raw;
 use bitflags::bitflags;
 use libc::c_char;
 use linkme::distributed_slice;

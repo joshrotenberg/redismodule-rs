@@ -258,7 +258,7 @@ pub use standard_log_implementation::*;
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_message, RedisLogLevel};
+    use super::{RedisLogLevel, sanitize_message};
 
     #[test]
     fn preserves_empty_unicode_percent_and_backslash_text() {

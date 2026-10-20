@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use redis_module::{
-    redis_module, Context, NextArg, RedisGILGuard, RedisResult, RedisString, RedisValue,
-    ThreadSafeContext,
+    Context, NextArg, RedisGILGuard, RedisResult, RedisString, RedisValue, ThreadSafeContext,
+    redis_module,
 };
 use std::mem::drop;
 use std::thread;

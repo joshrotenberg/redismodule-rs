@@ -5,7 +5,7 @@
 //! leaves the data with this guard, which drops it; an accepted one leaves it
 //! with Redis for the life of the module.
 
-use crate::{raw, RedisError};
+use crate::{RedisError, raw};
 use std::os::raw::c_int;
 use std::ptr::NonNull;
 
@@ -106,9 +106,11 @@ mod tests {
             PendingRegistration::prepare(Some(()), captured_callback(&drops), "Boolean").unwrap();
         assert_eq!(drops.get(), 0);
         let error = pending.finish(raw::REDISMODULE_ERR as c_int).unwrap_err();
-        assert!(error
-            .to_string()
-            .starts_with("Boolean configuration registration failed:"));
+        assert!(
+            error
+                .to_string()
+                .starts_with("Boolean configuration registration failed:")
+        );
         assert_eq!(drops.get(), 1);
     }
 

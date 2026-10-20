@@ -1,7 +1,7 @@
 use redis_module::{
-    raw, redis_module, BlockedClient, CallOptionResp, CallOptionsBuilder, CallReply, CallResult,
-    Context, FutureCallReply, PromiseCallReply, RedisError, RedisResult, RedisString, RedisValue,
-    ThreadSafeContext,
+    BlockedClient, CallOptionResp, CallOptionsBuilder, CallReply, CallResult, Context,
+    FutureCallReply, PromiseCallReply, RedisError, RedisResult, RedisString, RedisValue,
+    ThreadSafeContext, raw, redis_module,
 };
 
 use std::thread;

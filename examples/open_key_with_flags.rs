@@ -1,5 +1,5 @@
 use redis_module::{
-    key::KeyFlags, redis_module, Context, NextArg, RedisError, RedisResult, RedisString, RedisValue,
+    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, key::KeyFlags, redis_module,
 };
 use redis_module_macros::command;
 

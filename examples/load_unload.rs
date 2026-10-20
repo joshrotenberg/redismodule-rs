@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use redis_module::{logging::RedisLogLevel, redis_module, Context, RedisString, Status};
+use redis_module::{Context, RedisString, Status, logging::RedisLogLevel, redis_module};
 
 static GLOBAL_STATE: Mutex<Option<String>> = Mutex::new(None);
 

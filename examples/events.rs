@@ -1,11 +1,11 @@
 use redis_module::{
-    raw, redis_module, Context, NotifyEvent, RedisError, RedisResult, RedisString, RedisValue,
-    Status,
+    Context, NotifyEvent, RedisError, RedisResult, RedisString, RedisValue, Status, raw,
+    redis_module,
 };
 use std::ffi::CString;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 static NUM_KEY_MISSES: AtomicI64 = AtomicI64::new(0);
 static NUM_KEYS: AtomicI64 = AtomicI64::new(0);

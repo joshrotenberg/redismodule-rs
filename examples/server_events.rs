@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use redis_module::{
-    redis_module, server_events::FlushSubevent, Context, RedisResult, RedisString, RedisValue,
+    Context, RedisResult, RedisString, RedisValue, redis_module, server_events::FlushSubevent,
 };
 use redis_module_macros::{
     config_changed_event_handler, cron_event_handler, flush_event_handler, shutdown_event_handler,

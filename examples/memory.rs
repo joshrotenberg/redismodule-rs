@@ -2,7 +2,7 @@
 use std::alloc::Layout;
 
 use redis_module::{
-    alloc::redis_alloc_size, redis_module, Context, NextArg, RedisResult, RedisString, RedisValue,
+    Context, NextArg, RedisResult, RedisString, RedisValue, alloc::redis_alloc_size, redis_module,
 };
 
 /// `memory.ratio`: used memory relative to `maxmemory`, as text.

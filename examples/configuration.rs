@@ -1,13 +1,13 @@
 use std::sync::{
-    atomic::{AtomicBool, AtomicI64},
     Mutex,
+    atomic::{AtomicBool, AtomicI64},
 };
 
 use lazy_static::lazy_static;
 use redis_module::{
+    ConfigurationValue, Context, RedisGILGuard, RedisResult, RedisString, RedisValue, Status,
     configuration::{ConfigurationContext, ConfigurationFlags},
-    enum_configuration, redis_module, ConfigurationValue, Context, RedisGILGuard, RedisResult,
-    RedisString, RedisValue, Status,
+    enum_configuration, redis_module,
 };
 
 enum_configuration! {

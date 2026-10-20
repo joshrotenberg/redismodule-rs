@@ -1,6 +1,6 @@
 use std::{ffi::c_void, mem::ManuallyDrop, ptr::NonNull};
 
-use crate::{key::RedisKey, raw, RedisString};
+use crate::{RedisString, key::RedisKey, raw};
 
 /// A cursor to scan hash/set/sorted-set entries. Set callbacks have no value;
 /// hash and sorted-set callbacks provide Some(value).

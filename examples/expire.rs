@@ -1,4 +1,4 @@
-use redis_module::{redis_module, Context, NextArg, RedisError, RedisResult, RedisString};
+use redis_module::{Context, NextArg, RedisError, RedisResult, RedisString, redis_module};
 use std::time::Duration;
 
 fn expire_cmd(ctx: &Context, args: Vec<RedisString>) -> RedisResult {

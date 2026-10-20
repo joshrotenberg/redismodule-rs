@@ -2,8 +2,8 @@ use std::ffi::CString;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
 
-use crate::raw;
 use crate::Context;
+use crate::raw;
 
 /// A native data type that a module registers with Redis.
 ///

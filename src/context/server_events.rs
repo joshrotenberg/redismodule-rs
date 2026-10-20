@@ -1,7 +1,7 @@
 use std::ffi::CStr;
 
-use crate::{context::Context, RedisError};
-use crate::{raw, InfoContext, RedisResult};
+use crate::{InfoContext, RedisResult, raw};
+use crate::{RedisError, context::Context};
 use linkme::distributed_slice;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug)]

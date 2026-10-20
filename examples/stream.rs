@@ -1,6 +1,6 @@
 use redis_module::raw::{KeyType, RedisModuleStreamID};
 use redis_module::{
-    redis_module, Context, NextArg, RedisError, RedisResult, RedisString, RedisValue,
+    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
 };
 
 fn stream_read_from(ctx: &Context, args: Vec<RedisString>) -> RedisResult {

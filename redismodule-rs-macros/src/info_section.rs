@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
-use quote::{quote, ToTokens};
-use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields};
+use quote::{ToTokens, quote};
+use syn::{Data, DataStruct, DeriveInput, Fields, parse_macro_input};
 
 /// Returns `true` if the `type_string` provided is a type of a map
 /// supported by the [`crate::InfoSection`].

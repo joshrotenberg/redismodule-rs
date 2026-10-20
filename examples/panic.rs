@@ -4,10 +4,10 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use redis_module::{
+    ConfigurationValue, Context, KeysCursor, NotifyEvent, RedisError, RedisResult, RedisString,
     configuration::{ConfigurationContext, ConfigurationFlags},
     key::RedisKey,
-    redis_module, ConfigurationValue, Context, KeysCursor, NotifyEvent, RedisError, RedisResult,
-    RedisString,
+    redis_module,
 };
 use redis_module_macros::command;
 
