@@ -26,6 +26,10 @@ fn dump(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     forward(ctx, args, "DUMP")
 }
 
+fn eval(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    forward(ctx, args, "EVAL")
+}
+
 fn status(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     forward(ctx, args, "SET")
 }
@@ -104,5 +108,6 @@ redis_module! {
         ["call_reply.hgetall", hgetall, "readonly", 1, 1, 1, ""],
         ["call_reply.smembers", smembers, "readonly", 1, 1, 1, ""],
         ["call_reply.version", version, "readonly", 0, 0, 0, ""],
+        ["call_reply.eval", eval, "", 0, 0, 0, ""],
     ],
 }

@@ -49,6 +49,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - **Breaking:** `Context::call` returns `BulkString` for a bulk string reply and `SimpleString` only for a simple string reply, and a call that fails without the `E` flag returns an error naming the reason instead of `CallReply::Unknown` (adapted from upstream PR 93).
 - **Breaking:** `RedisValue` has two new variants, `InsertionOrderedMap` and `Error`.
 - **Breaking:** `RedisValueKey` has a new variant, `SimpleString`, and a call reply's simple-string map key or set element converts to it instead of `String`.
+- **Breaking:** an error in a call reply, also inside an array or map, converts to `RedisValue::Error` instead of `StringBuffer`, so a forwarded reply keeps it as an error.
 - **Breaking:** `RedisError` implements `std::error::Error`, which replaces the blanket `From<T: Error>` conversion with `From` for a list of standard library errors; other errors convert with `RedisError::from_error`.
 - **Breaking:** `register_i64_configuration`, `register_string_configuration`, `register_bool_configuration` and `register_enum_configuration` return `Result<(), RedisError>`.
 - **Breaking:** `RedisGILGuard<T>` is `Send` only when `T` is, and locking it twice panics. `ConfigurationContext` is neither `Send` nor `Sync`. `ConfigurationValue` no longer requires `Send`.

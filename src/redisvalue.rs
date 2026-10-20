@@ -318,12 +318,9 @@ impl<'root> From<&CallReply<'root>> for RedisValue {
 impl<'root> From<&CallResult<'root>> for RedisValue {
     fn from(reply: &CallResult<'root>) -> Self {
         reply.as_ref().map_or_else(
-            |e| {
-                // [RedisValue] does not support error, we can change that but to avoid
-                // drastic changes and try to keep backword compatability, currently
-                // we will stansform the error into a String buffer.
-                RedisValue::StringBuffer(e.as_bytes().to_vec())
-            },
+            // An error stays an error, also inside an array or map, so a
+            // forwarded reply keeps it. Invalid UTF-8 is replaced.
+            |e| RedisValue::Error(String::from_utf8_lossy(e.as_bytes()).into_owned()),
             |v| (v).into(),
         )
     }
