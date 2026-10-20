@@ -32,6 +32,9 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   them.
 - Each instance's linear memory is limited by `wasm.max-memory` (64 MiB by
   default), and `INFO wasm` reports instances, their memory and compiled code.
+- Runs unchanged on Redis 7.2, 7.4, 8.0, 8.2 and 8.10 (a smoke test of every
+  feature, Linux arm64); not on 7.0, because of the SDK (S11). The `WASM.*`
+  commands are in `@scripting`, as `FCALL` and `FUNCTION` are.
 - Functions have Lua's flags, with Lua's checks before they start and on the
   commands they call, and `WASM.CALL_RO` runs those with `no-writes`. Guests
   have `call` and `pcall`, an ACL check and `set-resp`, as Lua scripts have.
@@ -47,7 +50,7 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   moves 1000 strings into the guest, 1.4 times faster.
 - The host is about 790 lines of code, not counting comments and unit tests.
   The example guest is 22 KB as a core module and 23 KB as a component. The
-  seventeen integration tests take about 9 seconds.
+  eighteen integration tests take about 10 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
@@ -123,7 +126,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H8 | done | **Memory.** `wasm.max-memory` (default 64 MiB) limits each instance's linear memory through a wasmtime `ResourceLimiter`; a guest that grows past it traps and its call fails, which drops the instance. A function does not start while Redis is over `maxmemory`, and its calls use `RedisModule_Call`'s `M` flag. `INFO wasm` reports libraries, functions, component and compiled code bytes, live instances and their linear memory, and the limit. Not done: replacing a kept instance that grew large but stays under the limit; a failed call already drops it. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
 | H9 | done | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`) in the WIT, `WASM.CALL_RO`, Lua's checks before a function starts, read-only calls that refuse write and may-replicate commands, one slot per call on a cluster node, no calls while a library loads, flags in `WASM.LIST` and the RDB (H9a); `call`, which fails the function on an error reply, next to `pcall`, and `acl-check-command` and `set-resp` imports (H9b). Differences left: G5, G6, and RESP3 as the default. | Each has a test matching what Lua does. |
 | H10 | todo | **Guest helper library.** A small Rust crate that builds the pre-order node list from typed values, so guests do not build it by hand. | The example guest uses it. |
-| H11 | todo | **Bounds check cost.** Signal-based traps are off so wasmtime installs no signal handlers over Redis's crash handler. Measured with H3's benchmark: turning them on made `primes` 18% faster (185 against 226 µs, with the old sieve loop), `median` 6%, `adler32` no different. Left: whether wasmtime's handlers and Redis's crash handler can coexist, and whether 18% is worth it. | A decision, with a crash report checked with handlers on. |
+| H11 | done | **Bounds check cost.** Decided: keep signal-based traps off, so guests get explicit bounds checks. With H3's benchmark, turning them on made `primes` 18% faster (185 against 226 µs, old sieve loop) and `median` 6%. On Linux they are not safe in a module: wasmtime installs `SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE` handlers that chain to Redis's crash handler, but `CONFIG SET crash-log-enabled` (either value) reinstalls Redis's handlers or the defaults over them, and the next out-of-bounds guest access kills the server: silently after `no`, with a crash report after `yes` (G7). On macOS wasmtime takes faults through Mach exception ports, so the same steps are safe there. A crash outside wasm (`DEBUG SEGFAULT`) still produced Redis's crash report with wasmtime's handlers installed. | A decision, with a crash report checked with handlers on. |
 | H12 | done | **Context in the store.** The store holds a raw pointer to the command's `Context`. The safety argument is written down in `host.rs` ("The context pointer"): set and cleared around each guest run, re-entrant calls use their own instance, a panic drops the instance with the stale pointer, and instances stay on the main thread. No SDK pattern replaces it yet (S3). | Reviewed and documented, or replaced. |
 | H13 | todo | **Footprint.** Trim wasmtime features and measure the dylib and RSS. After loading the JavaScript component, RSS was 722 MB (serial compilation) and 959 MB (parallel) while `used_memory` stayed under 10 MB. `INFO wasm` (H8) accounts for 95 MB of compiled code and 7.7 MB of linear memory; find the rest, likely allocator memory kept after compiling. | Sizes recorded before and after. |
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
@@ -167,6 +170,7 @@ can be an ordinary PR.
 | S7 | todo | `ServerInfo::field` panics on a field name with a NUL byte; upstream returns `None`. |
 | S8 | todo | `Cargo.toml`'s `repository` field still names upstream. |
 | S10 | todo | No safe wrappers for `RedisModule_GetCommandKeysWithFlags` and `RedisModule_ClusterKeySlot`; the host calls them through `raw`. `ContextFlags` is not `Copy`. |
+| S11 | todo | Registering commands from the `#[command]` macro requires `RedisModule_SetCommandACLCategories` (Redis 7.2) even when no command declares ACL categories, so a module using the macro does not load on Redis 7.0 ("RedisModule_SetCommandACLCategories does not exists"). |
 | S9 | todo | `redis_module!`'s `configurations` block compiles only with all four groups (`i64`, `string`, `bool`, `enum`) and `module_args_as_configuration` listed, and module arguments are parsed as plain integers, so a memory config given as `8mb` fails the load. |
 
 ## Module API gaps
@@ -182,6 +186,7 @@ evidence as the host meets them.
 | G4 | Aux data reaches an AOF only inside its RDB preamble: no module API adds commands to a rewritten AOF without one (`aof_rewrite` is per key). Redis writes its own `FUNCTION` libraries into the rewrite (`rewriteFunctions` in `aof.c`). | With `aof-use-rdb-preamble no` (the default is `yes`), an AOF rewrite drops the libraries: `WASM.LIST` was empty after `BGREWRITEAOF` and a restart. |
 | G5 | No module API says whether writes are refused for a disk error (`MISCONF`) or for too few good replicas (`NOREPLICAS`). | Lua refuses a function that may write before it starts; here it starts, and its first write command fails with that error (`RedisModule_Call`'s script mode checks each write). |
 | G6 | `COMMAND INFO` hides the `may_replicate` flag ("Hidden on purpose" in `server.c`), and no module API returns a command's flags. | Lua's read-only functions refuse may-replicate commands. The host names them (`PUBLISH`, `SPUBLISH`, `PFCOUNT`; script mode refuses `EVAL`, `EVALSHA` and `FCALL`), so a module command with that flag is not refused. |
+| G7 | No module API installs fault handlers that Redis keeps: `CONFIG SET crash-log-enabled` calls `setupSigSegvHandler` or `removeSigSegvHandlers`, which replace every `SIGSEGV`, `SIGBUS`, `SIGFPE` and `SIGILL` handler. | A module cannot use signal-based bounds checks on Linux (H11): explicit checks cost 18% on the sieve. Redis's crash handler would have to pass faults in a module's code to the module. |
 
 ## Open questions
 
@@ -191,6 +196,13 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H11 done (keep signal-based traps off; see H11 and G7), with
+  the experiment run on macOS and, in a colima VM, on Linux with Redis 8.10.
+  The example guest gained `oob` and a test that an out-of-bounds access traps
+  and drops the instance. The same Linux build passed a smoke test of every
+  feature on Redis 7.2.16, 7.4.11, 8.0.6, 8.2.10 and 8.10.0, and failed to load
+  on 7.0.15 (S11). The `WASM.*` commands joined `@scripting`; a test checks
+  that a user without it is refused.
 - 2026-10-20: H12 done: reviewed every path that sets, uses or clears the
   store's context pointer (calls, re-entrant calls, epoch yields, the reply
   callback that adds a library, the RDB fork, panics) and wrote the argument

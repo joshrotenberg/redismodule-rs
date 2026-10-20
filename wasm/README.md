@@ -4,7 +4,8 @@ A Redis module that runs WebAssembly components as functions, the way
 `FUNCTION LOAD` and `FCALL` run Lua. It is built on `redis-module` and
 [wasmtime](https://wasmtime.dev) with the component model.
 
-This is an early prototype.
+This is an early prototype. It needs Redis 7.2 or later, and has been run on
+7.2, 7.4, 8.0, 8.2 and 8.10.
 
 ## Commands
 
@@ -17,7 +18,8 @@ WASM.DELETE <library>
 WASM.KILL                                       stop the running function, as FUNCTION KILL does
 ```
 
-Function names are global across libraries, as with `FUNCTION`.
+Function names are global across libraries, as with `FUNCTION`. The commands
+are in the `@scripting` ACL category, as `FUNCTION` and `FCALL` are.
 
 `WASM.CALL` declares its keys as `FCALL` does: the `numkeys` keys after the
 function name. `COMMAND GETKEYS`, ACL key patterns and cluster routing use

@@ -153,6 +153,7 @@ fn load_timed_out(_ctx: &Context) -> RedisResult {
     {
         name: "wasm.call",
         flags: [MayReplicate, DenyScript, NoMandatoryKeys, AllowStale],
+        acl_categories: [Scripting],
         arity: -3,
         key_spec: [
             {
@@ -174,6 +175,7 @@ fn wasm_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     {
         name: "wasm.call_ro",
         flags: [ReadOnly, DenyScript, NoMandatoryKeys, AllowStale],
+        acl_categories: [Scripting],
         arity: -3,
         key_spec: [
             {
@@ -319,10 +321,11 @@ redis_module! {
     init: init,
     deinit: deinit,
     commands: [
-        ["wasm.load", wasm_load, "write deny-oom deny-script", 0, 0, 0, ""],
-        ["wasm.list", wasm_list, "readonly deny-script", 0, 0, 0, ""],
-        ["wasm.delete", wasm_delete, "write deny-script", 0, 0, 0, ""],
-        ["wasm.kill", wasm_kill, "allow-busy deny-script fast", 0, 0, 0, ""],
+        // In @scripting, as FUNCTION and FCALL are.
+        ["wasm.load", wasm_load, "write deny-oom deny-script", 0, 0, 0, AclCategory::Scripting],
+        ["wasm.list", wasm_list, "readonly deny-script", 0, 0, 0, AclCategory::Scripting],
+        ["wasm.delete", wasm_delete, "write deny-script", 0, 0, 0, AclCategory::Scripting],
+        ["wasm.kill", wasm_kill, "allow-busy deny-script fast", 0, 0, 0, AclCategory::Scripting],
     ],
     configurations: [
         i64: [

@@ -888,6 +888,27 @@ fn wasm_call_declares_its_keys() {
         Value::Status("hello, world".into())
     );
     assert!(error_text(call(&mut limited, &["hello", "1", "b1"])).starts_with("NOPERM"));
+
+    // The WASM commands are in @scripting, as FCALL and FUNCTION are.
+    let _: () = redis::cmd("ACL")
+        .arg(&[
+            "SETUSER",
+            "noscripts",
+            "on",
+            "nopass",
+            "~*",
+            "+@all",
+            "-@scripting",
+        ])
+        .query(&mut con)
+        .unwrap();
+    let mut noscripts = server.connection();
+    let _: () = redis::cmd("AUTH")
+        .arg(&["noscripts", "any"])
+        .query(&mut noscripts)
+        .unwrap();
+    assert!(error_text(call(&mut noscripts, &["hello", "0"])).starts_with("NOPERM"));
+    assert!(error_text(redis::cmd("WASM.LIST").query(&mut noscripts)).starts_with("NOPERM"));
 }
 
 #[test]
