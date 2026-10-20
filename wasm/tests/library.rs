@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use redis::{Connection, RedisResult, Value};
 
 /// The functions the example guest provides, in its order.
-const FUNCTIONS: [&str; 17] = [
+const FUNCTIONS: [&str; 20] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -31,6 +31,9 @@ const FUNCTIONS: [&str; 17] = [
     "local_only",
     "get_args",
     "get_args_cross",
+    "run",
+    "acl_check",
+    "resp_shape",
 ];
 
 /// The workspace's `target` directory, from this test binary's path
@@ -1142,5 +1145,85 @@ fn a_replica_runs_functions_by_their_flags() {
     assert_eq!(
         call(&mut r, &["stale_ok", "0"]).unwrap(),
         Value::Status("ok".into())
+    );
+}
+
+#[test]
+fn call_pcall_acl_check_and_set_resp_work_as_in_lua() {
+    let server = Server::start(6629, &[]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    let _: () = redis::cmd("SET").arg(&["s", "x"]).query(&mut con).unwrap();
+
+    // call fails the function with the error reply, naming the function as
+    // Lua names the script; the rest of the function does not run.
+    assert_eq!(
+        call(&mut con, &["run", "0", "SET", "k", "v"]).unwrap(),
+        Value::Status("ran".into())
+    );
+    assert_eq!(
+        error_text(call(&mut con, &["run", "0", "INCR", "s"])),
+        "ERR value is not an integer or out of range function: run."
+    );
+    // pcall hands the error to the function, which here replies with it.
+    assert_eq!(
+        error_text(call(&mut con, &["hash_pairs", "1", "s"])),
+        "WRONGTYPE Operation against a key holding the wrong kind of value"
+    );
+    // A function that pcall handed an error succeeded, so its instance stays;
+    // one that call failed did not, so its instance goes.
+    assert_eq!([counter(&mut con), counter(&mut con)], [1, 2]);
+    let _ = call(&mut con, &["hash_pairs", "1", "s"]);
+    assert_eq!(counter(&mut con), 3);
+    let _ = call(&mut con, &["run", "0", "INCR", "s"]);
+    assert_eq!(counter(&mut con), 1);
+
+    // acl_check answers for the user running the function.
+    let acl_check = |con: &mut Connection, command: &[&str]| {
+        let mut args = vec!["acl_check", "0"];
+        args.extend_from_slice(command);
+        call(con, &args)
+    };
+    assert_eq!(
+        acl_check(&mut con, &["SET", "b1", "v"]).unwrap(),
+        Value::Int(1)
+    );
+    let _: () = redis::cmd("ACL")
+        .arg(&["SETUSER", "limited", "on", "nopass", "~a*", "+@all", "-set"])
+        .query(&mut con)
+        .unwrap();
+    let mut limited = server.connection();
+    let _: () = redis::cmd("AUTH")
+        .arg(&["limited", "any"])
+        .query(&mut limited)
+        .unwrap();
+    assert_eq!(
+        acl_check(&mut limited, &["GET", "a1"]).unwrap(),
+        Value::Int(1)
+    );
+    assert_eq!(
+        acl_check(&mut limited, &["GET", "b1"]).unwrap(),
+        Value::Int(0)
+    );
+    assert_eq!(
+        acl_check(&mut limited, &["SET", "a1", "v"]).unwrap(),
+        Value::Int(0)
+    );
+    assert_eq!(
+        error_text(acl_check(&mut limited, &["NOSUCH"])),
+        "ERR unknown command"
+    );
+
+    // set_resp chooses the protocol of the replies the function gets.
+    let _: () = redis::cmd("HSET")
+        .arg(&["h", "a", "1"])
+        .query(&mut con)
+        .unwrap();
+    let shape = |con: &mut Connection, resp: &str| call(con, &["resp_shape", "1", "h", resp]);
+    assert_eq!(shape(&mut con, "3").unwrap(), Value::Status("map".into()));
+    assert_eq!(shape(&mut con, "2").unwrap(), Value::Status("array".into()));
+    assert_eq!(
+        error_text(shape(&mut con, "4")),
+        "ERR RESP version must be 2 or 3. function: resp_shape."
     );
 }

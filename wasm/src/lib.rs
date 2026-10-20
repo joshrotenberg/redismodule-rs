@@ -206,9 +206,15 @@ fn run_function(ctx: &Context, args: &[RedisString], read_only: bool) -> RedisRe
     let call = with_host(|host| host.prepare(function))?
         .ok_or_else(|| RedisError::String(format!("ERR function '{function}' not found")))?;
     let mode = flags::check(ctx, call.flags(), read_only, &keys)?;
-    let nodes = call
-        .run(ctx, function, &keys, &rest, mode)
-        .map_err(|e| error(&format!("function '{function}' failed"), &e))?;
+    let nodes = call.run(ctx, function, &keys, &rest, mode).map_err(|e| {
+        match e.downcast_ref::<host::CallError>() {
+            // As Lua names the script after an error that redis.call raised.
+            Some(host::CallError(message)) => {
+                RedisError::String(format!("{message} function: {function}."))
+            }
+            None => error(&format!("function '{function}' failed"), &e),
+        }
+    })?;
     reply::to_value(&nodes).map_err(|reason| {
         RedisError::String(format!(
             "ERR function '{function}' returned a malformed reply: {reason}"

@@ -26,9 +26,23 @@ interface redis {
         warning,
     }
 
-    /// Runs a Redis command, like `redis.pcall`: an error comes back as an
-    /// `error` node instead of failing the call.
+    /// Runs a Redis command, like `redis.call`: an error reply fails the
+    /// function, which replies with that error.
     call: func(command: string, args: list<list<u8>>) -> list<node>;
+
+    /// Runs a Redis command, like `redis.pcall`: an error reply comes back as
+    /// an `error` node.
+    pcall: func(command: string, args: list<list<u8>>) -> list<node>;
+
+    /// Whether the user running the function may run the command with these
+    /// arguments, like `redis.acl_check_cmd`. An unknown command is an error.
+    acl-check-command: func(command: string, args: list<list<u8>>) -> result<bool, string>;
+
+    /// Sets the protocol of the replies `call` and `pcall` return, 2 or 3,
+    /// like `redis.setresp`. Each call of a function starts with 3, so the
+    /// guest sees each reply's type; Lua starts with 2. Another version fails
+    /// the function.
+    set-resp: func(version: u8);
 
     /// Writes to the server log.
     log: func(level: log-level, message: string);

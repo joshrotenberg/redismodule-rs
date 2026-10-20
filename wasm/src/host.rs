@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex, TryLockError};
 
 use anyhow::{Context as _, bail};
 use redis_module::logging::RedisLogLevel;
-use redis_module::{CallOptionResp, CallOptions, CallOptionsBuilder, CallResult, Context};
+use redis_module::{
+    CallOptionResp, CallOptions, CallOptionsBuilder, CallResult, Context, RedisString,
+};
 use wasmtime::component::{Component, HasSelf, Linker};
 use wasmtime::{Config, Engine, Store};
 
@@ -19,17 +21,39 @@ use crate::reply::push_call_result;
 wasmtime::component::bindgen!({
     path: "wit",
     world: "library",
+    // These fail the function by trapping the guest; see CallError.
+    imports: {
+        "redis-module-wasm:host/redis/call": trappable,
+        "redis-module-wasm:host/redis/set-resp": trappable,
+    },
 });
 
 use redis_module_wasm::host::redis::LogLevel;
+
+/// An error reply that fails the function, from `call` or `set-resp`, as an
+/// error raised by `redis.call` fails a Lua function. The function replies
+/// with it.
+#[derive(Debug)]
+pub(crate) struct CallError(pub(crate) String);
+
+impl std::fmt::Display for CallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CallError {}
 
 /// A store's data: the context of the command running a guest and how its
 /// calls into Redis run, both set for each call.
 pub(crate) struct CallState {
     ctx: Option<NonNull<Context>>,
     mode: Mode,
-    /// The call options for each mode, by `options_index`.
-    options: [CallOptions; 4],
+    /// Whether replies to the guest's calls are RESP3; `set-resp` changes it.
+    resp3: bool,
+    /// The call options for each combination of read_only, allow_oom and
+    /// resp3, by `options`.
+    options: [CallOptions; 8],
     memory: Memory,
 }
 
@@ -44,18 +68,45 @@ impl CallState {
         Self {
             ctx: None,
             mode: Mode::loading(),
-            options: [
-                call_options(false, false),
-                call_options(false, true),
-                call_options(true, false),
-                call_options(true, true),
-            ],
+            resp3: true,
+            options: std::array::from_fn(|i| call_options(i & 4 != 0, i & 2 != 0, i & 1 != 0)),
             memory: Memory::default(),
         }
     }
 
     fn options(&self) -> &CallOptions {
-        &self.options[usize::from(self.mode.read_only) << 1 | usize::from(self.mode.allow_oom)]
+        &self.options[usize::from(self.mode.read_only) << 2
+            | usize::from(self.mode.allow_oom) << 1
+            | usize::from(self.resp3)]
+    }
+
+    /// Runs a command for `call` or `pcall`, with an error as an error node.
+    fn run_command(&mut self, command: &str, args: &[Vec<u8>]) -> Vec<Node> {
+        if self.mode.loading {
+            return vec![Node::Error(
+                "ERR a library may not call Redis while it loads".into(),
+            )];
+        }
+        let args: Vec<&[u8]> = args.iter().map(Vec::as_slice).collect();
+        if self.mode.one_slot {
+            if let Err(error) = self.check_slot(command, &args) {
+                return vec![Node::Error(error)];
+            }
+        }
+        let effects = busy::note_call(self.ctx(), command, &args);
+        // As for a read-only Lua script: may-replicate commands count as
+        // writes. RedisModule_Call's W flag refuses only write commands.
+        if self.mode.read_only && (effects.write || effects.may_replicate) {
+            return vec![Node::Error(
+                "ERR Write commands are not allowed from read-only functions.".into(),
+            )];
+        }
+        let result: CallResult<'static> =
+            self.ctx()
+                .call_ext(command, self.options(), args.as_slice());
+        let mut nodes = Vec::new();
+        push_call_result(&mut nodes, &result);
+        nodes
     }
 
     /// Fails if a command using `args` would leave the call's slot, as Lua
@@ -92,14 +143,19 @@ impl CallState {
 /// script mode (S), the caller's ACL user (C), errors as replies (E), and the
 /// effects replicated (!). A read-only call refuses write commands (W); one
 /// without allow-oom refuses deny-oom commands over maxmemory (M). Replies are
-/// RESP3, so the guest sees each reply's type.
-fn call_options(read_only: bool, allow_oom: bool) -> CallOptions {
+/// RESP3 unless the guest asked for RESP2.
+fn call_options(read_only: bool, allow_oom: bool, resp3: bool) -> CallOptions {
+    let resp = if resp3 {
+        CallOptionResp::Resp3
+    } else {
+        CallOptionResp::Resp2
+    };
     let mut builder = CallOptionsBuilder::new()
         .script_mode()
         .verify_acl()
         .errors_as_replies()
         .replicate()
-        .resp(CallOptionResp::Resp3);
+        .resp(resp);
     if read_only {
         builder = builder.no_writes();
     }
@@ -110,32 +166,50 @@ fn call_options(read_only: bool, allow_oom: bool) -> CallOptions {
 }
 
 impl redis_module_wasm::host::redis::Host for CallState {
-    fn call(&mut self, command: String, args: Vec<Vec<u8>>) -> Vec<Node> {
-        if self.mode.loading {
-            return vec![Node::Error(
-                "ERR a library may not call Redis while it loads".into(),
-            )];
+    fn call(&mut self, command: String, args: Vec<Vec<u8>>) -> wasmtime::Result<Vec<Node>> {
+        let nodes = self.run_command(&command, &args);
+        // Only an error reply fails the function; an error inside an array,
+        // such as one in EXEC's reply, does not.
+        match nodes.as_slice() {
+            [Node::Error(message)] => Err(CallError(message.clone()).into()),
+            _ => Ok(nodes),
         }
-        let args: Vec<&[u8]> = args.iter().map(Vec::as_slice).collect();
-        if self.mode.one_slot {
-            if let Err(error) = self.check_slot(&command, &args) {
-                return vec![Node::Error(error)];
+    }
+
+    fn pcall(&mut self, command: String, args: Vec<Vec<u8>>) -> Vec<Node> {
+        self.run_command(&command, &args)
+    }
+
+    fn acl_check_command(&mut self, command: String, args: Vec<Vec<u8>>) -> Result<bool, String> {
+        let ctx = self.ctx();
+        // A context with no user, such as the AOF's, may run anything.
+        let Some(user) = ctx.get_current_user() else {
+            return Ok(true);
+        };
+        let argv: Vec<RedisString> = std::iter::once(command.into_bytes())
+            .chain(args)
+            .map(|arg| ctx.create_string(arg))
+            .collect();
+        match ctx.acl_check_command_permission(&user, &argv) {
+            Ok(()) => Ok(true),
+            Err(error) => {
+                let message = error.to_string();
+                if message.starts_with("NOPERM") {
+                    Ok(false)
+                } else {
+                    Err(message)
+                }
             }
         }
-        let effects = busy::note_call(self.ctx(), &command, &args);
-        // As for a read-only Lua script: may-replicate commands count as
-        // writes. RedisModule_Call's W flag refuses only write commands.
-        if self.mode.read_only && (effects.write || effects.may_replicate) {
-            return vec![Node::Error(
-                "ERR Write commands are not allowed from read-only functions.".into(),
-            )];
-        }
-        let result: CallResult<'static> =
-            self.ctx()
-                .call_ext(&command, self.options(), args.as_slice());
-        let mut nodes = Vec::new();
-        push_call_result(&mut nodes, &result);
-        nodes
+    }
+
+    fn set_resp(&mut self, version: u8) -> wasmtime::Result<()> {
+        self.resp3 = match version {
+            2 => false,
+            3 => true,
+            _ => return Err(CallError("ERR RESP version must be 2 or 3.".into()).into()),
+        };
+        Ok(())
     }
 
     fn log(&mut self, level: LogLevel, message: String) {
@@ -197,8 +271,10 @@ impl Instance {
         mode: Mode,
         f: impl FnOnce(&Library, &mut Store<CallState>) -> anyhow::Result<R>,
     ) -> anyhow::Result<R> {
-        self.store.data_mut().ctx = Some(NonNull::from(ctx));
-        self.store.data_mut().mode = mode;
+        let state = self.store.data_mut();
+        state.ctx = Some(NonNull::from(ctx));
+        state.mode = mode;
+        state.resp3 = true;
         self.store.set_epoch_deadline(1);
         let result = f(&self.library, &mut self.store);
         self.store.data_mut().ctx = None;

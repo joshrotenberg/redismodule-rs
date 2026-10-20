@@ -26,17 +26,28 @@
 //! WASM.CALL get_args 0 k ...     GETs each argument as a key: one slot on a cluster node
 //! WASM.CALL get_args_cross 0 k ...  the same with allow-cross-slot-keys
 //! ```
+//!
+//! The functions above call Redis with `pcall`, so an error reply comes back
+//! to them. These use the other imports:
+//!
+//! ```text
+//! WASM.CALL run 0 cmd arg ...    runs its arguments as a command with `call`,
+//!                                which fails the function on an error reply,
+//!                                then replies ran
+//! WASM.CALL acl_check 0 cmd arg ...  whether the caller may run the command
+//! WASM.CALL resp_shape 1 key resp    HGETALL with RESP 2 or 3: replies map or array
+//! ```
 
 wit_bindgen::generate!({
     path: "../../wit",
     world: "library",
 });
 
-use redis_module_wasm::host::redis::{LogLevel, call, log};
+use redis_module_wasm::host::redis::{LogLevel, acl_check_command, call, log, pcall, set_resp};
 
 /// The functions and their flags. A function that does not write says so, as
 /// a Lua function would.
-const FUNCTIONS: [(&str, FunctionFlags); 17] = [
+const FUNCTIONS: [(&str, FunctionFlags); 20] = [
     ("hello", FunctionFlags::NO_WRITES),
     ("incr_twice", FunctionFlags::empty()),
     ("hash_pairs", FunctionFlags::NO_WRITES),
@@ -63,6 +74,9 @@ const FUNCTIONS: [(&str, FunctionFlags); 17] = [
         "get_args_cross",
         FunctionFlags::NO_WRITES.union(FunctionFlags::ALLOW_CROSS_SLOT_KEYS),
     ),
+    ("run", FunctionFlags::empty()),
+    ("acl_check", FunctionFlags::NO_WRITES),
+    ("resp_shape", FunctionFlags::NO_WRITES),
 ];
 
 /// Calls of `counter` that this instance has served.
@@ -94,18 +108,18 @@ impl Guest for Hello {
             "incr_twice" => match keys.first() {
                 Some(key) => {
                     let mut reply = vec![Node::Array(2)];
-                    reply.extend(call("INCR", std::slice::from_ref(key)));
-                    reply.extend(call("INCR", std::slice::from_ref(key)));
+                    reply.extend(pcall("INCR", std::slice::from_ref(key)));
+                    reply.extend(pcall("INCR", std::slice::from_ref(key)));
                     reply
                 }
                 None => vec![Node::Error("ERR incr_twice needs a key".into())],
             },
             "hash_pairs" => match keys.first() {
-                Some(key) => call("HGETALL", std::slice::from_ref(key)),
+                Some(key) => pcall("HGETALL", std::slice::from_ref(key)),
                 None => vec![Node::Error("ERR hash_pairs needs a key".into())],
             },
             "set" => match (keys.first(), args.first()) {
-                (Some(key), Some(value)) => call("SET", &[key.clone(), value.clone()]),
+                (Some(key), Some(value)) => pcall("SET", &[key.clone(), value.clone()]),
                 _ => vec![Node::Error("ERR set needs a key and a value".into())],
             },
             "nested" => vec![
@@ -117,7 +131,7 @@ impl Guest for Hello {
                 Node::Error("ERR an error inside an array".into()),
             ],
             "fail" => vec![Node::Error("ERR this function always fails".into())],
-            "recurse" => call("WASM.LIST", &[]),
+            "recurse" => pcall("WASM.LIST", &[]),
             "spin" => spin(),
             "counter" => vec![Node::Integer(
                 COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
@@ -133,11 +147,11 @@ impl Guest for Hello {
                 )]
             }
             "run_ro" => match args.split_first() {
-                Some((command, args)) => call(&String::from_utf8_lossy(command), args),
+                Some((command, args)) => pcall(&String::from_utf8_lossy(command), args),
                 None => vec![Node::Error("ERR run_ro needs a command".into())],
             },
             "set_oom" => match keys.first() {
-                Some(key) => call(
+                Some(key) => pcall(
                     "SET",
                     &[key.clone(), args.first().cloned().unwrap_or_default()],
                 ),
@@ -147,13 +161,43 @@ impl Guest for Hello {
             "get_args" | "get_args_cross" => {
                 let mut reply = vec![Node::Array(args.len() as u32)];
                 for key in &args {
-                    reply.extend(call("GET", std::slice::from_ref(key)));
+                    reply.extend(pcall("GET", std::slice::from_ref(key)));
                 }
                 reply
             }
+            "run" => match args.split_first() {
+                Some((command, args)) => {
+                    call(&String::from_utf8_lossy(command), args);
+                    vec![Node::Simple("ran".into())]
+                }
+                None => vec![Node::Error("ERR run needs a command".into())],
+            },
+            "acl_check" => match args.split_first() {
+                Some((command, args)) => {
+                    match acl_check_command(&String::from_utf8_lossy(command), args) {
+                        Ok(allowed) => vec![Node::Boolean(allowed)],
+                        Err(message) => vec![Node::Error(message)],
+                    }
+                }
+                None => vec![Node::Error("ERR acl_check needs a command".into())],
+            },
+            "resp_shape" => {
+                let version = args
+                    .first()
+                    .and_then(|v| std::str::from_utf8(v).ok()?.parse().ok())
+                    .unwrap_or(0);
+                set_resp(version);
+                let reply = pcall("HGETALL", &keys);
+                let shape = match reply.first() {
+                    Some(Node::Map(_)) => "map",
+                    Some(Node::Array(_)) => "array",
+                    _ => "other",
+                };
+                vec![Node::Simple(shape.into())]
+            }
             "write_then_spin" => match keys.first() {
                 Some(key) => {
-                    call("SET", &[key.clone(), b"1".to_vec()]);
+                    pcall("SET", &[key.clone(), b"1".to_vec()]);
                     spin()
                 }
                 None => vec![Node::Error("ERR write_then_spin needs a key".into())],

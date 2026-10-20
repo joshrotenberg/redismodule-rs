@@ -32,7 +32,8 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
 - Each instance's linear memory is limited by `wasm.max-memory` (64 MiB by
   default), and `INFO wasm` reports instances, their memory and compiled code.
 - Functions have Lua's flags, with Lua's checks before they start and on the
-  commands they call, and `WASM.CALL_RO` runs those with `no-writes`.
+  commands they call, and `WASM.CALL_RO` runs those with `no-writes`. Guests
+  have `call` and `pcall`, an ACL check and `set-resp`, as Lua scripts have.
 - Guests in Rust (`guests/hello`) and JavaScript (`guests/js`, componentize-js);
   the same integration tests pass against both.
 - Reply types survive both ways, including simple versus bulk strings, maps,
@@ -45,7 +46,7 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   moves 1000 strings into the guest, 1.4 times faster.
 - The host is about 790 lines of code, not counting comments and unit tests.
   The example guest is 22 KB as a core module and 23 KB as a component. The
-  fifteen integration tests take about 9 seconds.
+  sixteen integration tests take about 9 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
@@ -119,7 +120,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H6 | done | **Key specs for `WASM.CALL`.** Declared with the `#[command]` macro and a key spec like `FCALL`'s: `numkeys` at argument 2, the keys after it, flags `RW`, `access` and `update`; `no-mandatory-keys`, arity -3. `COMMAND GETKEYS`, ACL key patterns and cluster routing (`MOVED`, `CROSSSLOT`) see the keys. | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
 | H7 | done | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread; the main thread instantiates and adds the library. Precompiled components (`Engine::precompile_component`) would skip the compile entirely, but loading one is `unsafe`: only for trusted input. | The server answers other clients while a large component compiles. |
 | H8 | done | **Memory.** `wasm.max-memory` (default 64 MiB) limits each instance's linear memory through a wasmtime `ResourceLimiter`; a guest that grows past it traps and its call fails, which drops the instance. A function does not start while Redis is over `maxmemory`, and its calls use `RedisModule_Call`'s `M` flag. `INFO wasm` reports libraries, functions, component and compiled code bytes, live instances and their linear memory, and the limit. Not done: replacing a kept instance that grew large but stays under the limit; a failed call already drops it. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
-| H9 | next | **Script parity.** Done (H9a): function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`) in the WIT, `WASM.CALL_RO`, Lua's checks before a function starts, read-only calls that refuse write and may-replicate commands, one slot per call on a cluster node, no calls while a library loads, flags in `WASM.LIST` and the RDB. Left (H9b): a `call` that fails the function where `pcall` returns the error, and `acl-check-command` and `set-resp` imports. | Each has a test matching what Lua does. |
+| H9 | done | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`) in the WIT, `WASM.CALL_RO`, Lua's checks before a function starts, read-only calls that refuse write and may-replicate commands, one slot per call on a cluster node, no calls while a library loads, flags in `WASM.LIST` and the RDB (H9a); `call`, which fails the function on an error reply, next to `pcall`, and `acl-check-command` and `set-resp` imports (H9b). Differences left: G5, G6, and RESP3 as the default. | Each has a test matching what Lua does. |
 | H10 | todo | **Guest helper library.** A small Rust crate that builds the pre-order node list from typed values, so guests do not build it by hand. | The example guest uses it. |
 | H11 | todo | **Bounds check cost.** Signal-based traps are off so wasmtime installs no signal handlers over Redis's crash handler. Measured with H3's benchmark: turning them on made `primes` 18% faster (185 against 226 µs, with the old sieve loop), `median` 6%, `adler32` no different. Left: whether wasmtime's handlers and Redis's crash handler can coexist, and whether 18% is worth it. | A decision, with a crash report checked with handlers on. |
 | H12 | todo | **Context in the store.** The store holds a raw pointer to the command's `Context`. Write down the safety argument or replace it with an SDK pattern (S3). | Reviewed and documented, or replaced. |
@@ -189,6 +190,17 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H9b done, so H9 is: `call` traps the guest with a `CallError`
+  carrying the error reply (a `trappable` import), and the function replies
+  with that error followed by `function: <name>.`; `pcall` returns it as a
+  node, as `call` used to. `acl-check-command` uses the SDK's
+  `acl_check_command_permission` for the current user, and `set-resp` picks
+  between RESP2 and RESP3 call options (each call starts with RESP3). The
+  example guest's functions moved to `pcall` and it gains `run`, `acl_check`
+  and `resp_shape`; the JavaScript and benchmark guests use `call`, as the Lua
+  benchmark uses `redis.call`. Test: `call` and `pcall` on an error reply and
+  what each does to the kept instance, `acl_check` as two users and for an
+  unknown command, and `set-resp` 3, 2 and 4.
 - 2026-10-20: H9a done: the WIT world has `function-flags` and `functions`
   returns each function's name and flags. `WASM.CALL` is now `may-replicate`
   rather than `write`, as `FCALL` is, and `WASM.CALL_RO` is `readonly`; both

@@ -125,10 +125,21 @@ A library is a component that implements the `library` world in
 functions with their flags, and `invoke`, which runs one with its keys and
 arguments. Guest code may not call Redis while its library loads. It imports:
 
-- `call(command, args)`: runs a Redis command, like `redis.pcall` in a script.
-  The call runs in script mode as the caller's ACL user, its effects are
-  replicated, and an error comes back as a reply instead of failing the call.
+- `call(command, args)`: runs a Redis command, like `redis.call`. An error
+  reply fails the function, which replies with that error followed by
+  `function: <name>.`, as Lua follows it with the script's name.
+- `pcall(command, args)`: the same, like `redis.pcall`: an error reply comes
+  back to the function as an `error` node.
+- `acl-check-command(command, args)`: whether the user running the function may
+  run the command, like `redis.acl_check_cmd`.
+- `set-resp(version)`: the protocol of the replies `call` and `pcall` return,
+  like `redis.setresp`. Each call starts with RESP3, so the function sees each
+  reply's type; Lua starts with RESP2.
 - `log(level, message)`: writes to the server log.
+
+Commands run in script mode as the caller's ACL user, with their effects
+replicated, as from a Lua function. A function that `call` fails, like one that
+traps or is killed, drops its library's kept instance.
 
 Replies cross the boundary as a list of nodes in pre-order, since WIT has no
 recursive types: `array(n)`, `set(n)` and `map(n)` are followed by their
@@ -205,5 +216,4 @@ workspace `Cargo.toml`); unoptimized, loading the JavaScript component took
 
 [TRACKING.md](TRACKING.md) has every open item, with IDs and what done means. The main ones:
 
-- A `call` that fails the function on an error, as `redis.call` does, and ACL
-  and RESP helpers for guests.
+- A guest helper library, so a guest need not build reply nodes by hand.
