@@ -96,6 +96,54 @@ applies to it.
 
 ## Features
 
+### Optional command builders
+
+Legacy command tuples remain supported. Builder expressions may appear in the
+same `commands` list, with no flags, keys, or ACL categories by default:
+
+Inside `redis_module!`:
+
+```rust
+commands: [
+    ["database.select", select, "deny-script", 0, 0, 0, ""],
+    redis_command!("database.selected", selected).read_only(),
+    redis_command!("database.get_in", get_in)
+        .read_only().deny_script().key(2),
+],
+```
+
+Other settings, using `CommandFlags` and `KeyRange` from `redis_module`:
+
+```rust
+redis_command!("example.keys", handler)
+    .flags(CommandFlags::READ_ONLY | CommandFlags::FAST)
+    .keys(KeyRange::new(1).last(-1).step(2))
+    .acl_categories("read")
+    .optional_acl_categories("example")
+```
+
+`redis_command!(name, handler)` generates the same panic-safe C callback as a
+legacy tuple and returns a `CommandBuilder`. Flags accumulate; key and ACL
+settings replace their previous values. Keys are numbered from 1, with the
+command at position 0. A negative last position counts from the end. A
+single key uses `.key(position)`; a range uses named `.last(...)` and `.step(...)`
+settings. Dynamic discovery uses `CommandFlags::GETKEYS_API` and the existing
+`is_keys_position_request` / `key_at_pos` APIs.
+
+Required ACL categories fail the load if unsupported or rejected. Optional
+categories are tried alongside the required set; on failure, registration warns
+and falls back to the required set. Optional categories are skipped on servers
+without command ACL support. Builders reject empty or NUL-containing names, unknown flag bits, invalid key ranges, and explicit
+empty optional categories with load diagnostics. Legacy tuples retain their
+native key-position semantics. Handlers still check
+their own argument counts. The `#[command]` attribute remains available for
+arity, detailed key specifications, summaries, and other rich metadata.
+
+See [examples/database.rs](examples/database.rs) for mixed syntax and
+[examples/command_builder.rs](examples/command_builder.rs) for more settings.
+
+### Feature flags
+
 | feature | effect |
 |---|---|
 | `min-redis-compatibility-version-6-0` (default), `-6-2`, `-7-0`, `-7-2`, `-7-4`, `-8-0` | The oldest Redis the module supports. Choose one. Module APIs newer than it are looked up when called, and fail with an error naming the API on an older server. |
@@ -119,7 +167,8 @@ cargo test
 ```
 
 The integration tests start `redis-server` processes, so it needs to be on the
-`PATH`; they use ports from 6479. To test another floor:
+`PATH`; they use OS-selected loopback ports and isolated directories.
+`TEST_REDIS_SERVER_BIN` selects another binary. To test another floor:
 
 ```bash
 cargo test --no-default-features --features min-redis-compatibility-version-7-2

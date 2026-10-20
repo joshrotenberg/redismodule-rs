@@ -12,6 +12,159 @@ use redis_module::RedisValue;
 mod utils;
 
 #[test]
+fn test_command_builders_mix_with_legacy_and_preserve_metadata() -> Result<()> {
+    let mut con = TestConnection::new("command_builder");
+    for command in [
+        "builder.legacy",
+        "builder.ping",
+        "builder.legacy_after",
+        "builder.optional",
+        "builder.legacy_callback",
+        "builder.legacy_keyless",
+        "builder.callback",
+        "builder.invoke",
+    ] {
+        assert_eq!(redis::cmd(command).query::<String>(&mut con)?, "PONG");
+    }
+    assert_eq!(
+        redis::Cmd::new()
+            .arg(&b"builder.binary_\xff"[..])
+            .query::<String>(&mut con)?,
+        "PONG"
+    );
+    redis::cmd("SET")
+        .arg(&["builder:key", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("builder.get")
+            .arg("builder:key")
+            .query::<String>(&mut con)?,
+        "value"
+    );
+    let metadata: Vec<Vec<Value>> = redis::cmd("COMMAND")
+        .arg(&["INFO", "builder.get", "builder.ping", "builder.legacy"])
+        .query(&mut con)?;
+    let flags: Vec<String> = redis::from_redis_value(&metadata[0][2])?;
+    for flag in ["readonly", "fast", "noscript"] {
+        assert!(flags.iter().any(|value| value == flag), "{flags:?}");
+    }
+    let positions: Vec<i64> = metadata[0][3..6]
+        .iter()
+        .map(redis::from_redis_value)
+        .collect::<RedisResult<_>>()?;
+    assert_eq!(positions, [1, 1, 1]);
+    for command in &metadata[1..] {
+        let positions: Vec<i64> = command[3..6]
+            .iter()
+            .map(redis::from_redis_value)
+            .collect::<RedisResult<_>>()?;
+        assert_eq!(positions, [0, 0, 0]);
+    }
+    Ok(())
+}
+
+#[test]
+fn test_command_builder_key_ranges_and_dynamic_discovery() -> Result<()> {
+    let mut con = TestConnection::new("command_builder");
+    let single: Vec<String> = redis::cmd("COMMAND")
+        .arg(&["GETKEYS", "builder.get", "single"])
+        .query(&mut con)?;
+    assert_eq!(single, ["single"]);
+    for command in ["builder.keys", "builder.dynamic"] {
+        let keys: Vec<String> = redis::cmd("COMMAND")
+            .arg(&["GETKEYS", command, "a", "value-a", "b", "value-b"])
+            .query(&mut con)?;
+        assert_eq!(keys, ["a", "b"]);
+        let reply: Vec<String> = redis::cmd(command)
+            .arg(&["a", "value-a", "b", "value-b"])
+            .query(&mut con)?;
+        assert_eq!(reply, ["a", "b"]);
+    }
+    Ok(())
+}
+
+#[test]
+fn test_command_builder_optional_acl_failure_retains_required_access() -> Result<()> {
+    let mut con = TestConnection::new("command_builder");
+    redis::cmd("ACL")
+        .arg(&[
+            "SETUSER",
+            "builder-reader",
+            "on",
+            ">secret",
+            "~*",
+            "-@all",
+            "+@read",
+        ])
+        .query::<()>(&mut con)?;
+    let mut reader = con.connection()?;
+    redis::cmd("AUTH")
+        .arg(&["builder-reader", "secret"])
+        .query::<()>(&mut reader)?;
+    assert_eq!(
+        redis::cmd("builder.acl").query::<String>(&mut reader)?,
+        "PONG"
+    );
+    assert_eq!(
+        redis::cmd("builder.legacy_acl").query::<String>(&mut reader)?,
+        "PONG"
+    );
+    assert!(
+        con.server_log()?
+            .contains("Failed to set optional ACL categories for command builder.acl")
+    );
+    assert!(
+        con.server_log()?
+            .contains("Failed to set optional ACL categories for command builder.optional")
+    );
+    Ok(())
+}
+
+#[test]
+fn test_command_builder_invalid_definitions_fail_the_load() {
+    for (mode, expected) in [
+        ("key-zero", "invalid command key range"),
+        ("key-negative", "invalid command key range"),
+        ("step-zero", "invalid command key range"),
+        ("step-negative", "invalid command key range"),
+        ("last-before-first", "invalid command key range"),
+        ("last-zero", "invalid command key range"),
+        ("unknown-flags", "unknown command flag bits"),
+        ("required-acl", "failed to set mandatory ACL categories"),
+        (
+            "optional-empty",
+            "optional ACL categories must not be empty",
+        ),
+        ("nul-acl", "nul byte"),
+        ("nul-name", "nul byte"),
+        ("empty-name", "command name must not be empty"),
+        ("duplicate", "failed to register command builder.ping"),
+    ] {
+        let error = match TestConnection::try_with_args("command_builder", &[mode]) {
+            Ok(_) => panic!("invalid definition {mode} loaded"),
+            Err(error) => error,
+        };
+        let error = format!("{error:#}");
+        assert!(error.contains(expected), "{mode}: {error}");
+        assert!(!error.contains("panicked"), "{mode}: {error}");
+    }
+}
+
+#[test]
+fn test_command_builder_panics_are_caught() -> Result<()> {
+    let mut con = TestConnection::new("command_builder");
+    let error = redis::cmd("builder.panic")
+        .query::<Value>(&mut con)
+        .expect_err("panic was not reported");
+    assert!(
+        error.to_string().contains("builder command panicked"),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_call_error_codes_classify_native_and_synthesized_errors() -> Result<()> {
     let mut con = TestConnection::new("call_reply");
     redis::cmd("SET")

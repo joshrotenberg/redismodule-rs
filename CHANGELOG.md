@@ -13,6 +13,9 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- Optional command builders in `redis_module!`: `redis_command!(name, handler)`
+  returns a `CommandBuilder` with typed `CommandFlags`, `KeyRange`, and ACL
+  settings. Builders can be mixed with existing command tuples.
 - `ErrorReply::code` and `ErrorCallReply::code`, which borrow the error prefix
   without allocating or decoding UTF-8, and `Context::notify_keyspace_event_bytes`,
   which sends event names containing arbitrary bytes except NUL.

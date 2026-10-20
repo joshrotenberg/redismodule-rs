@@ -6,6 +6,7 @@ pub use crate::context::InfoContext;
 pub mod __private {
     pub use ::libc::EBUSY;
     pub use ::linkme;
+    pub use ::redis_module_macros_internals::__register_command_list;
 }
 
 pub mod alloc;
@@ -44,6 +45,7 @@ pub use crate::configuration::EnumConfigurationValue;
 pub use crate::context::call_reply::FutureCallReply;
 pub use crate::context::call_reply::{CallReply, CallResult, ErrorReply, PromiseCallReply};
 pub use crate::context::commands;
+pub use crate::context::commands::{CommandBuilder, CommandFlags, KeyRange};
 pub use crate::context::defrag;
 pub use crate::context::event_loop;
 pub use crate::context::key_cursor::ScanKeyCursor;
