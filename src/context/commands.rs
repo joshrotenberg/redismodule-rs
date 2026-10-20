@@ -554,7 +554,6 @@ api! {[
         RedisModule_CreateCommand,
         RedisModule_GetCommand,
         RedisModule_SetCommandInfo,
-        RedisModule_SetCommandACLCategories,
     ],
     /// Register all the commands located on `COMMNADS_LIST`.
     fn register_commands_internal(ctx: &Context) -> Result<(), RedisError> {
@@ -597,8 +596,16 @@ api! {[
             }
 
             if let Some(acl_categories) = command_info.acl_categories {
+                // Redis 7.2 added ACL categories for module commands. Look the
+                // API up only here, so commands without categories load on 7.0.
+                let Some(set_acl_categories) = (unsafe { raw::RedisModule_SetCommandACLCategories }) else {
+                    return Err(RedisError::String(format!(
+                        "Command {} declares ACL categories, which need Redis 7.2 or later.",
+                        command_info.name
+                    )));
+                };
                 let acl_categories = CString::new(acl_categories.join(" ")).map_err(|e| RedisError::String(e.to_string()))?;
-                if unsafe { RedisModule_SetCommandACLCategories(command, acl_categories.as_ptr()) } == raw::Status::Err as i32 {
+                if unsafe { set_acl_categories(command, acl_categories.as_ptr()) } == raw::Status::Err as i32 {
                     return Err(RedisError::String(format!(
                         "Failed setting ACL categories for command {}.",
                         command_info.name
