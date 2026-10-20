@@ -37,6 +37,8 @@
 //! WASM.CALL acl_check 0 cmd arg ...  whether the caller may run the command
 //! WASM.CALL resp_shape 1 key resp    HGETALL with RESP 2 or 3: replies map or array
 //! WASM.CALL oob 0                reads past the end of its memory, which traps
+//! WASM.CALL run_flat 0 cmd arg ...  runs a command with `pcall-flat` and
+//!                                replies with what it got, as typed nodes
 //! ```
 
 wit_bindgen::generate!({
@@ -44,11 +46,13 @@ wit_bindgen::generate!({
     world: "library",
 });
 
-use redis_module_wasm::host::redis::{LogLevel, acl_check_command, call, log, pcall, set_resp};
+use redis_module_wasm::host::redis::{
+    FlatNode, LogLevel, acl_check_command, call, log, pcall, pcall_flat, set_resp,
+};
 
 /// The functions and their flags. A function that does not write says so, as
 /// a Lua function would.
-const FUNCTIONS: [(&str, FunctionFlags); 21] = [
+const FUNCTIONS: [(&str, FunctionFlags); 22] = [
     ("hello", FunctionFlags::NO_WRITES),
     ("incr_twice", FunctionFlags::empty()),
     ("hash_pairs", FunctionFlags::NO_WRITES),
@@ -79,6 +83,7 @@ const FUNCTIONS: [(&str, FunctionFlags); 21] = [
     ("acl_check", FunctionFlags::NO_WRITES),
     ("resp_shape", FunctionFlags::NO_WRITES),
     ("oob", FunctionFlags::NO_WRITES),
+    ("run_flat", FunctionFlags::empty()),
 ];
 
 /// Calls of `counter` that this instance has served.
@@ -203,6 +208,32 @@ impl Guest for Hello {
                 let byte = unsafe { core::ptr::read_volatile(usize::MAX as *const u8) };
                 vec![Node::Integer(i64::from(byte))]
             }
+            "run_flat" => match args.split_first() {
+                Some((command, args)) => {
+                    let reply = pcall_flat(&String::from_utf8_lossy(command), args);
+                    let bytes = |span: &redis_module_wasm::host::redis::Span| {
+                        reply.data[span.offset as usize..][..span.len as usize].to_vec()
+                    };
+                    let text = |span| String::from_utf8_lossy(&bytes(span)).into_owned();
+                    reply
+                        .nodes
+                        .iter()
+                        .map(|node| match node {
+                            FlatNode::Nil => Node::Nil,
+                            FlatNode::Integer(n) => Node::Integer(*n),
+                            FlatNode::Double(d) => Node::Double(*d),
+                            FlatNode::Boolean(b) => Node::Boolean(*b),
+                            FlatNode::Simple(span) => Node::Simple(text(span)),
+                            FlatNode::Bulk(span) => Node::Bulk(bytes(span)),
+                            FlatNode::Error(span) => Node::Error(text(span)),
+                            FlatNode::Array(n) => Node::Array(*n),
+                            FlatNode::Set(n) => Node::Set(*n),
+                            FlatNode::Map(n) => Node::Map(*n),
+                        })
+                        .collect()
+                }
+                None => vec![Node::Error("ERR run_flat needs a command".into())],
+            },
             "write_then_spin" => match keys.first() {
                 Some(key) => {
                     pcall("SET", &[key.clone(), b"1".to_vec()]);

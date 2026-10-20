@@ -7,14 +7,16 @@ wit_bindgen::generate!({
     world: "library",
 });
 
-use redis_module_wasm::host::redis::call;
+use redis_module_wasm::host::redis::{FlatNode, FlatReply, Span, call, call_flat};
 
-const FUNCTIONS: [&str; 6] = [
+const FUNCTIONS: [&str; 8] = [
     "incr_twice",
     "nested",
     "adler32",
     "median",
     "lrange",
+    "median_flat",
+    "lrange_flat",
     "primes",
 ];
 
@@ -39,6 +41,8 @@ impl Guest for Bench {
             "adler32" => key(&keys).map(adler32),
             "median" => key(&keys).and_then(median),
             "lrange" => key(&keys).map(lrange),
+            "median_flat" => key(&keys).and_then(median_flat),
+            "lrange_flat" => key(&keys).map(lrange_flat),
             "primes" => number(args.first()).map(primes),
             _ => Err(format!("ERR unknown function '{name}'")),
         };
@@ -112,6 +116,38 @@ fn median(key: &[u8]) -> Result<Vec<Node>, String> {
 fn lrange(key: &[u8]) -> Vec<Node> {
     let reply = call("LRANGE", &[key.to_vec(), b"0".to_vec(), b"-1".to_vec()]);
     vec![Node::Integer(reply.len() as i64 - 1)]
+}
+
+/// `median`, with the LRANGE reply flat: one buffer for all the items.
+fn median_flat(key: &[u8]) -> Result<Vec<Node>, String> {
+    let reply = call_flat("LRANGE", &[key.to_vec(), b"0".to_vec(), b"-1".to_vec()]);
+    let mut numbers = Vec::new();
+    for node in &reply.nodes {
+        if let FlatNode::Bulk(span) = node {
+            let item = bytes(&reply, span);
+            numbers.push(
+                std::str::from_utf8(item)
+                    .ok()
+                    .and_then(|text| text.parse().ok())
+                    .ok_or_else(|| "ERR expected an integer argument".to_owned())?,
+            );
+        }
+    }
+    numbers.sort_unstable();
+    Ok(vec![match numbers.len() {
+        0 => Node::Nil,
+        len => Node::Integer(numbers[(len - 1) / 2]),
+    }])
+}
+
+/// `lrange`, with the reply flat.
+fn lrange_flat(key: &[u8]) -> Vec<Node> {
+    let reply = call_flat("LRANGE", &[key.to_vec(), b"0".to_vec(), b"-1".to_vec()]);
+    vec![Node::Integer(reply.nodes.len() as i64 - 1)]
+}
+
+fn bytes<'a>(reply: &'a FlatReply, span: &Span) -> &'a [u8] {
+    &reply.data[span.offset as usize..][..span.len as usize]
 }
 
 /// How many primes there are up to `n`, with a sieve, in loops like the Lua

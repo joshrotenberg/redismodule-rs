@@ -20,6 +20,7 @@ second are what `redis-benchmark` saw with 50 clients (`CLIENTS` changes that,
 | `adler32` | `GET`s a 16 KiB value and computes its Adler-32 checksum one byte at a time. |
 | `median` | `LRANGE`s a list of 1000 integers, parses and sorts them, and returns the lower median. |
 | `lrange` | The same `LRANGE`, returning only the count: the call and its reply, without the parsing and sorting. |
+| `median_flat`, `lrange_flat` | `median` and `lrange` with the reply flat (`call-flat`): all the items in one buffer. In Lua they are the same functions again. |
 | `primes` | Counts the primes up to 10000 with a sieve. Pure computation. |
 
 Each function is written the same way in both languages, with the same

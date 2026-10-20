@@ -40,6 +40,22 @@ redis.register_function('lrange', function(keys)
   return #redis.call('LRANGE', keys[1], 0, -1)
 end)
 
+-- The wasm library has median and lrange a second time, taking the reply in
+-- one buffer (call-flat); Lua has one way, so these are the same functions.
+redis.register_function('median_flat', function(keys)
+  local items = redis.call('LRANGE', keys[1], 0, -1)
+  local numbers = {}
+  for i, item in ipairs(items) do
+    numbers[i] = tonumber(item)
+  end
+  table.sort(numbers)
+  return numbers[math.floor((#numbers + 1) / 2)]
+end)
+
+redis.register_function('lrange_flat', function(keys)
+  return #redis.call('LRANGE', keys[1], 0, -1)
+end)
+
 -- How many primes there are up to n, with a sieve.
 redis.register_function('primes', function(keys, args)
   local n = tonumber(args[1])

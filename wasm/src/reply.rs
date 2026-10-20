@@ -1,4 +1,5 @@
-//! Conversions between Redis replies and the `node` lists of the WIT interface.
+//! Conversions between Redis replies and the `node` lists and flat replies of
+//! the WIT interface.
 //!
 //! WIT has no recursive types, so a reply crosses the boundary as a list of
 //! nodes in pre-order: an aggregate node carries its element count and its
@@ -8,58 +9,174 @@ use redis_module::redisvalue::RedisValueKey;
 use redis_module::{CallReply, CallResult, RedisValue};
 
 use crate::host::Node;
+use crate::host::redis_module_wasm::host::redis::{FlatNode, FlatReply, Span};
 
-/// Appends `result` to `nodes` in pre-order.
-pub(crate) fn push_call_result(nodes: &mut Vec<Node>, result: &CallResult<'_>) {
-    match result {
-        Ok(reply) => push_call_reply(nodes, reply),
-        Err(error) => nodes.push(Node::Error(
-            String::from_utf8_lossy(error.as_bytes()).into_owned(),
-        )),
+/// Where a walk of a reply puts each node: typed nodes, or a flat reply.
+trait Sink {
+    fn scalar(&mut self, node: Scalar<'_>);
+    /// An aggregate of `len` elements, which follow it: `Node::Array`,
+    /// `Node::Set` or `Node::Map`, by `kind`.
+    fn aggregate(&mut self, kind: Aggregate, len: u32);
+}
+
+enum Scalar<'a> {
+    Nil,
+    Integer(i64),
+    Double(f64),
+    Boolean(bool),
+    Simple(&'a [u8]),
+    Bulk(&'a [u8]),
+    Error(&'a [u8]),
+}
+
+#[derive(Clone, Copy)]
+enum Aggregate {
+    Array,
+    Set,
+    Map,
+}
+
+impl Sink for Vec<Node> {
+    fn scalar(&mut self, node: Scalar<'_>) {
+        let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+        self.push(match node {
+            Scalar::Nil => Node::Nil,
+            Scalar::Integer(value) => Node::Integer(value),
+            Scalar::Double(value) => Node::Double(value),
+            Scalar::Boolean(value) => Node::Boolean(value),
+            Scalar::Simple(bytes) => Node::Simple(text(bytes)),
+            Scalar::Bulk(bytes) => Node::Bulk(bytes.to_vec()),
+            Scalar::Error(bytes) => Node::Error(text(bytes)),
+        });
+    }
+
+    fn aggregate(&mut self, kind: Aggregate, len: u32) {
+        self.push(match kind {
+            Aggregate::Array => Node::Array(len),
+            Aggregate::Set => Node::Set(len),
+            Aggregate::Map => Node::Map(len),
+        });
     }
 }
 
-fn push_call_reply(nodes: &mut Vec<Node>, reply: &CallReply<'_>) {
+impl FlatReply {
+    fn span(&mut self, bytes: &[u8]) -> Span {
+        let offset = count(self.data.len());
+        self.data.extend_from_slice(bytes);
+        Span {
+            offset,
+            len: count(bytes.len()),
+        }
+    }
+
+    /// A reply that is only the error `message`.
+    pub(crate) fn error(message: &str) -> Self {
+        let mut reply = Self {
+            nodes: Vec::with_capacity(1),
+            data: Vec::new(),
+        };
+        reply.scalar(Scalar::Error(message.as_bytes()));
+        reply
+    }
+
+    /// The message, if the reply is only an error.
+    pub(crate) fn as_error(&self) -> Option<String> {
+        match self.nodes.as_slice() {
+            [FlatNode::Error(span)] => {
+                let start = span.offset as usize;
+                let bytes = self.data.get(start..start + span.len as usize)?;
+                Some(String::from_utf8_lossy(bytes).into_owned())
+            }
+            _ => None,
+        }
+    }
+}
+
+impl Sink for FlatReply {
+    fn scalar(&mut self, node: Scalar<'_>) {
+        let node = match node {
+            Scalar::Nil => FlatNode::Nil,
+            Scalar::Integer(value) => FlatNode::Integer(value),
+            Scalar::Double(value) => FlatNode::Double(value),
+            Scalar::Boolean(value) => FlatNode::Boolean(value),
+            Scalar::Simple(bytes) => FlatNode::Simple(self.span(bytes)),
+            Scalar::Bulk(bytes) => FlatNode::Bulk(self.span(bytes)),
+            Scalar::Error(bytes) => FlatNode::Error(self.span(bytes)),
+        };
+        self.nodes.push(node);
+    }
+
+    fn aggregate(&mut self, kind: Aggregate, len: u32) {
+        self.nodes.push(match kind {
+            Aggregate::Array => FlatNode::Array(len),
+            Aggregate::Set => FlatNode::Set(len),
+            Aggregate::Map => FlatNode::Map(len),
+        });
+    }
+}
+
+/// Appends `result` to `nodes` in pre-order.
+pub(crate) fn push_call_result(nodes: &mut Vec<Node>, result: &CallResult<'_>) {
+    walk_result(nodes, result);
+}
+
+/// `result` as a flat reply.
+pub(crate) fn flat_call_result(result: &CallResult<'_>) -> FlatReply {
+    let mut reply = FlatReply {
+        nodes: Vec::new(),
+        data: Vec::new(),
+    };
+    walk_result(&mut reply, result);
+    reply
+}
+
+fn walk_result(sink: &mut impl Sink, result: &CallResult<'_>) {
+    match result {
+        Ok(reply) => walk_reply(sink, reply),
+        Err(error) => sink.scalar(Scalar::Error(error.as_bytes())),
+    }
+}
+
+fn walk_reply(sink: &mut impl Sink, reply: &CallReply<'_>) {
     match reply {
-        CallReply::I64(value) => nodes.push(Node::Integer(value.to_i64())),
-        CallReply::String(value) if value.is_simple_string() => nodes.push(Node::Simple(
-            String::from_utf8_lossy(value.as_bytes()).into_owned(),
-        )),
-        CallReply::String(value) => nodes.push(Node::Bulk(value.as_bytes().to_vec())),
-        CallReply::Null(_) => nodes.push(Node::Nil),
-        CallReply::Bool(value) => nodes.push(Node::Boolean(value.to_bool())),
-        CallReply::Double(value) => nodes.push(Node::Double(value.to_double())),
+        CallReply::I64(value) => sink.scalar(Scalar::Integer(value.to_i64())),
+        CallReply::String(value) if value.is_simple_string() => {
+            sink.scalar(Scalar::Simple(value.as_bytes()));
+        }
+        CallReply::String(value) => sink.scalar(Scalar::Bulk(value.as_bytes())),
+        CallReply::Null(_) => sink.scalar(Scalar::Nil),
+        CallReply::Bool(value) => sink.scalar(Scalar::Boolean(value.to_bool())),
+        CallReply::Double(value) => sink.scalar(Scalar::Double(value.to_double())),
         // The interface has no big number or verbatim node; both arrive as
         // their text.
-        CallReply::BigNumber(value) => nodes.push(Node::Bulk(
-            value.to_string().unwrap_or_default().into_bytes(),
-        )),
-        CallReply::VerbatimString(value) => nodes.push(Node::Bulk(
-            value
-                .as_parts()
-                .map(|(_, text)| text.to_vec())
-                .unwrap_or_default(),
-        )),
+        CallReply::BigNumber(value) => {
+            let text = value.to_string().unwrap_or_default();
+            sink.scalar(Scalar::Bulk(text.as_bytes()));
+        }
+        CallReply::VerbatimString(value) => {
+            let text = value.as_parts().map(|(_, text)| text).unwrap_or_default();
+            sink.scalar(Scalar::Bulk(text));
+        }
         CallReply::Array(array) => {
-            nodes.push(Node::Array(count(array.len())));
+            sink.aggregate(Aggregate::Array, count(array.len()));
             for element in array.iter() {
-                push_call_result(nodes, &element);
+                walk_result(sink, &element);
             }
         }
         CallReply::Set(set) => {
-            nodes.push(Node::Set(count(set.len())));
+            sink.aggregate(Aggregate::Set, count(set.len()));
             for element in set.iter() {
-                push_call_result(nodes, &element);
+                walk_result(sink, &element);
             }
         }
         CallReply::Map(map) => {
-            nodes.push(Node::Map(count(map.len())));
+            sink.aggregate(Aggregate::Map, count(map.len()));
             for (key, value) in map.iter() {
-                push_call_result(nodes, &key);
-                push_call_result(nodes, &value);
+                walk_result(sink, &key);
+                walk_result(sink, &value);
             }
         }
-        CallReply::Unknown => nodes.push(Node::Nil),
+        CallReply::Unknown => sink.scalar(Scalar::Nil),
     }
 }
 
@@ -133,6 +250,31 @@ fn to_key(value: RedisValue) -> Result<RedisValueKey, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_flat_reply_keeps_strings_as_spans_of_one_buffer() {
+        let mut reply = FlatReply {
+            nodes: Vec::new(),
+            data: Vec::new(),
+        };
+        reply.aggregate(Aggregate::Array, 2);
+        reply.scalar(Scalar::Bulk(b"ab"));
+        reply.scalar(Scalar::Simple(b"cde"));
+        assert_eq!(reply.data, b"abcde");
+        assert!(matches!(
+            reply.nodes.as_slice(),
+            [
+                FlatNode::Array(2),
+                FlatNode::Bulk(Span { offset: 0, len: 2 }),
+                FlatNode::Simple(Span { offset: 2, len: 3 }),
+            ]
+        ));
+        assert_eq!(reply.as_error(), None);
+        assert_eq!(
+            FlatReply::error("ERR no").as_error().as_deref(),
+            Some("ERR no")
+        );
+    }
 
     #[test]
     fn nested_nodes_become_one_value() {

@@ -19,6 +19,36 @@ interface redis {
         map(u32),
     }
 
+    /// Where a string lies in a `flat-reply`'s `data`.
+    record span {
+        offset: u32,
+        len: u32,
+    }
+
+    /// A node of a `flat-reply`: a `node` whose strings are spans of the
+    /// reply's `data`.
+    variant flat-node {
+        nil,
+        integer(s64),
+        double(f64),
+        boolean(bool),
+        simple(span),
+        bulk(span),
+        error(span),
+        array(u32),
+        set(u32),
+        map(u32),
+    }
+
+    /// A reply in two buffers: the nodes in pre-order, as `call` returns them,
+    /// and the bytes of all their strings. Moving it into the guest takes two
+    /// allocations instead of one per string, which matters for a reply with
+    /// many strings.
+    record flat-reply {
+        nodes: list<flat-node>,
+        data: list<u8>,
+    }
+
     enum log-level {
         debug,
         verbose,
@@ -33,6 +63,12 @@ interface redis {
     /// Runs a Redis command, like `redis.pcall`: an error reply comes back as
     /// an `error` node.
     pcall: func(command: string, args: list<list<u8>>) -> list<node>;
+
+    /// `call`, with the reply flat.
+    call-flat: func(command: string, args: list<list<u8>>) -> flat-reply;
+
+    /// `pcall`, with the reply flat.
+    pcall-flat: func(command: string, args: list<list<u8>>) -> flat-reply;
 
     /// Whether the user running the function may run the command with these
     /// arguments, like `redis.acl_check_cmd`. An unknown command is an error.

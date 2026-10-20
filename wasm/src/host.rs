@@ -45,7 +45,7 @@ use wasmtime::{Config, Engine, Store};
 use crate::busy::{self, Running, Ticker};
 use crate::flags::{self, Mode};
 use crate::memory::{LibrarySizes, Live, Memory};
-use crate::reply::push_call_result;
+use crate::reply::{flat_call_result, push_call_result};
 
 wasmtime::component::bindgen!({
     path: "wit",
@@ -53,11 +53,12 @@ wasmtime::component::bindgen!({
     // These fail the function by trapping the guest; see CallError.
     imports: {
         "redis-module-wasm:host/redis/call": trappable,
+        "redis-module-wasm:host/redis/call-flat": trappable,
         "redis-module-wasm:host/redis/set-resp": trappable,
     },
 });
 
-use redis_module_wasm::host::redis::LogLevel;
+use redis_module_wasm::host::redis::{FlatReply, LogLevel};
 
 /// An error reply that fails the function, from `call` or `set-resp`, as an
 /// error raised by `redis.call` fails a Lua function. The function replies
@@ -107,33 +108,49 @@ impl CallState {
             | usize::from(self.resp3)]
     }
 
-    /// Runs a command for `call` or `pcall`, with an error as an error node.
-    fn run_command(&mut self, command: &str, args: &[Vec<u8>]) -> Vec<Node> {
+    /// Runs a command for `call`, `pcall` and their flat forms: its result,
+    /// or the error the host refused it with.
+    fn run_command(
+        &mut self,
+        command: &str,
+        args: &[Vec<u8>],
+    ) -> Result<CallResult<'static>, String> {
         if self.mode.loading {
-            return vec![Node::Error(
-                "ERR a library may not call Redis while it loads".into(),
-            )];
+            return Err("ERR a library may not call Redis while it loads".into());
         }
         let args: Vec<&[u8]> = args.iter().map(Vec::as_slice).collect();
         if self.mode.one_slot {
-            if let Err(error) = self.check_slot(command, &args) {
-                return vec![Node::Error(error)];
-            }
+            self.check_slot(command, &args)?;
         }
         let effects = busy::note_call(self.ctx(), command, &args);
         // As for a read-only Lua script: may-replicate commands count as
         // writes. RedisModule_Call's W flag refuses only write commands.
         if self.mode.read_only && (effects.write || effects.may_replicate) {
-            return vec![Node::Error(
-                "ERR Write commands are not allowed from read-only functions.".into(),
-            )];
+            return Err("ERR Write commands are not allowed from read-only functions.".into());
         }
-        let result: CallResult<'static> =
-            self.ctx()
-                .call_ext(command, self.options(), args.as_slice());
-        let mut nodes = Vec::new();
-        push_call_result(&mut nodes, &result);
-        nodes
+        Ok(self
+            .ctx()
+            .call_ext(command, self.options(), args.as_slice()))
+    }
+
+    /// The reply to a command as nodes, an error as an error node.
+    fn nodes(&mut self, command: &str, args: &[Vec<u8>]) -> Vec<Node> {
+        match self.run_command(command, args) {
+            Ok(result) => {
+                let mut nodes = Vec::new();
+                push_call_result(&mut nodes, &result);
+                nodes
+            }
+            Err(message) => vec![Node::Error(message)],
+        }
+    }
+
+    /// The reply to a command, flat, an error as an error node.
+    fn flat(&mut self, command: &str, args: &[Vec<u8>]) -> FlatReply {
+        match self.run_command(command, args) {
+            Ok(result) => flat_call_result(&result),
+            Err(message) => FlatReply::error(&message),
+        }
     }
 
     /// Fails if a command using `args` would leave the call's slot, as Lua
@@ -194,7 +211,7 @@ fn call_options(read_only: bool, allow_oom: bool, resp3: bool) -> CallOptions {
 
 impl redis_module_wasm::host::redis::Host for CallState {
     fn call(&mut self, command: String, args: Vec<Vec<u8>>) -> wasmtime::Result<Vec<Node>> {
-        let nodes = self.run_command(&command, &args);
+        let nodes = self.nodes(&command, &args);
         // Only an error reply fails the function; an error inside an array,
         // such as one in EXEC's reply, does not.
         match nodes.as_slice() {
@@ -204,7 +221,19 @@ impl redis_module_wasm::host::redis::Host for CallState {
     }
 
     fn pcall(&mut self, command: String, args: Vec<Vec<u8>>) -> Vec<Node> {
-        self.run_command(&command, &args)
+        self.nodes(&command, &args)
+    }
+
+    fn call_flat(&mut self, command: String, args: Vec<Vec<u8>>) -> wasmtime::Result<FlatReply> {
+        let reply = self.flat(&command, &args);
+        match reply.as_error() {
+            Some(message) => Err(CallError(message).into()),
+            None => Ok(reply),
+        }
+    }
+
+    fn pcall_flat(&mut self, command: String, args: Vec<Vec<u8>>) -> FlatReply {
+        self.flat(&command, &args)
     }
 
     fn acl_check_command(&mut self, command: String, args: Vec<Vec<u8>>) -> Result<bool, String> {

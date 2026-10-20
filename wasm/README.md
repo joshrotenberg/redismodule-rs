@@ -137,6 +137,10 @@ arguments. Guest code may not call Redis while its library loads. It imports:
   `function: <name>.`, as Lua follows it with the script's name.
 - `pcall(command, args)`: the same, like `redis.pcall`: an error reply comes
   back to the function as an `error` node.
+- `call-flat` and `pcall-flat`: the same, with the reply flat: nodes whose
+  strings are spans of one buffer. Moving a reply with many strings this way
+  takes two allocations in the guest instead of one per string; for 1000 items
+  it halved the time (see the benchmark).
 - `acl-check-command(command, args)`: whether the user running the function may
   run the command, like `redis.acl_check_cmd`.
 - `set-resp(version)`: the protocol of the replies `call` and `pcall` return,

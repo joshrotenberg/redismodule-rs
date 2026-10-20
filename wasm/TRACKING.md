@@ -50,7 +50,7 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   moves 1000 strings into the guest, 1.4 times faster.
 - The host is about 790 lines of code, not counting comments and unit tests.
   The example guest is 22 KB as a core module and 23 KB as a component. The
-  eighteen integration tests take about 10 seconds.
+  nineteen integration tests take about 10 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
@@ -69,6 +69,8 @@ Redis 8.10.2, release build, 50 clients. Server time per call from
 | `adler32`: checksum of a 16 KiB value | 569 to 574 | 61 | 0.11 |
 | `median`: LRANGE 1000 integers, sort | 246 to 247 | 175 to 178 | 0.71 to 0.73 |
 | `lrange`: the same LRANGE, count only | 58 to 59 | 139 | 2.4 |
+| `median_flat`: `median` with `call-flat` | 253 to 254 | 126 | 0.50 |
+| `lrange_flat`: `lrange` with `call-flat` | 56 | 77 | 1.4 |
 | `primes`: sieve up to 10000 | 423 to 429 | 26 to 27 | 0.06 |
 
 Rerun after H8 and H9 (flags, memory limit): the same numbers within noise.
@@ -148,7 +150,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
 | H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30); not investigated. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
 | H17 | todo | **Load time.** Loading an RDB compiles each library's component on the main thread, one after another, before the server serves clients. Measured with the log line `aux_load` now writes (release build, quiet machine): the JavaScript library took 1.56 to 1.67 s, 15 ms of it reading the RDB, against a server ready in 0.03 s with an empty RDB; an earlier, busier run took 2.6 to 3.9 s. Compiling libraries on parallel threads would gain little, since wasmtime already compiles one component on all cores. Left: compile in the background and block a call to a library until its component is ready, or use wasmtime's on-disk code cache. | Load time with the JavaScript library, before and after. |
-| H15 | todo | **Large replies into the guest.** Measured with `lrange`, which makes `median`'s LRANGE and returns only the count: 139 µs in wasm against 58 µs in Lua. So of `median`'s 175 µs, about 139 µs is the call and moving the 1000-item reply into the guest, and 36 µs parsing and sorting (Lua: 194 µs). Likely cause, not yet profiled: lowering `list<node>` calls the guest's `cabi_realloc` once per bulk string. Left: a flat encoding (one buffer, nodes holding offsets into it), or a handle the guest reads the reply through. | `median`'s time split, and a lower number. |
+| H15 | done | **Large replies into the guest.** `lrange` (the LRANGE of `median`, count only) took 139 µs in wasm against 58 µs in Lua; a profile showed the time spread over allocating and copying each string on both sides. `call-flat` and `pcall-flat` return the reply as nodes whose strings are spans of one buffer: `lrange_flat` takes 77 µs (1.4 times Lua) and `median_flat` 126 µs (0.50 of Lua's 253). The typed `call` and `pcall` stay for small replies. | `median`'s time split, and a lower number. |
 
 ## Repository
 
@@ -212,6 +214,14 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H15 done: `call-flat` and `pcall-flat` in the WIT, the reply
+  walk shared by both encodings (a `Sink` per encoding), `median_flat` and
+  `lrange_flat` in the benchmark (the Lua library has the same functions under
+  those names), and a `run_flat` fixture whose test checks that a flat reply
+  rebuilt into nodes equals the typed reply for a list, a map, a status, a nil
+  and an error. A profile (`sample`) of `lrange` under load had shown the time
+  spread over per-string allocation and copying on the host, in wasmtime's
+  lowering, and in the guest's allocator.
 - 2026-10-20: H15 measured (see H15): the benchmark gained `lrange` in both
   libraries.
 - 2026-10-20: H13 measured (see H13): the compiler's temporary allocations

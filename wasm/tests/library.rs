@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use redis::{Connection, RedisResult, Value};
 
 /// The functions the example guest provides, in its order.
-const FUNCTIONS: [&str; 21] = [
+const FUNCTIONS: [&str; 22] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -35,6 +35,7 @@ const FUNCTIONS: [&str; 21] = [
     "acl_check",
     "resp_shape",
     "oob",
+    "run_flat",
 ];
 
 /// The workspace's `target` directory, from this test binary's path
@@ -1316,4 +1317,52 @@ fn an_out_of_bounds_access_traps_and_the_server_keeps_serving() {
     // The trap dropped the instance, and the server is fine.
     assert_eq!(counter(&mut con), 1);
     let _: String = redis::cmd("PING").query(&mut con).unwrap();
+}
+
+#[test]
+fn a_flat_reply_carries_the_same_reply() {
+    let server = Server::start(6632, &[]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    let _: () = redis::cmd("RPUSH")
+        .arg(&["list", "a", "", "ccc"])
+        .query(&mut con)
+        .unwrap();
+    let _: () = redis::cmd("HSET")
+        .arg(&["h", "f", "v"])
+        .query(&mut con)
+        .unwrap();
+    let _: () = redis::cmd("SET").arg(&["s", "x"]).query(&mut con).unwrap();
+
+    // run_flat rebuilds typed nodes from the flat reply; run_ro returns the
+    // typed reply as pcall gives it.
+    for command in [
+        &["LRANGE", "list", "0", "-1"][..],
+        &["HGETALL", "h"],
+        &["PING"],
+        &["GET", "missing"],
+        &["INCR", "s"],
+    ] {
+        let mut flat = vec!["run_flat", "0"];
+        flat.extend_from_slice(command);
+        let mut typed = vec!["run_ro", "0"];
+        typed.extend_from_slice(command);
+        let mut flat_args = vec!["WASM.CALL"];
+        flat_args.extend_from_slice(&flat);
+        let mut typed_args = vec!["WASM.CALL"];
+        typed_args.extend_from_slice(&typed);
+        if command[0] == "INCR" {
+            // run_ro may not write; compare with the error pcall gives.
+            assert_eq!(
+                raw_reply(6632, &flat_args),
+                "-ERR value is not an integer or out of range\r\n"
+            );
+            continue;
+        }
+        assert_eq!(
+            raw_reply(6632, &flat_args),
+            raw_reply(6632, &typed_args),
+            "{command:?}"
+        );
+    }
 }

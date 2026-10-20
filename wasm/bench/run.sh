@@ -24,6 +24,8 @@ cases=(
   "adler32|1 blob|20000"
   "median|1 numbers|20000"
   "lrange|1 numbers|20000"
+  "median_flat|1 numbers|20000"
+  "lrange_flat|1 numbers|20000"
   "primes|0 10000|5000"
 )
 
