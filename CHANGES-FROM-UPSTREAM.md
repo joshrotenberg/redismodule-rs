@@ -31,13 +31,13 @@ what is left.
 |---|---|---|---|
 | [7][i7] | Parameters shouldn't be owned by command | `ArgCursor` parses arguments by borrowing them ([ce0c36d]). Commands still receive `Vec<RedisString>`. | partly |
 | [89][i89] | `cargo test` panics on crates with dependency on `redis_module` | The `system-allocator-fallback` feature lets a module's tests allocate outside Redis ([a6841fb]). | fixed |
-| [134][i134] | Support for non-utf8/binary-safe data | `RedisString::create` keeps NUL bytes ([7333dba]); call replies that are not UTF-8 arrive as bytes ([b29cd45]); hash fields can be any bytes ([dd25376]). `RedisKeyWritable::write` still takes `&str`. | partly |
+| [134][i134] | Support for non-utf8/binary-safe data | `RedisString::create` keeps NUL bytes ([7333dba]); call replies holding NUL, CR or LF stay bulk strings instead of becoming simple strings ([b29cd45]); hash fields can be any bytes ([dd25376]). `RedisKeyWritable::write` still takes `&str`. | partly |
 | [150][i150] | Issues building examples modules | A default build uses committed bindings and needs no bindgen or libclang ([c1dc312]). It still compiles a C stub with `cc`. | partly |
 | [205][i205] | Functions suppressing not_unsafe_ptr_arg_deref clippy lint are unsound | Functions that take raw pointers are `unsafe` or private; no `not_unsafe_ptr_arg_deref` allows remain ([ce0c36d], [813cfa0], [24cd5ff], [3de40d8]). | fixed |
 | [234][i234] | Incorrect Return Type from `Context::call()` | Call replies keep simple versus bulk strings ([b29cd45], [41238c3]). | fixed |
 | [246][i246] | How to use binary/bytes/stringbuffer type | Hash fields and values as bytes ([dd25376]). `RedisKeyWritable::write` still takes `&str`; `as_string_dma` writes bytes. | partly |
 | [251][i251] | key.delete always returns okay - whether or not the key exists | `delete` and `unlink` return whether a value was removed ([0196506]). | fixed |
-| [287][i287] | Replace `unwrap` with `expect` and proper error message | A module API the server lacks is reported by name instead of unwrapping `None` ([68b33ab]). Other unwraps remain. | partly |
+| [287][i287] | Replace `unwrap` with `expect` and proper error message | Module API calls go through macros that name a missing API instead of unwrapping `None`; no `RedisModule_X.unwrap()` calls remain ([68b33ab]). | fixed |
 | [332][i332] | Consider changing command flags in bitflags | `redis_module!` checks command flags at compile time ([1c57c65]). They are still a string. | partly |
 | [351][i351] | Separate detached and thread safe context to be a different context | `Context` can no longer be built from any pointer by safe code, and `RedisGILGuard` can no longer hand out two mutable references ([24cd5ff]). The context types are not split. | partly |
 | [358][i358] | Refactor RedisString API | String views borrow from their owner, and strings no longer keep or free through the context they were created with ([ce0c36d], [813cfa0]). | fixed |
@@ -54,10 +54,11 @@ Redis's errors and frees the private data Redis rejects ([c3432c5]).
 
 | upstream PR | title | state upstream | in this fork |
 |---|---|---|---|
-| [93][p93] | Changed parse_call_reply to return a BulkString | open | Adapted: string call replies keep their type ([b29cd45], [41238c3]). |
+| [93][p93] | Changed parse_call_reply to return a BulkString. | open | Adapted: string call replies keep their type ([b29cd45], [41238c3]). |
 | [247][p247] | adds bytes-accepting versions of key methods | open | The hash part, as `hash_set_by_string` and `hash_del_by_string` ([dd25376]). |
+| [269][p269], [277][p277] | clean some code warnings; revert get-value lifetime changes | closed; both merged | 269 tied the reference `RedisKeyWritable::get_value` returns to the key; 277 reverted that so a caller could keep the reference next to the key. This fork ties it to the key again, through `&mut self` ([72eaf1a]); see the breaking changes. |
 | [368][p368] | fix: version_from_info from info cmd && change test start_redis_server_with_module add module args | open | The empty-capture panic is fixed ([b29cd45]) and the parser no longer uses a regex ([86b8113]). |
-| [375][p375] | Update dependencies and refactor the FFI calls | open | The same goal for `raw`: its pointer helpers are `unsafe` or private ([3de40d8]). |
+| [375][p375] | Update dependencies and refactor the FFI calls | open | Covered differently: module API calls go through lookup macros that name a missing API ([68b33ab]), and dependencies were removed or updated ([86b8113], [0e1d8f2]). |
 | [386][p386] | Derive hash and comparison traits for RedisAlloc | open | Ported ([b0135e0]). |
 | [397][p397] | Add API to get dbsize | open | Ported ([b0135e0]). |
 | [417][p417] | README: update Redis Modules API link | open | Included, with the other redirected links ([113216b]). |
@@ -67,13 +68,13 @@ Redis's errors and frees the private data Redis rejects ([c3432c5]).
 | [476][p476] | fix: make logging total on messages with interior NUL bytes | closed | Adapted, and the message no longer passes as a format string ([3700a31]). |
 | [477][p477] | Add example and support for shutdown server event | open | Ported ([b0135e0]). |
 | [483][p483] | [MOD-17680] Honour layouts requiring more than 16-byte alignment | open | The same bug is fixed here ([e81393d]). |
-| [487][p487], [488][p488] | Fix ServerInfo::field leak with a null context; Fix ServerInfo field string leaks with and without auto-memory | closed; 488 merged | The same fix ([813cfa0]); see Base. |
+| [487][p487], [488][p488] | Fix ServerInfo::field leak with a null context.; Fix ServerInfo field string leaks with and without auto-memory | closed; 488 merged | The same fix ([813cfa0]); see Base. |
 | [85][p85], [348][p348], [360][p360], [361][p361] | dependency updates | open | Superseded: `enum-primitive-derive` removed ([5dbf237]), `nix` and `strum_macros` removed ([86b8113]), bindgen at 0.73 ([0e1d8f2]). |
 
 ## Fixes with no upstream issue or pull request
 
 Upstream's issues and pull requests, open and closed, were searched for each of
-these on 2026-10-20.
+these in October 2026.
 
 | change | problem |
 |---|---|
@@ -81,7 +82,7 @@ these on 2026-10-20.
 | [3700a31] | Log messages were passed to `RedisModule_Log` as the format string, so `%` in logged text was undefined behavior. (The NUL panic is upstream issue 473.) |
 | [1d7aab1] | Modules using the registration attributes needed their own `linkme` dependency. |
 | [e7d39ce] | `call_blocking` was compiled out under the 8.0 floor. |
-| [813cfa0] | Strings freed themselves through the context they were created with, which may be gone; `ListPop`, server info and the keys cursor leaked strings; stream iterator strings were freed while Redis's automatic memory still held them. |
+| [813cfa0] | Strings freed themselves through the context they were created with, which may be gone; `ListPop` and the keys cursor leaked strings (the server info leak is upstream PRs 487 and 488); stream iterator strings were freed while Redis's automatic memory still held them. |
 | [d2f790a] | String configuration getters leaked one string per `CONFIG GET`. |
 | [c3432c5] | A rejected configuration registration was ignored and leaked its private data. |
 | [c478791] | A panic in any callback unwound into Redis and aborted the server. |
@@ -92,7 +93,6 @@ these on 2026-10-20.
 | [d742fec] | Cron event handlers received 1 instead of the server's `hz`. |
 | [332c68a] | `RedisKey::to_raw_parts` closed the key it handed over. |
 | [e074cdb] | Verbatim call replies read their format through a null pointer. |
-| [72eaf1a] | `RedisKeyWritable::get_value` and `as_string_dma` could return two mutable references to the same value, or one that outlived the key. |
 | [dd25376] | `hash_set` and `hash_del` reported replacing or deleting a field as an error. |
 | [41238c3] | A failed call read as success (`CallReply::Unknown`), a dry run reported success on Redis before 7.2, and `reply_with_call_reply` left a RESP2 client waiting. |
 | [3cb2121] | The ACL key check and unknown-user errors had no error code. |
@@ -117,6 +117,10 @@ these on 2026-10-20.
 | [a3b0f3d] | The `event_loop` module: file descriptor callbacks and one-shot callbacks on the main thread. |
 | [dd25376] | `hash_set_by_string` and `hash_del_by_string`. |
 | [eaaf9b2] | `RedisError::from_error`. |
+| [c478791] | `panic::catch_panic`, for callbacks a module registers itself. |
+| [762ab77] | `configuration::load_configurations`, for configurations registered outside `redis_module!`. |
+| [813cfa0] | `RedisString::from_bytes`, `from_owned_ptr`, `retain_from_ptr` and `as_ptr`. |
+| [3de40d8] | `InfoContext::get_raw`. |
 | [09acfb4] | docs/MIGRATING-3.0.md. |
 
 ## Changes that break compatibility with upstream
@@ -127,24 +131,39 @@ A module written against upstream needs changes for these; the
 | change | breaking change |
 |---|---|
 | [3de40d8] | `raw` is no longer re-exported at the crate root, except `Status`, `KeyType`, `NotifyEvent`, `Version` and `ModuleOptions`. |
-| [3de40d8], [ce0c36d], [813cfa0], [24cd5ff] | Functions that take raw pointers are `unsafe` (constructors of `Context`, `RedisString`, `RedisKey`, `RedisKeyWritable`, `InfoContext`, `RedisBuffer`, `RedisModuleIO`; the RDB helpers, `redis_log` and others in `raw`), or no longer public. `Context.ctx`, `InfoContext.ctx` and `RedisString.inner` are private. |
+| [3de40d8], [ce0c36d], [813cfa0], [24cd5ff] | Functions that take raw pointers are `unsafe`: `Context::new` and `dummy`; `RedisString::new`, `from_redis_module_string`, `from_ptr` and `string_as_slice`; `decode_args`; `RedisKey::open` and `open_with_flags`; `RedisKeyWritable::open`, `open_with_flags` and `open_with_redis_string`; `InfoContext::new`; `RedisBuffer::new`; `RedisModuleIO::new`; `logging::setup_for_context` and `log_io_error`; `DefragContext::defrag_dealloc`; and in `raw` the RDB `save_*` and `load_*` helpers, `is_io_error`, `redis_log`, `call_reply_verbatim_string` and `register_info_function`. The other pointer-taking `raw` helpers and `key::verify_type` are no longer public. `Context.ctx`, `InfoContext.ctx` and `RedisString.inner` are private. |
 | [ce0c36d] | `RedisString::try_as_str` borrows from the string, and `NextArg::next_str` is removed. Keyspace event handlers get the event name and key only for the callback. |
 | [813cfa0] | `Context::get_current_user` returns `Option<RedisString>`; `ScanKeyCursor` callbacks get the value as `Option<&RedisString>`; `KeysCursor::scan` takes `&mut F`. |
 | [0196506] | `RedisKeyWritable::delete` and `unlink` return `Result<bool, RedisError>`. |
 | [dd25376] | `hash_set` and `hash_del` return `Result<usize, RedisError>`. |
-| [72eaf1a] | `RedisKeyWritable::get_value` and `as_string_dma` take `&mut self`. |
+| [72eaf1a] | `RedisKeyWritable::get_value` and `as_string_dma` take `&mut self`, so the reference they return borrows the key. Code that keeps that reference in the same struct as the key, the pattern upstream PR 277 kept the unbound lifetime for, no longer compiles. |
 | [b29cd45], [41238c3] | `Context::call` returns `BulkString` for bulk replies, and an error for a call that fails without the `E` flag. |
 | [bd4e81d] | `RedisValue` has a new variant. |
 | [eaaf9b2] | `RedisError` converts with `From` only from a list of standard library errors. |
 | [c3432c5] | The `register_*_configuration` functions return `Result<(), RedisError>`. |
-| [24cd5ff] | `RedisGILGuard<T>` is `Send` only when `T` is, and panics when locked twice; `redis_command!` and `redis_event_handler!` take `&Context`. |
+| [24cd5ff] | `RedisGILGuard<T>` is `Send` only when `T` is; `ConfigurationContext` is neither `Send` nor `Sync`, and `ConfigurationValue` no longer has `Send` as a supertrait; `redis_command!` and `redis_event_handler!` take `&Context`. |
 | [2444ae1] | `RedisType::raw_type` is a method; `create_data_type` takes `&Context`; invalid type names fail to compile. |
 | [1c57c65] | Command flags in `redis_module!` must be a constant expression. |
 | [5dbf237] | `KeyType` and `ReplyType` are `#[non_exhaustive]` with new variants; the raw enums are `#[repr(i32)]` without `FromPrimitive`. |
 | [3de40d8] | `raw::export_shared_api` and `Context::export_shared_api` return `Status`. |
 | [c1dc312] | `bindgen-runtime` is no longer a default feature. |
 | [0e1d8f2] | The opaque handle types in `raw` no longer derive `Copy` and `Clone`. |
-| [752b2a7], [3cb2121], [b29cd45], [41238c3] | On the wire: `WRONGTYPE` and `NOPERM` error codes, the unknown-user error text, and string call replies forwarded with their type. |
+
+These compile unchanged but behave differently:
+
+| change | behavior change |
+|---|---|
+| [752b2a7], [dd25376] | Keys of the wrong type reply `WRONGTYPE` from `get_value`, the hash getters, `hash_set` and `hash_del`. |
+| [3cb2121] | A denied ACL key check replies `NOPERM ...`; an unknown or disabled user replies `ERR the user does not exist or is disabled`. |
+| [b29cd45], [41238c3] | `Context::call` returns `SimpleString` only for simple string replies, so a forwarded bulk reply reaches the client as a bulk string; a call that fails without the `E` flag returns an error. |
+| [7333dba] | Simple string and error replies replace CR, LF and NUL with spaces. |
+| [c478791] | A command that panics gets an error reply instead of aborting the server; other callbacks log the panic. |
+| [24cd5ff] | Locking a `RedisGILGuard` that is already locked panics. |
+| [5dbf237] | `Status::from(c_int)` maps every value other than `REDISMODULE_OK` to `Err`. |
+| [332c68a] | `RedisKey::to_raw_parts` leaves the key open for the caller. |
+| [a83e6d3] | Dropping a stream iterator stops it instead of deleting the current entry. |
+| [c3432c5], [762ab77] | `redis_module!` fails the load when a configuration registration fails or `LoadConfigs` rejects a value. |
+| [86b8113] | The crash report's `backtrace` field is `std::backtrace::Backtrace` output. |
 
 ## Build, tooling and documentation
 
@@ -228,6 +247,8 @@ A module written against upstream needs changes for these; the
 [p247]: https://github.com/RedisLabsModules/redismodule-rs/pull/247
 [p348]: https://github.com/RedisLabsModules/redismodule-rs/pull/348
 [p360]: https://github.com/RedisLabsModules/redismodule-rs/pull/360
+[p269]: https://github.com/RedisLabsModules/redismodule-rs/pull/269
+[p277]: https://github.com/RedisLabsModules/redismodule-rs/pull/277
 [p361]: https://github.com/RedisLabsModules/redismodule-rs/pull/361
 [p368]: https://github.com/RedisLabsModules/redismodule-rs/pull/368
 [p375]: https://github.com/RedisLabsModules/redismodule-rs/pull/375

@@ -24,7 +24,7 @@ crate-type = ["cdylib"]
 [dependencies]
 redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", rev = "<commit>" }
 # Only for the attribute and derive macros: #[command], the event handler, INFO
-# and defrag attributes, and #[derive(RedisValue)].
+# and defrag attributes, and #[derive(RedisValue)] and #[derive(InfoSection)].
 redis-module-macros = { git = "https://github.com/joshrotenberg/redismodule-rs", rev = "<commit>" }
 ```
 
@@ -101,6 +101,15 @@ applies to it.
 | `min-redis-compatibility-version-6-0` (default), `-6-2`, `-7-0`, `-7-2`, `-7-4`, `-8-0` | The oldest Redis the module supports. Choose one. Module APIs newer than it are looked up when called, and fail with an error naming the API on an older server. |
 | `bindgen-runtime`, `bindgen-static` | Generate the bindings with bindgen instead of using the committed ones. Both need libclang: `bindgen-runtime` loads it at build time, `bindgen-static` links it. |
 | `system-allocator-fallback` | Lets a module's `cargo test` allocate outside a Redis server. Enable it in `[dev-dependencies]` only. |
+
+## Bindings
+
+The crate binds `src/include/redismodule.h`. The bindings are generated with
+[bindgen](https://github.com/rust-lang/rust-bindgen) and committed as
+`src/redisraw/bindings.rs`, so a default build needs no libclang. After
+changing the header, build with the `bindgen-runtime` feature and copy the
+generated `OUT_DIR/bindings.rs` over `src/redisraw/bindings.rs`; CI fails when
+the two differ.
 
 ## Building and testing this repository
 
