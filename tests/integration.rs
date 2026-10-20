@@ -994,6 +994,74 @@ fn test_memory_accounting() -> Result<()> {
 }
 
 #[test]
+fn test_block_client_on_reply() -> Result<()> {
+    let mut con = TestConnection::new("block");
+
+    let res: String = redis::cmd("block.reply")
+        .arg(&["50", "hello"])
+        .query(&mut con)
+        .with_context(|| "failed to run block.reply")?;
+    assert_eq!(res, "hello");
+
+    // The timeout passes before the thread unblocks, and the late unblock only
+    // frees the value.
+    let res: String = redis::cmd("block.timeout")
+        .arg(&["50", "300"])
+        .query(&mut con)
+        .with_context(|| "failed to run block.timeout")?;
+    assert_eq!(res, "timed out");
+    let res: String = redis::cmd("block.timeout")
+        .arg(&["2000", "50"])
+        .query(&mut con)
+        .with_context(|| "failed to run block.timeout")?;
+    assert_eq!(res, "done");
+
+    let error = redis::cmd("block.dropped")
+        .query::<String>(&mut con)
+        .expect_err("a dropped handle replied with a value");
+    assert!(
+        error.to_string().contains("released without a reply"),
+        "{error}"
+    );
+
+    // The late unblock from the timed-out command frees its value with the
+    // private data; wait up to two seconds for it.
+    let mut live: i64 = -1;
+    for _ in 0..200 {
+        live = redis::cmd("block.live_values").query(&mut con)?;
+        if live == 0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(live, 0);
+
+    // A context that cannot block gets an error instead of a handle.
+    redis::cmd("MULTI").query::<()>(&mut con)?;
+    redis::cmd("block.reply")
+        .arg(&["10", "x"])
+        .query::<()>(&mut con)?;
+    // redis-rs reports the error inside EXEC's reply as the EXEC result.
+    let error = redis::cmd("EXEC")
+        .query::<Vec<redis::Value>>(&mut con)
+        .expect_err("a command blocked inside MULTI");
+    assert!(error.to_string().contains("cannot block here"), "{error}");
+    let error = redis::cmd("block.timeout")
+        .arg(&[&i64::MAX.to_string(), "10"])
+        .query::<String>(&mut con)
+        .expect_err("an out of range timeout blocked");
+    assert!(
+        error
+            .to_string()
+            .contains("blocking timeout is out of range"),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    Ok(())
+}
+
+#[test]
 fn test_string() -> Result<()> {
     let mut con = TestConnection::new("string");
 

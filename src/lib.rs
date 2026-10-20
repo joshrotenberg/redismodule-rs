@@ -29,7 +29,7 @@ mod macros;
 mod utils;
 
 pub use crate::args::ArgCursor;
-pub use crate::context::blocked::BlockedClient;
+pub use crate::context::blocked::{BlockedClient, ReplyingBlockedClient};
 pub use crate::context::thread_safe::{
     ContextGuard, DetachedFromClient, RedisGILGuard, RedisLockIndicator, ThreadSafeContext,
 };
