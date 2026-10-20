@@ -10,6 +10,7 @@ pub mod __private {
 pub mod alloc;
 pub mod apierror;
 mod args;
+pub mod cluster;
 pub mod error;
 pub mod io;
 pub mod native_types;

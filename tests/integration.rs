@@ -707,6 +707,35 @@ fn test_logging_io_message_text() -> Result<()> {
 }
 
 #[test]
+fn test_command_keys_and_key_slot() -> Result<()> {
+    let mut con = TestConnection::new("keys_pos");
+    let keys = |con: &mut TestConnection, args: &[&str]| -> redis::RedisResult<Vec<i64>> {
+        redis::cmd("command_keys").arg(args).query(con)
+    };
+    assert_eq!(keys(&mut con, &["SET", "k", "v"])?, [1]);
+    assert_eq!(keys(&mut con, &["MSET", "a", "1", "b", "2"])?, [1, 3]);
+    assert!(keys(&mut con, &["PING"])?.is_empty());
+    let unknown = keys(&mut con, &["NOSUCH", "x"]).unwrap_err();
+    assert!(unknown.to_string().contains("unknown command"), "{unknown}");
+    let arity = keys(&mut con, &["GET"]).unwrap_err();
+    assert!(
+        arity.to_string().contains("wrong number of arguments"),
+        "{arity}"
+    );
+    let empty = keys(&mut con, &[]).unwrap_err();
+    assert!(empty.to_string().contains("no command"), "{empty}");
+    // The server is still up.
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    // Values from the Redis cluster documentation.
+    for (key, slot) in [("somekey", 11058), ("foo{hash_tag}", 2515)] {
+        let got: i64 = redis::cmd("key_slot").arg(key).query(&mut con)?;
+        assert_eq!(got, slot, "{key}");
+    }
+    Ok(())
+}
+
+#[test]
 fn test_keys_pos() -> Result<()> {
     let mut con = TestConnection::new("keys_pos");
 

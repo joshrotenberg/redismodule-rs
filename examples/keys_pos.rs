@@ -1,4 +1,6 @@
-use redis_module::{Context, RedisError, RedisResult, RedisString, RedisValue, redis_module};
+use redis_module::{
+    Context, RedisError, RedisResult, RedisString, RedisValue, cluster, redis_module,
+};
 
 fn keys_pos(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     // Number of args (excluding command name) must be even
@@ -20,6 +22,24 @@ fn keys_pos(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok(reply.into())
 }
 
+/// `command_keys <command> [arg ...]`: the positions of the command's keys.
+fn command_keys(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let keys = ctx.get_command_keys(&args[1..])?;
+    Ok(RedisValue::Array(
+        keys.into_iter()
+            .map(|pos| RedisValue::Integer(pos as i64))
+            .collect(),
+    ))
+}
+
+/// `key_slot <key>`: the key's cluster hash slot.
+fn key_slot(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let key = args.get(1).ok_or(RedisError::WrongArity)?;
+    Ok(RedisValue::Integer(i64::from(cluster::key_slot(
+        key.as_slice(),
+    ))))
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -29,5 +49,7 @@ redis_module! {
     data_types: [],
     commands: [
         ["keys_pos", keys_pos, "getkeys-api", 1, 1, 1, ""],
+        ["command_keys", command_keys, "", 0, 0, 0, ""],
+        ["key_slot", key_slot, "", 0, 0, 0, ""],
     ],
 }
