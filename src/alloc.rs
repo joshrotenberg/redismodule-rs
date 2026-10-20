@@ -209,8 +209,9 @@ unsafe impl GlobalAlloc for RedisAlloc {
         }
         // SAFETY: Redis sets the API pointers once, before the module runs.
         match unsafe { raw::RedisModule_Alloc } {
-            // SAFETY: GlobalAlloc never asks for a zero-size layout, and
-            // RedisModule_Alloc has malloc semantics and alignment.
+            // SAFETY: the caller's GlobalAlloc contract gives a non-zero
+            // size; RedisModule_Alloc is callable once set and has malloc
+            // semantics and alignment, as alloc_with requires.
             Some(alloc) => unsafe { alloc_with(layout, |size| alloc(size).cast()) },
             None => allocation_free_panic(REDIS_ALLOCATOR_NOT_AVAILABLE_MESSAGE),
         }
@@ -245,6 +246,7 @@ unsafe impl GlobalAlloc for RedisAlloc {
 /// or `RedisModule_Realloc` returned. For a block from [`RedisAlloc`], use
 /// [`redis_alloc_size`].
 pub unsafe fn malloc_size(ptr: *mut std::ffi::c_void) -> Result<usize, crate::RedisError> {
+    // SAFETY: Redis sets the API pointers once, before the module runs.
     let malloc_size = unsafe { crate::__available_api!(RedisModule_MallocSize) };
     // SAFETY: the caller passes a live Redis allocation.
     Ok(unsafe { malloc_size(ptr) })
@@ -260,6 +262,7 @@ pub unsafe fn malloc_size(ptr: *mut std::ffi::c_void) -> Result<usize, crate::Re
 ///
 /// The requirements of [`malloc_size`] apply.
 pub unsafe fn malloc_usable_size(ptr: *mut std::ffi::c_void) -> Result<usize, crate::RedisError> {
+    // SAFETY: Redis sets the API pointers once, before the module runs.
     let malloc_usable_size = unsafe { crate::__available_api!(RedisModule_MallocUsableSize) };
     // SAFETY: the caller passes a live Redis allocation.
     Ok(unsafe { malloc_usable_size(ptr) })
@@ -285,6 +288,7 @@ pub unsafe fn redis_alloc_size(
     block: *const u8,
     layout: Layout,
 ) -> Result<usize, crate::RedisError> {
+    // SAFETY: Redis sets the API pointers once, before the module runs.
     let malloc_size = unsafe { crate::__available_api!(RedisModule_MallocSize) };
     // A block from the system allocator, under the system-allocator-fallback
     // feature, has no header and is not Redis's to measure.
