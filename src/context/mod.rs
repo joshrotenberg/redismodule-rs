@@ -16,7 +16,7 @@ use crate::raw::{
 };
 use crate::raw::{ModuleOptions, Version};
 use crate::redisvalue::RedisValueKey;
-use crate::{raw, utils, RedisResult, Status};
+use crate::{raw, RedisResult, Status};
 use crate::{RedisError, RedisString, RedisValue};
 use std::ops::Deref;
 
@@ -121,6 +121,31 @@ pub enum YieldMode {
     /// Also process client commands. Redis rejects most of them with `-BUSY`
     /// and runs the ones flagged `allow-busy`.
     Clients,
+}
+
+/// Parses an `INFO` line `redis_version:<major>.<minor>.<patch>`, where each
+/// part is ASCII digits. The patch number may be followed by text that does
+/// not start with a letter, digit or `_`, such as `-rc1`.
+fn parse_redis_version_line(line: &str) -> Option<Version> {
+    let rest = line.trim().strip_prefix("redis_version:")?;
+    let (major, rest) = rest.split_once('.')?;
+    let (minor, rest) = rest.split_once('.')?;
+    let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    let (patch, suffix) = rest.split_at(digits);
+    if suffix.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    let number = |part: &str| -> Option<c_int> {
+        if part.is_empty() || !part.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        part.parse().ok()
+    };
+    Some(Version {
+        major: number(major)?,
+        minor: number(minor)?,
+        patch: number(patch)?,
+    })
 }
 
 impl CallOptionsBuilder {
@@ -935,17 +960,8 @@ impl Context {
 
     pub fn version_from_info(info: RedisValue) -> Result<Version, RedisError> {
         if let RedisValue::SimpleString(info_str) | RedisValue::BulkString(info_str) = info {
-            if let Some(ver) = utils::get_regexp_captures(
-                info_str.as_str(),
-                r"(?m)\bredis_version:([0-9]+)\.([0-9]+)\.([0-9]+)\b",
-            ) {
-                if let [major, minor, patch, ..] = ver.as_slice() {
-                    return Ok(Version {
-                        major: major.parse::<c_int>().unwrap(),
-                        minor: minor.parse::<c_int>().unwrap(),
-                        patch: patch.parse::<c_int>().unwrap(),
-                    });
-                }
+            if let Some(version) = info_str.lines().find_map(parse_redis_version_line) {
+                return Ok(version);
             }
         }
         Err(RedisError::Str("Error getting redis_version"))
@@ -1298,6 +1314,25 @@ mod call_text_tests {
             assert_eq!((version.major, version.minor, version.patch), (7, 2, 8));
         }
         assert!(Context::version_from_info(RedisValue::BulkString("no version".into())).is_err());
+        let version = Context::version_from_info(RedisValue::BulkString(
+            "redis_version:8.10.2-rc1\r\n".into(),
+        ))
+        .unwrap();
+        assert_eq!((version.major, version.minor, version.patch), (8, 10, 2));
+        for text in [
+            "redis_version:99999999999.0.0",
+            "redis_version:7.2",
+            "redis_version:x.y.z",
+            "redis_version:7.2.4rc1",
+            "redis_version:7.2.4_1",
+            "redis_version:7x.2.4",
+            "redis_version:7.2y.4",
+            "redis_version:+7.2.4",
+            "redis_version: 7.2.4",
+            "redis_version:7..4",
+        ] {
+            assert!(Context::version_from_info(RedisValue::BulkString(text.into())).is_err());
+        }
         assert!(Context::version_from_info(RedisValue::Integer(7)).is_err());
     }
 

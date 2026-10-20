@@ -26,7 +26,6 @@ mod context;
 pub mod key;
 pub mod logging;
 mod macros;
-mod utils;
 
 pub use crate::args::ArgCursor;
 pub use crate::context::blocked::{BlockedClient, ReplyingBlockedClient};
@@ -73,7 +72,6 @@ pub use crate::context::{
 };
 
 pub use crate::redismodule::*;
-use backtrace::Backtrace;
 use context::server_events::INFO_COMMAND_HANDLER_LIST;
 
 /// The detached Redis module context (the context of this module). It
@@ -92,7 +90,7 @@ fn add_trace_info(ctx: &InfoContext) -> RedisResult<()> {
     const SECTION_NAME: &str = "trace";
     const FIELD_NAME: &str = "backtrace";
 
-    let current_backtrace = Backtrace::new();
+    let current_backtrace = std::backtrace::Backtrace::force_capture();
     let trace = format!("{current_backtrace:?}");
 
     ctx.builder()

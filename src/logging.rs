@@ -1,20 +1,31 @@
 use crate::raw;
 use std::ffi::{CStr, CString};
 use std::ptr;
-use strum_macros::AsRefStr;
 
 const NOT_INITIALISED_MESSAGE: &str = "Redis module hasn't been initialised.";
 
 /// [RedisLogLevel] is a level of logging which can be used when
 /// logging with Redis. See [raw::RedisModule_Log] and the official
 /// redis [reference](https://redis.io/docs/latest/develop/reference/modules/modules-api-ref/).
-#[derive(Clone, Copy, Debug, AsRefStr)]
-#[strum(serialize_all = "snake_case")]
+#[derive(Clone, Copy, Debug)]
 pub enum RedisLogLevel {
     Debug,
     Notice,
     Verbose,
     Warning,
+}
+
+impl AsRef<str> for RedisLogLevel {
+    /// The level's name as Redis spells it: `debug`, `notice`, `verbose` or
+    /// `warning`.
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::Debug => "debug",
+            Self::Notice => "notice",
+            Self::Verbose => "verbose",
+            Self::Warning => "warning",
+        }
+    }
 }
 
 impl From<log::Level> for RedisLogLevel {
