@@ -12,6 +12,9 @@
 //! WASM.LIST
 //! WASM.DELETE <library>
 //! WASM.KILL
+//! WASM.DUMP
+//! WASM.RESTORE <payload> [FLUSH|APPEND|REPLACE]
+//! WASM.FLUSH
 //! ```
 //!
 //! A function that runs past `busy-reply-threshold` yields to Redis, which
@@ -22,6 +25,8 @@
 
 use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
+use anyhow::Context as _;
+
 use redis_module::configuration::ConfigurationFlags;
 use redis_module::{
     ArgCursor, Context, ModuleOptions, RedisError, RedisResult, RedisString, RedisValue, Status,
@@ -30,6 +35,7 @@ use redis_module::{
 use redis_module_macros::command;
 
 mod busy;
+mod dump;
 mod flags;
 mod host;
 mod memory;
@@ -266,6 +272,113 @@ fn wasm_delete(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 }
 
+/// `WASM.DUMP`: every library, as a payload for `WASM.RESTORE`, as
+/// `FUNCTION DUMP` gives one for Lua libraries.
+fn wasm_dump(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    ArgCursor::new(&args[1..]).done()?;
+    with_host(|host| {
+        RedisValue::StringBuffer(dump::dump(
+            host.saved().map(|(name, component, _)| (name, component)),
+        ))
+    })
+}
+
+/// `WASM.RESTORE <payload> [FLUSH|APPEND|REPLACE]`: loads the libraries of a
+/// `WASM.DUMP` payload, all or none, as `FUNCTION RESTORE` does. `APPEND`, the
+/// default, fails if a library exists; `REPLACE` replaces it; `FLUSH` deletes
+/// every library first. The components compile on a thread, as for
+/// `WASM.LOAD`.
+fn wasm_restore(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = ArgCursor::new(&args[1..]);
+    let payload = args.next_bytes()?.to_vec();
+    let policy = match args.next() {
+        None => host::Policy::Append,
+        Some(arg) => match arg.as_slice().to_ascii_uppercase().as_slice() {
+            b"APPEND" => host::Policy::Append,
+            b"REPLACE" => host::Policy::Replace,
+            b"FLUSH" => host::Policy::Flush,
+            _ => {
+                return Err(RedisError::Str(
+                    "ERR the policy must be FLUSH, APPEND or REPLACE",
+                ));
+            }
+        },
+    };
+    args.done()?;
+    let libraries = dump::parse(&payload).map_err(|e| error("WASM.RESTORE failed", &e))?;
+    let compiler = with_host(|host| host.compiler())?;
+    let compile = move || -> anyhow::Result<Vec<(String, host::Compiled)>> {
+        libraries
+            .into_iter()
+            .map(|(name, component)| {
+                let compiled = compiler
+                    .compile(component)
+                    .with_context(|| format!("library '{name}'"))?;
+                Ok((name, compiled))
+            })
+            .collect()
+    };
+
+    let Ok(blocked) = ctx.block_client_on_reply(None, finish_restore, restore_timed_out) else {
+        return finish_restore(
+            ctx,
+            Restoring {
+                policy,
+                result: compile(),
+            },
+        );
+    };
+    let _ = std::thread::Builder::new()
+        .name("wasm-compile".into())
+        .spawn(move || {
+            blocked.unblock(Restoring {
+                policy,
+                result: compile(),
+            });
+        });
+    Ok(RedisValue::NoReply)
+}
+
+/// A `WASM.RESTORE` whose components have compiled, or failed to.
+struct Restoring {
+    policy: host::Policy,
+    result: anyhow::Result<Vec<(String, host::Compiled)>>,
+}
+
+/// Lists each restored library's functions, then adds them all or none, on
+/// the main thread.
+fn finish_restore(ctx: &Context, restoring: Restoring) -> RedisResult {
+    let compiled = restoring
+        .result
+        .map_err(|e| error("WASM.RESTORE failed", &e))?;
+    with_host(|host| -> anyhow::Result<()> {
+        let staged = compiled
+            .into_iter()
+            .map(|(name, compiled)| {
+                host.stage(ctx, name.clone(), compiled)
+                    .with_context(|| format!("library '{name}'"))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        host.restore_all(staged, restoring.policy)
+    })?
+    .map_err(|e| error("WASM.RESTORE failed", &e))?;
+    ctx.replicate_verbatim();
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
+/// `WASM.RESTORE` blocks with no timeout, so this does not run.
+fn restore_timed_out(_ctx: &Context) -> RedisResult {
+    Err(RedisError::Str("ERR WASM.RESTORE timed out"))
+}
+
+/// `WASM.FLUSH`: deletes every library, as `FUNCTION FLUSH` does.
+fn wasm_flush(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    ArgCursor::new(&args[1..]).done()?;
+    with_host(Host::clear)?;
+    ctx.replicate_verbatim();
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
 /// `WASM.KILL`: stops the running function if it has not called a write
 /// command, as `FUNCTION KILL` does for Lua.
 fn wasm_kill(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -326,6 +439,9 @@ redis_module! {
         ["wasm.list", wasm_list, "readonly deny-script", 0, 0, 0, AclCategory::Scripting],
         ["wasm.delete", wasm_delete, "write deny-script", 0, 0, 0, AclCategory::Scripting],
         ["wasm.kill", wasm_kill, "allow-busy deny-script fast", 0, 0, 0, AclCategory::Scripting],
+        ["wasm.dump", wasm_dump, "readonly deny-script", 0, 0, 0, AclCategory::Scripting],
+        ["wasm.restore", wasm_restore, "write deny-oom deny-script", 0, 0, 0, AclCategory::Scripting],
+        ["wasm.flush", wasm_flush, "write deny-script", 0, 0, 0, AclCategory::Scripting],
     ],
     configurations: [
         i64: [

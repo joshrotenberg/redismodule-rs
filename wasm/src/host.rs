@@ -30,7 +30,7 @@
 //! The SDK has no lifetime-safe way to give a store the context (S3 in
 //! `TRACKING.md`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, TryLockError};
 
@@ -401,7 +401,25 @@ impl Host {
         // Checked again here: another load may have added the name while this
         // component compiled.
         self.check_name(name, replace)?;
+        let staged = self.stage(ctx, name.to_owned(), compiled)?;
+        let functions = staged.functions.clone();
+        self.insert(
+            &staged.name,
+            staged.compiled,
+            staged.functions,
+            Some(staged.instance),
+        )?;
+        Ok(functions)
+    }
 
+    /// Instantiates a compiled library and lists its functions, without
+    /// adding it.
+    pub(crate) fn stage(
+        &self,
+        ctx: &Context,
+        name: String,
+        compiled: Compiled,
+    ) -> anyhow::Result<Staged> {
         // Listing the functions runs guest code too, so it can be killed.
         let running = Running::start();
         let mut instance = Instance::new(&self.engine, &compiled.pre, ctx)?;
@@ -409,9 +427,72 @@ impl Host {
             library.call_functions(store)
         })?;
         drop(running);
-        // The instance that listed the functions serves the first call.
-        self.insert(name, compiled, functions.clone(), Some(instance))?;
-        Ok(functions)
+        Ok(Staged {
+            name,
+            compiled,
+            functions,
+            instance,
+        })
+    }
+
+    /// Adds `staged` libraries, all or none, as `FUNCTION RESTORE` does with
+    /// `policy`: `Append` fails if a library exists, `Replace` replaces it,
+    /// and `Flush` deletes every library first. A function name may not be in
+    /// two of the libraries, nor in a library that stays.
+    pub(crate) fn restore_all(
+        &mut self,
+        staged: Vec<Staged>,
+        policy: Policy,
+    ) -> anyhow::Result<()> {
+        let names: BTreeSet<&str> = staged.iter().map(|s| s.name.as_str()).collect();
+        if names.len() != staged.len() {
+            bail!("the payload has a library twice");
+        }
+        // Whether an existing library is still there after the restore.
+        let stays = |library: &str| match policy {
+            Policy::Flush => false,
+            Policy::Append => true,
+            Policy::Replace => !names.contains(library),
+        };
+        let mut restored_functions = BTreeMap::new();
+        for library in &staged {
+            if policy == Policy::Append && self.libraries.contains_key(&library.name) {
+                bail!("library '{}' already exists", library.name);
+            }
+            for function in &library.functions {
+                if let Some(other) = restored_functions.insert(&function.name, &library.name) {
+                    bail!(
+                        "function '{}' is in libraries '{other}' and '{}'",
+                        function.name,
+                        library.name
+                    );
+                }
+                if let Some((owner, _)) = self.functions.get(&function.name) {
+                    if stays(owner) {
+                        bail!(
+                            "function '{}' already exists in library '{owner}'",
+                            function.name
+                        );
+                    }
+                }
+            }
+        }
+
+        if policy == Policy::Flush {
+            self.clear();
+        }
+        for library in &staged {
+            self.remove(&library.name);
+        }
+        for library in staged {
+            self.insert(
+                &library.name,
+                library.compiled,
+                library.functions,
+                Some(library.instance),
+            )?;
+        }
+        Ok(())
     }
 
     /// Adds library `name` from an RDB, which also lists its functions,
@@ -530,6 +611,22 @@ impl Host {
             flags: *flags,
         })
     }
+}
+
+/// A compiled library whose functions have been listed, ready to add.
+pub(crate) struct Staged {
+    name: String,
+    compiled: Compiled,
+    functions: Vec<Function>,
+    instance: Instance,
+}
+
+/// How `WASM.RESTORE` treats the libraries already loaded.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Policy {
+    Append,
+    Replace,
+    Flush,
 }
 
 /// A compiled component, linked and ready to instantiate, and its bytes.

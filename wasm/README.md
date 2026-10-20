@@ -16,6 +16,9 @@ WASM.CALL_RO <function> <numkeys> [key ...] [arg ...]   only functions with no-w
 WASM.LIST                                       [[library, [[function, [flag ...]] ...]] ...]
 WASM.DELETE <library>
 WASM.KILL                                       stop the running function, as FUNCTION KILL does
+WASM.DUMP                                       every library, as a payload
+WASM.RESTORE <payload> [FLUSH|APPEND|REPLACE]   load a payload's libraries, all or none
+WASM.FLUSH                                      delete every library
 ```
 
 Function names are global across libraries, as with `FUNCTION`. The commands
@@ -36,6 +39,13 @@ killed, drops the instance, and the next call starts a new one; replacing or
 deleting the library drops it too. All callers of a library share its
 instance, so a guest should not keep data from one call that another caller
 must not see.
+
+`WASM.DUMP`, `WASM.RESTORE` and `WASM.FLUSH` work as `FUNCTION DUMP`,
+`FUNCTION RESTORE` and `FUNCTION FLUSH` do: a restore loads all the payload's
+libraries or none, `APPEND` (the default) refuses a library that exists,
+`REPLACE` replaces it, and `FLUSH` deletes every library first. A restore
+lists each library's functions from its component again, so the payload holds
+only names and components, with a checksum.
 
 ## Function flags
 

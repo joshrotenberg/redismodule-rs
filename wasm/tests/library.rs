@@ -825,6 +825,18 @@ fn a_replica_gets_the_libraries_and_their_changes() {
     assert_eq!(list(&mut r), listed(&["again"]));
     let value: String = redis::cmd("GET").arg("counter").query(&mut r).unwrap();
     assert_eq!(value, "4");
+
+    // WASM.FLUSH and WASM.RESTORE replicate too.
+    let payload: Vec<u8> = redis::cmd("WASM.DUMP").query(&mut p).unwrap();
+    let _: () = redis::cmd("WASM.FLUSH").query(&mut p).unwrap();
+    wait(&mut p);
+    assert_eq!(list(&mut r), listed(&[]));
+    let _: () = redis::cmd("WASM.RESTORE")
+        .arg(&payload)
+        .query(&mut p)
+        .unwrap();
+    wait(&mut p);
+    assert_eq!(list(&mut r), listed(&["again"]));
 }
 
 /// Parses each entry of an array reply on its own; see `list`.
@@ -1365,4 +1377,73 @@ fn a_flat_reply_carries_the_same_reply() {
             "{command:?}"
         );
     }
+}
+
+fn restore(con: &mut Connection, payload: &[u8], policy: Option<&str>) -> RedisResult<Value> {
+    let mut cmd = redis::cmd("WASM.RESTORE");
+    cmd.arg(payload);
+    if let Some(policy) = policy {
+        cmd.arg(policy);
+    }
+    cmd.query(con)
+}
+
+#[test]
+fn dump_restore_and_flush_work_as_for_functions() {
+    let source = Server::start(6633, &[]);
+    let mut src = source.connection();
+    load(&mut src, "hello");
+    let payload: Vec<u8> = redis::cmd("WASM.DUMP").query(&mut src).unwrap();
+
+    let target = Server::start(6634, &[]);
+    let mut con = target.connection();
+    assert_eq!(restore(&mut con, &payload, None).unwrap(), Value::Okay);
+    assert_eq!(list(&mut con), listed(&["hello"]));
+    assert_eq!(
+        call(&mut con, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+
+    // APPEND, the default, refuses a library that exists; REPLACE replaces
+    // it, with a new instance.
+    assert!(
+        error_text(restore(&mut con, &payload, None)).contains("library 'hello' already exists")
+    );
+    assert_eq!([counter(&mut con), counter(&mut con)], [1, 2]);
+    assert_eq!(
+        restore(&mut con, &payload, Some("REPLACE")).unwrap(),
+        Value::Okay
+    );
+    assert_eq!(counter(&mut con), 1);
+
+    // A function in a library that stays fails the restore, which changes
+    // nothing; FLUSH deletes that library first.
+    let _: () = redis::cmd("WASM.FLUSH").query(&mut con).unwrap();
+    load(&mut con, "mine");
+    for policy in [None, Some("REPLACE")] {
+        assert!(
+            error_text(restore(&mut con, &payload, policy))
+                .contains("function 'hello' already exists in library 'mine'")
+        );
+        assert_eq!(list(&mut con), listed(&["mine"]));
+    }
+    assert_eq!(
+        restore(&mut con, &payload, Some("FLUSH")).unwrap(),
+        Value::Okay
+    );
+    assert_eq!(list(&mut con), listed(&["hello"]));
+
+    // A damaged payload or an unknown policy is refused.
+    let mut damaged = payload.clone();
+    let middle = damaged.len() / 2;
+    damaged[middle] ^= 1;
+    assert!(error_text(restore(&mut con, &damaged, None)).contains("checksum"));
+    assert!(error_text(restore(&mut con, &payload, Some("MERGE"))).contains("policy"));
+
+    // An empty server dumps a payload that restores nothing.
+    let _: () = redis::cmd("WASM.FLUSH").query(&mut con).unwrap();
+    assert!(list(&mut con).is_empty());
+    let empty: Vec<u8> = redis::cmd("WASM.DUMP").query(&mut con).unwrap();
+    assert_eq!(restore(&mut con, &empty, None).unwrap(), Value::Okay);
+    assert!(list(&mut con).is_empty());
 }

@@ -50,7 +50,7 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   moves 1000 strings into the guest, 1.4 times faster.
 - The host is about 790 lines of code at H5, more since, not counting
   comments and unit tests. The example guest is 37 KB as a core module. The
-  nineteen integration tests take about 10 seconds.
+  twenty integration tests take about 10 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
@@ -150,6 +150,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
 | H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30); not investigated. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
 | H17 | todo | **Load time.** Loading an RDB compiles each library's component on the main thread, one after another, before the server serves clients. Measured with the log line `aux_load` now writes (release build, quiet machine): the JavaScript library took 1.56 to 1.67 s, 15 ms of it reading the RDB, against a server ready in 0.03 s with an empty RDB; an earlier, busier run took 2.6 to 3.9 s. Compiling libraries on parallel threads would gain little, since wasmtime already compiles one component on all cores. Left: compile in the background and block a call to a library until its component is ready, or use wasmtime's on-disk code cache. | Load time with the JavaScript library, before and after. |
+| H18 | done | **Dump, restore, flush.** `WASM.DUMP`, `WASM.RESTORE <payload> [FLUSH\|APPEND\|REPLACE]` and `WASM.FLUSH`, as `FUNCTION DUMP`, `RESTORE` and `FLUSH` work. The payload (`dump.rs`) holds names and components with an FNV-1a checksum; a restore compiles on a thread, lists every library's functions, checks every conflict, then adds all or none. | Tests restore into another server under each policy, refuse a conflicting or damaged payload without changing anything, and replicate `WASM.FLUSH` and `WASM.RESTORE`. |
 | H15 | done | **Large replies into the guest.** `lrange` (the LRANGE of `median`, count only) took 139 µs in wasm against 58 µs in Lua; a profile showed the time spread over allocating and copying each string on both sides. `call-flat` and `pcall-flat` return the reply as nodes whose strings are spans of one buffer: `lrange_flat` takes 77 µs (1.4 times Lua) and `median_flat` 126 µs (0.50 of Lua's 253). The typed `call` and `pcall` stay for small replies. | `median`'s time split, and a lower number. |
 
 ## Repository
@@ -198,7 +199,7 @@ evidence as the host meets them.
 
 | ID | gap | effect on the host |
 |---|---|---|
-| G1 | No module API registers an engine for `FUNCTION` or `EVAL` (checked in Redis 8.0.0 and unstable `module.c`). | The host needs its own `WASM.*` commands; `FUNCTION LIST`, `FCALL` and `SCRIPT KILL` do not see it. |
+| G1 | No module API registers an engine for `FUNCTION` or `EVAL` (checked in Redis 8.0.0 and unstable `module.c`). | The host needs its own `WASM.*` commands, which now cover `FUNCTION`'s (H9, H18); `FUNCTION LIST`, `FCALL`, `FUNCTION DUMP` and `SCRIPT KILL` do not see wasm libraries. |
 | G2 | `RedisModule_CreateCommand` works only while the module loads. | A function loaded later cannot be a command of its own; every call goes through `WASM.CALL`. |
 | G3 | No module API adds memory allocated outside the Redis allocator to `used_memory`. | `maxmemory` and `INFO memory` do not count guest memory or compiled code (confirmed: 1.3 MB used, 16 to 18 MB RSS). `INFO wasm` reports them instead: 7.7 MB of linear memory and 95 MB of compiled code for the JavaScript library. |
 | G4 | Aux data reaches an AOF only inside its RDB preamble: no module API adds commands to a rewritten AOF without one (`aof_rewrite` is per key). Redis writes its own `FUNCTION` libraries into the rewrite (`rewriteFunctions` in `aof.c`). | With `aof-use-rdb-preamble no` (the default is `yes`), an AOF rewrite drops the libraries: `WASM.LIST` was empty after `BGREWRITEAOF` and a restart. |
@@ -214,6 +215,10 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H18 done: `WASM.DUMP`, `WASM.RESTORE` and `WASM.FLUSH`. `Host::add`
+  is now `stage` (instantiate, list functions) and a commit, so a restore can
+  stage every library, check conflicts against the policy, and add all or
+  none.
 - 2026-10-20: H10 done: `wasm/guest-sdk` with four unit tests that run on the
   host, and the example guest rewritten on it (its replies are `Value`s; the
   same nineteen integration tests pass). The WIT gained the `guest-imports`
