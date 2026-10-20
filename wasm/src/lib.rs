@@ -15,6 +15,7 @@
 //! WASM.DUMP
 //! WASM.RESTORE <payload> [FLUSH|APPEND|REPLACE]
 //! WASM.FLUSH
+//! WASM.STATS
 //! ```
 //!
 //! A function that runs past `busy-reply-threshold` yields to Redis, which
@@ -371,6 +372,36 @@ fn restore_timed_out(_ctx: &Context) -> RedisResult {
     Err(RedisError::Str("ERR WASM.RESTORE timed out"))
 }
 
+/// `WASM.STATS`: the running function and the counts of libraries and
+/// functions, as `FUNCTION STATS` gives for scripts. It is `allow-busy`, so it
+/// answers while a function runs; the counts are nil while a library loads,
+/// which holds the host.
+fn wasm_stats(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    ArgCursor::new(&args[1..]).done()?;
+    let running = match busy::running_function() {
+        Some((name, duration)) => RedisValue::Array(vec![
+            RedisValue::SimpleStringStatic("name"),
+            RedisValue::BulkString(name),
+            RedisValue::SimpleStringStatic("duration_ms"),
+            RedisValue::Integer(i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)),
+        ]),
+        None => RedisValue::Null,
+    };
+    let count = |n: Option<usize>| {
+        n.and_then(|n| i64::try_from(n).ok())
+            .map_or(RedisValue::Null, RedisValue::Integer)
+    };
+    let sizes = try_with_host(|host| host.sizes());
+    Ok(RedisValue::Array(vec![
+        RedisValue::SimpleStringStatic("running_function"),
+        running,
+        RedisValue::SimpleStringStatic("libraries_count"),
+        count(sizes.as_ref().map(|s| s.libraries)),
+        RedisValue::SimpleStringStatic("functions_count"),
+        count(sizes.as_ref().map(|s| s.functions)),
+    ]))
+}
+
 /// `WASM.FLUSH`: deletes every library, as `FUNCTION FLUSH` does.
 fn wasm_flush(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ArgCursor::new(&args[1..]).done()?;
@@ -442,6 +473,7 @@ redis_module! {
         ["wasm.dump", wasm_dump, "readonly deny-script", 0, 0, 0, AclCategory::Scripting],
         ["wasm.restore", wasm_restore, "write deny-oom deny-script", 0, 0, 0, AclCategory::Scripting],
         ["wasm.flush", wasm_flush, "write deny-script", 0, 0, 0, AclCategory::Scripting],
+        ["wasm.stats", wasm_stats, "allow-busy deny-script", 0, 0, 0, AclCategory::Scripting],
     ],
     configurations: [
         i64: [

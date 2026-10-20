@@ -11,10 +11,10 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::bail;
 use redis_module::{Context, RedisValue, YieldMode};
@@ -45,7 +45,12 @@ static WROTE: AtomicBool = AtomicBool::new(false);
 /// call's kill and write state.
 pub(crate) struct Running(());
 
+/// The outermost running function and when it started, for `WASM.STATS`.
+/// Functions run on the main thread, where `WASM.STATS` runs too.
+static CURRENT: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+
 impl Running {
+    /// Marks guest code as running, such as a library listing its functions.
     pub(crate) fn start() -> Self {
         if RUNNING.fetch_add(1, Ordering::SeqCst) == 0 {
             KILL.store(false, Ordering::SeqCst);
@@ -53,14 +58,35 @@ impl Running {
         }
         Self(())
     }
+
+    /// Marks function `name` as running.
+    pub(crate) fn start_function(name: &str) -> Self {
+        let running = Self::start();
+        if RUNNING.load(Ordering::SeqCst) == 1 {
+            *current() = Some((name.to_owned(), Instant::now()));
+        }
+        running
+    }
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
         if RUNNING.fetch_sub(1, Ordering::SeqCst) == 1 {
             KILL.store(false, Ordering::SeqCst);
+            *current() = None;
         }
     }
+}
+
+fn current() -> std::sync::MutexGuard<'static, Option<(String, Instant)>> {
+    CURRENT.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The running function, if any, and how long it has run.
+pub(crate) fn running_function() -> Option<(String, Duration)> {
+    current()
+        .as_ref()
+        .map(|(name, started)| (name.clone(), started.elapsed()))
 }
 
 /// What `WASM.KILL` found.

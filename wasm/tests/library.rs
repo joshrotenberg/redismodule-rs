@@ -389,6 +389,13 @@ fn a_busy_function_gets_busy_replies_and_can_be_killed() {
         busy,
         "BUSY a wasm function is running. You can only call WASM.KILL or SHUTDOWN NOSAVE."
     );
+    // WASM.STATS answers while the function runs, and names it.
+    let stats: Vec<Value> = redis::cmd("WASM.STATS").query(&mut con).unwrap();
+    let Value::Bulk(running) = &stats[1] else {
+        panic!("a running function in {stats:?}");
+    };
+    assert_eq!(running[1], Value::Data(b"spin".to_vec()));
+    assert!(matches!(running[3], Value::Int(ms) if ms >= 0));
     // Commands without allow-busy, including the module's own, get -BUSY too.
     let list: RedisResult<Value> = redis::cmd("WASM.LIST").query(&mut con);
     assert!(error_text(list).starts_with("BUSY"));
@@ -403,6 +410,18 @@ fn a_busy_function_gets_busy_replies_and_can_be_killed() {
         "PONG"
     );
     assert!(error_text(kill(&mut con)).starts_with("NOTBUSY"));
+    let stats: Vec<Value> = redis::cmd("WASM.STATS").query(&mut con).unwrap();
+    assert_eq!(
+        stats,
+        [
+            Value::Status("running_function".into()),
+            Value::Nil,
+            Value::Status("libraries_count".into()),
+            Value::Int(1),
+            Value::Status("functions_count".into()),
+            Value::Int(FUNCTIONS.len() as i64),
+        ]
+    );
 }
 
 #[test]

@@ -680,7 +680,7 @@ impl PreparedCall {
         args: &[Vec<u8>],
         mode: Mode,
     ) -> anyhow::Result<Vec<Node>> {
-        let _running = Running::start();
+        let _running = Running::start_function(function);
         // Another module's callback can call this library again while one of
         // its calls runs (from inside a Redis command the guest called). That
         // nested call finds the kept instance in use and gets a new one.

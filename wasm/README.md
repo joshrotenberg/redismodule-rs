@@ -19,6 +19,7 @@ WASM.KILL                                       stop the running function, as FU
 WASM.DUMP                                       every library, as a payload
 WASM.RESTORE <payload> [FLUSH|APPEND|REPLACE]   load a payload's libraries, all or none
 WASM.FLUSH                                      delete every library
+WASM.STATS                                      the running function, and counts
 ```
 
 Function names are global across libraries, as with `FUNCTION`. The commands
@@ -113,7 +114,9 @@ long Lua script. `WASM.KILL` stops the function, which fails with `ERR function
 '<name>' failed: killed by WASM.KILL`, unless it has already called a write
 command: then `WASM.KILL` replies `UNKILLABLE`, so the function's writes are not
 left half done, and `SHUTDOWN NOSAVE` is the way out. With no function running,
-`WASM.KILL` replies `NOTBUSY`.
+`WASM.KILL` replies `NOTBUSY`. `WASM.STATS`, like `FUNCTION STATS`, also
+answers while a function runs: it names the running function and how long it
+has run.
 
 ## Memory
 
