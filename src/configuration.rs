@@ -309,6 +309,45 @@ pub fn get_i64_default_config_value(
     })
 }
 
+/// The default of a configuration with [`ConfigurationFlags::MEMORY`] from
+/// the module arguments, which may give it with a unit, as Redis's own memory
+/// configurations take: a number and an optional `b`, `k` (1000), `kb` (1024),
+/// `m`, `mb`, `g` or `gb`, in any case.
+pub fn get_memory_default_config_value(
+    args: &[RedisString],
+    name: &str,
+    default: i64,
+) -> Result<i64, RedisError> {
+    find_config_value(args, name).map_or(Ok(default), |arg| parse_memory(arg.try_as_str()?))
+}
+
+/// Parses a memory amount as Redis's `memtoull` does.
+fn parse_memory(text: &str) -> Result<i64, RedisError> {
+    const UNITS: [(&str, i64); 7] = [
+        ("gb", 1 << 30),
+        ("mb", 1 << 20),
+        ("kb", 1 << 10),
+        ("g", 1_000_000_000),
+        ("m", 1_000_000),
+        ("k", 1_000),
+        ("b", 1),
+    ];
+    let invalid = || RedisError::String(format!("invalid memory amount '{text}'"));
+    let lower = text.to_ascii_lowercase();
+    let (digits, unit) = UNITS
+        .iter()
+        .find_map(|(suffix, unit)| lower.strip_suffix(suffix).map(|digits| (digits, *unit)))
+        .unwrap_or((lower.as_str(), 1));
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(invalid());
+    }
+    digits
+        .parse::<i64>()
+        .ok()
+        .and_then(|n| n.checked_mul(unit))
+        .ok_or_else(invalid)
+}
+
 extern "C" fn string_configuration_set<T: ConfigurationValue<RedisString> + 'static>(
     name: *const c_char,
     val: *mut raw::RedisModuleString,
@@ -693,4 +732,24 @@ pub fn module_config_set(
         )
     })?;
     Ok((&res).into())
+}
+
+#[cfg(test)]
+mod memory_tests {
+    use super::parse_memory;
+
+    #[test]
+    fn memory_amounts_parse_as_redis_parses_them() {
+        assert_eq!(parse_memory("100").unwrap(), 100);
+        assert_eq!(parse_memory("8mb").unwrap(), 8 << 20);
+        assert_eq!(parse_memory("8MB").unwrap(), 8 << 20);
+        assert_eq!(parse_memory("8m").unwrap(), 8_000_000);
+        assert_eq!(parse_memory("1kb").unwrap(), 1024);
+        assert_eq!(parse_memory("1k").unwrap(), 1000);
+        assert_eq!(parse_memory("2gb").unwrap(), 2 << 30);
+        assert_eq!(parse_memory("5b").unwrap(), 5);
+        for bad in ["", "mb", "-1", "1.5mb", "8 mb", "8tb", "99999999999gb"] {
+            assert!(parse_memory(bad).is_err(), "{bad}");
+        }
+    }
 }

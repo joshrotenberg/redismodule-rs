@@ -21,6 +21,7 @@ lazy_static! {
     static ref NUM_OF_CONFIGURATION_CHANGES: RedisGILGuard<i64> = RedisGILGuard::default();
     static ref CONFIGURATION_I64: RedisGILGuard<i64> = RedisGILGuard::default();
     static ref CONFIGURATION_ATOMIC_I64: AtomicI64 = AtomicI64::new(1);
+    static ref CONFIGURATION_MEMORY: AtomicI64 = AtomicI64::new(1024);
     static ref CONFIGURATION_REDIS_STRING: RedisGILGuard<RedisString> =
         RedisGILGuard::new(RedisString::create(None, "default"));
     static ref CONFIGURATION_STRING: RedisGILGuard<String> = RedisGILGuard::new("default".into());
@@ -69,6 +70,8 @@ redis_module! {
         i64: [
             ["i64", &*CONFIGURATION_I64, 10, 0, 1000, ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed))],
             ["atomic_i64", &*CONFIGURATION_ATOMIC_I64, 10, 0, 1000, ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed))],
+            // Takes units, such as 8mb, in CONFIG SET and in module arguments.
+            ["memory", &*CONFIGURATION_MEMORY, 1024, 0, i64::MAX, ConfigurationFlags::MEMORY, None],
         ],
         string: [
             ["redis_string", &*CONFIGURATION_REDIS_STRING, "default", ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed))],

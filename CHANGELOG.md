@@ -17,6 +17,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - `Context::yield_now` and `YieldMode`, for long-running commands (`RedisModule_Yield`).
 - `Context::acl_check_command_permission`, `Context::acl_check_channel_permission` with `AclChannelPermissions`, and `Context::acl_add_log_entry` with `AclLogReason`.
 - Memory accounting: `Context::used_memory_ratio`, `RedisString::malloc_size`, and `alloc::malloc_size`, `malloc_usable_size` and `redis_alloc_size`.
+- `configuration::get_memory_default_config_value`, which reads a memory configuration from the module arguments with Redis's units.
 - `Context::block_client_on_reply` and `ReplyingBlockedClient`, which block a client with reply and timeout callbacks on the main thread and private data.
 - The `event_loop` module: `add` and `remove` (both `unsafe`), `add_one_shot`, and `EventLoopMask` (`RedisModule_EventLoopAdd`, `EventLoopDel` and `EventLoopAddOneShot`).
 - `Context::reply_with_call_reply`, `StringCallReply::is_simple_string`, and the call options `dry_run`, `replicate_to_replicas_only` and `replicate_to_aof_only`.
@@ -81,6 +82,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - `From<c_int>` for `KeyType`, `ReplyType` and `Status` panicked on values outside their lists, and version parsing panicked on a number that overflows.
 - `RedisAlloc` ignored alignments above 16 bytes.
 - String configuration getters leaked their replies.
+- The `configurations` block of `redis_module!` compiled only with all four groups and `module_args_as_configuration` listed, and a memory configuration given as a module argument with a unit, such as `8mb`, failed the module load.
 - The stream iterator deleted an entry when dropped instead of stopping.
 - `RedisKey::to_raw_parts` closed the key it handed over.
 - Cron event handlers received 1 instead of the server's `hz`.

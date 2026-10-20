@@ -522,10 +522,18 @@ macro_rules! redis_module {
                     )?
 
                     $(
+                        // Bound once here: used inside the groups below, the
+                        // meta-variable would have to repeat with each group.
+                        let use_module_args: bool = false $(|| $use_module_args)?;
                         $(
                             $(
-                                let default = if $use_module_args {
-                                    match get_i64_default_config_value(&args, $i64_configuration_name, $i64_default) {
+                                let default = if use_module_args {
+                                    let value = if ($i64_flags_options).contains($crate::configuration::ConfigurationFlags::MEMORY) {
+                                        $crate::configuration::get_memory_default_config_value(&args, $i64_configuration_name, $i64_default)
+                                    } else {
+                                        get_i64_default_config_value(&args, $i64_configuration_name, $i64_default)
+                                    };
+                                    match value {
                                         Ok(v) => v,
                                         Err(e) => {
                                             context.log_warning(&format!("{e}"));
@@ -543,7 +551,7 @@ macro_rules! redis_module {
                         )?
                         $(
                             $(
-                                let default = if $use_module_args {
+                                let default = if use_module_args {
                                     match get_string_default_config_value(&args, $string_configuration_name, $string_default) {
                                         Ok(v) => v,
                                         Err(e) => {
@@ -562,7 +570,7 @@ macro_rules! redis_module {
                         )?
                         $(
                             $(
-                                let default = if $use_module_args {
+                                let default = if use_module_args {
                                     match get_bool_default_config_value(&args, $bool_configuration_name, $bool_default) {
                                         Ok(v) => v,
                                         Err(e) => {
@@ -581,7 +589,7 @@ macro_rules! redis_module {
                         )?
                         $(
                             $(
-                                let default = if $use_module_args {
+                                let default = if use_module_args {
                                     match get_enum_default_config_value(&args, $enum_configuration_name, $enum_default) {
                                         Ok(v) => v,
                                         Err(e) => {
