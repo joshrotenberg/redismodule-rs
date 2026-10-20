@@ -1,8 +1,6 @@
 use redis_module::{
-    Context, NotifyEvent, RedisError, RedisResult, RedisString, RedisValue, Status, raw,
-    redis_module,
+    Context, NotifyEvent, RedisError, RedisResult, RedisString, RedisValue, Status, redis_module,
 };
-use std::ffi::CString;
 use std::ptr::NonNull;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -59,28 +57,27 @@ fn event_send_invalid_utf8(ctx: &Context, args: Vec<RedisString>) -> RedisResult
     }
 
     let key_name = RedisString::create(NonNull::new(ctx.get_raw()), "mykey");
-    // Fire a keyspace event whose name is not valid UTF-8 (0xFF can never
-    // appear in a UTF-8 string), the way a C module could. This has to go
-    // through the raw API because the safe wrapper only accepts &str.
-    let event = CString::new(&b"ev\xFFnt"[..]).unwrap();
-    // SAFETY: `RedisModule_NotifyKeyspaceEvent` is set by Redis before any
-    // command handler runs, so the `unwrap` cannot fail. `ctx.get_raw()` is the
-    // valid context passed to this command invocation, `event` is a
-    // NUL-terminated C string that outlives the call, and `key_name.as_ptr()`
-    // is a valid `RedisModuleString` owned by `key_name` for the duration
-    // of the call.
-    let status: Status = unsafe {
-        raw::RedisModule_NotifyKeyspaceEvent.unwrap()(
-            ctx.get_raw(),
-            NotifyEvent::GENERIC.bits(),
-            event.as_ptr(),
-            key_name.as_ptr(),
-        )
+    ctx.notify_keyspace_event_bytes(NotifyEvent::GENERIC, b"ev\xFFnt", &key_name)?;
+    Ok("Event sent".into())
+}
+
+fn event_send_bytes(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if args.len() != 2 {
+        return Err(RedisError::WrongArity);
     }
-    .into();
-    match status {
+    let key_name = ctx.create_string("mykey");
+    ctx.notify_keyspace_event_bytes(NotifyEvent::GENERIC, args[1].as_slice(), &key_name)?;
+    Ok("Event sent".into())
+}
+
+fn event_send_text(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if args.len() != 2 {
+        return Err(RedisError::WrongArity);
+    }
+    let key_name = ctx.create_string("mykey");
+    match ctx.notify_keyspace_event(NotifyEvent::GENERIC, args[1].try_as_str()?, &key_name) {
         Status::Ok => Ok("Event sent".into()),
-        Status::Err => Err(RedisError::Str("Generic error")),
+        Status::Err => Err(RedisError::Str("ERR text notification rejected")),
     }
 }
 
@@ -113,6 +110,8 @@ redis_module! {
     commands: [
         ["events.send", event_send, "", 0, 0, 0, ""],
         ["events.send_invalid_utf8", event_send_invalid_utf8, "", 0, 0, 0, ""],
+        ["events.send_bytes", event_send_bytes, "", 0, 0, 0, ""],
+        ["events.send_text", event_send_text, "", 0, 0, 0, ""],
         ["events.last_generic_event", last_generic_event, "", 0, 0, 0, ""],
         ["events.num_key_miss", num_key_miss, "", 0, 0, 0, ""],
         ["events.num_keys", num_keys, "", 0, 0, 0, ""],

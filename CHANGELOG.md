@@ -13,6 +13,9 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `ErrorReply::code` and `ErrorCallReply::code`, which borrow the error prefix
+  without allocating or decoding UTF-8, and `Context::notify_keyspace_event_bytes`,
+  which sends event names containing arbitrary bytes except NUL.
 - `Context::get_selected_db`, `select_db`, and `with_db`, which restores the
   original database after a closure returns or unwinds.
 - `ArgCursor`, which parses command arguments by borrowing them.
@@ -46,6 +49,8 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- `Context::notify_keyspace_event` returns `Status::Err` for NUL-containing
+  event names instead of panicking.
 - **Breaking:** functions that take raw pointers they dereference are `unsafe`: `Context::new`, `Context::dummy`, `RedisString::new`, `RedisString::from_redis_module_string`, `RedisString::from_ptr`, `RedisString::string_as_slice`, `decode_args`, `RedisKey::open` and `open_with_flags`, `RedisKeyWritable::open`, `open_with_flags` and `open_with_redis_string`, `InfoContext::new`, `RedisBuffer::new`, `RedisModuleIO::new`, `logging::setup_for_context`, `logging::log_io_error`, `DefragContext::defrag_dealloc`, and in `raw` the RDB `save_*` and `load_*` helpers, `is_io_error`, `redis_log`, `call_reply_verbatim_string` and the doc-hidden `register_info_function`.
 - **Breaking:** the `ctx` fields of `Context` and `InfoContext` and `RedisString`'s `inner` field are private; use `get_raw()` and `as_ptr()`.
 - **Breaking:** `RedisString::try_as_str` borrows from the string, and `RedisString` no longer stores a context. `Context::get_current_user` returns `Option<RedisString>`. `ScanKeyCursor::scan` and `for_each` callbacks receive the value as `Option<&RedisString>`, and `KeysCursor::scan` takes `&mut F`.

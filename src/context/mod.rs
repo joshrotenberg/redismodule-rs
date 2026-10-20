@@ -943,6 +943,10 @@ impl Context {
     }
 
     /// Fires a keyspace notification for `keyname`.
+    ///
+    /// Returns [`Status::Err`] if the event contains a NUL byte or Redis rejects
+    /// the notification. See [`Self::notify_keyspace_event_bytes`] for byte
+    /// event names and detailed errors.
     #[allow(clippy::must_use_candidate)]
     pub fn notify_keyspace_event(
         &self,
@@ -950,7 +954,36 @@ impl Context {
         event: &str,
         keyname: &RedisString,
     ) -> raw::Status {
-        unsafe { raw::notify_keyspace_event(self.ctx, event_type, event, keyname) }
+        self.notify_keyspace_event_bytes(event_type, event.as_bytes(), keyname)
+            .map_or(Status::Err, |()| Status::Ok)
+    }
+
+    /// Fires a keyspace notification with an event name that need not be UTF-8.
+    ///
+    /// Redis takes a C string, so interior NUL bytes are rejected before the
+    /// notification is sent. Empty names are permitted. Existing event handlers
+    /// still receive a lossily decoded string through `redis_event_handler!`.
+    pub fn notify_keyspace_event_bytes(
+        &self,
+        event_type: raw::NotifyEvent,
+        event: &[u8],
+        keyname: &RedisString,
+    ) -> Result<(), RedisError> {
+        let event = CString::new(event)
+            .map_err(|_| RedisError::Str("ERR keyspace event name contains a NUL byte"))?;
+        let status: Status = unsafe {
+            crate::__required_api!(RedisModule_NotifyKeyspaceEvent)(
+                self.ctx,
+                event_type.bits(),
+                event.as_ptr(),
+                keyname.as_ptr(),
+            )
+        }
+        .into();
+        match status {
+            Status::Ok => Ok(()),
+            Status::Err => Err(RedisError::Str("ERR keyspace notification failed")),
+        }
     }
 
     pub fn current_command_name(&self) -> Result<String, RedisError> {
