@@ -12,6 +12,207 @@ use redis_module::RedisValue;
 mod utils;
 
 #[test]
+fn test_harness_starts_with_module_arguments() -> Result<()> {
+    let mut con = TestConnection::try_with_args(
+        "configuration",
+        &[
+            "i64",
+            "42",
+            "bool",
+            "YES",
+            "memory",
+            "2kb",
+            "string",
+            "two words",
+        ],
+    )?;
+    let configs: HashMap<String, String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.*"])
+        .query(&mut con)?;
+    for (name, expected) in [
+        ("i64", "42"),
+        ("bool", "yes"),
+        ("memory", "2048"),
+        ("string", "two words"),
+    ] {
+        assert_eq!(configs[&format!("configuration.{name}")], expected);
+    }
+    assert!(con.server_log()?.contains("configuration init: i64 is 42"));
+    Ok(())
+}
+
+#[test]
+fn test_harness_failed_startup_includes_module_diagnostic() {
+    let error = match TestConnection::try_with_args("configuration", &["bool", "invalid"]) {
+        Ok(_) => panic!("a module with an invalid configuration started"),
+        Err(error) => error,
+    };
+    let diagnostic = format!("{error:#}");
+    assert!(diagnostic.contains("Server log ("), "{diagnostic}");
+    assert!(
+        diagnostic.contains("Boolean configuration 'bool' must be 'yes' or 'no'"),
+        "{diagnostic}"
+    );
+    assert!(
+        !diagnostic.contains("configuration init:"),
+        "init ran for a failed load: {diagnostic}"
+    );
+}
+
+#[test]
+fn test_harness_replica_receives_initial_and_later_writes() -> Result<()> {
+    let mut primary = TestConnection::new("hello");
+    redis::cmd("SET")
+        .arg(&["before-replica", "initial value"])
+        .query::<()>(&mut primary)?;
+    let mut replica = primary.replica()?;
+    assert_ne!(primary.port(), replica.port());
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("before-replica")
+            .query::<String>(&mut replica)?,
+        "initial value"
+    );
+    assert_eq!(
+        redis::cmd("hello.mul")
+            .arg(&[2, 3])
+            .query::<Vec<i64>>(&mut replica)?,
+        [2, 3, 6]
+    );
+
+    redis::cmd("SET")
+        .arg(&["after-replica", "later value"])
+        .query::<()>(&mut primary)?;
+    let acknowledged: usize = redis::cmd("WAIT").arg(&[1, 5000]).query(&mut primary)?;
+    assert_eq!(acknowledged, 1, "replica log: {}", replica.server_log()?);
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("after-replica")
+            .query::<String>(&mut replica)?,
+        "later value"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_harness_restart_preserves_data_and_module_arguments() -> Result<()> {
+    let mut con = TestConnection::with_args(
+        "configuration",
+        &[
+            "i64",
+            "37",
+            "string",
+            "restart configuration",
+            "bool",
+            "YES",
+        ],
+    );
+    let port = con.port();
+    let directory: Vec<String> = redis::cmd("CONFIG").arg(&["GET", "dir"]).query(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["restart-data", "saved value"])
+        .query::<()>(&mut con)?;
+
+    for expected_count in 1..=2 {
+        redis::cmd("INCR")
+            .arg("restart-count")
+            .query::<i64>(&mut con)?;
+        con = con.restart()?;
+        assert_eq!(con.port(), port);
+        assert_eq!(
+            redis::cmd("CONFIG")
+                .arg(&["GET", "dir"])
+                .query::<Vec<String>>(&mut con)?,
+            directory
+        );
+        assert_eq!(
+            redis::cmd("GET")
+                .arg("restart-count")
+                .query::<i64>(&mut con)?,
+            expected_count
+        );
+        assert_eq!(
+            redis::cmd("GET")
+                .arg("restart-data")
+                .query::<String>(&mut con)?,
+            "saved value"
+        );
+        let configs: HashMap<String, String> = redis::cmd("CONFIG")
+            .arg(&["GET", "configuration.*"])
+            .query(&mut con)?;
+        assert_eq!(configs["configuration.i64"], "37");
+        assert_eq!(configs["configuration.string"], "restart configuration");
+        assert_eq!(configs["configuration.bool"], "yes");
+        assert!(
+            redis::cmd("configuration.num_changes").query::<i64>(&mut con)? > 0,
+            "the module's command or configuration initialization was lost"
+        );
+    }
+    assert_eq!(
+        con.server_log()?
+            .matches("configuration init: i64 is 37")
+            .count(),
+        3,
+        "the original log and both restart logs must be retained"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_harness_wait_until_reports_timeout() {
+    let mut attempts = 0;
+    let error = utils::wait_until(
+        Duration::from_millis(20),
+        "condition that stays false",
+        || {
+            attempts += 1;
+            Ok(false)
+        },
+    )
+    .expect_err("an unsatisfied condition succeeded");
+    assert!(attempts > 0);
+    assert!(
+        error.to_string().contains("condition that stays false"),
+        "{error}"
+    );
+}
+
+#[test]
+fn test_harness_wait_until_preserves_predicate_error() {
+    let mut attempts = 0;
+    let error = utils::wait_until(Duration::from_secs(1), "condition with an error", || {
+        attempts += 1;
+        Err(anyhow::anyhow!("predicate failed"))
+    })
+    .expect_err("a failed predicate succeeded");
+    assert_eq!(attempts, 1, "predicate errors must not be retried");
+    assert_eq!(error.to_string(), "predicate failed");
+}
+
+#[test]
+fn test_harness_pipeline_error_drains_remaining_replies() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    redis::cmd("SET")
+        .arg(&["pipeline-string", "value"])
+        .query::<()>(&mut con)?;
+    let error = redis::pipe()
+        .cmd("LPUSH")
+        .arg(&["pipeline-string", "item"])
+        .cmd("PING")
+        .query::<Vec<Value>>(&mut *con)
+        .expect_err("LPUSH accepted a string key");
+    assert_eq!(error.code(), Some("WRONGTYPE"), "{error}");
+    assert_eq!(
+        redis::cmd("ECHO")
+            .arg("after the pipeline")
+            .query::<String>(&mut con)?,
+        "after the pipeline",
+        "the failed pipeline left a PING reply on the connection"
+    );
+    Ok(())
+}
+
+#[test]
 fn test_string_ownership_additional_encodings() -> Result<()> {
     let mut con = TestConnection::new("string_ownership");
     redis::cmd("CONFIG")
@@ -1657,7 +1858,7 @@ fn test_acl_category_survives_module_reload() -> Result<()> {
         .query::<()>(&mut restricted)?;
 
     let assert_access =
-        |con: &mut TestConnection, restricted: &mut redis::Connection| -> Result<()> {
+        |con: &mut TestConnection, restricted: &mut utils::Connection| -> Result<()> {
             // Redis 7.4's ACL CAT <category> omits module commands. COMMAND INFO
             // reports their category membership on every version tested here.
             let command: Vec<Vec<Value>> = redis::cmd("COMMAND")
@@ -1966,15 +2167,9 @@ fn test_cron_event_hz() -> Result<()> {
         .arg(&["SET", "hz", "50"])
         .query::<()>(&mut con)?;
     // At 50 Hz a cron event follows within 20 ms; allow a second.
-    let mut hz = 0;
-    for _ in 0..100 {
-        hz = redis::cmd("last_cron_hz").query(&mut con)?;
-        if hz == 50 {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert_eq!(hz, 50);
+    utils::wait_until(Duration::from_secs(1), "a 50 Hz cron event", || {
+        Ok(redis::cmd("last_cron_hz").query::<i64>(&mut con)? == 50)
+    })?;
 
     Ok(())
 }

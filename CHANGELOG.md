@@ -36,6 +36,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - New variants `KeyType::Gcra`, `ReplyType::Attribute` and `ReplyType::Promise`.
 - `KeyFlags::ACCESS_TRIMMED` (upstream PR 468), and the swap-prefetch and `RedisModule_SetOpenFilesReservation` declarations in the vendored header (upstream PRs 478 and 486).
 - docs/MIGRATING-3.0.md.
+- The fork's integration harness supports module arguments, fallible startup
+  with server logs, bounded polling, replica startup, and graceful restarts on
+  saved data. Test servers use OS-selected ports and isolated directories,
+  with bounded retries for confirmed port collisions on fresh launches;
+  TEST_REDIS_SERVER_BIN selects another Redis binary.
 
 ### Changed
 
@@ -88,6 +93,9 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - `From<c_int>` for `KeyType`, `ReplyType` and `Status` panicked on values outside their lists, and version parsing panicked on a number that overflows.
 - `RedisAlloc` ignored alignments above 16 bytes.
 - String configuration getters leaked their replies.
+- Integration tests no longer retry forever after Redis fails to start. Startup
+  probes configure socket timeouts before protocol traffic and verify the child
+  process identity.
 - The `configurations` block of `redis_module!` compiled only with all four groups and `module_args_as_configuration` listed, and a memory configuration given as a module argument with a unit, such as `8mb`, failed the module load.
 - Module arguments used as configuration are read in name/value pairs, so a value matching another configuration's name does not override it. Numeric bounds are checked after memory units are converted, and mixed-case boolean values are parsed correctly.
 - The stream iterator deleted an entry when dropped instead of stopping.
