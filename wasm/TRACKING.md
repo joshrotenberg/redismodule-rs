@@ -220,6 +220,13 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: rebased onto SDK master `1d918e7`, which adds borrowed call-error
+  prefixes and byte notification names. No host adaptation needed. Rust 1.94.0
+  and Redis 8.10.2: workspace and guest formatting, default workspace Clippy,
+  separate SDK 7.2 Clippy, example builds, and guest Clippy passed. The full
+  workspace suite passed, including 91 SDK integration tests, four standalone
+  harness cases, seven host unit tests, and 21 host integration tests with
+  JavaScript; the guest helper's four tests passed.
 - 2026-10-20: rebased onto SDK master `e9425f8`, which adds direct and scoped
   database selection helpers. No host adaptation needed. Rust 1.94.0 and Redis
   8.10.2: workspace and guest formatting, default workspace Clippy, separate

@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-20.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `e9425f8`, scoped database selection helpers merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `1d918e7`, error-code and byte-event helpers merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `e9425f8` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `1d918e7` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -118,8 +118,11 @@ Database selection helpers merged in `e9425f8`: `Context::select_db`,
 return or unwind. Integration tests cover nested scopes, invalid indices,
 errors, and panics.
 
-Next: an accessor for the error code of a call's error reply, and
-`notify_keyspace_event` with a byte event name.
+Error-code and notification helpers merged in `1d918e7`: borrowed error
+prefixes on both call-error wrappers and byte event names with NUL rejection.
+
+Next: an optional command builder alongside the legacy `redis_module!` syntax,
+with shared registration, typed flags, named key positions, and ACL settings.
 
 Then: subscribing to keyspace events after load, the server-event payloads for
 flush and `SWAPDB`, a guide on writing to the keyspace from a notification, and
