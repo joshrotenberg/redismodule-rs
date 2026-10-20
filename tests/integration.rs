@@ -895,6 +895,62 @@ fn test_hash_mutation_counts() -> Result<()> {
             .expect_err("a string key accepted a hash mutation");
         assert_eq!(error.code(), Some("WRONGTYPE"), "{cmd}: {error}");
     }
+    Ok(())
+}
+
+#[test]
+fn test_event_loop() -> Result<()> {
+    let mut con = TestConnection::new("event_loop");
+
+    // Polls `query` until it returns `expected`, for up to a second.
+    fn wait_for(con: &mut TestConnection, query: &redis::Cmd, expected: &[u8]) -> Result<Vec<u8>> {
+        let mut value = Vec::new();
+        for _ in 0..100 {
+            value = query.query::<Option<Vec<u8>>>(con)?.unwrap_or_default();
+            if value == expected {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Ok(value)
+    }
+
+    // A one-shot scheduled from another thread runs on the main thread.
+    redis::cmd("eventloop.set_later")
+        .arg(&["later", "done"])
+        .query::<()>(&mut con)?;
+    let mut get = redis::cmd("GET");
+    get.arg("later");
+    assert_eq!(wait_for(&mut con, &get, b"done")?, b"done");
+
+    // A readable callback reads a pipe, then removes itself.
+    for text in ["first", "second"] {
+        redis::cmd("eventloop.pipe")
+            .arg(text)
+            .query::<()>(&mut con)?;
+        let last_read = redis::cmd("eventloop.last_read");
+        assert_eq!(
+            wait_for(&mut con, &last_read, text.as_bytes())?,
+            text.as_bytes()
+        );
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    // remove refuses a descriptor it did not add, here this client's socket.
+    let info: String = redis::cmd("CLIENT").arg("INFO").query(&mut con)?;
+    let fd = info
+        .split_whitespace()
+        .find_map(|field| field.strip_prefix("fd="))
+        .context("CLIENT INFO has no fd")?;
+    let error = redis::cmd("eventloop.remove")
+        .arg(fd)
+        .query::<String>(&mut con)
+        .expect_err("remove accepted a client's descriptor");
+    assert!(
+        error.to_string().contains("no event loop callback"),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
 
     Ok(())
 }

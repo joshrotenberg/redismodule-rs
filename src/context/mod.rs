@@ -31,6 +31,7 @@ pub mod blocked;
 pub mod call_reply;
 pub mod commands;
 pub mod defrag;
+pub mod event_loop;
 pub mod info;
 pub mod key_cursor;
 pub mod keys_cursor;
