@@ -1091,6 +1091,52 @@ impl Context {
         }
     }
 
+    /// The positions in `args`, which start with the command name, of the keys
+    /// the command would use, as Redis finds them for cluster routing and ACL
+    /// checks (`RedisModule_GetCommandKeysWithFlags`, Redis 7.0).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the command is unknown, `args` do not fit its
+    /// arity, or the running Redis does not provide the API.
+    pub fn get_command_keys(&self, args: &[RedisString]) -> Result<Vec<usize>, RedisError> {
+        let get_keys = unsafe { crate::__available_api!(RedisModule_GetCommandKeysWithFlags) };
+        let argc = c_int::try_from(args.len())
+            .map_err(|_| RedisError::Str("ERR too many command arguments"))?;
+        let mut argv: Vec<*mut raw::RedisModuleString> =
+            args.iter().map(RedisString::as_ptr).collect();
+        let mut num_keys: c_int = 0;
+        // SAFETY: argv holds live strings for the call, and out_flags may be
+        // null. Redis allocates the returned positions, freed below.
+        let positions = unsafe {
+            get_keys(
+                self.ctx,
+                argv.as_mut_ptr(),
+                argc,
+                &mut num_keys,
+                ptr::null_mut(),
+            )
+        };
+        if positions.is_null() {
+            // Null with errno 0 means a command without keys.
+            return match std::io::Error::last_os_error().raw_os_error() {
+                Some(libc::ENOENT) => Err(RedisError::Str("ERR unknown command")),
+                Some(libc::EINVAL) => Err(RedisError::Str(
+                    "ERR wrong number of arguments for the command",
+                )),
+                _ => Ok(Vec::new()),
+            };
+        }
+        let len = usize::try_from(num_keys).unwrap_or(0);
+        // SAFETY: Redis returned num_keys positions.
+        let keys = unsafe { std::slice::from_raw_parts(positions, len) }
+            .iter()
+            .filter_map(|&pos| usize::try_from(pos).ok())
+            .collect();
+        unsafe { crate::__required_api!(RedisModule_Free)(positions.cast()) };
+        Ok(keys)
+    }
+
     /// Checks whether the user named `user_name` may run the command in `args`,
     /// its name followed by its arguments, as `RedisModule_ACLCheckCommandPermissions`
     /// does. The arguments matter for the key permissions of the command and for
@@ -1824,6 +1870,7 @@ impl InfoContext {
 }
 
 bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct ContextFlags : c_int {
         /// The command is running in the context of a Lua script
         const LUA = raw::REDISMODULE_CTX_FLAGS_LUA as c_int;
