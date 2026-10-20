@@ -1,0 +1,47 @@
+package redis-module-wasm:host@0.1.0;
+
+/// What the host gives a guest.
+interface redis {
+    /// One node of a reply, in pre-order. WIT has no recursive types, so an
+    /// aggregate node carries its element count and its elements follow it:
+    /// `array(n)` and `set(n)` are followed by n nodes, `map(n)` by n key and
+    /// value pairs (2n nodes).
+    variant node {
+        nil,
+        integer(s64),
+        double(f64),
+        boolean(bool),
+        simple(string),
+        bulk(list<u8>),
+        error(string),
+        array(u32),
+        set(u32),
+        map(u32),
+    }
+
+    enum log-level {
+        debug,
+        verbose,
+        notice,
+        warning,
+    }
+
+    /// Runs a Redis command, like `redis.pcall`: an error comes back as an
+    /// `error` node instead of failing the call.
+    call: func(command: string, args: list<list<u8>>) -> list<node>;
+
+    /// Writes to the server log.
+    log: func(level: log-level, message: string);
+}
+
+/// A library of functions, like one loaded with `FUNCTION LOAD`.
+world library {
+    import redis;
+    use redis.{node};
+
+    /// The names of the functions this library provides.
+    export functions: func() -> list<string>;
+
+    /// Runs function `name` with its keys and arguments, and returns the reply.
+    export invoke: func(name: string, keys: list<list<u8>>, args: list<list<u8>>) -> list<node>;
+}

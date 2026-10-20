@@ -1,0 +1,27 @@
+[package]
+name = "redis-module-wasm"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "A Redis module that runs WebAssembly components as functions"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The default API floor: the host looks up newer APIs, such as
+# RedisModule_CallReplyProto, when it runs. Another floor here would combine
+# with the workspace's default one in workspace builds.
+redis-module = { path = ".." }
+# 36 is a long-term support release whose MSRV fits this workspace.
+wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime", "component-model", "std"] }
+anyhow = "1"
+
+[dev-dependencies]
+# Unit tests run outside Redis, where RedisAlloc has no allocator to use.
+redis-module = { path = "..", features = ["system-allocator-fallback"] }
+redis = "0.23"
+# The same wasm-tools release as wasmtime 36.
+wit-component = "0.236"

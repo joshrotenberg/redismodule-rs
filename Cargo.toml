@@ -1,5 +1,7 @@
 [workspace]
-members = [".", "redismodule-rs-macros", "redismodule-rs-macros-internals"]
+members = [".", "redismodule-rs-macros", "redismodule-rs-macros-internals", "wasm"]
+# Guests build for wasm32 with their own manifests.
+exclude = ["wasm/guests"]
 # Prefer dependency versions that support rust-version.
 resolver = "3"
 
@@ -291,3 +293,8 @@ system-allocator-fallback = []
 
 # List all features here, that are not in a exclusive or relationship
 all-features-but-xor = ["system-allocator-fallback"]
+
+# On macOS, stripping debug info from the wasm host's release build leaves a
+# dylib that dyld refuses to load ("mis-aligned LINKEDIT string pool").
+[profile.release.package.redis-module-wasm]
+strip = "none"
