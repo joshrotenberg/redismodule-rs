@@ -10,6 +10,7 @@
 //! WASM.CALL recurse 0            calls WASM.LIST, which a guest may not run
 //! WASM.CALL spin 0               loops until WASM.KILL stops it
 //! WASM.CALL write_then_spin 1 key  SETs the key, then loops; WASM.KILL refuses
+//! WASM.CALL counter 0            counts the calls this instance has served
 //! ```
 
 wit_bindgen::generate!({
@@ -19,7 +20,7 @@ wit_bindgen::generate!({
 
 use redis_module_wasm::host::redis::{LogLevel, call, log};
 
-const FUNCTIONS: [&str; 9] = [
+const FUNCTIONS: [&str; 10] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -29,7 +30,11 @@ const FUNCTIONS: [&str; 9] = [
     "recurse",
     "spin",
     "write_then_spin",
+    "counter",
 ];
+
+/// Calls of `counter` that this instance has served.
+static COUNTER: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
 struct Hello;
 
@@ -76,6 +81,9 @@ impl Guest for Hello {
             "fail" => vec![Node::Error("ERR this function always fails".into())],
             "recurse" => call("WASM.LIST", &[]),
             "spin" => spin(),
+            "counter" => vec![Node::Integer(
+                COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
+            )],
             "write_then_spin" => match keys.first() {
                 Some(key) => {
                     call("SET", &[key.clone(), b"1".to_vec()]);

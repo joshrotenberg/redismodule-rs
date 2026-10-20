@@ -22,6 +22,9 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   effects replicated, RESP3) and `log`. No WASI imports.
 - Reply types survive both ways, including simple versus bulk strings, maps,
   sets, nil, and errors inside arrays. A guest cannot run `WASM.*` commands.
+- Each library keeps one instance between calls, so guest state persists
+  across calls; a failed call, `REPLACE` or `DELETE` drops it. A call costs
+  about the same server time as the equivalent Lua function (see Numbers).
 - The host is about 400 lines. The example guest is 22 KB as a core module and
   23 KB as a component. The integration test runs in about 1.3 seconds.
 
@@ -29,19 +32,32 @@ Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 `wit-bindgen` 0.44.
 
-### Numbers (release build, laptop, one run)
+### Numbers
 
-| | 1 client | 50 clients |
+Server time per call from `INFO commandstats` (`usec_per_call`), with 50
+`redis-benchmark` clients, release build, Redis 8.10.2 on a laptop; two runs
+each, so ranges. Lua is `FCALL` of the same function.
+
+| function | wasm, an instance per call (before H2) | wasm, kept instance (H2) | Lua |
+|---|---|---|---|
+| `incr_twice` (two INCRs) | 20.8 to 22.0 µs (35k to 38k/s) | 2.6 to 2.9 µs (85k to 126k/s) | 1.3 to 1.5 µs (99k to 157k/s) |
+| `nested` (an array with a map, nil and an error; no calls) | 19.9 to 20.8 µs (38k/s) | 1.3 to 1.5 µs (103k to 155k/s) | 1.5 to 1.8 µs (92k to 153k/s) |
+
+Where a call's time went before H2 (`incr_twice`, phase timers, 22 µs):
+instantiating 7.9 µs, dropping the instance and store 7.8 µs, the guest 5.4 µs
+of which 1.1 µs in the two RedisModule_Call calls, everything else under
+0.5 µs. Variants measured back to back:
+
+| variant | `incr_twice` | `nested` |
 |---|---|---|
-| `PING` | 11.7k/s | |
-| Lua `FCALL incr_twice` (two INCRs) | 12.5k/s | 153k/s (about 6.5 µs per call) |
-| `WASM.CALL incr_twice` (same work) | 9.7k/s | 37k/s (about 27 µs per call) |
+| an instance per call | 22.0 µs | 20.3 µs |
+| an instance per call, pooling allocator, 64 KiB kept resident | 14.1 µs | 12.1 µs |
+| a kept instance per library | 2.65 µs | 0.94 µs |
 
-- One client is bound by the round trip; the 50-client column is the server's
-  cost. The 50-client wasm figure is with H1's epoch checks and write tracking
-  (39k/s before them; Lua varied between 133k and 153k/s across runs, so the
-  difference is within the noise). A fresh instance per call is the likely cause of the difference; not yet
-  measured (H2).
+The pooling allocator's teardown is mostly resetting the guest's memory, which
+starts at about 1.1 MiB (the Rust guest's default stack). The kept instance
+avoids both instantiating and tearing down, and was adopted.
+
 - `WASM.LOAD` of the 23 KB component: 23 ms, compilation included, on the main
   thread.
 - `used_memory` about 1.3 MB while RSS was 16 to 18 MB: guest memory and
@@ -55,8 +71,8 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 | ID | status | item | done when |
 |---|---|---|---|
 | H1 | done | **Time limit and kill.** wasmtime epoch interruption; at each epoch the host calls `Context::yield_now(YieldMode::Clients, ..)`, so other clients get `-BUSY` past `busy-reply-threshold`. `WASM.KILL`, flagged `allow-busy`, stops a running guest that has not written, as `FUNCTION KILL` does. | A test runs a guest that loops forever, sees `-BUSY` from another client, kills it, and the server keeps serving. |
-| H2 | next | **Per-call cost.** Measure where the 26 µs goes, then reuse instances per library or use wasmtime's pooling allocator. | The benchmark table is updated, with the cause named. |
-| H3 | todo | **A fair benchmark.** Add a compute-heavy function next to the two-INCR one, in both wasm and Lua, and keep the script in the repository. | `wasm/bench/` reproduces both rows on one command. |
+| H2 | done | **Per-call cost.** Measure where the 26 µs goes, then reuse instances per library or use wasmtime's pooling allocator. | The benchmark table is updated, with the cause named. |
+| H3 | next | **A fair benchmark.** Add a compute-heavy function next to the two-INCR one, in both wasm and Lua, and keep the script in the repository. | `wasm/bench/` reproduces both rows on one command. |
 | H4 | todo | **A guest in another language.** JavaScript (componentize-js), Python (componentize-py) or Go (TinyGo), whichever produces components wasmtime 36 loads. | The integration test loads and calls a non-Rust guest. |
 | H5 | todo | **Persistence and replication.** Save libraries in aux data (`aux_save`, `aux_load`) and replicate `WASM.LOAD` and `WASM.DELETE` verbatim. | Tests with a restart and with a replica see the same libraries. |
 
@@ -66,7 +82,7 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 |---|---|---|---|
 | H6 | todo | **Key specs for `WASM.CALL`.** A keynum key spec so a cluster routes it by its keys. `redis_module!`'s command table cannot express one; check the `#[command]` macro or `RedisModule_SetCommandInfo`. | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
 | H7 | todo | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread. | The server answers other clients while a large component compiles. |
-| H8 | todo | **Memory.** A memory limit per instance (wasmtime resource limiter), refusing writes when `used_memory_ratio` is at 1, and an `INFO` section with the host's memory. | Tests for the limit, the refusal and the `INFO` fields. |
+| H8 | todo | **Memory.** A memory limit per instance (wasmtime resource limiter), refusing writes when `used_memory_ratio` is at 1, and an `INFO` section with the host's memory. Kept instances (H2) only grow, so also replace an instance whose memory passes a size. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
 | H9 | todo | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`), `WASM.CALL_RO`, a `call` that fails where `pcall` returns the error, and `acl-check-command` and `set-resp` imports. | Each has a test matching what Lua does. |
 | H10 | todo | **Guest helper library.** A small Rust crate that builds the pre-order node list from typed values, so guests do not build it by hand. | The example guest uses it. |
 | H11 | todo | **Bounds check cost.** Signal-based traps are off so wasmtime installs no signal handlers over Redis's crash handler; measure what explicit bounds checks cost. | A number for a memory-heavy guest with traps on and off. |
@@ -109,6 +125,15 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H2 done: phase timers showed instantiating and dropping a
+  fresh instance took about 16 of 22 µs per call. The pooling allocator cut a
+  call to 14 µs; keeping one instance per library cut it to about 2.7 µs
+  (`incr_twice`) and 1.3 µs (`nested`), against Lua's 1.3 to 1.5 µs. Adopted
+  the kept instance: dropped after a failed call or on `REPLACE` and
+  `DELETE`; a nested call of the same library (from another module's callback)
+  gets its own instance; the store's context is set only during a call. Test:
+  a counter in the guest carries over between calls, survives an error reply,
+  and restarts after a kill and after `REPLACE`.
 - 2026-10-20: H1 done: epoch interruption with a 10 ms ticker thread,
   `yield_now` at each epoch, `WASM.KILL` with `NOTBUSY` and `UNKILLABLE`, write
   tracking from `COMMAND INFO` (cached, subcommands included), killable

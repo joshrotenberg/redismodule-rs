@@ -16,8 +16,15 @@ WASM.DELETE <library>
 WASM.KILL                                       stop the running function, as FUNCTION KILL does
 ```
 
-Function names are global across libraries, as with `FUNCTION`. Each call runs
-in a fresh instance of its library, so calls share no guest state.
+Function names are global across libraries, as with `FUNCTION`.
+
+Each library keeps one instance between calls, so a guest's memory and globals
+persist from one call to the next; creating an instance per call made a call
+about eight times slower. A call that fails, for example one that traps or is
+killed, drops the instance, and the next call starts a new one; replacing or
+deleting the library drops it too. All callers of a library share its
+instance, so a guest should not keep data from one call that another caller
+must not see.
 
 ## Long-running functions
 

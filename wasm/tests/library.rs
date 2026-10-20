@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use redis::{Connection, RedisResult, Value};
 
 /// The functions the example guest provides, in its order.
-const FUNCTIONS: [&str; 9] = [
+const FUNCTIONS: [&str; 10] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -23,6 +23,7 @@ const FUNCTIONS: [&str; 9] = [
     "recurse",
     "spin",
     "write_then_spin",
+    "counter",
 ];
 
 /// The workspace's `target` directory, from this test binary's path
@@ -385,4 +386,41 @@ fn a_function_that_wrote_cannot_be_killed() {
     let child = &mut server.child;
     wait_for("redis-server to exit", || child.try_wait().ok().flatten());
     assert!(spin.join().unwrap().is_err());
+}
+
+fn counter(con: &mut Connection) -> i64 {
+    match call(con, &["counter", "0"]).unwrap() {
+        Value::Int(n) => n,
+        other => panic!("counter replied {other:?}"),
+    }
+}
+
+#[test]
+fn a_library_keeps_its_instance_until_a_call_fails_or_it_is_replaced() {
+    let (server, mut con) = busy_server(6614);
+    // Calls share the instance, so the guest's state carries over.
+    assert_eq!(
+        [counter(&mut con), counter(&mut con), counter(&mut con)],
+        [1, 2, 3]
+    );
+    // An error reply is a successful call: the instance stays.
+    assert!(error_text(call(&mut con, &["fail", "0"])).starts_with("ERR"));
+    assert_eq!(counter(&mut con), 4);
+
+    // A killed call drops the instance; the next call gets a new one.
+    let mut spinner = server.connection();
+    let spin = std::thread::spawn(move || error_text(call(&mut spinner, &["spin", "0"])));
+    wait_for_busy(&mut con);
+    assert_eq!(kill(&mut con).unwrap(), Value::Okay);
+    assert!(spin.join().unwrap().contains("killed by WASM.KILL"));
+    assert_eq!(counter(&mut con), 1);
+
+    // Replacing the library starts over too.
+    let _: Vec<String> = redis::cmd("WASM.LOAD")
+        .arg("hello")
+        .arg(hello_component())
+        .arg("REPLACE")
+        .query(&mut con)
+        .expect("WASM.LOAD REPLACE");
+    assert_eq!(counter(&mut con), 1);
 }

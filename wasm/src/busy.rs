@@ -10,7 +10,7 @@
 //! acts on.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -30,31 +30,35 @@ const BUSY_REPLY: &str =
 /// The error a killed function fails with.
 const KILLED: &str = "killed by WASM.KILL";
 
-/// The function running now. Functions run on the main thread, one at a time:
-/// another `WASM.CALL` while one yields gets `-BUSY`.
-static RUNNING: AtomicBool = AtomicBool::new(false);
+/// How many functions are running: one, or more when another module's
+/// callback calls a function from inside a running one. Functions run on the
+/// main thread; another client's `WASM.CALL` while one yields gets `-BUSY`.
+static RUNNING: AtomicUsize = AtomicUsize::new(0);
 /// Set by `WASM.KILL`, acted on at the next epoch.
 static KILL: AtomicBool = AtomicBool::new(false);
 /// Set when the running function calls a write command; such a function is
 /// not killed, so its effects are not left half done.
 static WROTE: AtomicBool = AtomicBool::new(false);
 
-/// Marks a function as running until dropped.
+/// Marks a function as running until dropped. A nested call keeps the outer
+/// call's kill and write state.
 pub(crate) struct Running(());
 
 impl Running {
     pub(crate) fn start() -> Self {
-        KILL.store(false, Ordering::SeqCst);
-        WROTE.store(false, Ordering::SeqCst);
-        RUNNING.store(true, Ordering::SeqCst);
+        if RUNNING.fetch_add(1, Ordering::SeqCst) == 0 {
+            KILL.store(false, Ordering::SeqCst);
+            WROTE.store(false, Ordering::SeqCst);
+        }
         Self(())
     }
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
-        RUNNING.store(false, Ordering::SeqCst);
-        KILL.store(false, Ordering::SeqCst);
+        if RUNNING.fetch_sub(1, Ordering::SeqCst) == 1 {
+            KILL.store(false, Ordering::SeqCst);
+        }
     }
 }
 
@@ -69,7 +73,7 @@ pub(crate) enum Kill {
 }
 
 pub(crate) fn kill() -> Kill {
-    if !RUNNING.load(Ordering::SeqCst) {
+    if RUNNING.load(Ordering::SeqCst) == 0 {
         Kill::NotBusy
     } else if WROTE.load(Ordering::SeqCst) {
         Kill::Unkillable

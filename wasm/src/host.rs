@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::ptr::NonNull;
+use std::sync::{Arc, Mutex, TryLockError};
 
 use anyhow::{Context as _, bail};
 use redis_module::logging::RedisLogLevel;
@@ -20,17 +21,23 @@ wasmtime::component::bindgen!({
 
 use redis_module_wasm::host::redis::LogLevel;
 
-/// The store data for one function call: the context of the command running
-/// it.
+/// A store's data: the context of the command running a guest, set only for
+/// the duration of a call.
 pub(crate) struct CallState {
-    ctx: NonNull<Context>,
+    ctx: Option<NonNull<Context>>,
     options: CallOptions,
 }
 
+// SAFETY: the context pointer is set, used and cleared on the main thread
+// within one command (see `Instance::call`). Instances move between threads
+// only as part of the host's state, and only between calls, when the pointer
+// is None.
+unsafe impl Send for CallState {}
+
 impl CallState {
-    fn new(ctx: &Context) -> Self {
+    fn new() -> Self {
         Self {
-            ctx: NonNull::from(ctx),
+            ctx: None,
             // Like redis.call in a script: script mode (S), the caller's ACL
             // user (C), errors as replies (E), replicate the effects (!), and
             // RESP3 replies so the guest sees each reply's type.
@@ -44,11 +51,14 @@ impl CallState {
         }
     }
 
+    /// The context of the command running the guest. Host imports and the
+    /// epoch callback run only inside a call.
     fn ctx(&self) -> &Context {
-        // SAFETY: a CallState lives in a Store that the command handler
-        // creates and drops before it returns, and the guest runs
-        // synchronously in that handler, so the Context outlives every use.
-        unsafe { self.ctx.as_ref() }
+        let ctx = self.ctx.expect("guest code runs only inside a call");
+        // SAFETY: Instance::call sets the pointer from the command's &Context
+        // and clears it before returning, and the guest runs synchronously in
+        // that call, so the Context outlives every use.
+        unsafe { ctx.as_ref() }
     }
 }
 
@@ -75,11 +85,53 @@ impl redis_module_wasm::host::redis::Host for CallState {
     }
 }
 
-/// A loaded library: its component, linked and ready to instantiate, and the
-/// functions it provides.
+/// A loaded library: its component, linked and ready to instantiate, the
+/// functions it provides, and the instance its calls reuse.
 struct LoadedLibrary {
     pre: LibraryPre<CallState>,
     functions: Vec<String>,
+    kept: KeptInstance,
+}
+
+/// The instance a library's calls reuse. Reusing it, rather than creating one
+/// per call, is what makes a call cheap: instantiating and dropping an
+/// instance took about 16 of a call's 22 µs.
+type KeptInstance = Arc<Mutex<Option<Instance>>>;
+
+/// An instance of a library and its store.
+struct Instance {
+    store: Store<CallState>,
+    library: Library,
+}
+
+impl Instance {
+    fn new(engine: &Engine, pre: &LibraryPre<CallState>, ctx: &Context) -> anyhow::Result<Self> {
+        let mut store = Store::new(engine, CallState::new());
+        store.epoch_deadline_callback(|store| busy::on_epoch(store.data().ctx()));
+        // Instantiating can run guest code, so it runs like a call.
+        store.data_mut().ctx = Some(NonNull::from(ctx));
+        store.set_epoch_deadline(1);
+        let library = pre.instantiate(&mut store);
+        store.data_mut().ctx = None;
+        Ok(Self {
+            store,
+            library: library?,
+        })
+    }
+
+    /// Runs `f` with `ctx` as the context of the guest's imports, yielding to
+    /// Redis at each epoch.
+    fn call<R>(
+        &mut self,
+        ctx: &Context,
+        f: impl FnOnce(&Library, &mut Store<CallState>) -> anyhow::Result<R>,
+    ) -> anyhow::Result<R> {
+        self.store.data_mut().ctx = Some(NonNull::from(ctx));
+        self.store.set_epoch_deadline(1);
+        let result = f(&self.library, &mut self.store);
+        self.store.data_mut().ctx = None;
+        result
+    }
 }
 
 /// The engine and the libraries loaded with `WASM.LOAD`.
@@ -132,10 +184,10 @@ impl Host {
         let component = Component::new(&self.engine, component).context("invalid component")?;
         let pre = LibraryPre::new(self.linker.instantiate_pre(&component)?)?;
 
-        let mut store = new_store(&self.engine, ctx);
         // Listing the functions runs guest code too, so it can be killed.
         let running = Running::start();
-        let functions = pre.instantiate(&mut store)?.call_functions(&mut store)?;
+        let mut instance = Instance::new(&self.engine, &pre, ctx)?;
+        let functions = instance.call(ctx, |library, store| library.call_functions(store))?;
         drop(running);
         for function in &functions {
             match self.functions.get(function) {
@@ -155,6 +207,8 @@ impl Host {
             LoadedLibrary {
                 pre,
                 functions: functions.clone(),
+                // The instance that listed the functions serves the first call.
+                kept: Arc::new(Mutex::new(Some(instance))),
             },
         );
         Ok(functions)
@@ -186,19 +240,26 @@ impl Host {
     /// What a call of `function` needs, so the caller can release the host
     /// before running the guest.
     pub(crate) fn prepare(&self, function: &str) -> Option<PreparedCall> {
-        let library = self.functions.get(function)?;
+        let library = &self.libraries[self.functions.get(function)?];
         Some(PreparedCall {
             engine: self.engine.clone(),
-            pre: self.libraries[library].pre.clone(),
+            pre: library.pre.clone(),
+            kept: Arc::clone(&library.kept),
         })
     }
 }
 
-/// A function call ready to run: a fresh instance per call, so calls share no
-/// guest state.
+/// A function call ready to run.
+///
+/// It runs in the library's kept instance, so a guest's memory and globals
+/// persist from one call to the next. A call that fails, for example one that
+/// traps or is killed, may leave the instance in any state, so its instance is
+/// dropped and the next call starts a new one. Replacing or deleting the
+/// library drops it too.
 pub(crate) struct PreparedCall {
     engine: Engine,
     pre: LibraryPre<CallState>,
+    kept: KeptInstance,
 }
 
 impl PreparedCall {
@@ -210,17 +271,25 @@ impl PreparedCall {
         keys: &[Vec<u8>],
         args: &[Vec<u8>],
     ) -> anyhow::Result<Vec<Node>> {
-        let mut store = new_store(&self.engine, ctx);
         let _running = Running::start();
-        let library = self.pre.instantiate(&mut store)?;
-        library.call_invoke(&mut store, function, keys, args)
+        // Another module's callback can call this library again while one of
+        // its calls runs (from inside a Redis command the guest called). That
+        // nested call finds the kept instance in use and gets a new one.
+        let mut kept = match self.kept.try_lock() {
+            Ok(kept) => Some(kept),
+            Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        };
+        let mut instance = match kept.as_mut().and_then(|kept| kept.take()) {
+            Some(instance) => instance,
+            None => Instance::new(&self.engine, &self.pre, ctx)?,
+        };
+        let result = instance.call(ctx, |library, store| {
+            library.call_invoke(store, function, keys, args)
+        });
+        if let (Ok(_), Some(kept)) = (&result, kept.as_mut()) {
+            **kept = Some(instance);
+        }
+        result
     }
-}
-
-/// A store for one call, which yields to Redis at each epoch.
-fn new_store(engine: &Engine, ctx: &Context) -> Store<CallState> {
-    let mut store = Store::new(engine, CallState::new(ctx));
-    store.set_epoch_deadline(1);
-    store.epoch_deadline_callback(|store| busy::on_epoch(store.data().ctx()));
-    store
 }
