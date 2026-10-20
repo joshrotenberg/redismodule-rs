@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-20.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `5bf61ff`, configuration validation merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `efad730`, ACL category reload fix merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `5bf61ff` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `efad730` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -102,15 +102,16 @@ Module-argument configuration fixes merged in `5bf61ff`: numeric bounds are
 enforced after memory-unit conversion, booleans accept case-insensitive
 `yes`/`no`, and arguments are read as pairs.
 
-1. ACL categories: the module reports that `RedisModule_AddACLCategory` fails on
-   a second `MODULE LOAD` in the same process, which fails the load. Test a
-   load, unload and reload of an example that declares `acl_categories`;
-   distinguish an existing category from other registration errors.
-2. Test harness: pass module arguments, assert a load failure with the server
+The ACL category reload fix merged in `efad730`: an existing category is
+reused only when Redis reports `EBUSY`. Invalid names and other registration
+failures still reject the module load. Regression tests verify retained user
+permissions across two reloads and rejection of invalid names.
+
+1. Test harness: pass module arguments, assert a load failure with the server
    log, a `wait_until` helper, start a replica, restart on the same data.
-3. `Context::select_db` and `get_selected_db`, with a guard that restores the
+2. `Context::select_db` and `get_selected_db`, with a guard that restores the
    database.
-4. An accessor for the error code of a call's error reply, and
+3. An accessor for the error code of a call's error reply, and
    `notify_keyspace_event` with a byte event name.
 
 Then: subscribing to keyspace events after load, the server-event payloads for
