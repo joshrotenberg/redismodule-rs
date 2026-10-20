@@ -67,6 +67,8 @@ calls each function. It needs `redis-server` on the `PATH` and the
 
 ## Not done yet
 
+[TRACKING.md](TRACKING.md) has every open item, with IDs and what done means. The main ones:
+
 - A time limit, with `-BUSY` replies and a kill command.
 - Function flags, read-only calls, and ACL and RESP helpers for guests.
 - Saving libraries in RDB and AOF, and replicating `WASM.LOAD`.
