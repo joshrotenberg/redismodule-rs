@@ -1,5 +1,34 @@
 //! The wasmtime side: the engine, the loaded libraries, and the imports a guest
 //! calls back into Redis through.
+//!
+//! # The context pointer
+//!
+//! A guest's imports and the epoch callback need the context of the command
+//! that runs the guest, but a store's data must be `'static`, so `CallState`
+//! holds that context as a raw pointer. It is sound because:
+//!
+//! - `Instance::call` sets the pointer from the command's `&Context`, runs the
+//!   guest, and clears it. The guest runs synchronously inside that call, so
+//!   every use, from an import or the epoch callback, comes while the borrow
+//!   it was made from is live. `Instance::new` does the same around
+//!   instantiation.
+//! - A call that re-enters the host, through a command the guest runs that
+//!   runs `WASM.CALL` again, finds the kept instance locked and uses a new
+//!   instance with its own pointer; the outer pointer stays valid below it on
+//!   the stack. While a guest yields, Redis runs only `allow-busy` commands,
+//!   and `WASM.CALL` is not one.
+//! - If an import panics, the pointer is not cleared, but the instance is a
+//!   local value of `PreparedCall::run` or `Host::add` and is put back as the
+//!   kept instance only after a call that returned `Ok`, so the unwinding drops
+//!   it with the stale pointer.
+//! - Instances live in the host's state and are only touched on the main
+//!   thread. The fork that saves an RDB reads only component bytes, and the
+//!   compile thread has only clones of the engine and linker. `CallState` is
+//!   `Send` so that the host can sit in a static `Mutex`, and the pointer is
+//!   `None` whenever no call runs.
+//!
+//! The SDK has no lifetime-safe way to give a store the context (S3 in
+//! `TRACKING.md`).
 
 use std::collections::BTreeMap;
 use std::ptr::NonNull;
@@ -58,9 +87,7 @@ pub(crate) struct CallState {
 }
 
 // SAFETY: the context pointer is set, used and cleared on the main thread
-// within one command (see `Instance::call`). Instances move between threads
-// only as part of the host's state, and only between calls, when the pointer
-// is None.
+// within one command; see "The context pointer" in the module docs.
 unsafe impl Send for CallState {}
 
 impl CallState {
