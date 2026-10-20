@@ -29,6 +29,9 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
 - `WASM.CALL` declares its keys with a key spec like `FCALL`'s, so `COMMAND
   GETKEYS`, ACL key patterns and a cluster's `MOVED` and `CROSSSLOT` checks see
   them.
+- Each instance's linear memory is limited by `wasm.max-memory` (64 MiB by
+  default), and `INFO wasm` reports instances, their memory and compiled code.
+  A function does not start while Redis is over `maxmemory`.
 - Guests in Rust (`guests/hello`) and JavaScript (`guests/js`, componentize-js);
   the same integration tests pass against both.
 - Reply types survive both ways, including simple versus bulk strings, maps,
@@ -41,7 +44,7 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   moves 1000 strings into the guest, 1.4 times faster.
 - The host is about 790 lines of code, not counting comments and unit tests.
   The example guest is 22 KB as a core module and 23 KB as a component. The
-  twelve integration tests take about 9 seconds.
+  thirteen integration tests take about 9 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
@@ -114,12 +117,12 @@ avoids both instantiating and tearing down, and was adopted.
 |---|---|---|---|
 | H6 | done | **Key specs for `WASM.CALL`.** Declared with the `#[command]` macro and a key spec like `FCALL`'s: `numkeys` at argument 2, the keys after it, flags `RW`, `access` and `update`; `no-mandatory-keys`, arity -3. `COMMAND GETKEYS`, ACL key patterns and cluster routing (`MOVED`, `CROSSSLOT`) see the keys. | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
 | H7 | done | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread; the main thread instantiates and adds the library. Precompiled components (`Engine::precompile_component`) would skip the compile entirely, but loading one is `unsafe`: only for trusted input. | The server answers other clients while a large component compiles. |
-| H8 | todo | **Memory.** A memory limit per instance (wasmtime resource limiter), refusing writes when `used_memory_ratio` is at 1, and an `INFO` section with the host's memory. Kept instances (H2) only grow, so also replace an instance whose memory passes a size. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
+| H8 | done | **Memory.** `wasm.max-memory` (default 64 MiB) limits each instance's linear memory through a wasmtime `ResourceLimiter`; a guest that grows past it traps and its call fails, which drops the instance. A function does not start while Redis is over `maxmemory`, and its calls use `RedisModule_Call`'s `M` flag. `INFO wasm` reports libraries, functions, component and compiled code bytes, live instances and their linear memory, and the limit. Not done: replacing a kept instance that grew large but stays under the limit; a failed call already drops it. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
 | H9 | todo | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`), `WASM.CALL_RO`, a `call` that fails where `pcall` returns the error, and `acl-check-command` and `set-resp` imports. | Each has a test matching what Lua does. |
 | H10 | todo | **Guest helper library.** A small Rust crate that builds the pre-order node list from typed values, so guests do not build it by hand. | The example guest uses it. |
 | H11 | todo | **Bounds check cost.** Signal-based traps are off so wasmtime installs no signal handlers over Redis's crash handler. Measured with H3's benchmark: turning them on made `primes` 18% faster (185 against 226 µs, with the old sieve loop), `median` 6%, `adler32` no different. Left: whether wasmtime's handlers and Redis's crash handler can coexist, and whether 18% is worth it. | A decision, with a crash report checked with handlers on. |
 | H12 | todo | **Context in the store.** The store holds a raw pointer to the command's `Context`. Write down the safety argument or replace it with an SDK pattern (S3). | Reviewed and documented, or replaced. |
-| H13 | todo | **Footprint.** Trim wasmtime features and measure the dylib and RSS. After loading the JavaScript component, RSS was 722 MB (serial compilation) and 959 MB (parallel) while `used_memory` stayed under 10 MB: find how much is compiled code, the instance's memory, and allocator memory kept after compiling. | Sizes recorded before and after. |
+| H13 | todo | **Footprint.** Trim wasmtime features and measure the dylib and RSS. After loading the JavaScript component, RSS was 722 MB (serial compilation) and 959 MB (parallel) while `used_memory` stayed under 10 MB. `INFO wasm` (H8) accounts for 95 MB of compiled code and 7.7 MB of linear memory; find the rest, likely allocator memory kept after compiling. | Sizes recorded before and after. |
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
 | H16 | todo | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one ("the module exports one or more module-side data types, can't unload"). A module argument that leaves persistence off, and the type unregistered, would keep unloading for development. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
 | H17 | todo | **Load time.** Loading an RDB compiles each library's component on the main thread, one after another, before the server serves clients. With the JavaScript library in its RDB (5.4 MB), a release server took 2.6 to 3.9 s to start in three runs, against 0.07 s with an empty RDB. Compile them in parallel, or keep compiled code next to each component (`Component::serialize`; loading it is `unsafe`, and a replica's RDB comes from its primary). | Load time with the JavaScript library, before and after. |
@@ -160,6 +163,7 @@ can be an ordinary PR.
 | S6 | worked around | On macOS a stripped release build of the host fails to load ("mis-aligned LINKEDIT string pool"); the workspace sets `strip = "none"` for it. Check with a newer toolchain. |
 | S7 | todo | `ServerInfo::field` panics on a field name with a NUL byte; upstream returns `None`. |
 | S8 | todo | `Cargo.toml`'s `repository` field still names upstream. |
+| S9 | todo | `redis_module!`'s `configurations` block compiles only with all four groups (`i64`, `string`, `bool`, `enum`) and `module_args_as_configuration` listed, and module arguments are parsed as plain integers, so a memory config given as `8mb` fails the load. |
 
 ## Module API gaps
 
@@ -170,7 +174,7 @@ evidence as the host meets them.
 |---|---|---|
 | G1 | No module API registers an engine for `FUNCTION` or `EVAL` (checked in Redis 8.0.0 and unstable `module.c`). | The host needs its own `WASM.*` commands; `FUNCTION LIST`, `FCALL` and `SCRIPT KILL` do not see it. |
 | G2 | `RedisModule_CreateCommand` works only while the module loads. | A function loaded later cannot be a command of its own; every call goes through `WASM.CALL`. |
-| G3 | No module API adds memory allocated outside the Redis allocator to `used_memory`. | `maxmemory` and `INFO memory` do not count guest memory or compiled code (confirmed: 1.3 MB used, 16 to 18 MB RSS). |
+| G3 | No module API adds memory allocated outside the Redis allocator to `used_memory`. | `maxmemory` and `INFO memory` do not count guest memory or compiled code (confirmed: 1.3 MB used, 16 to 18 MB RSS). `INFO wasm` reports them instead: 7.7 MB of linear memory and 95 MB of compiled code for the JavaScript library. |
 | G4 | Aux data reaches an AOF only inside its RDB preamble: no module API adds commands to a rewritten AOF without one (`aof_rewrite` is per key). Redis writes its own `FUNCTION` libraries into the rewrite (`rewriteFunctions` in `aof.c`). | With `aof-use-rdb-preamble no` (the default is `yes`), an AOF rewrite drops the libraries: `WASM.LIST` was empty after `BGREWRITEAOF` and a restart. |
 
 ## Open questions
@@ -181,6 +185,16 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H8 done: a `ResourceLimiter` per store counts linear memory
+  (wasmtime asks it when a memory is created and when it grows) and refuses
+  growth past `wasm.max-memory`, an `i64` module config with the memory flag,
+  so `CONFIG SET wasm.max-memory 4mb` works. Growth past it traps with "the
+  instance would use N bytes of memory, more than wasm.max-memory (L)". The
+  example guest has `grow`. Measured: the Rust guest's instance uses 1.2 MB of
+  linear memory and 222 KB of compiled code; the JavaScript guest's 7.7 MB and
+  95 MB. Test: `INFO wasm` before and after a load, a growth under and past a
+  4 MB limit (the instance is dropped), the `OOM` refusal under `maxmemory`,
+  and the counts after `WASM.DELETE`. Found S9.
 - 2026-10-20: H6 done: `WASM.CALL` moved from the `redis_module!` table to
   the `#[command]` macro, which registers a keynum key spec through
   `RedisModule_SetCommandInfo`. Redis adds `movablekeys`; `COMMAND GETKEYS`

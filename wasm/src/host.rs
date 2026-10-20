@@ -12,6 +12,7 @@ use wasmtime::component::{Component, HasSelf, Linker};
 use wasmtime::{Config, Engine, Store};
 
 use crate::busy::{self, Running, Ticker};
+use crate::memory::{LibrarySizes, Live, Memory};
 use crate::reply::push_call_result;
 
 wasmtime::component::bindgen!({
@@ -26,6 +27,7 @@ use redis_module_wasm::host::redis::LogLevel;
 pub(crate) struct CallState {
     ctx: Option<NonNull<Context>>,
     options: CallOptions,
+    memory: Memory,
 }
 
 // SAFETY: the context pointer is set, used and cleared on the main thread
@@ -39,15 +41,18 @@ impl CallState {
         Self {
             ctx: None,
             // Like redis.call in a script: script mode (S), the caller's ACL
-            // user (C), errors as replies (E), replicate the effects (!), and
-            // RESP3 replies so the guest sees each reply's type.
+            // user (C), no deny-oom commands over maxmemory (M), errors as
+            // replies (E), replicate the effects (!), and RESP3 replies so the
+            // guest sees each reply's type.
             options: CallOptionsBuilder::new()
                 .script_mode()
                 .verify_acl()
+                .verify_oom()
                 .errors_as_replies()
                 .replicate()
                 .resp(CallOptionResp::Resp3)
                 .build(),
+            memory: Memory::default(),
         }
     }
 
@@ -104,11 +109,13 @@ type KeptInstance = Arc<Mutex<Option<Instance>>>;
 struct Instance {
     store: Store<CallState>,
     library: Library,
+    _live: Live,
 }
 
 impl Instance {
     fn new(engine: &Engine, pre: &LibraryPre<CallState>, ctx: &Context) -> anyhow::Result<Self> {
         let mut store = Store::new(engine, CallState::new());
+        store.limiter(|state| &mut state.memory);
         store.epoch_deadline_callback(|store| busy::on_epoch(store.data().ctx()));
         // Instantiating can run guest code, so it runs like a call.
         store.data_mut().ctx = Some(NonNull::from(ctx));
@@ -118,6 +125,7 @@ impl Instance {
         Ok(Self {
             store,
             library: library?,
+            _live: Live::new(),
         })
     }
 
@@ -281,6 +289,21 @@ impl Host {
         self.libraries
             .iter()
             .map(|(name, library)| (name.as_str(), library.functions.as_slice()))
+    }
+
+    /// The libraries' counts and sizes, for `INFO wasm`.
+    pub(crate) fn sizes(&mut self) -> LibrarySizes {
+        let mut sizes = LibrarySizes {
+            libraries: self.libraries.len(),
+            functions: self.functions.len(),
+            ..LibrarySizes::default()
+        };
+        for library in self.libraries.values() {
+            sizes.component_bytes += library.component.len();
+            let code = library.pre.instance_pre().component().image_range();
+            sizes.code_bytes += code.end as usize - code.start as usize;
+        }
+        sizes
     }
 
     /// What the RDB keeps of each library: its name, its component's bytes and

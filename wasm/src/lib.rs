@@ -19,16 +19,18 @@
 //! `WASM.LOAD` and `WASM.DELETE` replicate as they are, and the RDB keeps the
 //! libraries; see `persist.rs`.
 
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
+use redis_module::configuration::ConfigurationFlags;
 use redis_module::{
-    ArgCursor, Context, ModuleOptions, RedisError, RedisResult, RedisString, RedisValue, Status,
-    redis_module,
+    ArgCursor, Context, ContextFlags, ModuleOptions, RedisError, RedisResult, RedisString,
+    RedisValue, Status, redis_module,
 };
 use redis_module_macros::command;
 
 mod busy;
 mod host;
+mod memory;
 mod persist;
 mod reply;
 
@@ -47,6 +49,16 @@ fn with_host<R>(f: impl FnOnce(&mut Host) -> R) -> Result<R, RedisError> {
         .as_mut()
         .map(f)
         .ok_or(RedisError::Str("ERR the wasm host is not initialized"))
+}
+
+/// Like `with_host`, but `None` if the host is held.
+fn try_with_host<R>(f: impl FnOnce(&mut Host) -> R) -> Option<R> {
+    let mut host = match HOST.try_lock() {
+        Ok(host) => host,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(TryLockError::WouldBlock) => return None,
+    };
+    host.as_mut().map(f)
 }
 
 fn error(context: &str, error: &anyhow::Error) -> RedisError {
@@ -157,6 +169,14 @@ fn wasm_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let keys: Vec<Vec<u8>> = args.by_ref().take(numkeys).map(|k| k.to_vec()).collect();
     let rest: Vec<Vec<u8>> = args.map(|a| a.to_vec()).collect();
 
+    // As for a Lua function without flags: a function may write, so it does
+    // not start while Redis is over maxmemory.
+    if ctx.get_flags().contains(ContextFlags::OOM) {
+        return Err(RedisError::Str(
+            "OOM command not allowed when used memory > 'maxmemory'.",
+        ));
+    }
+
     // Release the host before running the guest, so a guest that calls a
     // WASM.* command fails on its command flags, not on a lock.
     let call = with_host(|host| host.prepare(function))?
@@ -259,4 +279,24 @@ redis_module! {
         ["wasm.delete", wasm_delete, "write deny-script", 0, 0, 0, ""],
         ["wasm.kill", wasm_kill, "allow-busy deny-script fast", 0, 0, 0, ""],
     ],
+    configurations: [
+        i64: [
+            [
+                "max-memory",
+                &memory::MAX_MEMORY,
+                memory::DEFAULT_MAX_MEMORY,
+                1 << 20,
+                i64::MAX,
+                ConfigurationFlags::MEMORY,
+                None
+            ],
+        ],
+        // The macro needs every group listed. Module arguments would be parsed
+        // without units, so `max-memory 8mb` would fail the load: set it with
+        // `wasm.max-memory` in the configuration or `CONFIG SET` instead.
+        string: [],
+        bool: [],
+        enum: [],
+        module_args_as_configuration: false,
+    ]
 }

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use redis::{Connection, RedisResult, Value};
 
 /// The functions the example guest provides, in its order.
-const FUNCTIONS: [&str; 10] = [
+const FUNCTIONS: [&str; 11] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -24,6 +24,7 @@ const FUNCTIONS: [&str; 10] = [
     "spin",
     "write_then_spin",
     "counter",
+    "grow",
 ];
 
 /// The workspace's `target` directory, from this test binary's path
@@ -896,4 +897,84 @@ fn a_cluster_routes_wasm_call_by_its_keys() {
         call(&mut ca, &["hello", "0"]).unwrap(),
         Value::Status("hello, world".into())
     );
+}
+
+/// `INFO wasm` as field names, without the `wasm_` prefix, and values.
+fn info(con: &mut Connection) -> std::collections::BTreeMap<String, i64> {
+    let text: String = redis::cmd("INFO").arg("wasm").query(con).unwrap();
+    text.lines()
+        .filter_map(|line| line.strip_prefix("wasm_")?.split_once(':'))
+        .map(|(field, value)| (field.to_owned(), value.trim().parse().unwrap()))
+        .collect()
+}
+
+fn grow(con: &mut Connection, bytes: usize) -> RedisResult<Value> {
+    call(con, &["grow", "0", &bytes.to_string()])
+}
+
+#[test]
+fn guest_memory_is_limited_and_reported() {
+    let server = Server::start(6625, &[]);
+    let mut con = server.connection();
+    let fresh = info(&mut con);
+    assert_eq!(fresh["libraries"], 0);
+    assert_eq!(fresh["instances"], 0);
+    assert_eq!(fresh["instance_memory_bytes"], 0);
+    assert_eq!(fresh["max_memory"], 64 << 20);
+
+    // Loading keeps the instance that listed the functions.
+    load(&mut con, "hello");
+    let loaded = info(&mut con);
+    assert_eq!(loaded["libraries"], 1);
+    assert_eq!(loaded["functions"], FUNCTIONS.len() as i64);
+    assert_eq!(loaded["component_bytes"], hello_component().len() as i64);
+    assert!(loaded["code_bytes"] > 0);
+    assert_eq!(loaded["instances"], 1);
+    let Value::Int(memory) = grow(&mut con, 0).unwrap() else {
+        panic!("grow replies with an integer");
+    };
+    assert_eq!(info(&mut con)["instance_memory_bytes"], memory);
+
+    // Under the limit a guest grows; past it, the call fails and the instance
+    // is dropped.
+    let _: () = redis::cmd("CONFIG")
+        .arg(&["SET", "wasm.max-memory", "4mb"])
+        .query(&mut con)
+        .unwrap();
+    assert!(matches!(grow(&mut con, 1 << 20).unwrap(), Value::Int(n) if n > memory));
+    assert_eq!(counter(&mut con), 1);
+    assert_eq!(counter(&mut con), 2);
+    let failed = error_text(grow(&mut con, 8 << 20));
+    assert!(
+        failed.starts_with("ERR function 'grow' failed:")
+            && failed.contains("more than wasm.max-memory (4194304)"),
+        "{failed}"
+    );
+    assert_eq!(counter(&mut con), 1);
+    assert_eq!(info(&mut con)["instances"], 1);
+
+    // Over maxmemory, a function does not start, as a Lua function without
+    // flags does not.
+    let _: () = redis::cmd("CONFIG")
+        .arg(&["SET", "maxmemory", "1"])
+        .query(&mut con)
+        .unwrap();
+    assert_eq!(
+        error_text(call(&mut con, &["hello", "0"])),
+        "OOM command not allowed when used memory > 'maxmemory'."
+    );
+    let _: () = redis::cmd("CONFIG")
+        .arg(&["SET", "maxmemory", "0"])
+        .query(&mut con)
+        .unwrap();
+
+    // Deleting the library frees its instance and its memory.
+    let _: () = redis::cmd("WASM.DELETE")
+        .arg("hello")
+        .query(&mut con)
+        .unwrap();
+    let deleted = info(&mut con);
+    assert_eq!(deleted["instances"], 0);
+    assert_eq!(deleted["instance_memory_bytes"], 0);
+    assert_eq!(deleted["code_bytes"], 0);
 }

@@ -11,6 +11,8 @@
 //! WASM.CALL spin 0               loops until WASM.KILL stops it
 //! WASM.CALL write_then_spin 1 key  SETs the key, then loops; WASM.KILL refuses
 //! WASM.CALL counter 0            counts the calls this instance has served
+//! WASM.CALL grow 0 bytes         allocates that many bytes, then replies with
+//!                                the size of the instance's memory
 //! ```
 
 wit_bindgen::generate!({
@@ -20,7 +22,7 @@ wit_bindgen::generate!({
 
 use redis_module_wasm::host::redis::{LogLevel, call, log};
 
-const FUNCTIONS: [&str; 10] = [
+const FUNCTIONS: [&str; 11] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -31,6 +33,7 @@ const FUNCTIONS: [&str; 10] = [
     "spin",
     "write_then_spin",
     "counter",
+    "grow",
 ];
 
 /// Calls of `counter` that this instance has served.
@@ -84,6 +87,16 @@ impl Guest for Hello {
             "counter" => vec![Node::Integer(
                 COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
             )],
+            "grow" => {
+                let bytes = args
+                    .first()
+                    .and_then(|n| std::str::from_utf8(n).ok()?.parse().ok())
+                    .unwrap_or(0);
+                std::hint::black_box(vec![1u8; bytes]);
+                vec![Node::Integer(
+                    (core::arch::wasm32::memory_size(0) * 65536) as i64,
+                )]
+            }
             "write_then_spin" => match keys.first() {
                 Some(key) => {
                     call("SET", &[key.clone(), b"1".to_vec()]);

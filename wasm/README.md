@@ -73,6 +73,26 @@ command: then `WASM.KILL` replies `UNKILLABLE`, so the function's writes are not
 left half done, and `SHUTDOWN NOSAVE` is the way out. With no function running,
 `WASM.KILL` replies `NOTBUSY`.
 
+## Memory
+
+`wasm.max-memory` (64 MiB by default; `CONFIG SET wasm.max-memory 128mb`)
+limits the linear memory of each instance. A function that grows past it
+fails, and its instance is dropped. Linear memory and compiled code are
+allocated outside the Redis allocator, so `used_memory` and `maxmemory` do not
+count them; `INFO wasm` reports them:
+
+```text
+wasm_libraries, wasm_functions        what is loaded
+wasm_component_bytes                  the components' bytes, which the RDB keeps
+wasm_code_bytes                       compiled code
+wasm_instances                        live instances, kept or running
+wasm_instance_memory_bytes            their linear memory
+wasm_max_memory                       the limit
+```
+
+As for a Lua function without flags, a function does not start while Redis is
+over `maxmemory`, and the commands it calls follow `deny-oom`.
+
 ## Writing a library
 
 A library is a component that implements the `library` world in
@@ -161,4 +181,3 @@ workspace `Cargo.toml`); unoptimized, loading the JavaScript component took
 [TRACKING.md](TRACKING.md) has every open item, with IDs and what done means. The main ones:
 
 - Function flags, read-only calls, and ACL and RESP helpers for guests.
-- Memory limits per instance and an `INFO` section.
