@@ -140,6 +140,11 @@ replied as a simple string. A map or set converted from a call reply holds it
 for a simple-string key or element, where 2.x gave `String`; an exhaustive
 `match` on `RedisValueKey` needs another arm.
 
+An error in a call reply converts to `RedisValue::Error`, also inside an array
+or map, where 2.x gave `StringBuffer` with the error's bytes. A module that
+forwards the reply now replies with the error, as Redis did; one that read the
+bytes from `StringBuffer` reads the message from `Error` instead.
+
 ### Errors
 
 `RedisError` implements `std::error::Error`. That replaces 2.x's blanket
