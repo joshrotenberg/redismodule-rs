@@ -5,7 +5,7 @@ updates:
   schedule:
     interval: daily
   open-pull-requests-limit: 10
-  ignore:
-  - dependency-name: bindgen
-    versions:
-    - 0.56.0
+- package-ecosystem: github-actions
+  directory: "/"
+  schedule:
+    interval: weekly
