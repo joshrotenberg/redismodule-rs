@@ -84,6 +84,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - The stream iterator deleted an entry when dropped instead of stopping.
 - `RedisKey::to_raw_parts` closed the key it handed over.
 - Cron event handlers received 1 instead of the server's `hz`.
+- `ServerInfo::field` and `Context::server_info` panicked on a name holding a NUL byte; such a name now names nothing (for `field`, as upstream PR 488 does).
 - Verbatim call replies read their format through a null pointer.
 - `hash_set` and `hash_del` reported replacing or deleting a field as an error, and `delete` and `unlink` did not say whether a value was removed.
 - `DefragContext::defrag_alloc` passed a zero-size layout to the allocator.
