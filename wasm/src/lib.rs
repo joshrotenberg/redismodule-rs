@@ -279,9 +279,18 @@ fn wasm_kill(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 }
 
 fn init(ctx: &Context, _args: &[RedisString]) -> Status {
-    // aux_load checks for read errors, so a replica can load its primary's RDB
-    // from the socket.
-    ctx.set_module_options(ModuleOptions::HANDLE_IO_ERRORS);
+    // Redis has applied the module's configuration by now. The data type the
+    // RDB keeps libraries under is registered only with persistence on, since
+    // Redis does not unload a module with a data type.
+    if persist::enabled() {
+        if let Err(e) = LIBRARIES.create_data_type(ctx) {
+            ctx.log_warning(&format!("wasm host: {e}"));
+            return Status::Err;
+        }
+        // aux_load checks for read errors, so a replica can load its
+        // primary's RDB from the socket.
+        ctx.set_module_options(ModuleOptions::HANDLE_IO_ERRORS);
+    }
     match Host::new() {
         Ok(new_host) => {
             *host() = Some(new_host);
@@ -305,7 +314,8 @@ redis_module! {
     name: "wasm",
     version: 1,
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
-    data_types: [LIBRARIES],
+    // LIBRARIES is registered in init, when wasm.persist is yes.
+    data_types: [],
     init: init,
     deinit: deinit,
     commands: [
@@ -330,7 +340,15 @@ redis_module! {
         // without units, so `max-memory 8mb` would fail the load: set it with
         // `wasm.max-memory` in the configuration or `CONFIG SET` instead.
         string: [],
-        bool: [],
+        bool: [
+            [
+                "persist",
+                &persist::PERSIST,
+                true,
+                ConfigurationFlags::IMMUTABLE,
+                None
+            ],
+        ],
         enum: [],
         module_args_as_configuration: false,
     ]

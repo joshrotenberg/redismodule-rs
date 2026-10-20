@@ -1227,3 +1227,54 @@ fn call_pcall_acl_check_and_set_resp_work_as_in_lua() {
         "ERR RESP version must be 2 or 3. function: resp_shape."
     );
 }
+
+#[test]
+fn the_module_unloads_when_persistence_is_off() {
+    let server = Server::start(
+        6630,
+        &["--enable-module-command", "yes", "--wasm.persist", "no"],
+    );
+    let mut con = server.connection();
+    let persist: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "wasm.persist"])
+        .query(&mut con)
+        .unwrap();
+    assert_eq!(persist, ["wasm.persist", "no"]);
+    assert!(
+        error_text(
+            redis::cmd("CONFIG")
+                .arg(&["SET", "wasm.persist", "yes"])
+                .query(&mut con)
+        )
+        .contains("immutable")
+    );
+    load(&mut con, "hello");
+    assert_eq!(counter(&mut con), 1);
+
+    let module = module_path();
+    let module = module.to_str().unwrap();
+    let unload = |con: &mut Connection| {
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "wasm"])
+            .query::<Value>(con)
+    };
+    assert_eq!(unload(&mut con).unwrap(), Value::Okay);
+    assert!(error_text(redis::cmd("WASM.LIST").query(&mut con)).contains("unknown command"));
+
+    // Loaded again, it starts with no libraries.
+    let _: () = redis::cmd("MODULE")
+        .arg(&["LOADEX", module, "CONFIG", "wasm.persist", "no"])
+        .query(&mut con)
+        .unwrap();
+    assert!(list(&mut con).is_empty());
+    load(&mut con, "hello");
+    assert_eq!(counter(&mut con), 1);
+    assert_eq!(unload(&mut con).unwrap(), Value::Okay);
+
+    // With persistence on, the default, the data type keeps it loaded.
+    let _: () = redis::cmd("MODULE")
+        .arg(&["LOAD", module])
+        .query(&mut con)
+        .unwrap();
+    assert!(error_text(unload(&mut con)).contains("module-side data types"));
+}

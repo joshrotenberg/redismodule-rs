@@ -10,8 +10,13 @@
 //!
 //! Loading an RDB or AOF replaces the libraries: they are cleared when loading
 //! starts, before the aux data is read.
+//!
+//! `wasm.persist no`, set when the module loads, leaves all of this off: the
+//! data type is not registered, so Redis can unload the module, and libraries
+//! live only in memory, untouched by loading.
 
 use std::ffi::c_int;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context as _, bail};
 use redis_module::native_types::RedisType;
@@ -21,6 +26,14 @@ use redis_module_macros::loading_event_handler;
 
 use crate::flags;
 use crate::host::{Function, FunctionFlags, Host};
+
+/// `wasm.persist`: whether the RDB keeps the libraries. It cannot change once
+/// the module has loaded.
+pub(crate) static PERSIST: AtomicBool = AtomicBool::new(true);
+
+pub(crate) fn enabled() -> bool {
+    PERSIST.load(Ordering::Relaxed)
+}
 
 /// The version of the format below, which `aux_load` is passed. Version 0 had
 /// no function flags.
@@ -59,10 +72,14 @@ pub(crate) static LIBRARIES: RedisType = RedisType::new(
 /// primary has none.
 #[loading_event_handler]
 fn on_loading(_ctx: &Context, event: LoadingSubevent) {
-    if matches!(
-        event,
-        LoadingSubevent::RdbStarted | LoadingSubevent::AofStarted | LoadingSubevent::ReplStarted
-    ) {
+    if enabled()
+        && matches!(
+            event,
+            LoadingSubevent::RdbStarted
+                | LoadingSubevent::AofStarted
+                | LoadingSubevent::ReplStarted
+        )
+    {
         let _ = crate::with_host(Host::clear);
     }
 }

@@ -83,9 +83,14 @@ primary waits, so the replica keeps serving and the commands after it still
 run in order. A function's writes replicate as its effects, as a Lua
 function's do.
 
-The libraries are aux data, which needs a data type, so Redis refuses
-`MODULE UNLOAD` for this module. With `aof-use-rdb-preamble no`, a rewritten
-AOF does not have the libraries; the default, `yes`, does.
+With `aof-use-rdb-preamble no`, a rewritten AOF does not have the libraries;
+the default, `yes`, does.
+
+The libraries are aux data, which needs a data type, and Redis does not unload
+a module with one. `wasm.persist no` (set at load time: `--wasm.persist no`,
+or `MODULE LOADEX <path> CONFIG wasm.persist no`) leaves persistence off: the
+RDB does not keep the libraries, loading an RDB leaves them alone, and
+`MODULE UNLOAD` works. `WASM.LOAD` and `WASM.DELETE` still replicate.
 
 ## Long-running functions
 

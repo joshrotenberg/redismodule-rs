@@ -25,7 +25,8 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
 - Libraries persist and replicate: the RDB keeps them as aux data, so a
   restart, `DEBUG RELOAD` or a replica's full sync brings them back, and
   `WASM.LOAD` and `WASM.DELETE` go to replicas and the AOF as they are. Because
-  aux data needs a data type, `MODULE UNLOAD` now refuses the module (H16).
+  aux data needs a data type, `MODULE UNLOAD` refuses the module unless
+  `wasm.persist no` leaves persistence off (H16).
 - `WASM.CALL` declares its keys with a key spec like `FCALL`'s, so `COMMAND
   GETKEYS`, ACL key patterns and a cluster's `MOVED` and `CROSSSLOT` checks see
   them.
@@ -46,7 +47,7 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   moves 1000 strings into the guest, 1.4 times faster.
 - The host is about 790 lines of code, not counting comments and unit tests.
   The example guest is 22 KB as a core module and 23 KB as a component. The
-  sixteen integration tests take about 9 seconds.
+  seventeen integration tests take about 9 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
@@ -126,7 +127,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H12 | todo | **Context in the store.** The store holds a raw pointer to the command's `Context`. Write down the safety argument or replace it with an SDK pattern (S3). | Reviewed and documented, or replaced. |
 | H13 | todo | **Footprint.** Trim wasmtime features and measure the dylib and RSS. After loading the JavaScript component, RSS was 722 MB (serial compilation) and 959 MB (parallel) while `used_memory` stayed under 10 MB. `INFO wasm` (H8) accounts for 95 MB of compiled code and 7.7 MB of linear memory; find the rest, likely allocator memory kept after compiling. | Sizes recorded before and after. |
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
-| H16 | todo | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one ("the module exports one or more module-side data types, can't unload"). A module argument that leaves persistence off, and the type unregistered, would keep unloading for development. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
+| H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30); not investigated. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
 | H17 | todo | **Load time.** Loading an RDB compiles each library's component on the main thread, one after another, before the server serves clients. With the JavaScript library in its RDB (5.4 MB), a release server took 2.6 to 3.9 s to start in three runs, against 0.07 s with an empty RDB. Compile them in parallel, or keep compiled code next to each component (`Component::serialize`; loading it is `unsafe`, and a replica's RDB comes from its primary). | Load time with the JavaScript library, before and after. |
 | H15 | todo | **Large replies into the guest.** `median` is only 1.4 times faster than Lua although sorting 1000 integers is cheap: the 1000 strings of its `LRANGE` reply are copied into nodes, then into the guest's memory. Measure how much of its 177 µs that is, then copy less (for example, give the guest a handle to read the reply from). | `median`'s time split, and a lower number. |
 
@@ -190,6 +191,12 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H16 done: `wasm.persist`, an immutable `bool` config (default
+  `yes`). `redis_module!` applies module configs before `init`, so `init`
+  registers the `wasm-libs` type only when it is on; with it off, loading an
+  RDB does not clear the libraries either. Test: with `--wasm.persist no`,
+  `CONFIG SET` is refused, the module unloads and loads again with `MODULE
+  LOADEX ... CONFIG wasm.persist no`, and with the default it does not unload.
 - 2026-10-20: H9b done, so H9 is: `call` traps the guest with a `CallError`
   carrying the error reply (a `trappable` import), and the function replies
   with that error followed by `function: <name>.`; `pcall` returns it as a
