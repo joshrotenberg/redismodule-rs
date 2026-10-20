@@ -1,0 +1,123 @@
+//! Choose subscriptions at load time or from a module command.
+use redis_module::{
+    Context, NotifyEvent, RedisError, RedisResult, RedisString, RedisValue, Status, redis_command,
+    redis_event_handler, redis_module,
+};
+use std::sync::Mutex;
+
+#[derive(Default)]
+struct Events {
+    counts: [i64; 5],
+    last: Option<(String, Vec<u8>, i32)>,
+}
+static EVENTS: Mutex<Events> = Mutex::new(Events {
+    counts: [0; 5],
+    last: None,
+});
+
+// The name also checks that the generated adapter does not shadow its handler.
+fn invoke(ctx: &Context, event_type: NotifyEvent, event: &str, key: &[u8]) {
+    if key == b"runtime:panic" {
+        panic!("runtime keyspace handler panicked");
+    }
+    let mut events = EVENTS.lock().unwrap();
+    for (index, flag) in [
+        NotifyEvent::STRING,
+        NotifyEvent::MISSED,
+        NotifyEvent::NEW,
+        NotifyEvent::GENERIC,
+        NotifyEvent::LOADED,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if event_type.contains(flag) {
+            events.counts[index] += 1;
+        }
+    }
+    // Keep owned copies, never the callback's borrowed pointers.
+    events.last = Some((event.to_owned(), key.to_vec(), ctx.get_selected_db()));
+}
+
+fn mask(value: &str) -> Result<NotifyEvent, RedisError> {
+    let mut mask = NotifyEvent::empty();
+    for flag in value.split(',') {
+        mask |= match flag {
+            "none" => NotifyEvent::empty(),
+            "string" => NotifyEvent::STRING,
+            "missed" => NotifyEvent::MISSED,
+            "new" => NotifyEvent::NEW,
+            "generic" => NotifyEvent::GENERIC,
+            "loaded" => NotifyEvent::LOADED,
+            "unsupported" => NotifyEvent::from_bits_retain(1 << 30),
+            _ => return Err(RedisError::Str("ERR unknown event mask")),
+        };
+    }
+    Ok(mask)
+}
+
+fn init(ctx: &Context, args: &[RedisString]) -> Status {
+    let result = (|| {
+        if let Some(value) = args.first() {
+            ctx.subscribe_to_keyspace_events(
+                mask(value.try_as_str()?)?,
+                redis_event_handler!(invoke),
+            )?;
+        }
+        Ok::<_, RedisError>(())
+    })();
+    match result {
+        Ok(()) => Status::Ok,
+        Err(error) => {
+            ctx.log_warning(&error.to_string());
+            Status::Err
+        }
+    }
+}
+
+fn subscribe(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if args.len() != 2 {
+        return Err(RedisError::WrongArity);
+    }
+    ctx.subscribe_to_keyspace_events(mask(args[1].try_as_str()?)?, redis_event_handler!(invoke))?;
+    Ok("OK".into())
+}
+
+fn counts(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(EVENTS.lock().unwrap().counts.to_vec().into())
+}
+
+fn last(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    let events = EVENTS.lock().unwrap();
+    let Some((event, key, db)) = &events.last else {
+        return Ok(RedisValue::Null);
+    };
+    Ok(vec![
+        event.clone().into(),
+        RedisValue::StringBuffer(key.clone()),
+        i64::from(*db).into(),
+    ]
+    .into())
+}
+
+fn send(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if args.len() != 3 {
+        return Err(RedisError::WrongArity);
+    }
+    ctx.notify_keyspace_event_bytes(NotifyEvent::GENERIC, args[1].as_slice(), &args[2])?;
+    Ok("OK".into())
+}
+
+redis_module! {
+    name: "runtime_events",
+    version: 1,
+    allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+    data_types: [],
+    init: init,
+    commands: [
+        redis_command!("runtime.subscribe", subscribe),
+        redis_command!("runtime.counts", counts).read_only(),
+        redis_command!("runtime.last", last).read_only(),
+        redis_command!("runtime.send", send),
+    ],
+}

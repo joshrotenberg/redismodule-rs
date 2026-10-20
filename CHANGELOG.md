@@ -13,6 +13,9 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `Context::subscribe_to_keyspace_events` for runtime-selected notification
+  masks, with `redis_event_handler!(handler)` providing the shared panic-safe
+  callback adapter. Existing `redis_module!` event handlers remain supported.
 - Optional command builders in `redis_module!`: `redis_command!(name, handler)`
   returns a `CommandBuilder` with typed `CommandFlags`, `KeyRange`, and ACL
   settings. Builders can be mixed with existing command tuples.

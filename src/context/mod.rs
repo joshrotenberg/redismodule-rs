@@ -35,6 +35,7 @@ pub mod event_loop;
 pub mod info;
 pub mod key_cursor;
 pub mod keys_cursor;
+pub mod keyspace_events;
 pub mod server_events;
 pub mod thread_safe;
 
