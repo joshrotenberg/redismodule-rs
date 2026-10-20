@@ -92,18 +92,24 @@ macro_rules! enum_configuration {
 /// running with the Redis GIL is held but we should not perform all the regular
 /// operation we can perfrom on the regular Context.
 pub struct ConfigurationContext {
-    _dummy: usize, // We set some none public vairable here so user will not be able to construct such object
+    // Private, so users cannot construct one, and a raw pointer type, so it is
+    // neither Send nor Sync: it proves the lock is held on this thread only.
+    _not_send: std::marker::PhantomData<*mut ()>,
 }
 
 impl ConfigurationContext {
     fn new() -> ConfigurationContext {
-        ConfigurationContext { _dummy: 0 }
+        ConfigurationContext {
+            _not_send: std::marker::PhantomData,
+        }
     }
 }
 
 unsafe impl RedisLockIndicator for ConfigurationContext {}
 
-pub trait ConfigurationValue<T>: Sync + Send {
+/// A configuration value. Values are registered as `&'static` references and only
+/// shared, so they need to be `Sync` but not `Send`.
+pub trait ConfigurationValue<T>: Sync {
     fn get(&self, ctx: &ConfigurationContext) -> T;
     fn set(&self, ctx: &ConfigurationContext, val: T) -> Result<(), RedisError>;
 }

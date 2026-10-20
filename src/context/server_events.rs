@@ -73,7 +73,7 @@ extern "C" fn cron_callback(
     // SAFETY: Redis passes a RedisModuleCronLoopV1 with the cron loop event.
     let data: &raw::RedisModuleCronLoopV1 = unsafe { &*(data as *mut raw::RedisModuleCronLoopV1) };
     let hz = data.hz as u64;
-    let ctx = Context::new(ctx);
+    let ctx = unsafe { Context::new(ctx) };
     CRON_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback("cron event handler", || callback(&ctx, hz), || ());
     });
@@ -90,7 +90,7 @@ extern "C" fn role_changed_callback(
     } else {
         ServerRole::Replica
     };
-    let ctx = Context::new(ctx);
+    let ctx = unsafe { Context::new(ctx) };
     ROLE_CHANGED_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback(
             "role changed event handler",
@@ -113,7 +113,7 @@ extern "C" fn loading_event_callback(
         raw::REDISMODULE_SUBEVENT_LOADING_ENDED => LoadingSubevent::Ended,
         _ => LoadingSubevent::Failed,
     };
-    let ctx = Context::new(ctx);
+    let ctx = unsafe { Context::new(ctx) };
     LOADING_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback(
             "loading event handler",
@@ -134,7 +134,7 @@ extern "C" fn flush_event_callback(
     } else {
         FlushSubevent::Ended
     };
-    let ctx = Context::new(ctx);
+    let ctx = unsafe { Context::new(ctx) };
     FLUSH_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback(
             "flush event handler",
@@ -155,7 +155,7 @@ extern "C" fn module_change_event_callback(
     } else {
         ModuleChangeSubevent::Unloaded
     };
-    let ctx = Context::new(ctx);
+    let ctx = unsafe { Context::new(ctx) };
     MODULE_CHANGED_SERVER_EVENTS_LIST
         .iter()
         .for_each(|callback| {
@@ -173,7 +173,7 @@ extern "C" fn shutdown_event_callback(
     _subevent: u64,
     _data: *mut ::std::os::raw::c_void,
 ) {
-    let ctx = Context::new(ctx);
+    let ctx = unsafe { Context::new(ctx) };
     SHUTDOWN_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback("shutdown event handler", || callback(&ctx), || ());
     });
@@ -200,7 +200,7 @@ extern "C" fn config_change_event_callback(
                 .expect("Got a configuration name which is not a valid utf8")
         })
         .collect();
-    let ctx = Context::new(ctx);
+    let ctx = unsafe { Context::new(ctx) };
     CONFIG_CHANGED_SERVER_EVENTS_LIST
         .iter()
         .for_each(|callback| {

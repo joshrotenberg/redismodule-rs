@@ -130,7 +130,7 @@ extern "C" fn raw_callback<F, T>(ctx: *mut raw::RedisModuleCtx, data: *mut c_voi
 where
     F: FnOnce(&Context, T),
 {
-    let ctx = &Context::new(ctx);
+    let ctx = &unsafe { Context::new(ctx) };
 
     if data.is_null() {
         ctx.log_debug("[callback] Data is null; this should not happen!");

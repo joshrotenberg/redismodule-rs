@@ -16,7 +16,7 @@ extern "C" fn scan_callback<C: FnMut(&Context, &RedisString, Option<&RedisKey>)>
     key: *mut raw::RedisModuleKey,
     private_data: *mut ::std::os::raw::c_void,
 ) {
-    let context = Context::new(ctx);
+    let context = unsafe { Context::new(ctx) };
     // SAFETY: this synchronous native callback supplies a retainable borrowed name.
     let key_name =
         unsafe { RedisString::retain_from_ptr(NonNull::new(key_name).expect("scan key name")) };

@@ -896,7 +896,7 @@ extern "C" fn on_unblock<C: FnOnce(&Context, CallResult<'static>)>(
     private_data: *mut ::std::os::raw::c_void,
 ) {
     let on_unblock = unsafe { Box::from_raw(private_data as *mut C) };
-    let ctx = Context::new(ctx);
+    let ctx = unsafe { Context::new(ctx) };
     let reply = NonNull::new(reply).map_or(Ok(CallReply::Unknown), create_call_reply);
     crate::panic::run_callback(
         "blocking call unblock handler",

@@ -327,7 +327,7 @@ impl DetachedContext {
     pub fn lock(&self) -> DetachedContextGuard {
         let c = self.ctx.load(Ordering::Relaxed);
         unsafe { crate::__required_api!(RedisModule_ThreadSafeContextLock)(c) };
-        let ctx = Context::new(c);
+        let ctx = unsafe { Context::new(c) };
         DetachedContextGuard { ctx }
     }
 }
@@ -337,9 +337,18 @@ unsafe impl Sync for DetachedContext {}
 
 /// `Context` is a structure that's designed to give us a high-level interface to
 /// the Redis module API by abstracting away the raw C FFI calls.
+///
+/// Holding a `Context` proves the Redis lock is held on this thread, so one can
+/// only be made with the unsafe [`Context::new`], not from a struct literal:
+///
+/// ```compile_fail,E0451
+/// let forged = redis_module::Context { ctx: std::ptr::null_mut() };
+/// ```
 #[derive(Debug)]
 pub struct Context {
-    pub ctx: *mut raw::RedisModuleCtx,
+    // Private: a Context built from any pointer would be a forged proof that
+    // the Redis lock is held. Use Context::new or get_raw.
+    pub(crate) ctx: *mut raw::RedisModuleCtx,
 }
 
 /// A guerd that protected a user that has
@@ -422,12 +431,27 @@ impl<'a> StrCallArgs<'a> {
 }
 
 impl Context {
-    pub const fn new(ctx: *mut raw::RedisModuleCtx) -> Self {
+    /// Wraps a context pointer that Redis passed to the module.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a context Redis passed to a module callback or a
+    /// thread-safe context, and the `Context` must be used only on a thread
+    /// that holds the Redis lock while `ctx` is valid. A `Context` is proof that
+    /// the lock is held, which [`RedisGILGuard`](crate::RedisGILGuard) relies on.
+    pub const unsafe fn new(ctx: *mut raw::RedisModuleCtx) -> Self {
         Self { ctx }
     }
 
+    /// A `Context` without a Redis context pointer, for the APIs that accept a
+    /// null context, such as logging.
+    ///
+    /// # Safety
+    ///
+    /// The `Context` must be used only on a thread that holds the Redis lock,
+    /// as for [`Context::new`].
     #[must_use]
-    pub const fn dummy() -> Self {
+    pub const unsafe fn dummy() -> Self {
         Self {
             ctx: ptr::null_mut(),
         }
@@ -1238,7 +1262,7 @@ extern "C" fn post_notification_job<F: FnOnce(&Context)>(
     pd: *mut c_void,
 ) {
     let callback = unsafe { &mut *(pd as *mut Option<F>) };
-    let ctx = Context::new(ctx);
+    let ctx = unsafe { Context::new(ctx) };
     callback.take().map_or_else(
         || {
             ctx.log(

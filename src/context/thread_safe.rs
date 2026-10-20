@@ -1,5 +1,5 @@
 use std::borrow::Borrow;
-use std::cell::UnsafeCell;
+use std::cell::{Cell, UnsafeCell};
 use std::ops::{Deref, DerefMut};
 use std::ptr;
 
@@ -22,6 +22,12 @@ impl<'ctx, 'mutex, T, G: RedisLockIndicator> Deref for RedisGILGuardScope<'ctx, 
 impl<'ctx, 'mutex, T, G: RedisLockIndicator> DerefMut for RedisGILGuardScope<'ctx, 'mutex, T, G> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { &mut *self.mutex.obj.get() }
+    }
+}
+
+impl<'ctx, 'mutex, T, G: RedisLockIndicator> Drop for RedisGILGuardScope<'ctx, 'mutex, T, G> {
+    fn drop(&mut self) {
+        self.mutex.locked.set(false);
     }
 }
 
@@ -56,19 +62,34 @@ pub unsafe trait RedisLockIndicator {}
 /// For example, look at examples/threads.rs
 pub struct RedisGILGuard<T> {
     obj: UnsafeCell<T>,
+    /// Whether a scope from [`Self::lock`] is live. Only read and written by
+    /// the thread holding the Redis lock.
+    locked: Cell<bool>,
 }
 
 impl<T> RedisGILGuard<T> {
     pub fn new(obj: T) -> RedisGILGuard<T> {
         RedisGILGuard {
             obj: UnsafeCell::new(obj),
+            locked: Cell::new(false),
         }
     }
 
+    /// Gives access to the value while the Redis lock is held, as `context`
+    /// proves.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a scope from an earlier `lock` on this guard is still live,
+    /// since two scopes would give two `&mut T` to the same value.
     pub fn lock<'mutex, 'ctx, G: RedisLockIndicator>(
         &'mutex self,
         context: &'ctx G,
     ) -> RedisGILGuardScope<'ctx, 'mutex, T, G> {
+        assert!(
+            !self.locked.replace(true),
+            "RedisGILGuard is already locked; drop the earlier scope first"
+        );
         RedisGILGuardScope {
             _context: context,
             mutex: self,
@@ -82,8 +103,13 @@ impl<T: Default> Default for RedisGILGuard<T> {
     }
 }
 
+// SAFETY: the value and the lock flag are only used by the thread holding the
+// Redis lock, as a RedisLockIndicator proves. T is not required to be Send:
+// RedisGILGuard<RedisString> holds string configurations, and RedisString is
+// not Send. A value cloned out of a scope follows its own thread rules.
 unsafe impl<T> Sync for RedisGILGuard<T> {}
-unsafe impl<T> Send for RedisGILGuard<T> {}
+// Moving the guard moves the value to another thread, so T must be Send.
+unsafe impl<T: Send> Send for RedisGILGuard<T> {}
 
 pub struct ContextGuard {
     ctx: Context,
@@ -162,7 +188,10 @@ impl ThreadSafeContext<BlockedClient> {
     /// so we pass through its functionality directly.
     #[allow(clippy::must_use_candidate)]
     pub fn reply(&self, r: RedisResult) -> raw::Status {
-        let ctx = Context::new(self.ctx);
+        // SAFETY: replies to a blocked client's thread-safe context are
+        // collected without the lock and sent when Redis unblocks the client;
+        // the Context is used only for this reply and is not kept.
+        let ctx = unsafe { Context::new(self.ctx) };
         ctx.reply(r)
     }
 }
@@ -174,7 +203,7 @@ impl<B: Send> ThreadSafeContext<B> {
         unsafe { crate::__required_api!(RedisModule_ThreadSafeContextLock)(self.ctx) };
         let ctx =
             unsafe { crate::__required_api!(RedisModule_GetThreadSafeContext)(ptr::null_mut()) };
-        let ctx = Context::new(ctx);
+        let ctx = unsafe { Context::new(ctx) };
         ContextGuard { ctx }
     }
 }
@@ -182,5 +211,28 @@ impl<B: Send> ThreadSafeContext<B> {
 impl<B: Send> Drop for ThreadSafeContext<B> {
     fn drop(&mut self) {
         unsafe { crate::__required_api!(RedisModule_FreeThreadSafeContext)(self.ctx) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RedisGILGuard, RedisLockIndicator};
+
+    struct Locked;
+    // SAFETY: test only; no Redis data is touched.
+    unsafe impl RedisLockIndicator for Locked {}
+
+    #[test]
+    fn a_guard_gives_one_scope_at_a_time() {
+        let guard = RedisGILGuard::new(1);
+        {
+            let mut scope = guard.lock(&Locked);
+            *scope += 1;
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _second = guard.lock(&Locked);
+            }))
+            .is_err());
+        }
+        assert_eq!(*guard.lock(&Locked), 2);
     }
 }

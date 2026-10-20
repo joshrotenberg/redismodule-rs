@@ -108,11 +108,12 @@ fn lifecycle(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
             "ERR retained alias append policy",
         )?;
         require(alias.as_slice() == b"a\0\xff", "ERR alias bytes changed")?;
-        let transferred =
-            unsafe { raw::RedisModule_CreateString.unwrap()(ctx.ctx, b"owned".as_ptr().cast(), 5) };
+        let transferred = unsafe {
+            raw::RedisModule_CreateString.unwrap()(ctx.get_raw(), b"owned".as_ptr().cast(), 5)
+        };
         let mut adopted = unsafe {
             RedisString::from_owned_ptr(
-                NonNull::new(ctx.ctx),
+                NonNull::new(ctx.get_raw()),
                 NonNull::new(transferred)
                     .ok_or(RedisError::Str("ERR native creation returned null"))?,
             )
@@ -157,11 +158,11 @@ fn store(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
         "create" => owners.push(ctx.create_string("context-created")),
         "owned" => {
             let p = unsafe {
-                raw::RedisModule_CreateString.unwrap()(ctx.ctx, b"owned".as_ptr().cast(), 5)
+                raw::RedisModule_CreateString.unwrap()(ctx.get_raw(), b"owned".as_ptr().cast(), 5)
             };
             owners.push(unsafe {
                 RedisString::from_owned_ptr(
-                    NonNull::new(ctx.ctx),
+                    NonNull::new(ctx.get_raw()),
                     NonNull::new(p).ok_or(RedisError::Str("ERR native creation returned null"))?,
                 )
             });

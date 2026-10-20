@@ -41,7 +41,7 @@ fn event_send(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         return Err(RedisError::WrongArity);
     }
 
-    let key_name = RedisString::create(NonNull::new(ctx.ctx), "mykey");
+    let key_name = RedisString::create(NonNull::new(ctx.get_raw()), "mykey");
     let status = ctx.notify_keyspace_event(NotifyEvent::GENERIC, "events.send", &key_name);
     match status {
         Status::Ok => Ok("Event sent".into()),
@@ -58,20 +58,20 @@ fn event_send_invalid_utf8(ctx: &Context, args: Vec<RedisString>) -> RedisResult
         return Err(RedisError::WrongArity);
     }
 
-    let key_name = RedisString::create(NonNull::new(ctx.ctx), "mykey");
+    let key_name = RedisString::create(NonNull::new(ctx.get_raw()), "mykey");
     // Fire a keyspace event whose name is not valid UTF-8 (0xFF can never
     // appear in a UTF-8 string), the way a C module could. This has to go
     // through the raw API because the safe wrapper only accepts &str.
     let event = CString::new(&b"ev\xFFnt"[..]).unwrap();
     // SAFETY: `RedisModule_NotifyKeyspaceEvent` is set by Redis before any
-    // command handler runs, so the `unwrap` cannot fail. `ctx.ctx` is the
+    // command handler runs, so the `unwrap` cannot fail. `ctx.get_raw()` is the
     // valid context passed to this command invocation, `event` is a
     // NUL-terminated C string that outlives the call, and `key_name.as_ptr()`
     // is a valid `RedisModuleString` owned by `key_name` for the duration
     // of the call.
     let status: Status = unsafe {
         raw::RedisModule_NotifyKeyspaceEvent.unwrap()(
-            ctx.ctx,
+            ctx.get_raw(),
             NotifyEvent::GENERIC.bits(),
             event.as_ptr(),
             key_name.as_ptr(),
