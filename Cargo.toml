@@ -81,6 +81,10 @@ name = "acl"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "acl_invalid_category"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "call"
 crate-type = ["cdylib"]
 required-features = ["redis-7-2-examples"]
