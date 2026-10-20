@@ -19,10 +19,12 @@ use redis_module::server_events::LoadingSubevent;
 use redis_module::{Context, RedisModuleIO, logging, raw};
 use redis_module_macros::loading_event_handler;
 
-use crate::host::Host;
+use crate::flags;
+use crate::host::{Function, FunctionFlags, Host};
 
-/// The version of the format below, which `aux_load` is passed.
-const ENCODING_VERSION: i32 = 0;
+/// The version of the format below, which `aux_load` is passed. Version 0 had
+/// no function flags.
+const ENCODING_VERSION: i32 = 1;
 
 /// The data type the libraries are saved under.
 pub(crate) static LIBRARIES: RedisType = RedisType::new(
@@ -66,7 +68,7 @@ fn on_loading(_ctx: &Context, event: LoadingSubevent) {
 }
 
 /// Saves the libraries: their count, then each library's name, component and
-/// function names. Redis before 7.2 calls this one.
+/// functions, each a name and its flags. Redis before 7.2 calls this one.
 unsafe extern "C" fn aux_save(rdb: *mut raw::RedisModuleIO, _when: c_int) {
     // SAFETY: Redis passes the RDB it is saving, for this call only.
     save(&mut unsafe { RedisModuleIO::new(rdb) }, false);
@@ -91,7 +93,8 @@ fn save(rdb: &mut RedisModuleIO, skip_if_empty: bool) {
         rdb.write_slice(component);
         rdb.write_unsigned(functions.len() as u64);
         for function in functions {
-            rdb.write_string(function);
+            rdb.write_string(&function.name);
+            rdb.write_unsigned(flags::to_bits(function.flags));
         }
     }
 }
@@ -109,7 +112,7 @@ unsafe extern "C" fn aux_load(rdb: *mut raw::RedisModuleIO, encver: c_int, _when
 
 /// Reads the libraries `save` wrote, then compiles and adds each one.
 fn load(rdb: &mut RedisModuleIO, encver: c_int) -> anyhow::Result<()> {
-    if encver != ENCODING_VERSION {
+    if !(0..=ENCODING_VERSION).contains(&encver) {
         bail!("unknown encoding version {encver}");
     }
     let mut libraries = Vec::new();
@@ -117,8 +120,16 @@ fn load(rdb: &mut RedisModuleIO, encver: c_int) -> anyhow::Result<()> {
         let name = rdb.read_string()?;
         let component = rdb.read_string_buffer()?.as_ref().to_vec();
         let functions = (0..rdb.read_unsigned()?)
-            .map(|_| rdb.read_string())
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|_| {
+                let name = rdb.read_string()?;
+                let flags = if encver >= 1 {
+                    flags::from_bits(rdb.read_unsigned()?)
+                } else {
+                    FunctionFlags::empty()
+                };
+                Ok(Function { name, flags })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
         libraries.push((name, component, functions));
     }
 

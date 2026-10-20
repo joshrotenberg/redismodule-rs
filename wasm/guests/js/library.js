@@ -55,8 +55,21 @@ function decode(bytes) {
   return new TextDecoder().decode(bytes);
 }
 
+// The flags of the functions that have any; the rest may write. WIT flags are
+// objects of booleans named in lower camel case.
+const flagsByName = {
+  hello: { noWrites: true },
+  nested: { noWrites: true },
+  fail: { noWrites: true },
+  counter: { noWrites: true },
+  spin: { noWrites: true },
+};
+
 export function functions() {
-  return Object.keys(functionsByName);
+  return Object.keys(functionsByName).map((name) => ({
+    name,
+    flags: flagsByName[name] ?? {},
+  }));
 }
 
 export function invoke(name, keys, args) {

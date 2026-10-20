@@ -14,8 +14,15 @@ const FUNCTIONS: [&str; 5] = ["incr_twice", "nested", "adler32", "median", "prim
 struct Bench;
 
 impl Guest for Bench {
-    fn functions() -> Vec<String> {
-        FUNCTIONS.map(String::from).to_vec()
+    fn functions() -> Vec<Function> {
+        // No flags, as in functions.lua.
+        FUNCTIONS
+            .iter()
+            .map(|name| Function {
+                name: (*name).into(),
+                flags: FunctionFlags::empty(),
+            })
+            .collect()
     }
 
     fn invoke(name: String, keys: Vec<Vec<u8>>, args: Vec<Vec<u8>>) -> Vec<Node> {

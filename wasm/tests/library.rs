@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use redis::{Connection, RedisResult, Value};
 
 /// The functions the example guest provides, in its order.
-const FUNCTIONS: [&str; 11] = [
+const FUNCTIONS: [&str; 17] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -25,6 +25,12 @@ const FUNCTIONS: [&str; 11] = [
     "write_then_spin",
     "counter",
     "grow",
+    "run_ro",
+    "set_oom",
+    "stale_ok",
+    "local_only",
+    "get_args",
+    "get_args_cross",
 ];
 
 /// The workspace's `target` directory, from this test binary's path
@@ -37,7 +43,17 @@ fn target_dir() -> PathBuf {
         .to_path_buf()
 }
 
+/// The module, built once for all tests: `cargo test` does not refresh the
+/// module's dylib, so a test could otherwise load a stale one.
 fn module_path() -> PathBuf {
+    static BUILT: OnceLock<()> = OnceLock::new();
+    BUILT.get_or_init(|| {
+        let status = Command::new(env!("CARGO"))
+            .args(["build", "--quiet", "-p", "redis-module-wasm"])
+            .status()
+            .expect("run cargo for the module");
+        assert!(status.success(), "building the module failed");
+    });
     let ext = if cfg!(target_os = "macos") {
         "dylib"
     } else {
@@ -299,18 +315,7 @@ fn load_call_list_and_delete_a_library() {
     assert!(error_text(broken).contains("invalid component"));
 
     // List, then delete.
-    assert_eq!(
-        redis::cmd("WASM.LIST").query::<Value>(&mut con).unwrap(),
-        Value::Bulk(vec![Value::Bulk(vec![
-            Value::Data(b"hello".to_vec()),
-            Value::Bulk(
-                FUNCTIONS
-                    .iter()
-                    .map(|f| Value::Data(f.as_bytes().to_vec()))
-                    .collect()
-            ),
-        ])])
-    );
+    assert_eq!(list(&mut con), listed(&["hello"]));
     assert_eq!(
         redis::cmd("WASM.DELETE")
             .arg("hello")
@@ -510,6 +515,9 @@ fn a_javascript_library_behaves_like_the_rust_one() {
             "spin"
         ]
     );
+    // WIT flags reach the host from JavaScript objects of booleans.
+    assert_eq!(flags_of(&mut con, "hello"), ["no-writes"]);
+    assert!(flags_of(&mut con, "set").is_empty());
 
     assert_eq!(
         call(&mut con, &["hello", "0"]).unwrap(),
@@ -633,14 +641,53 @@ fn load(con: &mut Connection, name: &str) {
     assert_eq!(functions, FUNCTIONS);
 }
 
-/// `WASM.LIST` as `(library, functions)` pairs.
-fn list(con: &mut Connection) -> Vec<(String, Vec<String>)> {
+/// Each library with its functions and their flags.
+type Listing = Vec<(String, Vec<(String, Vec<String>)>)>;
+
+/// `WASM.LIST` as a `Listing`.
+fn list_with_flags(con: &mut Connection) -> Listing {
     // redis-rs reads a Vec of pairs from a flat array, so read each pair.
+    let pair =
+        |value: &Value| -> (String, Value) { redis::from_redis_value(value).expect("a pair") };
     let entries: Vec<Value> = redis::cmd("WASM.LIST").query(con).expect("WASM.LIST");
     entries
         .iter()
-        .map(|entry| redis::from_redis_value(entry).expect("a [library, functions] pair"))
+        .map(|entry| {
+            let (library, functions) = pair(entry);
+            let functions: Vec<Value> = redis::from_redis_value(&functions).unwrap();
+            let functions = functions
+                .iter()
+                .map(|function| {
+                    let (name, flags) = pair(function);
+                    (name, redis::from_redis_value(&flags).unwrap())
+                })
+                .collect();
+            (library, functions)
+        })
         .collect()
+}
+
+/// `WASM.LIST` as `(library, function names)` pairs.
+fn list(con: &mut Connection) -> Vec<(String, Vec<String>)> {
+    list_with_flags(con)
+        .into_iter()
+        .map(|(library, functions)| {
+            (
+                library,
+                functions.into_iter().map(|(name, _)| name).collect(),
+            )
+        })
+        .collect()
+}
+
+/// The flags `WASM.LIST` shows for `function`.
+fn flags_of(con: &mut Connection, function: &str) -> Vec<String> {
+    list_with_flags(con)
+        .into_iter()
+        .flat_map(|(_, functions)| functions)
+        .find(|(name, _)| name == function)
+        .map(|(_, flags)| flags)
+        .unwrap_or_else(|| panic!("no function {function}"))
 }
 
 /// What `list` returns with the example guest loaded as each of `names`.
@@ -897,6 +944,35 @@ fn a_cluster_routes_wasm_call_by_its_keys() {
         call(&mut ca, &["hello", "0"]).unwrap(),
         Value::Status("hello, world".into())
     );
+
+    // A function with no-cluster does not run on a cluster node.
+    assert_eq!(
+        error_text(call(&mut ca, &["local_only", "0"])),
+        "ERR Can not run function on cluster, 'no-cluster' flag is set."
+    );
+
+    // Keys a function did not declare must hash to one slot, the declared
+    // keys' if any, unless it has allow-cross-slot-keys. The refused GET is an
+    // error inside the reply, so read it raw.
+    let get_args = |function: &str, numkeys: &str, keys: &[&str]| {
+        let mut args = vec!["WASM.CALL", function, numkeys];
+        args.extend_from_slice(keys);
+        raw_reply(6623, &args)
+    };
+    let refused = "-ERR Function attempted to access keys that do not hash to the same slot\r\n";
+    // on_a holds 2 from incr_twice above; on_a_too is unset.
+    assert_eq!(
+        get_args("get_args", "0", &[&on_a_too, &on_a]),
+        format!("*2\r\n$-1\r\n{refused}")
+    );
+    assert_eq!(
+        get_args("get_args", "1", &[&on_a, &on_a_too]),
+        format!("*1\r\n{refused}")
+    );
+    assert_eq!(
+        get_args("get_args_cross", "0", &[&on_a_too, &on_a]),
+        "*2\r\n$-1\r\n$1\r\n2\r\n"
+    );
 }
 
 /// `INFO wasm` as field names, without the `wasm_` prefix, and values.
@@ -953,21 +1029,6 @@ fn guest_memory_is_limited_and_reported() {
     assert_eq!(counter(&mut con), 1);
     assert_eq!(info(&mut con)["instances"], 1);
 
-    // Over maxmemory, a function does not start, as a Lua function without
-    // flags does not.
-    let _: () = redis::cmd("CONFIG")
-        .arg(&["SET", "maxmemory", "1"])
-        .query(&mut con)
-        .unwrap();
-    assert_eq!(
-        error_text(call(&mut con, &["hello", "0"])),
-        "OOM command not allowed when used memory > 'maxmemory'."
-    );
-    let _: () = redis::cmd("CONFIG")
-        .arg(&["SET", "maxmemory", "0"])
-        .query(&mut con)
-        .unwrap();
-
     // Deleting the library frees its instance and its memory.
     let _: () = redis::cmd("WASM.DELETE")
         .arg("hello")
@@ -977,4 +1038,109 @@ fn guest_memory_is_limited_and_reported() {
     assert_eq!(deleted["instances"], 0);
     assert_eq!(deleted["instance_memory_bytes"], 0);
     assert_eq!(deleted["code_bytes"], 0);
+}
+
+fn config_set(con: &mut Connection, name: &str, value: &str) {
+    let _: () = redis::cmd("CONFIG")
+        .arg(&["SET", name, value])
+        .query(con)
+        .unwrap();
+}
+
+fn call_ro(con: &mut Connection, args: &[&str]) -> RedisResult<Value> {
+    redis::cmd("WASM.CALL_RO").arg(args).query(con)
+}
+
+#[test]
+fn function_flags_work_as_in_lua() {
+    let server = Server::start(6626, &["--enable-debug-command", "yes"]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    assert_eq!(flags_of(&mut con, "hello"), ["no-writes"]);
+    assert!(flags_of(&mut con, "set").is_empty());
+    assert_eq!(flags_of(&mut con, "stale_ok"), ["no-writes", "allow-stale"]);
+
+    // WASM.CALL_RO runs only functions that do not write.
+    assert_eq!(
+        call_ro(&mut con, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+    assert_eq!(
+        error_text(call_ro(&mut con, &["set", "1", "k", "v"])),
+        "ERR Can not execute a function with write flag using WASM.CALL_RO."
+    );
+    // A function with no-writes cannot write, nor run a may-replicate
+    // command such as PUBLISH, from either command.
+    for command in [["SET", "k", "v"], ["PUBLISH", "channel", "message"]] {
+        let mut args = vec!["run_ro", "0"];
+        args.extend(command);
+        assert_eq!(
+            error_text(call(&mut con, &args)),
+            "ERR Write commands are not allowed from read-only functions."
+        );
+    }
+    assert_eq!(
+        call_ro(&mut con, &["run_ro", "0", "GET", "k"]).unwrap(),
+        Value::Nil
+    );
+
+    // Over maxmemory: a function that may write does not start unless it has
+    // allow-oom, and one that does not write runs.
+    config_set(&mut con, "maxmemory", "1");
+    assert_eq!(
+        error_text(call(&mut con, &["set", "1", "k", "v"])),
+        "OOM allow-oom flag is not set on the function, can not run it when used memory > 'maxmemory'"
+    );
+    assert_eq!(
+        call(&mut con, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+    assert_eq!(
+        call(&mut con, &["set_oom", "1", "k", "v"]).unwrap(),
+        Value::Okay
+    );
+    config_set(&mut con, "maxmemory", "0");
+
+    // The RDB keeps the flags.
+    let _: () = redis::cmd("DEBUG").arg("RELOAD").query(&mut con).unwrap();
+    assert_eq!(flags_of(&mut con, "stale_ok"), ["no-writes", "allow-stale"]);
+    assert!(error_text(call_ro(&mut con, &["set", "1", "k", "v"])).contains("write flag"));
+}
+
+#[test]
+fn a_replica_runs_functions_by_their_flags() {
+    let primary = Server::start(6627, &[]);
+    let mut p = primary.connection();
+    load(&mut p, "hello");
+    let replica = Server::start(6628, &["--replicaof", "127.0.0.1", "6627"]);
+    let mut r = replica.connection();
+    wait_for("the replica to sync", || {
+        let info: String = redis::cmd("INFO").arg("replication").query(&mut r).ok()?;
+        info.contains("master_link_status:up").then_some(())
+    });
+
+    // A read-only replica runs a function that does not write, from WASM.CALL
+    // too, and refuses one that may.
+    assert_eq!(
+        call(&mut r, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+    assert_eq!(
+        error_text(call(&mut r, &["set", "1", "k", "v"])),
+        "READONLY Can not run function with write flag on readonly replica"
+    );
+
+    // With the primary gone and stale data not to be served, only a function
+    // with allow-stale runs.
+    primary.shutdown();
+    config_set(&mut r, "replica-serve-stale-data", "no");
+    assert_eq!(
+        error_text(call(&mut r, &["hello", "0"])),
+        "MASTERDOWN Link with MASTER is down, replica-serve-stale-data is set to 'no' \
+         and 'allow-stale' flag is not set on the function."
+    );
+    assert_eq!(
+        call(&mut r, &["stale_ok", "0"]).unwrap(),
+        Value::Status("ok".into())
+    );
 }

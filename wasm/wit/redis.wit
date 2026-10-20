@@ -39,8 +39,33 @@ world library {
     import redis;
     use redis.{node};
 
-    /// The names of the functions this library provides.
-    export functions: func() -> list<string>;
+    /// What a function may do: the flags of a Lua function.
+    flags function-flags {
+        /// The function does not write. It may run from `WASM.CALL_RO`, on a
+        /// read-only replica and over `maxmemory`; a write command it calls
+        /// fails.
+        no-writes,
+        /// A function that writes may start over `maxmemory`, and the commands
+        /// it calls are not checked against it.
+        allow-oom,
+        /// The function may run on a replica whose link to its primary is down
+        /// while `replica-serve-stale-data` is `no`.
+        allow-stale,
+        /// The function does not run on a cluster node.
+        no-cluster,
+        /// On a cluster node, the commands the function calls may use keys in
+        /// any slot this node serves, not only one slot.
+        allow-cross-slot-keys,
+    }
+
+    /// A function's name and flags.
+    record function {
+        name: string,
+        %flags: function-flags,
+    }
+
+    /// The functions this library provides.
+    export functions: func() -> list<function>;
 
     /// Runs function `name` with its keys and arguments, and returns the reply.
     export invoke: func(name: string, keys: list<list<u8>>, args: list<list<u8>>) -> list<node>;

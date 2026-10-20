@@ -11,7 +11,8 @@ This is an early prototype.
 ```text
 WASM.LOAD <library> <component> [REPLACE]       load a library; replies with its functions
 WASM.CALL <function> <numkeys> [key ...] [arg ...]
-WASM.LIST                                       [[library, [function ...]] ...]
+WASM.CALL_RO <function> <numkeys> [key ...] [arg ...]   only functions with no-writes
+WASM.LIST                                       [[library, [[function, [flag ...]] ...]] ...]
 WASM.DELETE <library>
 WASM.KILL                                       stop the running function, as FUNCTION KILL does
 ```
@@ -33,6 +34,30 @@ killed, drops the instance, and the next call starts a new one; replacing or
 deleting the library drops it too. All callers of a library share its
 instance, so a guest should not keep data from one call that another caller
 must not see.
+
+## Function flags
+
+A function has the flags of a Lua function, and they mean what they mean for
+Lua; the error replies have Lua's codes and say "function" where Lua's say
+"script":
+
+- `no-writes`: the function does not write. It may run from `WASM.CALL_RO`, on
+  a read-only replica and over `maxmemory`, and a write command it calls fails,
+  as does a `PUBLISH`, `SPUBLISH` or `PFCOUNT`.
+- `allow-oom`: a function that writes may start over `maxmemory`, and the
+  commands it calls are not checked against it.
+- `allow-stale`: the function may run on a replica that has lost its primary
+  while `replica-serve-stale-data` is `no`.
+- `no-cluster`: the function does not run on a cluster node.
+- `allow-cross-slot-keys`: on a cluster node, the commands the function calls
+  may use keys in any slot the node serves. Without it, they must use one slot:
+  the declared keys' slot, or the first one used.
+
+A function without flags may write, so like a Lua function it does not run on
+a read-only replica, from `WASM.CALL_RO`, or over `maxmemory`. Two of Lua's
+checks happen later: Redis offers modules no way to ask whether writes are
+refused for a disk error (`MISCONF`) or for too few replicas (`NOREPLICAS`), so
+such a function starts, and its first write fails with that error.
 
 ## Loading
 
@@ -97,8 +122,8 @@ over `maxmemory`, and the commands it calls follow `deny-oom`.
 
 A library is a component that implements the `library` world in
 [`wit/redis.wit`](wit/redis.wit). It exports `functions`, which lists the
-function names, and `invoke`, which runs one with its keys and arguments. It
-imports:
+functions with their flags, and `invoke`, which runs one with its keys and
+arguments. Guest code may not call Redis while its library loads. It imports:
 
 - `call(command, args)`: runs a Redis command, like `redis.pcall` in a script.
   The call runs in script mode as the caller's ACL user, its effects are
@@ -180,4 +205,5 @@ workspace `Cargo.toml`); unoptimized, loading the JavaScript component took
 
 [TRACKING.md](TRACKING.md) has every open item, with IDs and what done means. The main ones:
 
-- Function flags, read-only calls, and ACL and RESP helpers for guests.
+- A `call` that fails the function on an error, as `redis.call` does, and ACL
+  and RESP helpers for guests.

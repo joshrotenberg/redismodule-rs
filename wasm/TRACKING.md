@@ -31,7 +31,8 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   them.
 - Each instance's linear memory is limited by `wasm.max-memory` (64 MiB by
   default), and `INFO wasm` reports instances, their memory and compiled code.
-  A function does not start while Redis is over `maxmemory`.
+- Functions have Lua's flags, with Lua's checks before they start and on the
+  commands they call, and `WASM.CALL_RO` runs those with `no-writes`.
 - Guests in Rust (`guests/hello`) and JavaScript (`guests/js`, componentize-js);
   the same integration tests pass against both.
 - Reply types survive both ways, including simple versus bulk strings, maps,
@@ -44,7 +45,7 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   moves 1000 strings into the guest, 1.4 times faster.
 - The host is about 790 lines of code, not counting comments and unit tests.
   The example guest is 22 KB as a core module and 23 KB as a component. The
-  thirteen integration tests take about 9 seconds.
+  fifteen integration tests take about 9 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
@@ -118,7 +119,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H6 | done | **Key specs for `WASM.CALL`.** Declared with the `#[command]` macro and a key spec like `FCALL`'s: `numkeys` at argument 2, the keys after it, flags `RW`, `access` and `update`; `no-mandatory-keys`, arity -3. `COMMAND GETKEYS`, ACL key patterns and cluster routing (`MOVED`, `CROSSSLOT`) see the keys. | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
 | H7 | done | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread; the main thread instantiates and adds the library. Precompiled components (`Engine::precompile_component`) would skip the compile entirely, but loading one is `unsafe`: only for trusted input. | The server answers other clients while a large component compiles. |
 | H8 | done | **Memory.** `wasm.max-memory` (default 64 MiB) limits each instance's linear memory through a wasmtime `ResourceLimiter`; a guest that grows past it traps and its call fails, which drops the instance. A function does not start while Redis is over `maxmemory`, and its calls use `RedisModule_Call`'s `M` flag. `INFO wasm` reports libraries, functions, component and compiled code bytes, live instances and their linear memory, and the limit. Not done: replacing a kept instance that grew large but stays under the limit; a failed call already drops it. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
-| H9 | todo | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`), `WASM.CALL_RO`, a `call` that fails where `pcall` returns the error, and `acl-check-command` and `set-resp` imports. | Each has a test matching what Lua does. |
+| H9 | next | **Script parity.** Done (H9a): function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`) in the WIT, `WASM.CALL_RO`, Lua's checks before a function starts, read-only calls that refuse write and may-replicate commands, one slot per call on a cluster node, no calls while a library loads, flags in `WASM.LIST` and the RDB. Left (H9b): a `call` that fails the function where `pcall` returns the error, and `acl-check-command` and `set-resp` imports. | Each has a test matching what Lua does. |
 | H10 | todo | **Guest helper library.** A small Rust crate that builds the pre-order node list from typed values, so guests do not build it by hand. | The example guest uses it. |
 | H11 | todo | **Bounds check cost.** Signal-based traps are off so wasmtime installs no signal handlers over Redis's crash handler. Measured with H3's benchmark: turning them on made `primes` 18% faster (185 against 226 µs, with the old sieve loop), `median` 6%, `adler32` no different. Left: whether wasmtime's handlers and Redis's crash handler can coexist, and whether 18% is worth it. | A decision, with a crash report checked with handlers on. |
 | H12 | todo | **Context in the store.** The store holds a raw pointer to the command's `Context`. Write down the safety argument or replace it with an SDK pattern (S3). | Reviewed and documented, or replaced. |
@@ -163,6 +164,7 @@ can be an ordinary PR.
 | S6 | worked around | On macOS a stripped release build of the host fails to load ("mis-aligned LINKEDIT string pool"); the workspace sets `strip = "none"` for it. Check with a newer toolchain. |
 | S7 | todo | `ServerInfo::field` panics on a field name with a NUL byte; upstream returns `None`. |
 | S8 | todo | `Cargo.toml`'s `repository` field still names upstream. |
+| S10 | todo | No safe wrappers for `RedisModule_GetCommandKeysWithFlags` and `RedisModule_ClusterKeySlot`; the host calls them through `raw`. `ContextFlags` is not `Copy`. |
 | S9 | todo | `redis_module!`'s `configurations` block compiles only with all four groups (`i64`, `string`, `bool`, `enum`) and `module_args_as_configuration` listed, and module arguments are parsed as plain integers, so a memory config given as `8mb` fails the load. |
 
 ## Module API gaps
@@ -176,6 +178,8 @@ evidence as the host meets them.
 | G2 | `RedisModule_CreateCommand` works only while the module loads. | A function loaded later cannot be a command of its own; every call goes through `WASM.CALL`. |
 | G3 | No module API adds memory allocated outside the Redis allocator to `used_memory`. | `maxmemory` and `INFO memory` do not count guest memory or compiled code (confirmed: 1.3 MB used, 16 to 18 MB RSS). `INFO wasm` reports them instead: 7.7 MB of linear memory and 95 MB of compiled code for the JavaScript library. |
 | G4 | Aux data reaches an AOF only inside its RDB preamble: no module API adds commands to a rewritten AOF without one (`aof_rewrite` is per key). Redis writes its own `FUNCTION` libraries into the rewrite (`rewriteFunctions` in `aof.c`). | With `aof-use-rdb-preamble no` (the default is `yes`), an AOF rewrite drops the libraries: `WASM.LIST` was empty after `BGREWRITEAOF` and a restart. |
+| G5 | No module API says whether writes are refused for a disk error (`MISCONF`) or for too few good replicas (`NOREPLICAS`). | Lua refuses a function that may write before it starts; here it starts, and its first write command fails with that error (`RedisModule_Call`'s script mode checks each write). |
+| G6 | `COMMAND INFO` hides the `may_replicate` flag ("Hidden on purpose" in `server.c`), and no module API returns a command's flags. | Lua's read-only functions refuse may-replicate commands. The host names them (`PUBLISH`, `SPUBLISH`, `PFCOUNT`; script mode refuses `EVAL`, `EVALSHA` and `FCALL`), so a module command with that flag is not refused. |
 
 ## Open questions
 
@@ -185,6 +189,23 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H9a done: the WIT world has `function-flags` and `functions`
+  returns each function's name and flags. `WASM.CALL` is now `may-replicate`
+  rather than `write`, as `FCALL` is, and `WASM.CALL_RO` is `readonly`; both
+  run Lua's `scriptPrepareForRun` checks (read from Redis's `script.c`) in its
+  order. Calls run with `RedisModule_Call`'s `W` for a read-only call and `M`
+  unless `allow-oom`; the host refuses may-replicate commands itself (G6), and
+  on a cluster node keeps a call's keys in one slot through
+  `RedisModule_GetCommandKeysWithFlags` (S10). The RDB format is version 1,
+  with flags; version 0 still loads. The example guests declare flags; the
+  Rust one gains `run_ro`, `set_oom`, `stale_ok`, `local_only`, `get_args` and
+  `get_args_cross`. Tests: flags in `WASM.LIST` and after `DEBUG RELOAD`,
+  `WASM.CALL_RO`, read-only refusals of `SET` and `PUBLISH`, the `OOM` refusal
+  and `allow-oom`, a read-only replica, a stale replica with `allow-stale`,
+  and on a cluster `no-cluster` and the one-slot rule with and without
+  `allow-cross-slot-keys`. Not tested: refusing calls while a library loads,
+  and loading a version 0 RDB. The test harness now builds the module itself:
+  `cargo test` did not refresh its dylib, so a test could load a stale one.
 - 2026-10-20: H8 done: a `ResourceLimiter` per store counts linear memory
   (wasmtime asks it when a memory is created and when it grows) and refuses
   growth past `wasm.max-memory`, an `i64` module config with the memory flag,

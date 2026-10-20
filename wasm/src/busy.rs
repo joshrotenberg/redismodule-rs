@@ -97,12 +97,29 @@ pub(crate) fn on_epoch(ctx: &Context) -> anyhow::Result<UpdateDeadline> {
     Ok(UpdateDeadline::Continue(1))
 }
 
-/// Records that the running function is about to call `command` with `args`,
-/// if it is a write command.
-pub(crate) fn note_call(ctx: &Context, command: &str, args: &[&[u8]]) {
-    if is_write(ctx, command, args.first().copied()) {
+/// What a command a guest calls may do.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Effects {
+    /// It is a write command, from `COMMAND INFO`.
+    pub(crate) write: bool,
+    /// It may replicate something without being a write command.
+    pub(crate) may_replicate: bool,
+}
+
+/// The commands flagged `may_replicate` that script mode allows. `COMMAND
+/// INFO` hides that flag and no module API returns a command's flags, so they
+/// are named here, from Redis's command table; `EVAL`, `EVALSHA` and `FCALL`,
+/// the others, cannot run from a script.
+const MAY_REPLICATE: [&str; 3] = ["publish", "spublish", "pfcount"];
+
+/// Looks up what `command` with `args` may do, and records that the running
+/// function has written if it is a write command.
+pub(crate) fn note_call(ctx: &Context, command: &str, args: &[&[u8]]) -> Effects {
+    let effects = effects(ctx, command, args.first().copied());
+    if effects.write {
         WROTE.store(true, Ordering::SeqCst);
     }
+    effects
 }
 
 /// What `COMMAND INFO` says about a command or subcommand.
@@ -117,21 +134,28 @@ struct CommandInfo {
 /// cache grows with the command and subcommand names guests use.
 static COMMANDS: Mutex<BTreeMap<String, Option<CommandInfo>>> = Mutex::new(BTreeMap::new());
 
-fn is_write(ctx: &Context, command: &str, first_arg: Option<&[u8]>) -> bool {
+fn effects(ctx: &Context, command: &str, first_arg: Option<&[u8]>) -> Effects {
     let name = command.to_ascii_lowercase();
+    let may_replicate = MAY_REPLICATE.contains(&name.as_str());
     let Some(info) = command_info(ctx, &name) else {
-        return false;
+        return Effects::default();
     };
     if info.has_subcommands {
         if let Some(sub) = first_arg.and_then(|arg| std::str::from_utf8(arg).ok()) {
             if let Some(sub_info) =
                 command_info(ctx, &format!("{name}|{}", sub.to_ascii_lowercase()))
             {
-                return sub_info.write;
+                return Effects {
+                    write: sub_info.write,
+                    may_replicate,
+                };
             }
         }
     }
-    info.write
+    Effects {
+        write: info.write,
+        may_replicate,
+    }
 }
 
 fn command_info(ctx: &Context, name: &str) -> Option<CommandInfo> {

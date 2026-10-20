@@ -8,6 +8,7 @@
 //! ```text
 //! WASM.LOAD <library> <component> [REPLACE]
 //! WASM.CALL <function> <numkeys> [key ...] [arg ...]
+//! WASM.CALL_RO <function> <numkeys> [key ...] [arg ...]
 //! WASM.LIST
 //! WASM.DELETE <library>
 //! WASM.KILL
@@ -23,12 +24,13 @@ use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
 
 use redis_module::configuration::ConfigurationFlags;
 use redis_module::{
-    ArgCursor, Context, ContextFlags, ModuleOptions, RedisError, RedisResult, RedisString,
-    RedisValue, Status, redis_module,
+    ArgCursor, Context, ModuleOptions, RedisError, RedisResult, RedisString, RedisValue, Status,
+    redis_module,
 };
 use redis_module_macros::command;
 
 mod busy;
+mod flags;
 mod host;
 mod memory;
 mod persist;
@@ -128,7 +130,10 @@ fn finish_load(ctx: &Context, loaded: Loaded) -> RedisResult {
     // A blocked client keeps its arguments until it is unblocked, after this.
     ctx.replicate_verbatim();
     Ok(RedisValue::Array(
-        functions.into_iter().map(RedisValue::BulkString).collect(),
+        functions
+            .into_iter()
+            .map(|function| RedisValue::BulkString(function.name))
+            .collect(),
     ))
 }
 
@@ -142,10 +147,12 @@ fn load_timed_out(_ctx: &Context) -> RedisResult {
 /// Like `FCALL`'s, its key spec reads the keys from `numkeys`, so `COMMAND
 /// GETKEYS`, ACL key patterns and cluster routing see them. A function may do
 /// anything with a key, so the spec assumes it reads and updates each one.
+/// Like `FCALL`, it is not a write command: the function's flags decide where
+/// it may run (see `flags.rs`).
 #[command(
     {
         name: "wasm.call",
-        flags: [Write, DenyScript, NoMandatoryKeys],
+        flags: [MayReplicate, DenyScript, NoMandatoryKeys, AllowStale],
         arity: -3,
         key_spec: [
             {
@@ -158,6 +165,31 @@ fn load_timed_out(_ctx: &Context) -> RedisResult {
     }
 )]
 fn wasm_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    run_function(ctx, &args, false)
+}
+
+/// `WASM.CALL_RO <function> <numkeys> [key ...] [arg ...]`: like `FCALL_RO`,
+/// runs only a function with `no-writes`.
+#[command(
+    {
+        name: "wasm.call_ro",
+        flags: [ReadOnly, DenyScript, NoMandatoryKeys, AllowStale],
+        arity: -3,
+        key_spec: [
+            {
+                notes: "the function only reads its keys",
+                flags: [ReadOnly, Access],
+                begin_search: Index({ index : 2 }),
+                find_keys: Keynum({ key_num_idx : 0, first_key : 1, key_step : 1 }),
+            }
+        ]
+    }
+)]
+fn wasm_call_ro(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    run_function(ctx, &args, true)
+}
+
+fn run_function(ctx: &Context, args: &[RedisString], read_only: bool) -> RedisResult {
     let mut args = ArgCursor::new(&args[1..]);
     let function = args.next_str()?;
     let numkeys = usize::try_from(args.next_u64()?)
@@ -169,20 +201,13 @@ fn wasm_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let keys: Vec<Vec<u8>> = args.by_ref().take(numkeys).map(|k| k.to_vec()).collect();
     let rest: Vec<Vec<u8>> = args.map(|a| a.to_vec()).collect();
 
-    // As for a Lua function without flags: a function may write, so it does
-    // not start while Redis is over maxmemory.
-    if ctx.get_flags().contains(ContextFlags::OOM) {
-        return Err(RedisError::Str(
-            "OOM command not allowed when used memory > 'maxmemory'.",
-        ));
-    }
-
     // Release the host before running the guest, so a guest that calls a
     // WASM.* command fails on its command flags, not on a lock.
     let call = with_host(|host| host.prepare(function))?
         .ok_or_else(|| RedisError::String(format!("ERR function '{function}' not found")))?;
+    let mode = flags::check(ctx, call.flags(), read_only, &keys)?;
     let nodes = call
-        .run(ctx, function, &keys, &rest)
+        .run(ctx, function, &keys, &rest, mode)
         .map_err(|e| error(&format!("function '{function}' failed"), &e))?;
     reply::to_value(&nodes).map_err(|reason| {
         RedisError::String(format!(
@@ -191,22 +216,26 @@ fn wasm_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     })
 }
 
-/// `WASM.LIST`: an array of `[library, [function ...]]` pairs.
+/// `WASM.LIST`: `[library, [[function, [flag ...]] ...]]` for each library.
 fn wasm_list(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ArgCursor::new(&args[1..]).done()?;
+    let function = |function: &host::Function| {
+        RedisValue::Array(vec![
+            RedisValue::BulkString(function.name.clone()),
+            RedisValue::Array(
+                flags::names(function.flags)
+                    .map(RedisValue::SimpleStringStatic)
+                    .collect(),
+            ),
+        ])
+    };
     with_host(|host| {
         RedisValue::Array(
             host.list()
                 .map(|(name, functions)| {
                     RedisValue::Array(vec![
                         RedisValue::BulkString(name.to_owned()),
-                        RedisValue::Array(
-                            functions
-                                .iter()
-                                .cloned()
-                                .map(RedisValue::BulkString)
-                                .collect(),
-                        ),
+                        RedisValue::Array(functions.iter().map(function).collect()),
                     ])
                 })
                 .collect(),

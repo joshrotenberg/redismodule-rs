@@ -12,6 +12,7 @@ use wasmtime::component::{Component, HasSelf, Linker};
 use wasmtime::{Config, Engine, Store};
 
 use crate::busy::{self, Running, Ticker};
+use crate::flags::{self, Mode};
 use crate::memory::{LibrarySizes, Live, Memory};
 use crate::reply::push_call_result;
 
@@ -22,11 +23,13 @@ wasmtime::component::bindgen!({
 
 use redis_module_wasm::host::redis::LogLevel;
 
-/// A store's data: the context of the command running a guest, set only for
-/// the duration of a call.
+/// A store's data: the context of the command running a guest and how its
+/// calls into Redis run, both set for each call.
 pub(crate) struct CallState {
     ctx: Option<NonNull<Context>>,
-    options: CallOptions,
+    mode: Mode,
+    /// The call options for each mode, by `options_index`.
+    options: [CallOptions; 4],
     memory: Memory,
 }
 
@@ -40,20 +43,38 @@ impl CallState {
     fn new() -> Self {
         Self {
             ctx: None,
-            // Like redis.call in a script: script mode (S), the caller's ACL
-            // user (C), no deny-oom commands over maxmemory (M), errors as
-            // replies (E), replicate the effects (!), and RESP3 replies so the
-            // guest sees each reply's type.
-            options: CallOptionsBuilder::new()
-                .script_mode()
-                .verify_acl()
-                .verify_oom()
-                .errors_as_replies()
-                .replicate()
-                .resp(CallOptionResp::Resp3)
-                .build(),
+            mode: Mode::loading(),
+            options: [
+                call_options(false, false),
+                call_options(false, true),
+                call_options(true, false),
+                call_options(true, true),
+            ],
             memory: Memory::default(),
         }
+    }
+
+    fn options(&self) -> &CallOptions {
+        &self.options[usize::from(self.mode.read_only) << 1 | usize::from(self.mode.allow_oom)]
+    }
+
+    /// Fails if a command using `args` would leave the call's slot, as Lua
+    /// does on a cluster node for a script without `allow-cross-slot-keys`.
+    fn check_slot(&mut self, command: &str, args: &[&[u8]]) -> Result<(), String> {
+        let Some(slot) = flags::command_slot(self.ctx(), command, args) else {
+            return Ok(());
+        };
+        match self.mode.slot {
+            None => self.mode.slot = Some(slot),
+            Some(first) if first != slot => {
+                return Err(
+                    "ERR Function attempted to access keys that do not hash to the same slot"
+                        .into(),
+                );
+            }
+            Some(_) => {}
+        }
+        Ok(())
     }
 
     /// The context of the command running the guest. Host imports and the
@@ -67,13 +88,51 @@ impl CallState {
     }
 }
 
+/// The options for a guest's calls, like those of redis.call in a script:
+/// script mode (S), the caller's ACL user (C), errors as replies (E), and the
+/// effects replicated (!). A read-only call refuses write commands (W); one
+/// without allow-oom refuses deny-oom commands over maxmemory (M). Replies are
+/// RESP3, so the guest sees each reply's type.
+fn call_options(read_only: bool, allow_oom: bool) -> CallOptions {
+    let mut builder = CallOptionsBuilder::new()
+        .script_mode()
+        .verify_acl()
+        .errors_as_replies()
+        .replicate()
+        .resp(CallOptionResp::Resp3);
+    if read_only {
+        builder = builder.no_writes();
+    }
+    if !allow_oom {
+        builder = builder.verify_oom();
+    }
+    builder.build()
+}
+
 impl redis_module_wasm::host::redis::Host for CallState {
     fn call(&mut self, command: String, args: Vec<Vec<u8>>) -> Vec<Node> {
+        if self.mode.loading {
+            return vec![Node::Error(
+                "ERR a library may not call Redis while it loads".into(),
+            )];
+        }
         let args: Vec<&[u8]> = args.iter().map(Vec::as_slice).collect();
-        busy::note_call(self.ctx(), &command, &args);
+        if self.mode.one_slot {
+            if let Err(error) = self.check_slot(&command, &args) {
+                return vec![Node::Error(error)];
+            }
+        }
+        let effects = busy::note_call(self.ctx(), &command, &args);
+        // As for a read-only Lua script: may-replicate commands count as
+        // writes. RedisModule_Call's W flag refuses only write commands.
+        if self.mode.read_only && (effects.write || effects.may_replicate) {
+            return vec![Node::Error(
+                "ERR Write commands are not allowed from read-only functions.".into(),
+            )];
+        }
         let result: CallResult<'static> =
             self.ctx()
-                .call_ext(&command, &self.options, args.as_slice());
+                .call_ext(&command, self.options(), args.as_slice());
         let mut nodes = Vec::new();
         push_call_result(&mut nodes, &result);
         nodes
@@ -96,7 +155,7 @@ impl redis_module_wasm::host::redis::Host for CallState {
 struct LoadedLibrary {
     pre: LibraryPre<CallState>,
     component: Vec<u8>,
-    functions: Vec<String>,
+    functions: Vec<Function>,
     kept: KeptInstance,
 }
 
@@ -117,7 +176,8 @@ impl Instance {
         let mut store = Store::new(engine, CallState::new());
         store.limiter(|state| &mut state.memory);
         store.epoch_deadline_callback(|store| busy::on_epoch(store.data().ctx()));
-        // Instantiating can run guest code, so it runs like a call.
+        // Instantiating can run guest code, so it runs like a call, in the
+        // loading mode CallState starts in.
         store.data_mut().ctx = Some(NonNull::from(ctx));
         store.set_epoch_deadline(1);
         let library = pre.instantiate(&mut store);
@@ -129,14 +189,16 @@ impl Instance {
         })
     }
 
-    /// Runs `f` with `ctx` as the context of the guest's imports, yielding to
-    /// Redis at each epoch.
+    /// Runs `f` with `ctx` as the context of the guest's imports and `mode`
+    /// for its calls, yielding to Redis at each epoch.
     fn call<R>(
         &mut self,
         ctx: &Context,
+        mode: Mode,
         f: impl FnOnce(&Library, &mut Store<CallState>) -> anyhow::Result<R>,
     ) -> anyhow::Result<R> {
         self.store.data_mut().ctx = Some(NonNull::from(ctx));
+        self.store.data_mut().mode = mode;
         self.store.set_epoch_deadline(1);
         let result = f(&self.library, &mut self.store);
         self.store.data_mut().ctx = None;
@@ -150,8 +212,8 @@ pub(crate) struct Host {
     ticker: Ticker,
     linker: Linker<CallState>,
     libraries: BTreeMap<String, LoadedLibrary>,
-    /// Which library provides each function.
-    functions: BTreeMap<String, String>,
+    /// Which library provides each function, and the function's flags.
+    functions: BTreeMap<String, (String, FunctionFlags)>,
 }
 
 impl Host {
@@ -203,7 +265,7 @@ impl Host {
         name: &str,
         compiled: Compiled,
         replace: bool,
-    ) -> anyhow::Result<Vec<String>> {
+    ) -> anyhow::Result<Vec<Function>> {
         // Checked again here: another load may have added the name while this
         // component compiled.
         self.check_name(name, replace)?;
@@ -211,7 +273,9 @@ impl Host {
         // Listing the functions runs guest code too, so it can be killed.
         let running = Running::start();
         let mut instance = Instance::new(&self.engine, &compiled.pre, ctx)?;
-        let functions = instance.call(ctx, |library, store| library.call_functions(store))?;
+        let functions = instance.call(ctx, Mode::loading(), |library, store| {
+            library.call_functions(store)
+        })?;
         drop(running);
         // The instance that listed the functions serves the first call.
         self.insert(name, compiled, functions.clone(), Some(instance))?;
@@ -225,7 +289,7 @@ impl Host {
         &mut self,
         name: &str,
         compiled: Compiled,
-        functions: Vec<String>,
+        functions: Vec<Function>,
     ) -> anyhow::Result<()> {
         self.insert(name, compiled, functions, None)
     }
@@ -234,13 +298,16 @@ impl Host {
         &mut self,
         name: &str,
         compiled: Compiled,
-        functions: Vec<String>,
+        functions: Vec<Function>,
         instance: Option<Instance>,
     ) -> anyhow::Result<()> {
         for function in &functions {
-            match self.functions.get(function) {
-                Some(owner) if owner != name => {
-                    bail!("function '{function}' already exists in library '{owner}'")
+            match self.functions.get(&function.name) {
+                Some((owner, _)) if owner != name => {
+                    bail!(
+                        "function '{}' already exists in library '{owner}'",
+                        function.name
+                    )
                 }
                 _ => {}
             }
@@ -248,7 +315,8 @@ impl Host {
 
         self.remove(name);
         for function in &functions {
-            self.functions.insert(function.clone(), name.to_owned());
+            self.functions
+                .insert(function.name.clone(), (name.to_owned(), function.flags));
         }
         self.libraries.insert(
             name.to_owned(),
@@ -273,7 +341,7 @@ impl Host {
             return false;
         };
         for function in library.functions {
-            self.functions.remove(&function);
+            self.functions.remove(&function.name);
         }
         true
     }
@@ -285,7 +353,7 @@ impl Host {
     }
 
     /// The loaded libraries and their functions, by library name.
-    pub(crate) fn list(&self) -> impl Iterator<Item = (&str, &[String])> {
+    pub(crate) fn list(&self) -> impl Iterator<Item = (&str, &[Function])> {
         self.libraries
             .iter()
             .map(|(name, library)| (name.as_str(), library.functions.as_slice()))
@@ -308,7 +376,7 @@ impl Host {
 
     /// What the RDB keeps of each library: its name, its component's bytes and
     /// its functions.
-    pub(crate) fn saved(&self) -> impl Iterator<Item = (&str, &[u8], &[String])> {
+    pub(crate) fn saved(&self) -> impl Iterator<Item = (&str, &[u8], &[Function])> {
         self.libraries.iter().map(|(name, library)| {
             (
                 name.as_str(),
@@ -321,11 +389,13 @@ impl Host {
     /// What a call of `function` needs, so the caller can release the host
     /// before running the guest.
     pub(crate) fn prepare(&self, function: &str) -> Option<PreparedCall> {
-        let library = &self.libraries[self.functions.get(function)?];
+        let (library, flags) = self.functions.get(function)?;
+        let library = &self.libraries[library];
         Some(PreparedCall {
             engine: self.engine.clone(),
             pre: library.pre.clone(),
             kept: Arc::clone(&library.kept),
+            flags: *flags,
         })
     }
 }
@@ -362,16 +432,24 @@ pub(crate) struct PreparedCall {
     engine: Engine,
     pre: LibraryPre<CallState>,
     kept: KeptInstance,
+    flags: FunctionFlags,
 }
 
 impl PreparedCall {
-    /// Runs `function` with `keys` and `args` and returns its reply nodes.
+    /// The function's flags.
+    pub(crate) fn flags(&self) -> FunctionFlags {
+        self.flags
+    }
+
+    /// Runs `function` with `keys` and `args`, its calls in `mode`, and
+    /// returns its reply nodes.
     pub(crate) fn run(
         self,
         ctx: &Context,
         function: &str,
         keys: &[Vec<u8>],
         args: &[Vec<u8>],
+        mode: Mode,
     ) -> anyhow::Result<Vec<Node>> {
         let _running = Running::start();
         // Another module's callback can call this library again while one of
@@ -386,7 +464,7 @@ impl PreparedCall {
             Some(instance) => instance,
             None => Instance::new(&self.engine, &self.pre, ctx)?,
         };
-        let result = instance.call(ctx, |library, store| {
+        let result = instance.call(ctx, mode, |library, store| {
             library.call_invoke(store, function, keys, args)
         });
         if let (Ok(_), Some(kept)) = (&result, kept.as_mut()) {
