@@ -1036,6 +1036,36 @@ fn test_error_inside_an_array() -> Result<()> {
     Ok(())
 }
 
+/// Sends `command` with no arguments on a new connection and reads the raw
+/// RESP reply, which must be `expected.len()` bytes.
+fn raw_reply(con: &TestConnection, command: &str, expected: &str) -> Result<String> {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", con.port()))?;
+    stream.write_all(format!("*1\r\n${}\r\n{command}\r\n", command.len()).as_bytes())?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
+    let mut reply = vec![0; expected.len()];
+    stream.read_exact(&mut reply)?;
+    Ok(String::from_utf8_lossy(&reply).into_owned())
+}
+
+#[test]
+fn test_simple_string_map_keys() -> Result<()> {
+    let con = TestConnection::new("response");
+    // RESP2 receives the map as a flat array; each key keeps its type, also
+    // after a call reply is converted and forwarded. The forwarded map is
+    // sorted by key, and String keys sort before SimpleString ones.
+    for (command, expected) in [
+        ("map.simple_keys", "*4\r\n+a\r\n:1\r\n$1\r\nb\r\n:2\r\n"),
+        (
+            "map.forward_simple_keys",
+            "*4\r\n$1\r\nb\r\n:2\r\n+a\r\n:1\r\n",
+        ),
+    ] {
+        assert_eq!(raw_reply(&con, command, expected)?, expected, "{command}");
+    }
+    Ok(())
+}
+
 #[test]
 fn test_insertion_ordered_map() -> Result<()> {
     let mut con = TestConnection::new("response");

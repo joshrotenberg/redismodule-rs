@@ -1,6 +1,6 @@
 use redis_module::{
-    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
-    redisvalue::RedisValueKey,
+    CallOptionResp, CallOptionsBuilder, CallResult, Context, NextArg, RedisError, RedisResult,
+    RedisString, RedisValue, redis_module, redisvalue::RedisValueKey,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -105,6 +105,37 @@ fn map_ordered(_: &Context, _: Vec<RedisString>) -> RedisResult {
     ))
 }
 
+/// `map.simple_keys`: a map with a simple-string key and a bulk-string key.
+fn map_simple_keys(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::InsertionOrderedMap(vec![
+        (
+            RedisValueKey::SimpleString("a".to_owned()),
+            RedisValue::Integer(1),
+        ),
+        (
+            RedisValueKey::String("b".to_owned()),
+            RedisValue::Integer(2),
+        ),
+    ]))
+}
+
+/// `map.forward_simple_keys`: calls `map.simple_keys` with RESP3 replies and
+/// replies with the converted value, which keeps each key's type.
+fn map_forward_simple_keys(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let options = CallOptionsBuilder::new()
+        .resp(CallOptionResp::Resp3)
+        .build();
+    let reply: CallResult = ctx.call_ext("map.simple_keys", &options, &[] as &[&[u8]]);
+    let reply = reply.map_err(RedisError::from)?;
+    // A map converts to a hash map, so order the keys for a stable reply.
+    let RedisValue::Map(map) = RedisValue::from(&reply) else {
+        return Err(RedisError::Str("ERR expected a map"));
+    };
+    let mut entries: Vec<_> = map.into_iter().collect();
+    entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+    Ok(RedisValue::InsertionOrderedMap(entries))
+}
+
 /// `errors.in_array`: an array holding an error with a computed message.
 fn errors_in_array(_: &Context, _: Vec<RedisString>) -> RedisResult {
     let failed = 2;
@@ -129,5 +160,7 @@ redis_module! {
         ["map.hget_writable", map_hget_writable, "write", 1, 1, 1, ""],
         ["map.ordered", map_ordered, "readonly", 0, 0, 0, ""],
         ["errors.in_array", errors_in_array, "readonly", 0, 0, 0, ""],
+        ["map.simple_keys", map_simple_keys, "readonly", 0, 0, 0, ""],
+        ["map.forward_simple_keys", map_forward_simple_keys, "readonly", 0, 0, 0, ""],
     ],
 }

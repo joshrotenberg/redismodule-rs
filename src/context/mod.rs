@@ -660,6 +660,7 @@ impl Context {
             RedisValueKey::String(s) => {
                 raw::reply_with_string_buffer(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
             }
+            RedisValueKey::SimpleString(s) => self.reply_simple_string(&s),
             RedisValueKey::BulkString(b) => {
                 raw::reply_with_string_buffer(self.ctx, b.as_ptr().cast::<c_char>(), b.len())
             }
