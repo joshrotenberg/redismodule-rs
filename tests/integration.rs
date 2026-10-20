@@ -12,6 +12,99 @@ use redis_module::RedisValue;
 mod utils;
 
 #[test]
+fn test_call_error_codes_classify_native_and_synthesized_errors() -> Result<()> {
+    let mut con = TestConnection::new("call_reply");
+    redis::cmd("SET")
+        .arg(&["string-key", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("XGROUP")
+        .arg(&["CREATE", "stream", "group", "0", "MKSTREAM"])
+        .query::<()>(&mut con)?;
+    for (args, expected) in [
+        (&["HGET", "string-key", "field"][..], &b"WRONGTYPE"[..]),
+        (
+            &["XGROUP", "CREATE", "stream", "group", "0"][..],
+            &b"BUSYGROUP"[..],
+        ),
+        (&["NOSUCHCMD"][..], &b"ERR"[..]),
+    ] {
+        let code: Vec<u8> = redis::cmd("call_reply.error_code")
+            .arg(args)
+            .query(&mut con)?;
+        assert_eq!(code, expected, "{args:?}");
+    }
+    let code: Option<Vec<u8>> = redis::cmd("call_reply.error_code")
+        .arg(&["PING"])
+        .query(&mut con)?;
+    assert_eq!(code, None, "a successful call had an error code");
+    Ok(())
+}
+
+#[test]
+fn test_call_error_codes_do_not_require_utf8_messages() -> Result<()> {
+    let mut con = TestConnection::new("call_reply");
+    for (script, expected) in [
+        (
+            "return redis.error_reply('CUSTOM detail ' .. string.char(255))",
+            &b"CUSTOM"[..],
+        ),
+        (
+            "return redis.error_reply(string.char(255) .. ' details')",
+            &b"\xff"[..],
+        ),
+    ] {
+        let code: Vec<u8> = redis::cmd("call_reply.error_code")
+            .arg(&["EVAL", script, "0"])
+            .query(&mut con)?;
+        assert_eq!(code, expected);
+    }
+    Ok(())
+}
+
+#[test]
+fn test_byte_keyspace_notifications_accept_non_utf8_and_empty_names() -> Result<()> {
+    let mut con = TestConnection::new("events");
+    for (event, expected) in [
+        (&b"ordinary"[..], "ordinary"),
+        (&b"ev\xffnt"[..], "ev\u{FFFD}nt"),
+        (&b""[..], ""),
+    ] {
+        let sent: String = redis::cmd("events.send_bytes").arg(event).query(&mut con)?;
+        assert_eq!(sent, "Event sent");
+        let seen: String = redis::cmd("events.last_generic_event").query(&mut con)?;
+        assert_eq!(seen, expected);
+    }
+    Ok(())
+}
+
+#[test]
+fn test_keyspace_notifications_reject_nul_without_firing_or_panicking() -> Result<()> {
+    let mut con = TestConnection::new("events");
+    // The legacy text helper still sends valid names.
+    redis::cmd("events.send_text")
+        .arg("previous")
+        .query::<String>(&mut con)?;
+    for (command, expected) in [
+        ("events.send_bytes", "contains a NUL byte"),
+        ("events.send_text", "text notification rejected"),
+    ] {
+        let error = redis::cmd(command)
+            .arg(&b"before\0after"[..])
+            .query::<Value>(&mut con)
+            .expect_err("a NUL-containing event was accepted");
+        assert!(error.to_string().contains(expected), "{command}: {error}");
+        assert!(!error.to_string().contains("panicked"), "{error}");
+        let seen: String = redis::cmd("events.last_generic_event").query(&mut con)?;
+        assert_eq!(
+            seen, "previous",
+            "the rejected event was fired or truncated"
+        );
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    Ok(())
+}
+
+#[test]
 fn test_database_selection_changes_the_client_database() -> Result<()> {
     let mut con = TestConnection::new("database");
     assert_eq!(redis::cmd("database.selected").query::<i32>(&mut con)?, 0);

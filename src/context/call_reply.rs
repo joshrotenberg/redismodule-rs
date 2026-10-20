@@ -81,6 +81,16 @@ pub struct ErrorCallReply<'root> {
 }
 
 impl<'root> ErrorCallReply<'root> {
+    /// Borrows the error prefix, such as `WRONGTYPE`, without decoding UTF-8.
+    ///
+    /// This is the payload before the first ASCII space, or the entire payload
+    /// if there is no space. An empty payload has an empty code. The prefix is
+    /// a Redis convention and is not validated or normalized here.
+    #[must_use]
+    pub fn code(&self) -> &[u8] {
+        error_code(self.as_bytes())
+    }
+
     /// Convert ErrorCallReply to String.
     /// Return None data is not a valid utf8.
     pub fn to_utf8_string(&self) -> Option<String> {
@@ -141,6 +151,24 @@ pub enum ErrorReply<'root> {
 unsafe impl<'root> Send for ErrorCallReply<'root> {}
 
 impl<'root> ErrorReply<'root> {
+    /// Borrows the error prefix from either a native error reply or a message.
+    ///
+    /// Uses the same byte-preserving rules as [`ErrorCallReply::code`]. The
+    /// message after the prefix need not be valid UTF-8.
+    ///
+    /// ```
+    /// use redis_module::ErrorReply;
+    /// let error = ErrorReply::Message("BUSYGROUP group already exists".into());
+    /// assert_eq!(error.code(), b"BUSYGROUP");
+    /// ```
+    #[must_use]
+    pub fn code(&self) -> &[u8] {
+        match self {
+            ErrorReply::Message(message) => error_code(message.as_bytes()),
+            ErrorReply::RedisError(reply) => reply.code(),
+        }
+    }
+
     /// Convert [ErrorCallReply] to [String] or [None] if its not a valid utf8.
     pub fn to_utf8_string(&self) -> Option<String> {
         match self {
@@ -162,6 +190,14 @@ impl<'root> Display for ErrorReply<'root> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&String::from_utf8_lossy(self.as_bytes()), f)
     }
+}
+
+fn error_code(message: &[u8]) -> &[u8] {
+    let end = message
+        .iter()
+        .position(|byte| *byte == b' ')
+        .unwrap_or(message.len());
+    &message[..end]
 }
 
 pub struct I64CallReply<'root> {
@@ -961,5 +997,34 @@ impl<'ctx> From<PromiseCallReply<'static, 'ctx>> for CallResult<'static> {
             PromiseCallReply::Resolved(c) => c,
             PromiseCallReply::Future(_) => panic!("Got unexpected future call reply"),
         }
+    }
+}
+
+#[cfg(test)]
+mod error_code_tests {
+    use super::{ErrorReply, error_code};
+
+    #[test]
+    fn message_codes_handle_bare_empty_and_nonstandard_payloads() {
+        for (message, expected) in [
+            ("OOM command not allowed", &b"OOM"[..]),
+            ("BUSYGROUP group exists", &b"BUSYGROUP"[..]),
+            ("ERR", &b"ERR"[..]),
+            ("", &b""[..]),
+            (" ERR message", &b""[..]),
+            ("CUSTOM  multiple spaces", &b"CUSTOM"[..]),
+            ("lowercase message", &b"lowercase"[..]),
+            ("CUSTOM\tdetails", &b"CUSTOM\tdetails"[..]),
+        ] {
+            let reply = ErrorReply::Message(message.into());
+            assert_eq!(reply.code(), expected, "{message:?}");
+        }
+    }
+
+    #[test]
+    fn codes_preserve_bytes_without_decoding_the_message() {
+        assert_eq!(error_code(b"CUSTOM non-UTF-8 \xff"), b"CUSTOM");
+        assert_eq!(error_code(b"\xffCODE details"), b"\xffCODE");
+        assert_eq!(error_code(b"\xff"), b"\xff");
     }
 }

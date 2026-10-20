@@ -14,6 +14,18 @@ fn echo(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     forward(ctx, args, "ECHO")
 }
 
+/// Classifies failed calls without decoding or copying the error message.
+fn error_code(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let command = args.get(1).ok_or(RedisError::WrongArity)?.try_as_str()?;
+    let call_args: Vec<_> = args.iter().skip(2).map(RedisString::as_slice).collect();
+    let options = CallOptionsBuilder::new().errors_as_replies().build();
+    let result: CallResult = ctx.call_ext(command, &options, call_args.as_slice());
+    Ok(match result {
+        Ok(_) => RedisValue::Null,
+        Err(error) => RedisValue::StringBuffer(error.code().to_vec()),
+    })
+}
+
 fn get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     forward(ctx, args, "GET")
 }
@@ -100,6 +112,7 @@ redis_module! {
     data_types: [],
     commands: [
         ["call_reply.echo", echo, "readonly", 0, 0, 0, ""],
+        ["call_reply.error_code", error_code, "", 0, 0, 0, ""],
         ["call_reply.get", get, "readonly", 1, 1, 1, ""],
         ["call_reply.mget", mget, "readonly", 1, -1, 1, ""],
         ["call_reply.dump", dump, "readonly", 1, 1, 1, ""],

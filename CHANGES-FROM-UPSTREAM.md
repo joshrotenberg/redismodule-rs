@@ -112,6 +112,7 @@ these in October 2026.
 
 | change | addition |
 |---|---|
+| [Error and notification helpers](examples/events.rs) | `ErrorReply::code` and `ErrorCallReply::code` borrow the error prefix as bytes; `Context::notify_keyspace_event_bytes` sends non-UTF-8 event names and rejects NUL bytes. The existing text helper returns `Status::Err` on a NUL-containing name instead of panicking. |
 | [Database selection helpers](examples/database.rs) | `Context::get_selected_db`, `select_db`, and `with_db`, which restores the original database after synchronous scoped access, including returned errors and unwinding. |
 | [ce0c36d] | `ArgCursor`, a borrowing argument parser (upstream issue 7). |
 | [b0135e0] | `Context::dbsize`, the shutdown server event, `RedisAlloc` trait derives (upstream PRs 397, 477, 386). |
