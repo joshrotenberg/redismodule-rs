@@ -8,7 +8,7 @@ version = "3.0.0"
 license = "BSD-3-Clause"
 edition = "2024"
 rust-version = "1.87"
-repository = "https://github.com/RedisLabsModules/redismodule-rs"
+repository = "https://github.com/joshrotenberg/redismodule-rs"
 
 [package]
 name = "redis-module"
