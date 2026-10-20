@@ -11,12 +11,10 @@ concurrency:
 
 jobs:
   test:
-    name: Build and run the unit tests using the latest rust.
+    # The default build, with the committed bindings, on the toolchain that
+    # rust-toolchain.toml pins.
+    name: Build and test (floor ${{ matrix.redis-version[0] }}, Redis ${{ matrix.redis-version[1] }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    env:
-      # One job checks that the committed bindings are what bindgen generates;
-      # the others would depend on each runner's LLVM version.
-      REDISMODULE_RS_CHECK_BINDINGS: ${{ matrix.os == 'ubuntu-latest' && matrix.redis-version[0] == '8-0' && '1' || '0' }}
     strategy:
       fail-fast: false
       matrix:
@@ -30,8 +28,6 @@ jobs:
           - [7-2, "7.2"]
           - [7-4, "7.4"]
           - [8-0, "8.0"]
-        toolchain:
-          - stable
         # macOS runs the lowest and highest floors; Linux runs them all.
         exclude:
           - os: macos-latest
@@ -46,13 +42,10 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       - name: Checkout redis sources
         uses: actions/checkout@v5
         with:
-          submodules: recursive
           repository: redis/redis
           ref: ${{ matrix.redis-version[1] }}
           path: redis
@@ -66,53 +59,57 @@ jobs:
           make install PREFIX=/usr/local
           redis-server --version
 
-      - name: Setup python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
-
-      - name: Install Clang (for bindgen)
-        run: |
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            sudo apt-get update
-            sudo apt-get install -y libclang-dev
-          elif [[ "${{ runner.os }}" == "macOS" ]]; then
-            # Install LLVM which provides libclang
-            brew install llvm
-            # Set environment variables for bindgen to find libclang
-            echo "LIBCLANG_PATH=$(brew --prefix llvm)/lib" >> "$GITHUB_ENV"
-            echo "LLVM_CONFIG_PATH=$(brew --prefix llvm)/bin/llvm-config" >> "$GITHUB_ENV"
-          fi
-
       - name: Install toolchain
-        id: tc
         uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: ${{ matrix.toolchain }}
-          components: rustfmt, clippy
 
       - name: Format
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime -- -D warnings
+        run: cargo clippy --workspace --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }} -- -D warnings
 
       - name: Build debug
-        run: cargo build --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime
+        run: cargo build --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }}
 
       - name: Build release
-        run: cargo build --release --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime
+        run: cargo build --release --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }}
 
       - name: Test
-        run: cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime
+        run: cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }}
 
       - name: Lint and test the system allocator fallback
         run: |
-          cargo clippy --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime,system-allocator-fallback -- -D warnings
-          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},bindgen-runtime,system-allocator-fallback --test system_allocator_fallback
+          cargo clippy --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},system-allocator-fallback -- -D warnings
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},system-allocator-fallback --test system_allocator_fallback
 
       - name: Doc
-        run: cargo doc --no-default-features --features "all-features-but-xor bindgen-runtime min-redis-compatibility-version-${{ matrix.redis-version[0] }}"
+        run: cargo doc --no-default-features --features "all-features-but-xor min-redis-compatibility-version-${{ matrix.redis-version[0] }}"
+
+  bindings:
+    # Generates the bindings with bindgen and fails if they differ from the
+    # committed ones. One runner, so the result does not depend on each
+    # runner's LLVM version.
+    name: Check the committed bindings against bindgen
+    runs-on: ubuntu-latest
+    env:
+      REDISMODULE_RS_CHECK_BINDINGS: "1"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install Clang
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
+
+      - name: Install toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Build with bindgen
+        run: cargo build --features bindgen-runtime
+
+      - name: Clippy with bindgen
+        run: cargo clippy --workspace --all-targets --features bindgen-runtime -- -D warnings
 
   msrv:
     # Without clang installed, so the default build with the committed
@@ -122,15 +119,13 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
-        with:
-          submodules: recursive
 
       - name: Install toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: "1.87"
-          # The stable jobs deny warnings. Here a lint added after 1.87, named
-          # in an allow attribute, would fail as an unknown lint.
+          # The pinned-toolchain jobs deny warnings. Here a lint added after
+          # 1.87, named in an allow attribute, would fail as an unknown lint.
           rustflags: ""
 
       - name: Check
