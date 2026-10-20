@@ -20,6 +20,8 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
 - Guests are components implementing `wit/redis.wit`. They import `call`
   (RedisModule_Call in script mode, as the caller's ACL user, errors as replies,
   effects replicated, RESP3) and `log`. No WASI imports.
+- `WASM.LOAD` compiles on a thread behind a blocked client, so loading the
+  11 MB JavaScript component no longer stops the server.
 - Guests in Rust (`guests/hello`) and JavaScript (`guests/js`, componentize-js);
   the same integration tests pass against both.
 - Reply types survive both ways, including simple versus bulk strings, maps,
@@ -96,14 +98,14 @@ avoids both instantiating and tearing down, and was adopted.
 | H2 | done | **Per-call cost.** Measure where the 26 µs goes, then reuse instances per library or use wasmtime's pooling allocator. | The benchmark table is updated, with the cause named. |
 | H3 | done | **A fair benchmark.** Add a compute-heavy function next to the two-INCR one, in both wasm and Lua, and keep the script in the repository. | `wasm/bench/` reproduces both rows on one command. |
 | H4 | done | **A guest in another language.** JavaScript (componentize-js), Python (componentize-py) or Go (TinyGo), whichever produces components wasmtime 36 loads. | The integration test loads and calls a non-Rust guest. |
-| H5 | todo | **Persistence and replication.** Save libraries in aux data (`aux_save`, `aux_load`) and replicate `WASM.LOAD` and `WASM.DELETE` verbatim. | Tests with a restart and with a replica see the same libraries. |
+| H5 | next | **Persistence and replication.** Save libraries in aux data (`aux_save`, `aux_load`) and replicate `WASM.LOAD` and `WASM.DELETE` verbatim. | Tests with a restart and with a replica see the same libraries. |
 
 ### Then
 
 | ID | status | item | done when |
 |---|---|---|---|
 | H6 | todo | **Key specs for `WASM.CALL`.** A keynum key spec so a cluster routes it by its keys. `redis_module!`'s command table cannot express one; check the `#[command]` macro or `RedisModule_SetCommandInfo`. | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
-| H7 | next | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread. Urgent since H4: the 11 MB JavaScript component takes 1.4 s to compile with parallel compilation (11.7 s without), and the server answers no one meanwhile. Precompiled components (`Engine::precompile_component`) would also skip the compile, but loading one is `unsafe`: only for trusted input. | The server answers other clients while a large component compiles. |
+| H7 | done | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread; the main thread instantiates and adds the library. Precompiled components (`Engine::precompile_component`) would skip the compile entirely, but loading one is `unsafe`: only for trusted input. | The server answers other clients while a large component compiles. |
 | H8 | todo | **Memory.** A memory limit per instance (wasmtime resource limiter), refusing writes when `used_memory_ratio` is at 1, and an `INFO` section with the host's memory. Kept instances (H2) only grow, so also replace an instance whose memory passes a size. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
 | H9 | todo | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`), `WASM.CALL_RO`, a `call` that fails where `pcall` returns the error, and `acl-check-command` and `set-resp` imports. | Each has a test matching what Lua does. |
 | H10 | todo | **Guest helper library.** A small Rust crate that builds the pre-order node list from typed values, so guests do not build it by hand. | The example guest uses it. |
@@ -168,6 +170,13 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H7 done: `WASM.LOAD` blocks its client (`block_client_on_reply`)
+  and compiles on a thread; the library is instantiated and added in the reply
+  callback, which checks the name again. Inside `MULTI` or a script it compiles
+  inline. While the JavaScript component loaded (release build), the server
+  answered 154 PINGs, slowest 14.7 ms, median 0.38 ms; before, one PING waited
+  2.2 s. Tests: two overlapping loads of the same name (one succeeds, one is
+  refused) with PINGs answered throughout, and a load inside `MULTI`.
 - 2026-10-20: H4 done: `guests/js`, the example library in JavaScript, built
   with componentize-js 0.18.5 and jco 1.14.0 (pinned: jco 1.39 pulls a WASI shim
   componentize-js 0.18 cannot use). With stdio, random, clocks and HTTP

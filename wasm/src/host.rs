@@ -169,20 +169,34 @@ impl Host {
         })
     }
 
-    /// Compiles `component` and adds it as library `name`, replacing a library
-    /// of that name only if `replace` is set. Returns the library's functions.
-    pub(crate) fn load(
-        &mut self,
-        ctx: &Context,
-        name: &str,
-        component: &[u8],
-        replace: bool,
-    ) -> anyhow::Result<Vec<String>> {
+    /// What compiling a component needs, to compile it on another thread.
+    pub(crate) fn compiler(&self) -> Compiler {
+        Compiler {
+            engine: self.engine.clone(),
+            linker: self.linker.clone(),
+        }
+    }
+
+    /// Fails if library `name` exists and `replace` is not set.
+    pub(crate) fn check_name(&self, name: &str, replace: bool) -> anyhow::Result<()> {
         if self.libraries.contains_key(name) && !replace {
             bail!("library '{name}' already exists");
         }
-        let component = Component::new(&self.engine, component).context("invalid component")?;
-        let pre = LibraryPre::new(self.linker.instantiate_pre(&component)?)?;
+        Ok(())
+    }
+
+    /// Adds a compiled component as library `name`, replacing a library of
+    /// that name only if `replace` is set. Returns the library's functions.
+    pub(crate) fn add(
+        &mut self,
+        ctx: &Context,
+        name: &str,
+        pre: Compiled,
+        replace: bool,
+    ) -> anyhow::Result<Vec<String>> {
+        // Checked again here: another load may have added the name while this
+        // component compiled.
+        self.check_name(name, replace)?;
 
         // Listing the functions runs guest code too, so it can be killed.
         let running = Running::start();
@@ -246,6 +260,23 @@ impl Host {
             pre: library.pre.clone(),
             kept: Arc::clone(&library.kept),
         })
+    }
+}
+
+/// A compiled component, linked and ready to instantiate.
+pub(crate) type Compiled = LibraryPre<CallState>;
+
+/// Compiles components. It holds clones of the engine and linker, so it can run
+/// on another thread while the server keeps serving.
+pub(crate) struct Compiler {
+    engine: Engine,
+    linker: Linker<CallState>,
+}
+
+impl Compiler {
+    pub(crate) fn compile(&self, component: &[u8]) -> anyhow::Result<Compiled> {
+        let component = Component::new(&self.engine, component).context("invalid component")?;
+        LibraryPre::new(self.linker.instantiate_pre(&component)?)
     }
 }
 

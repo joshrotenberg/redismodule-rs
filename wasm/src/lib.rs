@@ -48,21 +48,70 @@ fn error(context: &str, error: &anyhow::Error) -> RedisError {
 
 /// `WASM.LOAD <library> <component> [REPLACE]`: replies with the library's
 /// functions.
+///
+/// Compiling a large component takes seconds, so the component compiles on a
+/// thread while the client waits and the server keeps serving others; the
+/// library is added on the main thread once it has compiled. Where the client
+/// cannot block, inside `MULTI` or a script, it compiles here instead.
 fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = ArgCursor::new(&args[1..]);
-    let name = args.next_str()?;
-    let component = args.next_bytes()?;
+    let name = args.next_str()?.to_owned();
+    let component = args.next_bytes()?.to_vec();
     let replace = match args.next() {
         None => false,
         Some(arg) if arg.as_slice().eq_ignore_ascii_case(b"REPLACE") => true,
         Some(_) => return Err(RedisError::Str("ERR the only option is REPLACE")),
     };
     args.done()?;
-    let functions = with_host(|host| host.load(ctx, name, component, replace))?
+    let compiler = with_host(|host| host.check_name(&name, replace).map(|()| host.compiler()))?
+        .map_err(|e| error("WASM.LOAD failed", &e))?;
+
+    let Ok(blocked) = ctx.block_client_on_reply(None, finish_load, load_timed_out) else {
+        let result = compiler.compile(&component);
+        return finish_load(
+            ctx,
+            Loaded {
+                name,
+                replace,
+                result,
+            },
+        );
+    };
+    // If the thread cannot start, the handle is dropped with it, which
+    // unblocks the client with an error reply.
+    let _ = std::thread::Builder::new()
+        .name("wasm-compile".into())
+        .spawn(move || {
+            let result = compiler.compile(&component);
+            blocked.unblock(Loaded {
+                name,
+                replace,
+                result,
+            });
+        });
+    Ok(RedisValue::NoReply)
+}
+
+/// A `WASM.LOAD` whose component has compiled, or failed to.
+struct Loaded {
+    name: String,
+    replace: bool,
+    result: anyhow::Result<host::Compiled>,
+}
+
+/// Adds a compiled library and replies with its functions, on the main thread.
+fn finish_load(ctx: &Context, loaded: Loaded) -> RedisResult {
+    let compiled = loaded.result.map_err(|e| error("WASM.LOAD failed", &e))?;
+    let functions = with_host(|host| host.add(ctx, &loaded.name, compiled, loaded.replace))?
         .map_err(|e| error("WASM.LOAD failed", &e))?;
     Ok(RedisValue::Array(
         functions.into_iter().map(RedisValue::BulkString).collect(),
     ))
+}
+
+/// `WASM.LOAD` blocks with no timeout, so this does not run.
+fn load_timed_out(_ctx: &Context) -> RedisResult {
+    Err(RedisError::Str("ERR WASM.LOAD timed out"))
 }
 
 /// `WASM.CALL <function> <numkeys> [key ...] [arg ...]`

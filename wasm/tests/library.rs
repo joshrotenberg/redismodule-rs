@@ -525,3 +525,72 @@ fn a_javascript_library_behaves_like_the_rust_one() {
     );
     assert_eq!(counter(&mut con), 1);
 }
+
+#[test]
+fn a_slow_load_does_not_block_other_clients() {
+    let Some(component) = js_component() else {
+        return;
+    };
+    let server = Server::start(6616, &[]);
+    let mut con = server.connection();
+
+    // Two loads of the same name: both compile on threads, and the second to
+    // finish finds the name taken.
+    let loads: Vec<_> = (0..2)
+        .map(|_| {
+            let mut loader = server.connection();
+            std::thread::spawn(move || -> RedisResult<Vec<String>> {
+                redis::cmd("WASM.LOAD")
+                    .arg("js")
+                    .arg(component)
+                    .query(&mut loader)
+            })
+        })
+        .collect();
+
+    // The 11 MB component takes seconds to compile; the server keeps
+    // answering meanwhile.
+    let mut answered_while_loading = 0;
+    let mut slowest = Duration::ZERO;
+    while loads.iter().any(|load| !load.is_finished()) {
+        let start = Instant::now();
+        let _: String = redis::cmd("PING").query(&mut con).unwrap();
+        slowest = slowest.max(start.elapsed());
+        answered_while_loading += 1;
+        sleep(Duration::from_millis(20));
+    }
+    assert!(
+        answered_while_loading > 5,
+        "{answered_while_loading} PINGs answered"
+    );
+    assert!(
+        slowest < Duration::from_millis(500),
+        "slowest PING took {slowest:?}"
+    );
+
+    let results: Vec<_> = loads.into_iter().map(|load| load.join().unwrap()).collect();
+    let loaded: Vec<_> = results.iter().filter_map(|r| r.as_ref().ok()).collect();
+    assert_eq!(loaded.len(), 1, "{results:?}");
+    assert_eq!(loaded[0][0], "hello");
+    let refused = results.into_iter().find_map(Result::err).unwrap();
+    assert!(error_text(Err(refused)).contains("library 'js' already exists"));
+    assert_eq!(
+        call(&mut con, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+}
+
+#[test]
+fn a_load_inside_multi_compiles_inline() {
+    let server = Server::start(6617, &[]);
+    let mut con = server.connection();
+    let (functions,): (Vec<String>,) = redis::pipe()
+        .atomic()
+        .cmd("WASM.LOAD")
+        .arg("hello")
+        .arg(hello_component())
+        .query(&mut con)
+        .expect("WASM.LOAD in MULTI");
+    assert_eq!(functions, FUNCTIONS);
+    assert_eq!(counter(&mut con), 1);
+}

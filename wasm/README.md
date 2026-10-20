@@ -26,6 +26,15 @@ deleting the library drops it too. All callers of a library share its
 instance, so a guest should not keep data from one call that another caller
 must not see.
 
+## Loading
+
+`WASM.LOAD` compiles the component on a thread while its client waits, so the
+server keeps serving other clients; once it has compiled, the library is
+instantiated and added on the main thread, and the client gets the reply.
+Inside `MULTI` or a script, where a client cannot block, it compiles on the
+main thread. If two loads of the same library overlap, the second to finish
+fails as if it had come second, unless it has `REPLACE`.
+
 ## Long-running functions
 
 A running function yields to Redis every 10 ms. Once it has run longer than
@@ -98,10 +107,9 @@ componentize-js 0.18 cannot use. `build.mjs` disables the WASI features the
 library does not use, so the component imports only the host's `redis`
 interface.
 
-The component is 11 MB, and loading it compiles all of it: about 1.4 s in a
-release build of the module (11.7 s without parallel compilation), during
-which the server answers no one. A Rust library of the same functions is
-23 KB and loads in milliseconds.
+The component is 11 MB, and loading it compiles all of it: one to two seconds
+in a release build of the module (11.7 s without parallel compilation). A Rust
+library of the same functions is 23 KB and loads in milliseconds.
 
 ## Benchmark
 
