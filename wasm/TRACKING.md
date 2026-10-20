@@ -33,7 +33,9 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
 - Each instance's linear memory is limited by `wasm.max-memory` (64 MiB by
   default), and `INFO wasm` reports instances, their memory and compiled code.
 - Runs unchanged on Redis 7.2, 7.4, 8.0, 8.2 and 8.10 (a smoke test of every
-  feature, Linux arm64); not on 7.0, because of the SDK (S11). The `WASM.*`
+  feature plus a two-node cluster, Linux arm64, and the whole test suite on
+  8.0.2 in Linux and 8.10.2 on macOS); not on 7.0, which has no ACL
+  categories for module commands (S11, and the module's own `@scripting`). The `WASM.*`
   commands are in `@scripting`, as `FCALL` and `FUNCTION` are.
 - Functions have Lua's flags, with Lua's checks before they start and on the
   commands they call, and `WASM.CALL_RO` runs those with `no-writes`. Guests
@@ -217,6 +219,11 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: final smoke test of the night's build on Linux: every feature
+  (calls, flags, `call`/`pcall`, flat replies, dump and restore, stats, kill,
+  restart) and a cluster `MOVED` passed on Redis 7.2.16, 7.4.11, 8.0.6, 8.2.10
+  and 8.10.2; 7.0.15 refused the module ("Redis version does not support ACL
+  categories").
 - 2026-10-20: the whole test suite ran on Linux (Redis 8.0.2 from Debian, in a
   colima VM; the JavaScript tests skipped without Node) and found G8: the
   cluster test failed because 8.0 did not route `WASM.CALL`. Fixed with
