@@ -1,4 +1,5 @@
 mod api_versions;
+mod command_list;
 
 use api_versions::{API_OLDEST_VERSION, API_VERSION_MAPPING, get_feature_flags};
 use proc_macro::TokenStream;
@@ -148,4 +149,10 @@ pub fn api(item: TokenStream) -> TokenStream {
         }
     };
     r#gen.into()
+}
+
+#[doc(hidden)]
+#[proc_macro]
+pub fn __register_command_list(input: TokenStream) -> TokenStream {
+    command_list::expand(input)
 }

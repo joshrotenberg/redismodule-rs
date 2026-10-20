@@ -98,6 +98,10 @@ name = "keys_pos"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "command_builder"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "database"
 crate-type = ["cdylib"]
 

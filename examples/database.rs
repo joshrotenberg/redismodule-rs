@@ -1,6 +1,7 @@
 //! Direct database selection and temporary access with automatic restoration.
 use redis_module::{
-    ArgCursor, Context, RedisError, RedisResult, RedisString, RedisValue, redis_module,
+    ArgCursor, Context, RedisError, RedisResult, RedisString, RedisValue, redis_command,
+    redis_module,
 };
 
 fn parse_db(args: &mut ArgCursor<'_>) -> Result<i32, RedisError> {
@@ -76,9 +77,9 @@ redis_module! {
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
     commands: [
-        ["database.selected", selected, "readonly", 0, 0, 0, ""],
+        redis_command!("database.selected", selected).read_only(),
         ["database.select", select, "deny-script", 0, 0, 0, ""],
-        ["database.get_in", get_in, "readonly deny-script", 2, 2, 1, ""],
+        redis_command!("database.get_in", get_in).read_only().deny_script().key(2),
         ["database.nested", nested, "readonly deny-script", 0, 0, 0, ""],
         ["database.scoped_error", scoped_error, "readonly deny-script", 0, 0, 0, ""],
         ["database.scoped_panic", scoped_panic, "readonly deny-script", 0, 0, 0, ""],

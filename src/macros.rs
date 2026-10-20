@@ -25,7 +25,12 @@ macro_rules! __available_api {
     };
 }
 
-/// Registers a command. `redis_module!` calls this for each entry in `commands`.
+/// With two arguments, returns a [`crate::CommandBuilder`] that generates a
+/// panic-safe callback: `redis_command!("example.get", get).read_only().key(1)`.
+/// Builders may be mixed with legacy tuples in `redis_module!`'s command list.
+///
+/// The legacy form registers a command directly. `redis_module!` calls it for
+/// tuple entries in `commands`.
 ///
 /// The flags are a constant string of flag names separated by single spaces,
 /// checked when the module compiles:
@@ -63,134 +68,93 @@ macro_rules! __available_api {
 /// }
 /// # fn main() {}
 /// ```
+/// Mixed lists preserve compile-time checking for legacy flag strings:
+///
+/// ```compile_fail,E0080
+/// use redis_module::{Context, RedisResult, RedisString, redis_command, redis_module};
+/// fn ping(_: &Context, _: Vec<RedisString>) -> RedisResult { Ok("PONG".into()) }
+/// redis_module! {
+///     name: "bad_mixed_flags", version: 1,
+///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+///     data_types: [],
+///     commands: [
+///         redis_command!("valid.ping", ping).read_only(),
+///         ["invalid.ping", ping, "readonly fsat", 0, 0, 0, ""],
+///     ],
+/// }
+/// ```
+/// A malformed legacy entry in a mixed list is rejected too:
+///
+/// ```compile_fail
+/// use redis_module::{Context, RedisResult, RedisString, redis_command, redis_module};
+/// fn ping(_: &Context, _: Vec<RedisString>) -> RedisResult { Ok("PONG".into()) }
+/// redis_module! {
+///     name: "bad_mixed_entry", version: 1,
+///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+///     data_types: [],
+///     commands: [
+///         redis_command!("valid.ping", ping),
+///         ["invalid.ping", ping, "readonly", 0, 0, 0],
+///     ],
+/// }
+/// ```
 #[macro_export]
 macro_rules! redis_command {
-    ($ctx:expr,
-     $command_name:expr,
-     $command_handler:expr,
-     $command_flags:expr,
-     $firstkey:expr,
-     $lastkey:expr,
-     $keystep:expr,
-     $mandatory_acl_categories:expr
-     $(, $optional_acl_categories:expr)?
-    ) => {{
+    ($name:expr, $handler:expr $(,)?) => {
+        $crate::commands::CommandBuilder::__new($name, $crate::__redis_command_callback!($handler))
+    };
+    ($ctx:expr, $name:expr, $handler:expr, $flags:expr,
+     $first:expr, $last:expr, $step:expr, $required:expr $(, $optional:expr)?) => {{
         use $crate::AclCategory;
-
-        // A &Context is proof the module is loading with a valid context; a
-        // raw pointer argument would let safe code pass any pointer.
-        let __module_ctx: *mut $crate::raw::RedisModuleCtx = $crate::Context::get_raw($ctx);
-
-        // A misspelled flag fails to compile here instead of at load.
-        const _: () = $crate::commands::__check_command_flags($command_flags);
-        let name = CString::new($command_name).unwrap();
-        let flags = CString::new($command_flags).unwrap();
-
-        /////////////////////
-        extern "C" fn __do_command(
-            ctx: *mut $crate::raw::RedisModuleCtx,
-            argv: *mut *mut $crate::raw::RedisModuleString,
-            argc: c_int,
-        ) -> c_int {
-            let command = || {
-                let context = unsafe { $crate::Context::new(ctx) };
-
-                // SAFETY: Redis supplies live callback argv/count with legal retention.
-                let args = unsafe { $crate::decode_args(ctx, argv, argc) };
-                let response = $command_handler(&context, args);
-                context.reply(response.map(|v| v.into())) as c_int
-            };
-            // SAFETY: ctx is the context Redis passed to this command.
-            unsafe { $crate::panic::run_command(ctx, command) }
-        }
-        /////////////////////
-
-        if unsafe {
-            $crate::__required_api!(RedisModule_CreateCommand)(
-                __module_ctx,
-                name.as_ptr(),
-                Some(__do_command),
-                flags.as_ptr(),
-                $firstkey,
-                $lastkey,
-                $keystep,
-            )
-        } == $crate::raw::Status::Err as c_int
-        {
-            // SAFETY: __module_ctx comes from the load Context.
-            unsafe { $crate::raw::redis_log(
-                __module_ctx,
-                &format!("Error: failed to create command {}", $command_name),
-            ) };
-            return $crate::raw::Status::Err as c_int;
-        }
-
-        let mandatory = AclCategory::from($mandatory_acl_categories);
-        // SAFETY: Redis sets the API pointers before OnLoad runs.
-        if let Some(RM_SetCommandACLCategories) = unsafe { $crate::raw::RedisModule_SetCommandACLCategories } {
-            let command =
-            unsafe { $crate::__required_api!(RedisModule_GetCommand)(__module_ctx, name.as_ptr()) };
-            if command.is_null() {
-                // SAFETY: __module_ctx comes from the load Context.
-                unsafe { $crate::raw::redis_log(
-                    __module_ctx,
-                    &format!("Error: failed to get command {}", $command_name),
-                ) };
-                return $crate::raw::Status::Err as c_int;
-            }
-            let mut optional_failed = true;
-            let mut acl_categories = CString::default();
-            $(
-                let optional = AclCategory::from($optional_acl_categories);
-                assert!(optional != AclCategory::None);
-                optional_failed = false;
-                if mandatory != AclCategory::None {
-                    acl_categories = CString::new(format!("{mandatory} {optional}")).unwrap();
-                } else {
-                    acl_categories = CString::new(format!("{optional}")).unwrap();
-                }
-                // Warn if optional ACL categories are not set, but don't fail.
-                // SAFETY: command is the command just created; the string outlives the call.
-                if unsafe { RM_SetCommandACLCategories(command, acl_categories.as_ptr()) } == $crate::raw::Status::Err as c_int {
-                    optional_failed = true;
-                    // SAFETY: __module_ctx comes from the load Context.
-                    unsafe { $crate::raw::redis_log(
-                        __module_ctx,
-                        &format!(
-                            "Warning: failed to set command `{}` ACL categories `{}`",
-                            $command_name, &acl_categories.to_string_lossy()
-                        ),
-                    ) };
-                }
-            )?
-            if optional_failed && mandatory != AclCategory::None {
-                acl_categories = CString::new(format!("{mandatory}")).unwrap();
-
-                // Fail if mandatory ACL categories are not set.
-                // SAFETY: as above.
-                if unsafe { RM_SetCommandACLCategories(command, acl_categories.as_ptr()) }
-                    == $crate::raw::Status::Err as c_int
-                {
-                    // SAFETY: __module_ctx comes from the load Context.
-                    unsafe { $crate::raw::redis_log(
-                        __module_ctx,
-                        &format!(
-                            "Error: failed to set command `{}` mandatory ACL categories `{mandatory}`",
-                            $command_name
-                        ),
-                    ) };
-                    return $crate::raw::Status::Err as c_int;
-                }
-            }
-        } else if mandatory != AclCategory::None {
-            // SAFETY: __module_ctx comes from the load Context.
-            unsafe { $crate::raw::redis_log(
-                __module_ctx,
-                "Error: Redis version does not support ACL categories",
-            ) };
-            return $crate::raw::Status::Err as c_int;
+        const _: () = $crate::commands::__check_command_flags($flags);
+        let command = $crate::commands::CommandBuilder::__new(
+            $name, $crate::__redis_command_callback!($handler),
+        ).__legacy($flags, $first, $last, $step).acl_categories(AclCategory::from($required))
+            $(.optional_acl_categories($optional))?;
+        if let Err(error) = command.register($ctx) {
+            ($ctx).log_warning(&error.to_string());
+            return $crate::Status::Err as i32;
         }
     }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __redis_command_callback {
+    ($handler:expr) => {{
+        enum __RedisModuleCommandCallback {}
+        impl __RedisModuleCommandCallback {
+            extern "C" fn invoke(
+                ctx: *mut $crate::raw::RedisModuleCtx,
+                argv: *mut *mut $crate::raw::RedisModuleString,
+                argc: i32,
+            ) -> i32 {
+                let command = || {
+                    let context = unsafe { $crate::Context::new(ctx) };
+                    // SAFETY: Redis supplies live argv/count for this callback.
+                    let args = unsafe { $crate::decode_args(ctx, argv, argc) };
+                    let response = $handler(&context, args);
+                    context.reply(response.map(|value| value.into())) as i32
+                };
+                // SAFETY: Redis passed this live command context.
+                unsafe { $crate::panic::run_command(ctx, command) }
+            }
+        }
+        __RedisModuleCommandCallback::invoke
+    }};
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __redis_register_commands {
+    // Preserve the original flat expansion for legacy-only lists.
+    ($ctx:expr; $([$name:expr, $handler:expr, $flags:expr, $first:expr,
+                  $last:expr, $step:expr, $required:expr $(, $optional:expr)?]),* $(,)*) => {
+        $( $crate::redis_command!($ctx, $name, $handler, $flags, $first, $last, $step, $required $(, $optional)?); )*
+    };
+    ($ctx:expr; $($entries:tt)*) => {
+        $crate::__private::__register_command_list!(($crate), $ctx, [$($entries)*]);
+    };
 }
 
 /// Subscribes a keyspace event handler. `redis_module!` calls this for each
@@ -329,18 +293,7 @@ macro_rules! redis_module {
         $(init: $init_func:ident,)* $(,)*
         $(deinit: $deinit_func:ident,)* $(,)*
         $(info: $info_func:ident,)?
-        $(commands: [
-            $([
-                $name:expr,
-                $command:expr,
-                $flags:expr,
-                $firstkey:expr,
-                $lastkey:expr,
-                $keystep:expr,
-                $mandatory_command_acl_categories:expr
-                $(, $optional_command_acl_categories:expr)?
-              ]),* $(,)*
-        ] $(,)*)?
+        $(commands: [$($commands:tt)*] $(,)*)?
         $(event_handlers: [
             $([
                 $(@$event_type:ident) +:
@@ -511,9 +464,7 @@ macro_rules! redis_module {
                     )?
 
                     $(
-                        $(
-                            $crate::redis_command!(&context, $name, $command, $flags, $firstkey, $lastkey, $keystep, $mandatory_command_acl_categories $(, $optional_command_acl_categories)?);
-                        )*
+                        $crate::__redis_register_commands!(&context; $($commands)*);
                     )?
 
                     if $crate::commands::register_commands(&context) == raw::Status::Err {

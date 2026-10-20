@@ -1,3 +1,6 @@
+mod builder;
+pub use builder::{CommandBuilder, CommandFlags, KeyRange};
+
 use crate::Context;
 use crate::RedisError;
 use crate::Status;
@@ -551,7 +554,6 @@ fn free_command_arg(arg: &raw::RedisModuleCommandArg) {
 }
 
 api! {[
-        RedisModule_CreateCommand,
         RedisModule_GetCommand,
         RedisModule_SetCommandInfo,
     ],
@@ -560,30 +562,13 @@ api! {[
         let is_enterprise = ctx.is_enterprise();
         COMMANDS_LIST.iter().try_for_each(|command| {
             let command_info = command()?;
-            let name: CString = CString::new(command_info.name.as_str()).unwrap();
             let mut flags = command_info.flags.as_deref().unwrap_or("").to_owned();
             if is_enterprise {
                 flags = format!("{flags} {}", command_info.enterprise_flags.as_deref().unwrap_or("")).trim().to_owned();
             }
-            let flags = CString::new(flags).map_err(|e| RedisError::String(e.to_string()))?;
-
-            if unsafe {
-                RedisModule_CreateCommand(
-                    ctx.ctx,
-                    name.as_ptr(),
-                    Some(command_info.callback),
-                    flags.as_ptr(),
-                    0,
-                    0,
-                    0,
-                )
-            } == raw::Status::Err as i32
-            {
-                return Err(RedisError::String(format!(
-                    "Failed register command {}.",
-                    command_info.name
-                )));
-            }
+            let name = builder::register_base_command(
+                ctx, command_info.name.as_bytes(), &flags, command_info.callback, None,
+            )?;
 
             // Register the extra data of the command
             let command = unsafe { RedisModule_GetCommand(ctx.ctx, name.as_ptr()) };
@@ -733,32 +718,7 @@ pub fn register_commands(ctx: &Context) -> Status {
     )
 }
 
-/// The command flags `RedisModule_CreateCommand` accepts: those of Redis 7.2 and
-/// 8.0, plus `internal` and `touches-arbitrary-keys` from later versions.
-const COMMAND_FLAGS: [&str; 22] = [
-    "write",
-    "readonly",
-    "admin",
-    "deny-oom",
-    "deny-script",
-    "allow-loading",
-    "pubsub",
-    "random",
-    "blocking",
-    "allow-stale",
-    "no-monitor",
-    "no-slowlog",
-    "fast",
-    "no-auth",
-    "may-replicate",
-    "getkeys-api",
-    "getchannels-api",
-    "no-cluster",
-    "no-mandatory-keys",
-    "allow-busy",
-    "internal",
-    "touches-arbitrary-keys",
-];
+use builder::COMMAND_FLAGS;
 
 /// Whether `token` equals `flag`, ignoring ASCII case.
 const fn is_flag(token: &[u8], flag: &[u8]) -> bool {
@@ -785,9 +745,16 @@ const fn is_flag(token: &[u8], flag: &[u8]) -> bool {
 /// Panics if `flags` has an unknown or empty token.
 #[doc(hidden)]
 pub const fn __check_command_flags(flags: &str) {
+    assert!(
+        command_flags_valid(flags),
+        "unknown command flag: flags are a known flag name or names separated by single spaces"
+    );
+}
+
+const fn command_flags_valid(flags: &str) -> bool {
     let bytes = flags.as_bytes();
     if bytes.is_empty() {
-        return;
+        return true;
     }
     let mut start = 0;
     while start <= bytes.len() {
@@ -807,12 +774,12 @@ pub const fn __check_command_flags(flags: &str) {
             }
             i += 1;
         }
-        assert!(
-            known,
-            "unknown command flag: flags are a known flag name or names separated by single spaces"
-        );
+        if !known {
+            return false;
+        }
         start = end + 1;
     }
+    true
 }
 
 #[cfg(test)]
