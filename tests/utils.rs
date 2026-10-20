@@ -1,83 +1,368 @@
-use anyhow::{Context, Result};
-
-use redis::Connection;
-use std::fs;
+use anyhow::{Context, Result, bail, ensure};
+use redis::{ConnectionLike, RedisResult, Value};
+use std::ffi::OsString;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::Command;
-use std::sync::atomic::AtomicU16;
-use std::time::Duration;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
-/// Starts a redis instance with the module provided as a module name
-/// and a port, returns the connection guards (`ChildGuard`) through
-/// which the redis instance can be interacted with.
-pub fn start_redis(module_name: &str, port: u16) -> Result<Vec<ChildGuard>, &'static str> {
-    Ok(vec![
-        start_redis_server_with_module(module_name, port, None)
-            .map_err(|_| "failed to start redis server")?,
-    ])
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+const PROBE_TIMEOUT: Duration = Duration::from_millis(200);
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
+static INSTANCE_ID: AtomicUsize = AtomicUsize::new(0);
+
+/// A test-local RESP connection with timeouts installed before any commands.
+/// redis 0.23's connection constructor performs an unbounded CLIENT SETINFO
+/// handshake before exposing its socket timeout setters.
+pub struct Connection {
+    socket: TcpStream,
+    parser: redis::Parser,
+    open: bool,
 }
 
-pub struct TestConnection {
-    _guards: Vec<ChildGuard>,
-    connection: Connection,
-    port: u16,
-}
-
-static TEST_PORT: AtomicU16 = AtomicU16::new(6479);
-
-impl TestConnection {
-    /// Creates a new connection to a Redis server with the module
-    /// provided as a module name.
-    pub fn new(module_name: &str) -> Self {
-        let port = TEST_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-
-        Self {
-            _guards: start_redis(module_name, port).expect("Redis instance started."),
-            connection: get_redis_connection(port).expect("Established connection to server."),
-            port,
-        }
+impl Connection {
+    fn connect(port: u16) -> RedisResult<Self> {
+        let address = SocketAddr::from(([127, 0, 0, 1], port));
+        let socket = TcpStream::connect_timeout(&address, PROBE_TIMEOUT)?;
+        socket.set_read_timeout(Some(PROBE_TIMEOUT))?;
+        socket.set_write_timeout(Some(PROBE_TIMEOUT))?;
+        Ok(Self {
+            socket,
+            parser: redis::Parser::new(),
+            open: true,
+        })
     }
 
-    /// Like [`TestConnection::new`], but the server writes its log to a file
-    /// that [`TestConnection::server_log`] reads, instead of to stdout.
-    pub fn with_log_file(module_name: &str) -> Self {
-        let port = TEST_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let log_file = test_dir(port)
-            .expect("Test directory path.")
-            .join("redis.log");
-        let guard = start_redis_server_with_module(module_name, port, Some(log_file))
-            .expect("Redis instance started.");
+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> std::io::Result<()> {
+        self.socket.set_read_timeout(timeout)
+    }
 
-        Self {
-            _guards: vec![guard],
-            connection: get_redis_connection(port).expect("Established connection to server."),
-            port,
+    pub fn set_write_timeout(&self, timeout: Option<Duration>) -> std::io::Result<()> {
+        self.socket.set_write_timeout(timeout)
+    }
+
+    fn send(&mut self, command: &[u8]) -> RedisResult<()> {
+        if let Err(error) = self.socket.write_all(command) {
+            self.open = false;
+            let _ = self.socket.shutdown(Shutdown::Both);
+            return Err(error.into());
         }
+        Ok(())
+    }
+
+    fn receive(&mut self) -> RedisResult<Value> {
+        let reply = self.parser.parse_value(&mut self.socket);
+        if reply.as_ref().is_err_and(|error| error.is_io_error()) {
+            // Partial or late replies cannot be reused after a timeout.
+            self.open = false;
+            let _ = self.socket.shutdown(Shutdown::Both);
+        }
+        reply
+    }
+}
+
+impl ConnectionLike for Connection {
+    fn req_packed_command(&mut self, command: &[u8]) -> RedisResult<Value> {
+        self.send(command)?;
+        self.receive()
+    }
+
+    fn req_packed_commands(
+        &mut self,
+        command: &[u8],
+        offset: usize,
+        count: usize,
+    ) -> RedisResult<Vec<Value>> {
+        self.send(command)?;
+        let mut replies = Vec::new();
+        let mut first_error = None;
+        // Drain all replies even if one command fails; otherwise the next
+        // query could consume a response left behind by this pipeline.
+        for index in 0..(offset + count) {
+            match self.receive() {
+                Ok(reply) if index >= offset => replies.push(reply),
+                Ok(_) => {}
+                Err(error) if first_error.is_none() => first_error = Some(error),
+                Err(_) => {}
+            }
+        }
+        first_error.map_or(Ok(replies), Err)
+    }
+
+    fn get_db(&self) -> i64 {
+        0
+    }
+    fn is_open(&self) -> bool {
+        self.open
+    }
+    fn check_connection(&mut self) -> bool {
+        redis::cmd("PING")
+            .query::<String>(self)
+            .is_ok_and(|pong| pong == "PONG")
+    }
+}
+
+/// Polls until the condition succeeds, returning predicate errors immediately.
+/// Conditions must bound their own blocking operations; the deadline is checked
+/// between calls. A timeout reports what the test was waiting for.
+pub fn wait_until(
+    timeout: Duration,
+    description: &str,
+    mut condition: impl FnMut() -> Result<bool>,
+) -> Result<()> {
+    let start = Instant::now();
+    loop {
+        if condition()? {
+            return Ok(());
+        }
+        let remaining = timeout.saturating_sub(start.elapsed());
+        ensure!(
+            !remaining.is_zero(),
+            "Timed out after {timeout:?} waiting for {description}"
+        );
+        std::thread::sleep(POLL_INTERVAL.min(remaining));
+    }
+}
+
+#[derive(Clone)]
+struct LaunchSpec {
+    binary: OsString,
+    module: PathBuf,
+    module_args: Vec<String>,
+    port: u16,
+    directory: PathBuf,
+    log_file: PathBuf,
+    replica_of: Option<u16>,
+}
+
+impl LaunchSpec {
+    fn fresh(module: PathBuf, module_args: Vec<String>) -> Result<Self> {
+        // Redis cannot inherit this listener. Readiness also verifies its PID,
+        // so a process winning the bind race cannot be mistaken for our child.
+        let port = TcpListener::bind(("127.0.0.1", 0))?.local_addr()?.port();
+        let base = profile_dir()?.join("integration-test");
+        fs::create_dir_all(&base)?;
+        let directory = loop {
+            let id = INSTANCE_ID.fetch_add(1, Ordering::Relaxed);
+            let dir = base.join(format!("instance-{}-{id}-p{port}", std::process::id()));
+            match fs::create_dir(&dir) {
+                Ok(()) => break dir,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error.into()),
+            }
+        };
+        Ok(Self {
+            binary: std::env::var_os("TEST_REDIS_SERVER_BIN")
+                .unwrap_or_else(|| "redis-server".into()),
+            module,
+            module_args,
+            port,
+            log_file: directory.join("redis.log"),
+            directory,
+            replica_of: None,
+        })
+    }
+
+    fn spawn(&self) -> Result<ChildGuard> {
+        ensure!(
+            self.module.is_file(),
+            "Module not built: {}",
+            self.module.display()
+        );
+        // Append across restarts and capture errors emitted before Redis opens
+        // its own logfile. Files avoid the backpressure of undrained pipes.
+        let output = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.log_file)?;
+        let mut command = Command::new(&self.binary);
+        command
+            .args(["--bind", "127.0.0.1", "--port"])
+            .arg(self.port.to_string())
+            .args([
+                "--save",
+                "",
+                "--appendonly",
+                "no",
+                "--enable-debug-command",
+                "yes",
+                "--enable-module-command",
+                "local",
+                "--repl-diskless-sync-delay",
+                "0",
+                "--dir",
+            ])
+            .arg(&self.directory)
+            .args(["--dbfilename", "dump.rdb", "--logfile"])
+            .arg(&self.log_file);
+        if let Some(primary) = self.replica_of {
+            command
+                .args(["--replicaof", "127.0.0.1"])
+                .arg(primary.to_string());
+        }
+        let child = command
+            .arg("--loadmodule")
+            .arg(&self.module)
+            .args(&self.module_args)
+            .stdout(Stdio::from(output.try_clone()?))
+            .stderr(Stdio::from(output))
+            .spawn()
+            .with_context(|| format!("Starting Redis binary {:?}", self.binary))?;
+        Ok(ChildGuard {
+            child,
+            log_file: self.log_file.clone(),
+        })
+    }
+
+    fn diagnostics(&self, action: &str) -> String {
+        let log = fs::read_to_string(&self.log_file)
+            .unwrap_or_else(|error| format!("Could not read {}: {error}", self.log_file.display()));
+        format!(
+            "{action} for module {} on port {}. Server log ({}):\n{log}",
+            self.module.display(),
+            self.port,
+            self.log_file.display()
+        )
+    }
+}
+
+/// Owns a Redis server and a connection. Every server captures its startup log.
+pub struct TestConnection {
+    server: ChildGuard,
+    connection: Connection,
+    spec: LaunchSpec,
+}
+
+impl TestConnection {
+    pub fn new(module_name: &str) -> Self {
+        Self::with_args(module_name, &[])
+    }
+
+    /// Starts a module with arguments, panicking with diagnostics on failure.
+    pub fn with_args(module_name: &str, args: &[&str]) -> Self {
+        Self::try_with_args(module_name, args)
+            .unwrap_or_else(|error| panic!("Redis instance failed to start: {error:#}"))
+    }
+
+    /// Returns startup failures with the server's exit status or timeout and log.
+    pub fn try_with_args(module_name: &str, args: &[&str]) -> Result<Self> {
+        Self::launch(LaunchSpec::fresh(
+            module_path(module_name)?.into(),
+            args.iter().map(|arg| (*arg).to_owned()).collect(),
+        )?)
+    }
+
+    /// Kept for existing tests; all constructors now capture server logs.
+    pub fn with_log_file(module_name: &str) -> Self {
+        Self::new(module_name)
+    }
+
+    fn launch(spec: LaunchSpec) -> Result<Self> {
+        // Install ownership before probing so every failure kills and reaps.
+        let mut server = spec
+            .spawn()
+            .with_context(|| spec.diagnostics("Redis spawn failed"))?;
+        let mut connection = None;
+        wait_until(STARTUP_TIMEOUT, "Redis startup", || {
+            if let Some(status) = server.child.try_wait()? {
+                bail!("Redis exited with {status} before becoming ready");
+            }
+            connection = probe_connection(spec.port, Some(server.child.id()))?;
+            Ok(connection.is_some())
+        })
+        .with_context(|| spec.diagnostics("Redis startup failed"))?;
+        Ok(Self {
+            server,
+            connection: connection.expect("successful readiness probe"),
+            spec,
+        })
     }
 
     /// Opens another connection to the same server.
     pub fn connection(&self) -> Result<Connection> {
-        get_redis_connection(self.port)
+        get_redis_connection(self.spec.port, self.server.child.id())
+            .with_context(|| self.spec.diagnostics("Redis connection failed"))
     }
 
-    /// The port of the server, for a raw connection.
     pub fn port(&self) -> u16 {
-        self.port
+        self.spec.port
     }
 
-    /// Reads the server log of a connection made with [`TestConnection::with_log_file`].
     pub fn server_log(&self) -> std::io::Result<String> {
-        let log_file = self._guards[0]
-            .log_file
-            .as_ref()
-            .expect("The server was started with a log file.");
-        fs::read_to_string(log_file)
+        fs::read_to_string(&self.spec.log_file)
+    }
+
+    /// Starts the same module and arguments in a separate replica and waits for
+    /// initial synchronization. Later writes can be acknowledged with WAIT.
+    pub fn replica(&self) -> Result<Self> {
+        let mut spec = LaunchSpec::fresh(self.spec.module.clone(), self.spec.module_args.clone())?;
+        spec.binary = self.spec.binary.clone();
+        spec.replica_of = Some(self.spec.port);
+        let mut replica = Self::launch(spec)?;
+        let sync = wait_until(STARTUP_TIMEOUT, "replica initial synchronization", || {
+            if let Some(status) = replica.server.child.try_wait()? {
+                bail!("Replica exited with {status} during synchronization");
+            }
+            let Some(mut probe) =
+                probe_connection(replica.port(), Some(replica.server.child.id()))?
+            else {
+                return Ok(false);
+            };
+            probe.set_read_timeout(Some(PROBE_TIMEOUT))?;
+            probe.set_write_timeout(Some(PROBE_TIMEOUT))?;
+            // Use a fresh connection on each attempt: a timed-out INFO reply
+            // must not be mistaken for the reply to the next polling request.
+            match redis::cmd("INFO")
+                .arg("replication")
+                .query::<String>(&mut probe)
+            {
+                Ok(info) => Ok(info.lines().any(|line| line == "master_link_status:up")
+                    && info.lines().any(|line| line == "master_sync_in_progress:0")),
+                Err(error) if error.is_io_error() || error.code() == Some("LOADING") => Ok(false),
+                Err(error) => Err(error.into()),
+            }
+        });
+        sync.with_context(|| replica.spec.diagnostics("Replica synchronization failed"))?;
+        replica.connection = replica.connection()?;
+        Ok(replica)
+    }
+
+    /// Saves and shuts down Redis, then relaunches on the same port with the
+    /// same data directory, module arguments, role, binary, and appended log.
+    /// Consuming self prevents callers from using a stale connection on error.
+    pub fn restart(mut self) -> Result<Self> {
+        self.connection.set_read_timeout(Some(STARTUP_TIMEOUT))?;
+        let shutdown = redis::cmd("SHUTDOWN")
+            .arg("SAVE")
+            .query::<()>(&mut self.connection);
+        if let Err(error) = shutdown {
+            if !error.is_io_error() {
+                return Err(error).with_context(|| self.spec.diagnostics("Redis shutdown failed"));
+            }
+            // Redis closes the connection on success. Confirm actual exit
+            // below rather than mistaking a socket timeout for shutdown.
+        }
+        wait_until(STARTUP_TIMEOUT, "Redis shutdown", || {
+            match self.server.child.try_wait()? {
+                Some(status) => {
+                    ensure!(status.success(), "Redis shutdown exited with {status}");
+                    Ok(true)
+                }
+                None => Ok(false),
+            }
+        })
+        .with_context(|| self.spec.diagnostics("Redis shutdown failed"))?;
+        let spec = self.spec.clone();
+        drop(self);
+        Self::launch(spec)
     }
 }
 
 impl std::ops::Deref for TestConnection {
     type Target = Connection;
-
     fn deref(&self) -> &Self::Target {
         &self.connection
     }
@@ -89,171 +374,154 @@ impl std::ops::DerefMut for TestConnection {
     }
 }
 
-/// Ensure child process is killed both on normal exit and when panicking due to a failed test.
-#[derive(Debug)]
-pub struct ChildGuard {
-    name: &'static str,
-    child: std::process::Child,
-    log_file: Option<PathBuf>,
+struct ChildGuard {
+    child: Child,
+    log_file: PathBuf,
 }
 
 impl Drop for ChildGuard {
     fn drop(&mut self) {
-        // A server with a log file does not write its crash report to the
-        // test output, so print the log if the server failed, or if the test
-        // is failing while the server may still be writing its report.
-        if let Some(log_file) = &self.log_file {
-            let status = self.child.try_wait();
-            let failed = matches!(&status, Ok(Some(status)) if !status.success());
-            if failed || std::thread::panicking() {
-                if std::thread::panicking() {
-                    std::thread::sleep(Duration::from_millis(200));
-                }
-                println!("{} log ({status:?}):", self.name);
-                match fs::read_to_string(log_file) {
-                    Ok(log) => println!("{log}"),
-                    Err(e) => println!("Could not read {}: {e}", log_file.display()),
-                }
+        let status = self.child.try_wait();
+        let failed = matches!(&status, Ok(Some(status)) if !status.success());
+        if !matches!(status, Ok(Some(_))) {
+            let _ = self.child.kill();
+        }
+        let _ = self.child.wait();
+        if failed || std::thread::panicking() {
+            match fs::read_to_string(&self.log_file) {
+                Ok(log) => eprintln!("Redis server log ({}):\n{log}", self.log_file.display()),
+                Err(error) => eprintln!("Could not read {}: {error}", self.log_file.display()),
             }
-        }
-        if let Err(e) = self.child.kill() {
-            println!("Could not kill {}: {e}", self.name);
-        }
-        if let Err(e) = self.child.wait() {
-            println!("Could not wait for {}: {e}", self.name);
         }
     }
 }
 
-/// The working directory of the test server on `port`.
-fn test_dir(port: u16) -> Result<PathBuf> {
-    Ok(std::env::current_dir()?.join(format!("target/integration-test/instance-p{port}")))
+/// The profile directory beside the current integration test's deps directory.
+fn profile_dir() -> Result<PathBuf> {
+    let exe = std::env::current_exe()?;
+    let parent = exe.parent().context("Test executable has a parent")?;
+    Ok(if parent.file_name().is_some_and(|name| name == "deps") {
+        parent.parent().context("deps has a profile parent")?
+    } else {
+        parent
+    }
+    .to_path_buf())
 }
 
-/// The path of example module `module_name`, as built for the tests.
+/// Resolves built modules beside the running tests, including custom targets.
 pub fn module_path(module_name: &str) -> Result<String> {
     let extension = if cfg!(target_os = "macos") {
         "dylib"
     } else {
         "so"
     };
-    let profile = if cfg!(not(debug_assertions)) {
-        "release"
-    } else {
-        "debug"
-    };
-    let path: PathBuf = [
-        std::env::current_dir()?,
-        PathBuf::from(format!(
-            "target/{profile}/examples/lib{module_name}.{extension}"
-        )),
-    ]
-    .iter()
-    .collect();
-    Ok(format!("{}", path.display()))
+    Ok(profile_dir()?
+        .join("examples")
+        .join(format!("lib{module_name}.{extension}"))
+        .to_str()
+        .context("Module path is UTF-8")?
+        .to_owned())
 }
 
-pub fn start_redis_server_with_module(
-    module_name: &str,
-    port: u16,
-    log_file: Option<PathBuf>,
-) -> Result<ChildGuard> {
-    let extension = if cfg!(target_os = "macos") {
-        "dylib"
-    } else {
-        "so"
+fn probe_connection(port: u16, expected_pid: Option<u32>) -> Result<Option<Connection>> {
+    let mut con = match Connection::connect(port) {
+        Ok(con) => con,
+        Err(error) if error.is_io_error() => return Ok(None),
+        Err(error) => return Err(error.into()),
     };
-
-    let profile = if cfg!(not(debug_assertions)) {
-        "release"
-    } else {
-        "debug"
-    };
-
-    let module_path: PathBuf = [
-        std::env::current_dir()?,
-        PathBuf::from(format!(
-            "target/{profile}/examples/lib{module_name}.{extension}"
-        )),
-    ]
-    .iter()
-    .collect();
-
-    assert!(
-        fs::metadata(&module_path)
-            .with_context(|| format!("Loading redis module: {}", module_path.display()))?
-            .is_file()
-    );
-
-    let module_path = format!("{}", module_path.display());
-
-    let rdb_filename = format!("test-on-port-{}.rdb", port);
-    let rdb_out_dir = test_dir(port)?;
-    if rdb_out_dir.exists() {
-        fs::remove_dir_all(&rdb_out_dir).with_context(|| {
-            format!(
-                "Removing existing rdb output dir: {}",
-                rdb_out_dir.display()
-            )
-        })?;
+    con.set_read_timeout(Some(PROBE_TIMEOUT))?;
+    con.set_write_timeout(Some(PROBE_TIMEOUT))?;
+    let probe = (|| -> redis::RedisResult<bool> {
+        let pong: String = redis::cmd("PING").query(&mut con)?;
+        if let Some(pid) = expected_pid {
+            let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+            let expected = format!("process_id:{pid}");
+            return Ok(pong == "PONG" && info.lines().any(|line| line == expected));
+        }
+        Ok(pong == "PONG")
+    })();
+    match probe {
+        Ok(true) => {
+            con.set_read_timeout(None)?;
+            con.set_write_timeout(None)?;
+            Ok(Some(con))
+        }
+        Ok(false) => Ok(None),
+        Err(error) if error.is_io_error() || error.code() == Some("LOADING") => Ok(None),
+        Err(error) => Err(error.into()),
     }
-
-    fs::create_dir_all(&rdb_out_dir)
-        .with_context(|| format!("Creating rdb output dir: {}", rdb_out_dir.display()))?;
-
-    let port = port.to_string();
-    let mut args = vec![
-        "--port",
-        &port,
-        "--loadmodule",
-        module_path.as_str(),
-        "--enable-debug-command",
-        "yes",
-        "--enable-module-command",
-        "local",
-        "--dir",
-        rdb_out_dir
-            .to_str()
-            .expect("RDB output directory path contains invalid UTF-8 characters"),
-        "--dbfilename",
-        rdb_filename.as_str(),
-    ];
-    if let Some(log_file) = &log_file {
-        args.push("--logfile");
-        args.push(
-            log_file
-                .to_str()
-                .expect("Log file path contains invalid UTF-8 characters"),
-        );
-    }
-
-    let redis_server = Command::new("redis-server")
-        .args(args)
-        .spawn()
-        .map(|c| ChildGuard {
-            name: "redis-server",
-            child: c,
-            log_file,
-        })?;
-
-    Ok(redis_server)
 }
 
-// Get connection to Redis
-pub fn get_redis_connection(port: u16) -> Result<Connection> {
-    let client = redis::Client::open(format!("redis://127.0.0.1:{port}/"))?;
-    loop {
-        let res = client.get_connection();
-        match res {
-            Ok(con) => return Ok(con),
-            Err(e) => {
-                if e.is_connection_refusal() {
-                    // Redis not ready yet, sleep and retry
-                    std::thread::sleep(Duration::from_millis(50));
-                } else {
-                    return Err(e.into());
+/// Connects with bounded attempts instead of retrying connection refusal forever.
+fn get_redis_connection(port: u16, expected_pid: u32) -> Result<Connection> {
+    let mut connection = None;
+    wait_until(
+        STARTUP_TIMEOUT,
+        &format!("Redis connection on port {port}"),
+        || {
+            connection = probe_connection(port, Some(expected_pid))?;
+            Ok(connection.is_some())
+        },
+    )?;
+    Ok(connection.expect("successful readiness probe"))
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+    use std::io::Read;
+
+    #[test]
+    fn test_harness_rejects_a_different_process_on_the_port() -> Result<()> {
+        let listener = TcpListener::bind(("127.0.0.1", 0))?;
+        let port = listener.local_addr()?.port();
+        let peer = std::thread::spawn(move || -> Result<()> {
+            let (mut socket, _) = listener.accept()?;
+            socket.set_read_timeout(Some(Duration::from_secs(3)))?;
+            socket.set_write_timeout(Some(Duration::from_secs(3)))?;
+            let mut parser = redis::Parser::new();
+            parser.parse_value(&mut socket)?;
+            socket.write_all(b"+PONG\r\n")?;
+            parser.parse_value(&mut socket)?;
+            let info = b"# Server\r\nprocess_id:0\r\n";
+            write!(socket, "${}\r\n", info.len())?;
+            socket.write_all(info)?;
+            socket.write_all(b"\r\n")?;
+            Ok(())
+        });
+        let result = probe_connection(port, Some(u32::MAX));
+        peer.join().expect("fake listener thread panicked")?;
+        assert!(result?.is_none(), "a different process passed readiness");
+        Ok(())
+    }
+
+    #[test]
+    fn test_harness_unresponsive_listener_is_bounded() -> Result<()> {
+        let listener = TcpListener::bind(("127.0.0.1", 0))?;
+        let port = listener.local_addr()?.port();
+        let peer = std::thread::spawn(move || -> std::io::Result<()> {
+            let (mut socket, _) = listener.accept()?;
+            // Close eventually even if the client's timeout regresses, so the
+            // regression fails an elapsed-time assertion instead of hanging CI.
+            socket.set_read_timeout(Some(Duration::from_secs(3)))?;
+            let mut bytes = [0; 1024];
+            loop {
+                match socket.read(&mut bytes) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
                 }
             }
-        }
+            Ok(())
+        });
+        let start = Instant::now();
+        let result = probe_connection(port, None);
+        let elapsed = start.elapsed();
+        peer.join().expect("fake listener thread panicked")?;
+        assert!(
+            result?.is_none(),
+            "an unresponsive listener passed readiness"
+        );
+        assert!(elapsed < Duration::from_secs(2), "probe waited {elapsed:?}");
+        Ok(())
     }
 }

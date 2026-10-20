@@ -176,7 +176,7 @@ These compile unchanged but behave differently:
 | [a83e6d3] | Dropping a stream iterator stops it instead of deleting the current entry. |
 | [c3432c5], [762ab77] | `redis_module!` fails the load when a configuration registration fails or `LoadConfigs` rejects a value. |
 | [5bf61ff] | Numeric defaults must be within the declared inclusive bounds, including module arguments after memory-unit conversion. Boolean module arguments accept only case-insensitive `yes` or `no`; invalid values fail the load. Configuration names are looked up only in the name positions of name/value pairs, so a value matching another configuration's name does not override it. |
-| [Custom ACL category registration](src/macros.rs) | `redis_module!` reuses an existing custom ACL category instead of failing the load. Redis keeps categories after module unload, so a module can reload with its category and existing user grants intact. Only `EBUSY` is accepted; invalid names and other failures still fail the load. |
+| [efad730] | `redis_module!` reuses an existing custom ACL category instead of failing the load. Redis keeps categories after module unload, so a module can reload with its category and existing user grants intact. Only `EBUSY` is accepted; invalid names and other failures still fail the load. |
 | [86b8113] | The crash report's `backtrace` field is `std::backtrace::Backtrace` output. |
 | [a5eb60d] | A call reply's simple-string map key or set element converts to `RedisValueKey::SimpleString` instead of `String`, so a forwarded reply keeps it a simple string. |
 | [9258efb] | An error in a call reply, also inside an array or map, converts to `RedisValue::Error` instead of `StringBuffer`, so a forwarded reply keeps it an error. |
@@ -192,6 +192,12 @@ These compile unchanged but behave differently:
 - Six fewer dependencies: `nix`, `strum_macros`, `regex`, `backtrace`, `enum-primitive-derive`, `num-traits` ([86b8113], [5dbf237]).
 - Version 3.0.0 for `redis-module`, `redis-module-macros` and `redis-module-macros-internals`, and 0.1.2 for `redis-module-common` ([af6611a]).
 - A regression test for the string ownership leaks ([1cf82af]), and a test harness that prints the server log when a test fails or panics ([4e8efc7]).
+- The [integration harness](tests/utils.rs) accepts module arguments, returns
+  startup diagnostics, polls with a deadline, starts replicas, and restarts
+  after saving while preserving the data directory and launch settings. It
+  uses OS-selected ports, isolated directories, bounded socket probes before
+  protocol traffic, and child PID verification. TEST_REDIS_SERVER_BIN selects
+  the Redis executable.
 - Logging docs that say how NUL bytes are written ([4e8efc7]), and the changelog for 3.0.0 ([1eb962a]).
 
 [a808377]: https://github.com/RedisLabsModules/redismodule-rs/commit/a808377
@@ -263,6 +269,7 @@ These compile unchanged but behave differently:
 [e81393d]: https://github.com/joshrotenberg/redismodule-rs/commit/e81393d
 [eaaf9b2]: https://github.com/joshrotenberg/redismodule-rs/commit/eaaf9b2
 [ee02544]: https://github.com/joshrotenberg/redismodule-rs/commit/ee02544
+[efad730]: https://github.com/joshrotenberg/redismodule-rs/commit/efad730
 [i7]: https://github.com/RedisLabsModules/redismodule-rs/issues/7
 [i89]: https://github.com/RedisLabsModules/redismodule-rs/issues/89
 [i134]: https://github.com/RedisLabsModules/redismodule-rs/issues/134
