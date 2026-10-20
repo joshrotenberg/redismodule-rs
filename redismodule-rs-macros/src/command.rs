@@ -498,7 +498,8 @@ pub(crate) fn redis_command(attr: TokenStream, item: TokenStream) -> TokenStream
             argc: i32,
         ) -> i32 {
             let command = || {
-                let context = unsafe { redis_module::Context::new(ctx) };
+                // SAFETY: Redis invokes this registered command for its owning module.
+                let context = unsafe { redis_module::Context::from_module_context(ctx) };
 
                 // SAFETY: Redis supplies live callback argv/count with legal retention.
                 let args = unsafe { redis_module::decode_args(ctx, argv, argc) };

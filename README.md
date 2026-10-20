@@ -152,7 +152,10 @@ command:
 ctx.subscribe_to_keyspace_events(mask, redis_module::redis_event_handler!(on_event))?;
 ```
 
-The existing `event_handlers` list still works. Each subscription is additive
+Use a module-owned context from initialization or a command. Ordinary
+thread-safe context guards are rejected because Redis cannot associate their
+subscriptions with a module for unload cleanup. The existing `event_handlers`
+list still works. Each subscription is additive
 and lasts until the module unloads. See
 [examples/runtime_events.rs](examples/runtime_events.rs) for load-time and
 command-time subscriptions.

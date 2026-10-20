@@ -83,6 +83,26 @@ fn subscribe(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok("OK".into())
 }
 
+#[redis_module_macros::command({ flags: [], arity: 2, key_spec: [] })]
+fn runtime_subscribe_proc(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    subscribe(ctx, args)
+}
+
+fn subscribe_on_thread(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let blocked = ctx.block_client();
+    std::thread::spawn(move || {
+        let thread_ctx = redis_module::ThreadSafeContext::new();
+        let guard = thread_ctx.lock();
+        let result =
+            guard.subscribe_to_keyspace_events(NotifyEvent::STRING, redis_event_handler!(invoke));
+        drop(guard);
+        drop(thread_ctx);
+        let reply = redis_module::ThreadSafeContext::with_blocked_client(blocked);
+        reply.reply(result.map(|()| "OK".into()));
+    });
+    Ok(RedisValue::NoReply)
+}
+
 fn counts(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(EVENTS.lock().unwrap().counts.to_vec().into())
 }
@@ -116,6 +136,8 @@ redis_module! {
     init: init,
     commands: [
         redis_command!("runtime.subscribe", subscribe),
+        ["runtime.subscribe_legacy", subscribe, "", 0, 0, 0, ""],
+        redis_command!("runtime.subscribe_on_thread", subscribe_on_thread),
         redis_command!("runtime.counts", counts).read_only(),
         redis_command!("runtime.last", last).read_only(),
         redis_command!("runtime.send", send),

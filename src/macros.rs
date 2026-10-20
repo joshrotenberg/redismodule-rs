@@ -130,7 +130,8 @@ macro_rules! __redis_command_callback {
                 argc: i32,
             ) -> i32 {
                 let command = || {
-                    let context = unsafe { $crate::Context::new(ctx) };
+                    // SAFETY: Redis associates this SDK module callback with its module.
+                    let context = unsafe { $crate::Context::from_module_context(ctx) };
                     // SAFETY: Redis supplies live argv/count for this callback.
                     let args = unsafe { $crate::decode_args(ctx, argv, argc) };
                     let response = $handler(&context, args);
@@ -167,6 +168,12 @@ macro_rules! __redis_register_commands {
 /// The existing three-argument form subscribes immediately and returns a native
 /// error status from the enclosing function on failure. `redis_module!` uses
 /// that form for each entry in `event_handlers`.
+///
+/// Both forms require proven module ownership for subscription. A context from
+/// [`Context::new`](crate::Context::new), including an ordinary thread-safe
+/// guard, is rejected. SDK load, command, and keyspace callbacks provide the
+/// proof. For a custom native callback, see the safety contract of
+/// [`Context::from_module_context`](crate::Context::from_module_context).
 ///
 /// The key slice a handler receives is valid only while the handler runs, so a
 /// handler cannot ask to keep it:
@@ -229,7 +236,8 @@ macro_rules! redis_event_handler {
                 $crate::panic::run_callback(
                     "keyspace event handler",
                     || {
-                        let context = unsafe { $crate::Context::new(ctx) };
+                        // SAFETY: Redis associates this SDK module callback with its module.
+                        let context = unsafe { $crate::Context::from_module_context(ctx) };
                         // SAFETY: Redis supplies a live, read-only key for this
                         // synchronous invocation. The context anchors its lifetime,
                         // including handlers which would otherwise request 'static.
@@ -423,7 +431,8 @@ macro_rules! redis_module {
             $crate::panic::run_callback(
                 "module load",
                 || {
-                    let context = unsafe { $crate::Context::new(ctx) };
+                    // SAFETY: Redis associates this SDK module callback with its module.
+                    let context = unsafe { $crate::Context::from_module_context(ctx) };
                     unsafe {
                         let _ = $crate::MODULE_CONTEXT.set_context(&context);
                     }
@@ -620,7 +629,8 @@ macro_rules! redis_module {
             $crate::panic::run_callback(
                 "module unload",
                 || {
-                    let context = unsafe { $crate::Context::new(ctx) };
+                    // SAFETY: Redis associates this SDK module callback with its module.
+                    let context = unsafe { $crate::Context::from_module_context(ctx) };
                     $(
                         if $deinit_func(&context) == $crate::Status::Err {
                             return $crate::Status::Err as c_int;

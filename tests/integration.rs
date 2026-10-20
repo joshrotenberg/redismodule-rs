@@ -42,10 +42,12 @@ fn test_runtime_keyspace_subscriptions_after_load_are_additive() -> Result<()> {
     redis::cmd("SET")
         .arg(&["before", "value"])
         .query::<()>(&mut con)?;
-    for mask in ["string", "missed"] {
-        redis::cmd("runtime.subscribe")
-            .arg(mask)
-            .query::<()>(&mut con)?;
+    for (command, mask) in [
+        ("runtime.subscribe", "string"),
+        ("runtime_subscribe_proc", "missed"),
+        ("runtime.subscribe_legacy", "none"),
+    ] {
+        redis::cmd(command).arg(mask).query::<()>(&mut con)?;
     }
     redis::cmd("GET").arg("missing").query::<()>(&mut con)?;
     redis::cmd("SET")
@@ -141,6 +143,31 @@ fn test_runtime_keyspace_subscriptions_are_removed_on_unload() -> Result<()> {
     redis::cmd("GET").arg("missing").query::<()>(&mut con)?;
     let counts: Vec<i64> = redis::cmd("runtime.counts").query(&mut con)?;
     assert_eq!(counts, expected);
+    Ok(())
+}
+
+#[test]
+fn test_runtime_keyspace_subscriptions_reject_unowned_thread_contexts() -> Result<()> {
+    let mut con = TestConnection::new("runtime_events");
+    let error = redis::cmd("runtime.subscribe_on_thread")
+        .query::<String>(&mut con)
+        .expect_err("a module-less thread context registered a subscription");
+    assert!(
+        error.to_string().contains("module-owned context"),
+        "{error}"
+    );
+    redis::cmd("SET")
+        .arg(&["before-unload", "value"])
+        .query::<()>(&mut con)?;
+    let counts: Vec<i64> = redis::cmd("runtime.counts").query(&mut con)?;
+    assert_eq!(counts, [0; 5]);
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "runtime_events"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["after-unload", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
 

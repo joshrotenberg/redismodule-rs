@@ -44,7 +44,11 @@ impl Context {
     /// }
     /// ```
     ///
-    /// Use this from module initialization or a command on Redis's main thread.
+    /// Use a module-owned context from SDK module initialization, a command,
+    /// or a keyspace callback. Unproven contexts, including ordinary
+    /// [`crate::ThreadSafeContext`] guards and [`Self::new`], return an error
+    /// before registering. Custom native callbacks can establish ownership with
+    /// [`Self::from_module_context`] when its safety requirements hold.
     /// Each call adds a subscription; repeated calls do not replace an earlier
     /// mask. Redis removes subscriptions when the module unloads. Notifications
     /// do not depend on the server's `notify-keyspace-events` configuration.
@@ -60,7 +64,15 @@ impl Context {
         mask: NotifyEvent,
         handler: KeyspaceEventHandler,
     ) -> Result<(), RedisError> {
-        let supported = raw::get_keyspace_notification_flags_all();
+        if !self.module_owned {
+            return Err(RedisError::Str(
+                "ERR keyspace subscriptions require a module-owned context",
+            ));
+        }
+        let flags_all = unsafe { raw::RedisModule_GetKeyspaceNotificationFlagsAll }.ok_or(
+            RedisError::Str("ERR keyspace notification flags API is unavailable"),
+        )?;
+        let supported = NotifyEvent::from_bits_truncate(unsafe { flags_all() });
         let available = mask.intersection(supported);
         if !supported.contains(mask) {
             let unsupported = mask.difference(supported);

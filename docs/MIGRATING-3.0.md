@@ -206,6 +206,19 @@ These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
 
+- **Keyspace subscription ownership.** The three-argument
+  `redis_event_handler!(ctx, mask, handler)` now rejects contexts without proven
+  module ownership, logging a warning and returning a native error status from
+  its enclosing function. SDK module-load, command, and keyspace callbacks
+  provide the proof, so normal `redis_module!` event-handler lists are unchanged.
+  `Context::new` does not establish ownership, even if its raw pointer happens
+  to belong to a module; custom native callbacks must use the unsafe
+  `Context::from_module_context` constructor only after verifying its stronger
+  contract. Other SDK callback contexts that do not carry this proof are also
+  rejected; move their subscriptions into initialization or a command.
+  A context from `RedisModule_GetThreadSafeContext(NULL)` has no native module
+  identity and must never be promoted this way. Register from a module-owned
+  context instead, so Redis can remove the callback when the module unloads.
 - **Call results.** `Context::call` returns `SimpleString` for a simple string
   reply and `BulkString` for a bulk string reply (`StringBuffer` when it is not
   UTF-8); 2.x returned `SimpleString` for both when the text was UTF-8, so a
