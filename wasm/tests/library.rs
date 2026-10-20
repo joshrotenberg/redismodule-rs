@@ -1466,3 +1466,49 @@ fn dump_restore_and_flush_work_as_for_functions() {
     assert_eq!(restore(&mut con, &empty, None).unwrap(), Value::Okay);
     assert!(list(&mut con).is_empty());
 }
+
+#[test]
+fn a_restart_serves_while_saved_libraries_compile() {
+    let Some(component) = js_component() else {
+        return;
+    };
+    let server = Server::start(6635, &[]);
+    let mut con = server.connection();
+    let _: Vec<String> = redis::cmd("WASM.LOAD")
+        .arg("js")
+        .arg(component)
+        .query(&mut con)
+        .expect("WASM.LOAD of the JavaScript library");
+    let _: () = redis::cmd("SAVE").query(&mut con).unwrap();
+    server.shutdown();
+
+    // The server serves as soon as it has read the RDB: compiling the 11 MB
+    // component takes seconds, and happens on a thread.
+    let started = Instant::now();
+    let server = Server::restart(6635, &[]);
+    let serving = started.elapsed();
+    let mut con = server.connection();
+    assert_eq!(info(&mut con)["compiling"], 1, "served after {serving:?}");
+    assert_eq!(list(&mut con).len(), 1);
+
+    // A call waits for the library; other clients are answered meanwhile.
+    let mut caller = server.connection();
+    let waiting = std::thread::spawn(move || call(&mut caller, &["hello", "0"]));
+    let mut pings = 0;
+    while !waiting.is_finished() {
+        let _: String = redis::cmd("PING").query(&mut con).unwrap();
+        pings += 1;
+        sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        waiting.join().unwrap().unwrap(),
+        Value::Status("hello, world".into())
+    );
+    assert!(
+        pings > 1,
+        "{pings} PINGs answered while the library compiled"
+    );
+    let compiled = info(&mut con);
+    assert_eq!(compiled["compiling"], 0);
+    assert!(compiled["code_bytes"] > 0);
+}

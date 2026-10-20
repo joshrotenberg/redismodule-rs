@@ -50,7 +50,7 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   moves 1000 strings into the guest, 1.4 times faster.
 - The host is about 790 lines of code at H5, more since, not counting
   comments and unit tests. The example guest is 37 KB as a core module. The
-  twenty integration tests take about 10 seconds.
+  twenty-one integration tests take about 10 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
@@ -149,7 +149,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H13 | todo | **Footprint.** The release dylib is 12.4 MB (macOS). Loading the JavaScript component (release build, macOS): `INFO wasm` accounts for 95 MB of compiled code and 7.7 MB of linear memory, and RSS reached 0.97 GB, then 1.35 GB after a delete and two more loads. The compiler allocates through the module's global allocator, Redis's, so `used_memory_peak` reached 1.05 GB during the load, and 57.7 MB stayed counted after `WASM.DELETE` (not growing on later loads: caches, not a leak). With `std::alloc::System` as the module's allocator, `used_memory` stayed near 1 MB (peak 25 MB, the argument itself) and RSS behaved the same. Decision needed: count wasmtime's heap in `used_memory`, so a load's transient 1 GB counts against `maxmemory`, or not, so 70 MB of lasting heap per JavaScript library is invisible to it. | Sizes recorded before and after. |
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
 | H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30); not investigated. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
-| H17 | todo | **Load time.** Loading an RDB compiles each library's component on the main thread, one after another, before the server serves clients. Measured with the log line `aux_load` now writes (release build, quiet machine): the JavaScript library took 1.56 to 1.67 s, 15 ms of it reading the RDB, against a server ready in 0.03 s with an empty RDB; an earlier, busier run took 2.6 to 3.9 s. Compiling libraries on parallel threads would gain little, since wasmtime already compiles one component on all cores. Left: compile in the background and block a call to a library until its component is ready, or use wasmtime's on-disk code cache. | Load time with the JavaScript library, before and after. |
+| H17 | done | **Load time.** Loading an RDB compiled each library's component on the main thread before the server served: 1.56 to 1.67 s for the JavaScript library (release build), 15 ms of it reading. Now the libraries are added at once with their code compiling on a thread (`code.rs`): a call to a library still compiling blocks its client until the code is ready (or waits in place inside `MULTI` or a script), `INFO wasm` counts the libraries compiling, and the server was ready in 0.11 to 0.12 s. | Load time with the JavaScript library, before and after. |
 | H18 | done | **Dump, restore, flush.** `WASM.DUMP`, `WASM.RESTORE <payload> [FLUSH\|APPEND\|REPLACE]` and `WASM.FLUSH`, as `FUNCTION DUMP`, `RESTORE` and `FLUSH` work. The payload (`dump.rs`) holds names and components with an FNV-1a checksum; a restore compiles on a thread, lists every library's functions, checks every conflict, then adds all or none. | Tests restore into another server under each policy, refuse a conflicting or damaged payload without changing anything, and replicate `WASM.FLUSH` and `WASM.RESTORE`. |
 | H19 | done | **Stats.** `WASM.STATS`, `allow-busy` like `FUNCTION STATS`: the running function's name and duration, and the counts of libraries and functions (nil while a library loads and holds the host). | The busy test reads it while a function spins and after it is killed. |
 | H15 | done | **Large replies into the guest.** `lrange` (the LRANGE of `median`, count only) took 139 µs in wasm against 58 µs in Lua; a profile showed the time spread over allocating and copying each string on both sides. `call-flat` and `pcall-flat` return the reply as nodes whose strings are spans of one buffer: `lrange_flat` takes 77 µs (1.4 times Lua) and `median_flat` 126 µs (0.50 of Lua's 253). The typed `call` and `pcall` stay for small replies. | `median`'s time split, and a lower number. |
@@ -216,6 +216,10 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H17 done: libraries from an RDB compile in the background (see
+  H17). Test: after a restart with the JavaScript library saved, `INFO wasm`
+  shows it compiling, a call waits and returns the right reply, and PINGs are
+  answered meanwhile.
 - 2026-10-20: H19 done: `WASM.STATS`.
 - 2026-10-20: H18 done: `WASM.DUMP`, `WASM.RESTORE` and `WASM.FLUSH`. `Host::add`
   is now `stage` (instantiate, list functions) and a commit, so a restore can

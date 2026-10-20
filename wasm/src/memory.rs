@@ -102,6 +102,8 @@ pub(crate) struct LibrarySizes {
     pub(crate) functions: usize,
     pub(crate) component_bytes: usize,
     pub(crate) code_bytes: usize,
+    /// Libraries whose component is still compiling after an RDB load.
+    pub(crate) compiling: usize,
 }
 
 /// `INFO wasm`.
@@ -117,6 +119,7 @@ fn info(ctx: &InfoContext, _for_crash_report: bool) -> RedisResult<()> {
         .field("functions", count(sizes.functions))?
         .field("component_bytes", count(sizes.component_bytes))?
         .field("code_bytes", count(sizes.code_bytes))?
+        .field("compiling", count(sizes.compiling))?
         .field("instances", count(INSTANCES.load(Ordering::Relaxed)))?
         .field(
             "instance_memory_bytes",

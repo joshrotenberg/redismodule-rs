@@ -85,8 +85,11 @@ second to finish fails as if it had come second, unless it has `REPLACE`.
 
 The RDB keeps the libraries, as Redis does for `FUNCTION` libraries, so they
 come back after a restart, `DEBUG RELOAD` or a replica's full sync. Loading an
-RDB or AOF replaces the libraries: it compiles each saved component again and
-runs no guest code, so a library's first call creates its instance. An RDB
+RDB or AOF replaces the libraries and runs no guest code: the saved components
+compile again on a thread while the server serves, a call to a library still
+compiling waits for it, and a library's first call creates its instance. With
+an 11 MB JavaScript library saved, a server was ready in 0.12 s instead of
+1.6 s. An RDB
 saved with no libraries has nothing from the module, and a server without the
 module can load it.
 
@@ -130,6 +133,7 @@ count them; `INFO wasm` reports them:
 wasm_libraries, wasm_functions        what is loaded
 wasm_component_bytes                  the components' bytes, which the RDB keeps
 wasm_code_bytes                       compiled code
+wasm_compiling                        libraries still compiling after an RDB load
 wasm_instances                        live instances, kept or running
 wasm_instance_memory_bytes            their linear memory
 wasm_max_memory                       the limit
@@ -248,4 +252,4 @@ workspace `Cargo.toml`); unoptimized, loading the JavaScript component took
 
 [TRACKING.md](TRACKING.md) has every open item, with IDs and what done means. The main ones:
 
-- Loading an RDB compiles each library before the server serves (H17).
+- Choosing whether wasmtime's heap counts in `used_memory` (H13).

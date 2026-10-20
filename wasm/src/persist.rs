@@ -17,6 +17,7 @@
 
 use std::ffi::c_int;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use anyhow::{Context as _, bail};
@@ -157,21 +158,39 @@ fn load(rdb: &mut RedisModuleIO, encver: c_int) -> anyhow::Result<()> {
         .iter()
         .map(|(_, component, _)| component.len())
         .sum();
-
-    // Compile without holding the host, as WASM.LOAD does.
-    let compiler = crate::with_host(|host| host.compiler())?;
     let count = libraries.len();
+
+    // The libraries are added now, and compile on a thread: the server serves
+    // meanwhile, and a call to a library still compiling waits for it.
+    let compiler = crate::with_host(|host| host.compiler())?;
+    let mut jobs = Vec::with_capacity(count);
     for (name, component, functions) in libraries {
-        let compiled = compiler
-            .compile(component)
-            .with_context(|| format!("library '{name}'"))?;
-        crate::with_host(|host| host.restore(&name, compiled, functions))?
-            .with_context(|| format!("library '{name}'"))?;
+        let code =
+            crate::with_host(|host| host.restore_compiling(&name, component.clone(), functions))?
+                .with_context(|| format!("library '{name}'"))?;
+        jobs.push((code, component));
     }
     if count > 0 {
+        let jobs = Arc::new(Mutex::new(jobs));
+        let compile = {
+            let jobs = Arc::clone(&jobs);
+            move || {
+                let jobs =
+                    std::mem::take(&mut *jobs.lock().unwrap_or_else(PoisonError::into_inner));
+                for (code, component) in jobs {
+                    code.finish(compiler.compile_code(&component));
+                }
+            }
+        };
+        let spawned = std::thread::Builder::new()
+            .name("wasm-compile".into())
+            .spawn(compile.clone());
+        if spawned.is_err() {
+            // Without a thread, compile here; the load takes longer.
+            compile();
+        }
         logging::log_notice(format!(
-            "wasm: loaded {count} libraries ({bytes} bytes) from the RDB in {} ms, {} ms of it reading",
-            started.elapsed().as_millis(),
+            "wasm: loaded {count} libraries ({bytes} bytes) from the RDB in {} ms; they compile in the background",
             read.as_millis()
         ));
     }

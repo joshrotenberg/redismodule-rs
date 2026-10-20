@@ -36,6 +36,7 @@ use redis_module::{
 use redis_module_macros::command;
 
 mod busy;
+mod code;
 mod dump;
 mod flags;
 mod host;
@@ -43,6 +44,7 @@ mod memory;
 mod persist;
 mod reply;
 
+use code::WaitingCall;
 use host::Host;
 use persist::LIBRARIES;
 
@@ -200,7 +202,7 @@ fn wasm_call_ro(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
 fn run_function(ctx: &Context, args: &[RedisString], read_only: bool) -> RedisResult {
     let mut args = ArgCursor::new(&args[1..]);
-    let function = args.next_str()?;
+    let function = args.next_str()?.to_owned();
     let numkeys = usize::try_from(args.next_u64()?)
         .ok()
         .filter(|&n| n <= args.remaining().len())
@@ -209,26 +211,71 @@ fn run_function(ctx: &Context, args: &[RedisString], read_only: bool) -> RedisRe
         ))?;
     let keys: Vec<Vec<u8>> = args.by_ref().take(numkeys).map(|k| k.to_vec()).collect();
     let rest: Vec<Vec<u8>> = args.map(|a| a.to_vec()).collect();
+    call_function(
+        ctx,
+        WaitingCall {
+            function,
+            keys,
+            args: rest,
+            read_only,
+        },
+    )
+}
 
+/// Runs a function call, or holds it while the function's library compiles
+/// after an RDB load.
+fn call_function(ctx: &Context, call: WaitingCall) -> RedisResult {
+    let function = call.function.as_str();
     // Release the host before running the guest, so a guest that calls a
     // WASM.* command fails on its command flags, not on a lock.
-    let call = with_host(|host| host.prepare(function))?
+    let prepared = with_host(|host| host.prepare(function))?
         .ok_or_else(|| RedisError::String(format!("ERR function '{function}' not found")))?;
-    let mode = flags::check(ctx, call.flags(), read_only, &keys)?;
-    let nodes = call.run(ctx, function, &keys, &rest, mode).map_err(|e| {
-        match e.downcast_ref::<host::CallError>() {
+    let ready = match prepared {
+        host::Prepared::Ready(ready) => ready,
+        host::Prepared::Failed(message) => {
+            return Err(RedisError::String(format!("ERR {message}")));
+        }
+        host::Prepared::Compiling(code) => {
+            return match ctx.block_client_on_reply(None, finish_waiting, wait_timed_out) {
+                Ok(blocked) => {
+                    code.wait(blocked, call);
+                    Ok(RedisValue::NoReply)
+                }
+                // Inside MULTI or a script, or from a reply callback.
+                Err(_) => {
+                    code.wait_here();
+                    call_function(ctx, call)
+                }
+            };
+        }
+    };
+    let mode = flags::check(ctx, ready.flags(), call.read_only, &call.keys)?;
+    let nodes = ready
+        .run(ctx, function, &call.keys, &call.args, mode)
+        .map_err(|e| match e.downcast_ref::<host::CallError>() {
             // As Lua names the script after an error that redis.call raised.
             Some(host::CallError(message)) => {
                 RedisError::String(format!("{message} function: {function}."))
             }
             None => error(&format!("function '{function}' failed"), &e),
-        }
-    })?;
+        })?;
     reply::to_value(&nodes).map_err(|reason| {
         RedisError::String(format!(
             "ERR function '{function}' returned a malformed reply: {reason}"
         ))
     })
+}
+
+/// Runs a call that waited for its library to compile.
+fn finish_waiting(ctx: &Context, call: WaitingCall) -> RedisResult {
+    call_function(ctx, call)
+}
+
+/// A waiting call blocks with no timeout, so this does not run.
+fn wait_timed_out(_ctx: &Context) -> RedisResult {
+    Err(RedisError::Str(
+        "ERR timed out waiting for a library to compile",
+    ))
 }
 
 /// `WASM.LIST`: `[library, [[function, [flag ...]] ...]]` for each library.

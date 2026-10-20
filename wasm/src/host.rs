@@ -43,6 +43,7 @@ use wasmtime::component::{Component, HasSelf, Linker};
 use wasmtime::{Config, Engine, Store};
 
 use crate::busy::{self, Running, Ticker};
+use crate::code::{Code, Now};
 use crate::flags::{self, Mode};
 use crate::memory::{LibrarySizes, Live, Memory};
 use crate::reply::{flat_call_result, push_call_result};
@@ -283,7 +284,7 @@ impl redis_module_wasm::host::redis::Host for CallState {
 /// component's bytes, which the RDB keeps, the functions it provides, and the
 /// instance its calls reuse.
 struct LoadedLibrary {
-    pre: LibraryPre<CallState>,
+    code: Arc<Code>,
     component: Vec<u8>,
     functions: Vec<Function>,
     kept: KeptInstance,
@@ -403,12 +404,7 @@ impl Host {
         self.check_name(name, replace)?;
         let staged = self.stage(ctx, name.to_owned(), compiled)?;
         let functions = staged.functions.clone();
-        self.insert(
-            &staged.name,
-            staged.compiled,
-            staged.functions,
-            Some(staged.instance),
-        )?;
+        self.insert_staged(staged)?;
         Ok(functions)
     }
 
@@ -485,32 +481,41 @@ impl Host {
             self.remove(&library.name);
         }
         for library in staged {
-            self.insert(
-                &library.name,
-                library.compiled,
-                library.functions,
-                Some(library.instance),
-            )?;
+            self.insert_staged(library)?;
         }
         Ok(())
     }
 
     /// Adds library `name` from an RDB, which also lists its functions,
-    /// replacing a library of that name. Loading runs no guest code: the
-    /// library's first call creates its instance.
-    pub(crate) fn restore(
+    /// replacing a library of that name, before its component has compiled.
+    /// Returns its code for the caller to compile: calls wait for it. Loading
+    /// runs no guest code: the library's first call creates its instance.
+    pub(crate) fn restore_compiling(
         &mut self,
         name: &str,
-        compiled: Compiled,
+        component: Vec<u8>,
         functions: Vec<Function>,
-    ) -> anyhow::Result<()> {
-        self.insert(name, compiled, functions, None)
+    ) -> anyhow::Result<Arc<Code>> {
+        let code = Arc::new(Code::compiling());
+        self.insert(name, Arc::clone(&code), component, functions, None)?;
+        Ok(code)
+    }
+
+    fn insert_staged(&mut self, staged: Staged) -> anyhow::Result<()> {
+        self.insert(
+            &staged.name,
+            Arc::new(Code::ready(staged.compiled.pre)),
+            staged.compiled.component,
+            staged.functions,
+            Some(staged.instance),
+        )
     }
 
     fn insert(
         &mut self,
         name: &str,
-        compiled: Compiled,
+        code: Arc<Code>,
+        component: Vec<u8>,
         functions: Vec<Function>,
         instance: Option<Instance>,
     ) -> anyhow::Result<()> {
@@ -534,8 +539,8 @@ impl Host {
         self.libraries.insert(
             name.to_owned(),
             LoadedLibrary {
-                pre: compiled.pre,
-                component: compiled.component,
+                code,
+                component,
                 functions,
                 kept: Arc::new(Mutex::new(instance)),
             },
@@ -581,8 +586,14 @@ impl Host {
         };
         for library in self.libraries.values() {
             sizes.component_bytes += library.component.len();
-            let code = library.pre.instance_pre().component().image_range();
-            sizes.code_bytes += code.end as usize - code.start as usize;
+            match library.code.now() {
+                Now::Ready(pre) => {
+                    let code = pre.instance_pre().component().image_range();
+                    sizes.code_bytes += code.end as usize - code.start as usize;
+                }
+                Now::Compiling => sizes.compiling += 1,
+                Now::Failed(_) => {}
+            }
         }
         sizes
     }
@@ -601,14 +612,20 @@ impl Host {
 
     /// What a call of `function` needs, so the caller can release the host
     /// before running the guest.
-    pub(crate) fn prepare(&self, function: &str) -> Option<PreparedCall> {
-        let (library, flags) = self.functions.get(function)?;
-        let library = &self.libraries[library];
-        Some(PreparedCall {
-            engine: self.engine.clone(),
-            pre: library.pre.clone(),
-            kept: Arc::clone(&library.kept),
-            flags: *flags,
+    pub(crate) fn prepare(&self, function: &str) -> Option<Prepared> {
+        let (name, flags) = self.functions.get(function)?;
+        let library = &self.libraries[name];
+        Some(match library.code.now() {
+            Now::Ready(pre) => Prepared::Ready(PreparedCall {
+                engine: self.engine.clone(),
+                pre,
+                kept: Arc::clone(&library.kept),
+                flags: *flags,
+            }),
+            Now::Compiling => Prepared::Compiling(Arc::clone(&library.code)),
+            Now::Failed(message) => {
+                Prepared::Failed(format!("library '{name}' did not compile: {message}"))
+            }
         })
     }
 }
@@ -637,6 +654,7 @@ pub(crate) struct Compiled {
 
 /// Compiles components. It holds clones of the engine and linker, so it can run
 /// on another thread while the server keeps serving.
+#[derive(Clone)]
 pub(crate) struct Compiler {
     engine: Engine,
     linker: Linker<CallState>,
@@ -644,10 +662,24 @@ pub(crate) struct Compiler {
 
 impl Compiler {
     pub(crate) fn compile(&self, component: Vec<u8>) -> anyhow::Result<Compiled> {
-        let compiled = Component::new(&self.engine, &component).context("invalid component")?;
-        let pre = LibraryPre::new(self.linker.instantiate_pre(&compiled)?)?;
+        let pre = self.compile_code(&component)?;
         Ok(Compiled { pre, component })
     }
+
+    /// Compiles a component without keeping its bytes.
+    pub(crate) fn compile_code(&self, component: &[u8]) -> anyhow::Result<LibraryPre<CallState>> {
+        let compiled = Component::new(&self.engine, component).context("invalid component")?;
+        LibraryPre::new(self.linker.instantiate_pre(&compiled)?)
+    }
+}
+
+/// What a call of a function finds.
+pub(crate) enum Prepared {
+    Ready(PreparedCall),
+    /// The library's component is compiling after an RDB load.
+    Compiling(Arc<Code>),
+    /// The library's component did not compile; the reason.
+    Failed(String),
 }
 
 /// A function call ready to run.
