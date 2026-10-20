@@ -801,6 +801,18 @@ impl Context {
         Ok(())
     }
 
+    /// How much memory Redis uses relative to its `maxmemory` setting, through
+    /// `RedisModule_GetUsedMemoryRatio`: 0 when no limit is set, 1 at the
+    /// limit, and more than 1 above it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the running Redis does not provide the API.
+    pub fn used_memory_ratio(&self) -> Result<f32, RedisError> {
+        let ratio = unsafe { crate::__available_api!(RedisModule_GetUsedMemoryRatio) };
+        Ok(unsafe { ratio() })
+    }
+
     #[must_use]
     pub fn create_string<T: Into<Vec<u8>>>(&self, s: T) -> RedisString {
         RedisString::create(NonNull::new(self.ctx), s)

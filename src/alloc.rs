@@ -222,6 +222,73 @@ unsafe impl GlobalAlloc for RedisAlloc {
     }
 }
 
+/// The memory Redis allocated for `ptr`, which may be more than was asked
+/// for, through `RedisModule_MallocSize`.
+///
+/// # Errors
+///
+/// Returns an error if the running Redis does not provide the API.
+///
+/// # Safety
+///
+/// `ptr` must be a live allocation that `RedisModule_Alloc`, `RedisModule_Calloc`
+/// or `RedisModule_Realloc` returned. For a block from [`RedisAlloc`], use
+/// [`redis_alloc_size`].
+pub unsafe fn malloc_size(ptr: *mut std::ffi::c_void) -> Result<usize, crate::RedisError> {
+    let malloc_size = crate::__available_api!(RedisModule_MallocSize);
+    Ok(malloc_size(ptr))
+}
+
+/// The usable size of `ptr`, through `RedisModule_MallocUsableSize`.
+///
+/// # Errors
+///
+/// Returns an error if the running Redis does not provide the API.
+///
+/// # Safety
+///
+/// The requirements of [`malloc_size`] apply.
+pub unsafe fn malloc_usable_size(ptr: *mut std::ffi::c_void) -> Result<usize, crate::RedisError> {
+    let malloc_usable_size = crate::__available_api!(RedisModule_MallocUsableSize);
+    Ok(malloc_usable_size(ptr))
+}
+
+/// The memory Redis allocated for a block that [`RedisAlloc`] returned for
+/// `layout`, for example the buffer of a `Vec` or a `Box` in a module that uses
+/// `RedisAlloc` as its global allocator. A block with more alignment than
+/// `RedisModule_Alloc` provides starts inside a larger allocation; this measures
+/// that allocation.
+///
+/// # Errors
+///
+/// Returns an error if the running Redis does not provide `RedisModule_MallocSize`,
+/// or if the module allocates from the system allocator under the
+/// `system-allocator-fallback` feature.
+///
+/// # Safety
+///
+/// `block` must be a live block that [`RedisAlloc`] returned for `layout`, with
+/// a non-zero size.
+pub unsafe fn redis_alloc_size(
+    block: *const u8,
+    layout: Layout,
+) -> Result<usize, crate::RedisError> {
+    let malloc_size = crate::__available_api!(RedisModule_MallocSize);
+    // A block from the system allocator, under the system-allocator-fallback
+    // feature, has no header and is not Redis's to measure.
+    if __uses_system_allocator() {
+        return Err(crate::RedisError::Str(
+            "ERR the module allocates from the system allocator, not from Redis",
+        ));
+    }
+    let base = if is_over_aligned(layout) {
+        block.sub(HEADER).cast::<*mut u8>().read()
+    } else {
+        block.cast_mut()
+    };
+    Ok(malloc_size(base.cast()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

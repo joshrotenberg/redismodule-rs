@@ -960,6 +960,40 @@ fn test_insertion_ordered_map() -> Result<()> {
 }
 
 #[test]
+fn test_memory_accounting() -> Result<()> {
+    let mut con = TestConnection::new("memory");
+
+    let ratio = |con: &mut TestConnection| -> Result<f64> {
+        let ratio: String = redis::cmd("memory.ratio").query(con)?;
+        Ok(ratio.parse()?)
+    };
+    redis::cmd("CONFIG")
+        .arg(&["SET", "maxmemory", "0"])
+        .query::<()>(&mut con)?;
+    assert_eq!(ratio(&mut con)?, 0.0);
+    redis::cmd("CONFIG")
+        .arg(&["SET", "maxmemory", "1gb"])
+        .query::<()>(&mut con)?;
+    let limited = ratio(&mut con)?;
+    assert!(limited > 0.0 && limited < 1.0, "ratio {limited}");
+
+    let text = "x".repeat(1000);
+    let size: i64 = redis::cmd("memory.string_size")
+        .arg(&text)
+        .query(&mut con)?;
+    assert!(size >= 1000, "string size {size}");
+
+    let (buffer, aligned): (i64, i64) = redis::cmd("memory.buffer_sizes")
+        .arg(10_000)
+        .query(&mut con)?;
+    assert!((10_000..20_000).contains(&buffer), "buffer size {buffer}");
+    // 64 bytes, plus the header and padding of an over-aligned block.
+    assert!(aligned >= 64 + 8, "aligned size {aligned}");
+
+    Ok(())
+}
+
+#[test]
 fn test_string() -> Result<()> {
     let mut con = TestConnection::new("string");
 

@@ -37,6 +37,10 @@ name = "yield"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "memory"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "args"
 crate-type = ["cdylib"]
 

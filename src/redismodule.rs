@@ -153,6 +153,17 @@ impl RedisString {
         self.inner.as_ptr()
     }
 
+    /// The memory Redis uses for this string, its object and its buffer,
+    /// through `RedisModule_MallocSizeString`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the running Redis does not provide the API.
+    pub fn malloc_size(&self) -> Result<usize, RedisError> {
+        let malloc_size = unsafe { crate::__available_api!(RedisModule_MallocSizeString) };
+        Ok(unsafe { malloc_size(self.as_ptr()) })
+    }
+
     /// Suppress Drop for exactly one reference. StrCallArgs releases it in its
     /// own Drop; Redis releases configuration error strings. Do not use this for
     /// a string configuration getter's reply: Redis copies that string without
