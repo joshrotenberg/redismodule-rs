@@ -769,6 +769,8 @@ impl Context {
 
             Ok(RedisValue::StaticError(s)) => self.reply_error_string(s),
 
+            Ok(RedisValue::Error(s)) => self.reply_error_string(&s),
+
             Err(RedisError::WrongArity) => unsafe {
                 if self.is_keys_position_request() {
                     // We can't return a result since we don't have a client

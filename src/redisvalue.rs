@@ -30,6 +30,9 @@ pub enum RedisValue {
     VerbatimString((VerbatimStringFormat, Vec<u8>)),
     Array(Vec<RedisValue>),
     StaticError(&'static str),
+    /// An error reply with an owned message, such as `ERR something failed`.
+    /// Unlike returning `Err`, it can be an element of an array, set or map.
+    Error(String),
     Map(HashMap<RedisValueKey, RedisValue>),
     Set(HashSet<RedisValueKey>),
     OrderedMap(BTreeMap<RedisValueKey, RedisValue>),
