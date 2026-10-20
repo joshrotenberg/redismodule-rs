@@ -305,6 +305,10 @@ macro_rules! redis_event_handler {
 ///
 /// It registers the defined module, sets it up and initialises properly,
 /// registers all the commands and types.
+///
+/// Custom `acl_categories` are shared across modules and remain registered
+/// after unload. Existing categories are reused; other registration errors
+/// fail the module load.
 #[macro_export]
 macro_rules! redis_module {
     (
@@ -488,9 +492,15 @@ macro_rules! redis_module {
                                     let category = CString::new(format!("{module_acl_category}")).unwrap();
                                     // SAFETY: ctx is the load context; the string outlives the call.
                                     if unsafe { RM_AddACLCategory(ctx, category.as_ptr()) } == raw::Status::Err as c_int {
-                                        // SAFETY: ctx is the module's load context.
-                                        unsafe { raw::redis_log(ctx, &format!("Error: failed to add ACL category `{module_acl_category}`")) };
-                                        return raw::Status::Err as c_int;
+                                        // Capture errno before formatting or logging can change it.
+                                        let error = ::std::io::Error::last_os_error();
+                                        // Redis keeps categories after unload and permits every
+                                        // module to use them. Only EBUSY means the name exists.
+                                        if error.raw_os_error() != Some($crate::__private::EBUSY) {
+                                            // SAFETY: ctx is the module's load context.
+                                            unsafe { raw::redis_log(ctx, &format!("Error: failed to add ACL category `{module_acl_category}`")) };
+                                            return raw::Status::Err as c_int;
+                                        }
                                     }
                                 }
                             } else {

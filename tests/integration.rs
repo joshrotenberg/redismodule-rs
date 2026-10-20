@@ -1627,6 +1627,112 @@ fn test_set_acl_categories_commands() -> Result<()> {
     Ok(())
 }
 
+fn supports_custom_acl_categories(con: &mut TestConnection) -> Result<bool> {
+    let info: String = redis::cmd("INFO").arg("server").query(con)?;
+    let version = redis_module::Context::version_from_info(RedisValue::BulkString(info))?;
+    Ok((version.major, version.minor) >= (7, 4))
+}
+
+#[test]
+fn test_acl_category_survives_module_reload() -> Result<()> {
+    let mut con = TestConnection::with_log_file("acl");
+    if !supports_custom_acl_categories(&mut con)? {
+        return Ok(());
+    }
+    let module = utils::module_path("acl")?;
+    redis::cmd("ACL")
+        .arg(&[
+            "SETUSER",
+            "category-user",
+            "on",
+            ">pass",
+            "~*",
+            "-@all",
+            "+@acl",
+        ])
+        .query::<()>(&mut con)?;
+    let mut restricted = con.connection()?;
+    redis::cmd("AUTH")
+        .arg(&["category-user", "pass"])
+        .query::<()>(&mut restricted)?;
+
+    let assert_access =
+        |con: &mut TestConnection, restricted: &mut redis::Connection| -> Result<()> {
+            // Redis 7.4's ACL CAT <category> omits module commands. COMMAND INFO
+            // reports their category membership on every version tested here.
+            let command: Vec<Vec<Value>> = redis::cmd("COMMAND")
+                .arg(&["INFO", "get_current_user"])
+                .query(con)?;
+            assert_eq!(command.len(), 1);
+            let categories: Vec<String> = redis::from_redis_value(
+                command[0]
+                    .get(6)
+                    .context("COMMAND INFO includes ACL categories")?,
+            )?;
+            assert!(categories.contains(&"@acl".to_owned()), "{categories:?}");
+            assert_eq!(
+                redis::cmd("get_current_user").query::<String>(restricted)?,
+                "category-user"
+            );
+            let error = redis::cmd("SET")
+                .arg(&["acl-reload-denied", "value"])
+                .query::<()>(&mut *restricted)
+                .expect_err("the category grant allowed an unrelated SET");
+            assert_eq!(error.code(), Some("NOPERM"), "{error}");
+            Ok(())
+        };
+    assert_access(&mut con, &mut restricted)?;
+
+    for _ in 0..2 {
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "acl"])
+            .query::<()>(&mut con)?;
+        let categories: Vec<String> = redis::cmd("ACL").arg("CAT").query(&mut con)?;
+        assert!(categories.contains(&"acl".to_owned()), "{categories:?}");
+        let command: Vec<Value> = redis::cmd("COMMAND")
+            .arg(&["INFO", "get_current_user"])
+            .query(&mut con)?;
+        assert_eq!(command, [Value::Nil]);
+
+        redis::cmd("MODULE")
+            .arg(&["LOAD", module.as_str()])
+            .query::<()>(&mut con)
+            .with_context(|| format!("failed to reload acl: {:?}", con.server_log()))?;
+        // Reuse both the existing user grant and its authenticated connection.
+        assert_access(&mut con, &mut restricted)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_acl_category_invalid_name_fails_module_load() -> Result<()> {
+    let mut con = TestConnection::with_log_file("hello");
+    if !supports_custom_acl_categories(&mut con)? {
+        return Ok(());
+    }
+    let module = utils::module_path("acl_invalid_category")?;
+    let error = redis::cmd("MODULE")
+        .arg(&["LOAD", module.as_str()])
+        .query::<()>(&mut con)
+        .expect_err("a module declaring an invalid ACL category loaded");
+    assert!(
+        error.to_string().contains("Error loading the extension"),
+        "{error}"
+    );
+    let log = con.server_log()?;
+    assert!(
+        log.contains("failed to add ACL category `invalid category`"),
+        "{log}"
+    );
+    let modules: Vec<HashMap<String, Value>> = redis::cmd("MODULE").arg("LIST").query(&mut con)?;
+    for module in modules {
+        let name: String = redis::from_redis_value(&module["name"])?;
+        assert_ne!(name, "acl_invalid_category");
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
 #[test]
 fn test_acl_command_and_channel_checks() -> Result<()> {
     let mut con = TestConnection::new("acl");

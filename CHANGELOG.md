@@ -100,6 +100,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - Keyspace event names that are not UTF-8 no longer panic in the event macro (upstream PR 475).
 - `call_blocking` is available under the 8.0 floor.
 - Commands registered with `#[command]` load on Redis 7.0 when they declare no ACL categories; registration required Redis 7.2's `RedisModule_SetCommandACLCategories` for every command. Under the 7.0 floor, an error registering one of those commands was also ignored and the module loaded anyway; it now fails the load, as under the other floors.
+- `redis_module!` reuses an existing custom ACL category when Redis reports `EBUSY`, so modules declaring `acl_categories` can unload and reload in the same server. Invalid names and other category registration failures still fail the load.
 
 ## [2.0.8](https://github.com/RedisLabsModules/redismodule-rs/compare/redis-module-v2.0.7...redis-module-v2.0.8) - 2026-05-04
 

@@ -175,7 +175,8 @@ These compile unchanged but behave differently:
 | [332c68a] | `RedisKey::to_raw_parts` leaves the key open for the caller. |
 | [a83e6d3] | Dropping a stream iterator stops it instead of deleting the current entry. |
 | [c3432c5], [762ab77] | `redis_module!` fails the load when a configuration registration fails or `LoadConfigs` rejects a value. |
-| [Configuration defaults and arguments](src/configuration.rs) | Numeric defaults must be within the declared inclusive bounds, including module arguments after memory-unit conversion. Boolean module arguments accept only case-insensitive `yes` or `no`; invalid values fail the load. Configuration names are looked up only in the name positions of name/value pairs, so a value matching another configuration's name does not override it. |
+| [5bf61ff] | Numeric defaults must be within the declared inclusive bounds, including module arguments after memory-unit conversion. Boolean module arguments accept only case-insensitive `yes` or `no`; invalid values fail the load. Configuration names are looked up only in the name positions of name/value pairs, so a value matching another configuration's name does not override it. |
+| [Custom ACL category registration](src/macros.rs) | `redis_module!` reuses an existing custom ACL category instead of failing the load. Redis keeps categories after module unload, so a module can reload with its category and existing user grants intact. Only `EBUSY` is accepted; invalid names and other failures still fail the load. |
 | [86b8113] | The crash report's `backtrace` field is `std::backtrace::Backtrace` output. |
 | [a5eb60d] | A call reply's simple-string map key or set element converts to `RedisValueKey::SimpleString` instead of `String`, so a forwarded reply keeps it a simple string. |
 | [9258efb] | An error in a call reply, also inside an array or map, converts to `RedisValue::Error` instead of `StringBuffer`, so a forwarded reply keeps it an error. |
@@ -216,6 +217,7 @@ These compile unchanged but behave differently:
 [4300c6a]: https://github.com/joshrotenberg/redismodule-rs/commit/4300c6a
 [4e8efc7]: https://github.com/joshrotenberg/redismodule-rs/commit/4e8efc7
 [54cde09]: https://github.com/joshrotenberg/redismodule-rs/commit/54cde09
+[5bf61ff]: https://github.com/joshrotenberg/redismodule-rs/commit/5bf61ff
 [5c4d6b3]: https://github.com/joshrotenberg/redismodule-rs/commit/5c4d6b3
 [5dbf237]: https://github.com/joshrotenberg/redismodule-rs/commit/5dbf237
 [686f84c]: https://github.com/joshrotenberg/redismodule-rs/commit/686f84c
