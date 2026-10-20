@@ -738,8 +738,10 @@ pub fn module_config_set(
 mod memory_tests {
     use super::parse_memory;
 
+    // As Redis's memtoull, except that an empty number, which memtoull reads
+    // as 0, is an error.
     #[test]
-    fn memory_amounts_parse_as_redis_parses_them() {
+    fn memory_amounts_parse_as_redis_parses_them_but_need_a_number() {
         assert_eq!(parse_memory("100").unwrap(), 100);
         assert_eq!(parse_memory("8mb").unwrap(), 8 << 20);
         assert_eq!(parse_memory("8MB").unwrap(), 8 << 20);

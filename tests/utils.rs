@@ -60,12 +60,12 @@ impl TestConnection {
         get_redis_connection(self.port)
     }
 
-    /// Reads the server log of a connection made with [`TestConnection::with_log_file`].
     /// The port of the server, for a raw connection.
     pub fn port(&self) -> u16 {
         self.port
     }
 
+    /// Reads the server log of a connection made with [`TestConnection::with_log_file`].
     pub fn server_log(&self) -> std::io::Result<String> {
         let log_file = self._guards[0]
             .log_file
