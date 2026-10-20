@@ -87,12 +87,9 @@ redis_module! {
         [@STRING: on_string_event],
     ],
     configurations: [
+        // Only the groups a module uses need to be listed.
         i64: [
             ["number", &NUMBER, 0, 0, 100, ConfigurationFlags::DEFAULT, None],
         ],
-        string: [],
-        bool: [],
-        enum: [],
-        module_args_as_configuration: false,
     ]
 }

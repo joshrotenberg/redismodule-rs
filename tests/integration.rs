@@ -1913,6 +1913,33 @@ fn example_module_path(module_name: &str) -> String {
 }
 
 #[test]
+fn test_memory_configuration_takes_units() -> Result<()> {
+    let mut con = TestConnection::new("configuration");
+    let memory = |con: &mut TestConnection| -> Result<String> {
+        let res: Vec<String> = redis::cmd("CONFIG")
+            .arg(&["GET", "configuration.memory"])
+            .query(con)?;
+        Ok(res[1].clone())
+    };
+    assert_eq!(memory(&mut con)?, "1024");
+    let _: () = redis::cmd("CONFIG")
+        .arg(&["SET", "configuration.memory", "2kb"])
+        .query(&mut con)?;
+    assert_eq!(memory(&mut con)?, "2048");
+
+    // Loaded again with module arguments, which take units too.
+    let _: () = redis::cmd("MODULE")
+        .arg(&["UNLOAD", "configuration"])
+        .query(&mut con)?;
+    let module = utils::module_path("configuration")?;
+    let _: () = redis::cmd("MODULE")
+        .arg(&["LOAD", module.as_str(), "memory", "8mb"])
+        .query(&mut con)?;
+    assert_eq!(memory(&mut con)?, "8388608");
+    Ok(())
+}
+
+#[test]
 fn test_configuration_registration_errors_fail_the_load() -> Result<()> {
     let mut con = TestConnection::new("hello");
     let module = example_module_path("configuration_registration");

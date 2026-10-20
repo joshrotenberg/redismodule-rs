@@ -125,6 +125,29 @@ fn test_dir(port: u16) -> Result<PathBuf> {
     Ok(std::env::current_dir()?.join(format!("target/integration-test/instance-p{port}")))
 }
 
+/// The path of example module `module_name`, as built for the tests.
+pub fn module_path(module_name: &str) -> Result<String> {
+    let extension = if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    };
+    let profile = if cfg!(not(debug_assertions)) {
+        "release"
+    } else {
+        "debug"
+    };
+    let path: PathBuf = [
+        std::env::current_dir()?,
+        PathBuf::from(format!(
+            "target/{profile}/examples/lib{module_name}.{extension}"
+        )),
+    ]
+    .iter()
+    .collect();
+    Ok(format!("{}", path.display()))
+}
+
 pub fn start_redis_server_with_module(
     module_name: &str,
     port: u16,
