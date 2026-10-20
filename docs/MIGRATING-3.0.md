@@ -246,11 +246,12 @@ text.
 
 A module's unit tests that allocate abort under `RedisAlloc`, because there is
 no Redis allocator outside a server. The `system-allocator-fallback` feature
-lets them use the system allocator. Enable it for tests only:
+lets them use the system allocator. Enable it for tests only, from the same
+`git` and `rev` as the dependency, so Cargo builds one copy:
 
 ```toml
 [dev-dependencies]
-redis-module = { version = "3", features = ["system-allocator-fallback"] }
+redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", rev = "<commit>", features = ["system-allocator-fallback"] }
 ```
 
 `redis_module!` fails the module load if a module built with the feature has
