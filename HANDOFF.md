@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-20.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `2f8e2a9`, integration harness improvements merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `e9425f8`, scoped database selection helpers merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `2f8e2a9` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `e9425f8` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -113,10 +113,13 @@ fallible startup with retained logs, bounded probes and polling, replica startup
 and graceful persistent restarts. Fresh launches retry confirmed bind collisions
 with isolated directories and logs; restarts retain their original port.
 
-1. `Context::select_db` and `get_selected_db`, with a guard that restores the
-   database.
-2. An accessor for the error code of a call's error reply, and
-   `notify_keyspace_event` with a byte event name.
+Database selection helpers merged in `e9425f8`: `Context::select_db`,
+`get_selected_db`, and `with_db`, which restores the original selection after
+return or unwind. Integration tests cover nested scopes, invalid indices,
+errors, and panics.
+
+Next: an accessor for the error code of a call's error reply, and
+`notify_keyspace_event` with a byte event name.
 
 Then: subscribing to keyspace events after load, the server-event payloads for
 flush and `SWAPDB`, a guide on writing to the keyspace from a notification, and
@@ -162,7 +165,7 @@ State (wasm/TRACKING.md has each item and the log):
   its commands declare `@scripting`. The one-slot rule has not been run on 7.2
   since it moved to `cluster::key_slot`.
 
-Gates on this branch: the four above, except that the Redis 7.2 Clippy check
+Gates on this branch: the SDK gates above, except that the Redis 7.2 Clippy check
 excludes the wasm crate. Its SDK dependency enables the default 6.0 floor;
 combining it with another floor in the same build fails (S5). The full
 workspace Clippy and test runs use the default floor. Then check the guests:
