@@ -74,6 +74,18 @@ Redis 8.10.2, release build, 50 clients. Server time per call from
 Rerun after H8 and H9 (flags, memory limit): the same numbers within noise.
 `lrange` was added for H15 in that rerun.
 
+Where `incr_twice`'s time goes, measured in one server with a throwaway native
+module whose command makes the same two `INCR`s through `RedisModule_Call`
+with the host's options (two runs, µs per call): a plain `INCR` 0.07, the
+native command 0.94 to 0.97, Lua's `FCALL incr_twice` 1.31, wasm's 2.64 to
+2.67; `nested`, with no calls, 1.31 in wasm and 1.48 in Lua. So
+`RedisModule_Call` is not the gap, and a wasm call's fixed cost is close to
+Lua's: what costs more is each call from the guest into Redis, about 0.67 µs
+against about 0.45 µs for a native `RedisModule_Call`. The difference is the
+component ABI and the host's per-call bookkeeping. Looking commands up in a
+thread-local cache by the name as the guest spells it, without lowercasing it
+or taking a mutex, then brought wasm's `incr_twice` to 2.50 to 2.52 µs.
+
 The sieve's time grows linearly with n in both (wasm 4.3, 28 and 309 µs for n
 of 1000, 10000 and 100000; Lua 34, 433 and 3863 µs).
 

@@ -9,9 +9,10 @@
 //! `allow-busy` commands such as `WASM.KILL`, which sets a flag the next epoch
 //! acts on.
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -129,22 +130,25 @@ struct CommandInfo {
     has_subcommands: bool,
 }
 
-/// `COMMAND INFO` results by lowercase name, such as `set` or `config|set`.
-/// A first argument is looked up only for commands with subcommands, so the
-/// cache grows with the command and subcommand names guests use.
-static COMMANDS: Mutex<BTreeMap<String, Option<CommandInfo>>> = Mutex::new(BTreeMap::new());
+thread_local! {
+    /// `COMMAND INFO` results by name as the guest spelled it, such as `SET`
+    /// or `config|set`. A first argument is looked up only for commands with
+    /// subcommands, so the cache grows with the spellings guests use. Guests
+    /// run on the main thread, so a thread-local cache needs no lock; each
+    /// call looks a command up here without allocating.
+    static COMMANDS: RefCell<HashMap<String, Option<CommandInfo>>> = RefCell::new(HashMap::new());
+}
 
 fn effects(ctx: &Context, command: &str, first_arg: Option<&[u8]>) -> Effects {
-    let name = command.to_ascii_lowercase();
-    let may_replicate = MAY_REPLICATE.contains(&name.as_str());
-    let Some(info) = command_info(ctx, &name) else {
+    let may_replicate = MAY_REPLICATE
+        .iter()
+        .any(|name| command.eq_ignore_ascii_case(name));
+    let Some(info) = command_info(ctx, command) else {
         return Effects::default();
     };
     if info.has_subcommands {
         if let Some(sub) = first_arg.and_then(|arg| std::str::from_utf8(arg).ok()) {
-            if let Some(sub_info) =
-                command_info(ctx, &format!("{name}|{}", sub.to_ascii_lowercase()))
-            {
+            if let Some(sub_info) = command_info(ctx, &format!("{command}|{sub}")) {
                 return Effects {
                     write: sub_info.write,
                     may_replicate,
@@ -159,12 +163,12 @@ fn effects(ctx: &Context, command: &str, first_arg: Option<&[u8]>) -> Effects {
 }
 
 fn command_info(ctx: &Context, name: &str) -> Option<CommandInfo> {
-    let commands = || COMMANDS.lock().unwrap_or_else(PoisonError::into_inner);
-    if let Some(info) = commands().get(name) {
-        return *info;
+    if let Some(info) = COMMANDS.with_borrow(|commands| commands.get(name).copied()) {
+        return info;
     }
+    // COMMAND INFO ignores case.
     let info = parse_command_info(ctx.call("COMMAND", &["INFO", name]).ok()?);
-    commands().insert(name.to_owned(), info);
+    COMMANDS.with_borrow_mut(|commands| commands.insert(name.to_owned(), info));
     info
 }
 
