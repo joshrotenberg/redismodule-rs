@@ -10,8 +10,8 @@ This repository is a fork of
 It fixes soundness and correctness bugs, wraps more of the module API, and
 makes the breaking changes those needed, as version 3.0.0.
 [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) lists every change and the
-upstream issues and pull requests it relates to. The upstream README is kept as
-[README.upstream.md](README.upstream.md).
+upstream issues and pull requests it relates to. The upstream README is kept,
+unchanged, as [README.upstream.md](README.upstream.md).
 
 ## Using it
 
