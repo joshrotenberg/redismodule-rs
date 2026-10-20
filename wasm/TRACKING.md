@@ -128,7 +128,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H13 | todo | **Footprint.** Trim wasmtime features and measure the dylib and RSS. After loading the JavaScript component, RSS was 722 MB (serial compilation) and 959 MB (parallel) while `used_memory` stayed under 10 MB. `INFO wasm` (H8) accounts for 95 MB of compiled code and 7.7 MB of linear memory; find the rest, likely allocator memory kept after compiling. | Sizes recorded before and after. |
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
 | H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30); not investigated. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
-| H17 | todo | **Load time.** Loading an RDB compiles each library's component on the main thread, one after another, before the server serves clients. With the JavaScript library in its RDB (5.4 MB), a release server took 2.6 to 3.9 s to start in three runs, against 0.07 s with an empty RDB. Compile them in parallel, or keep compiled code next to each component (`Component::serialize`; loading it is `unsafe`, and a replica's RDB comes from its primary). | Load time with the JavaScript library, before and after. |
+| H17 | todo | **Load time.** Loading an RDB compiles each library's component on the main thread, one after another, before the server serves clients. Measured with the log line `aux_load` now writes (release build, quiet machine): the JavaScript library took 1.56 to 1.67 s, 15 ms of it reading the RDB, against a server ready in 0.03 s with an empty RDB; an earlier, busier run took 2.6 to 3.9 s. Compiling libraries on parallel threads would gain little, since wasmtime already compiles one component on all cores. Left: compile in the background and block a call to a library until its component is ready, or use wasmtime's on-disk code cache. | Load time with the JavaScript library, before and after. |
 | H15 | todo | **Large replies into the guest.** `median` is only 1.4 times faster than Lua although sorting 1000 integers is cheap: the 1000 strings of its `LRANGE` reply are copied into nodes, then into the guest's memory. Measure how much of its 177 µs that is, then copy less (for example, give the guest a handle to read the reply from). | `median`'s time split, and a lower number. |
 
 ## Repository
@@ -191,6 +191,9 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H17 measured, not changed: `aux_load` logs how many libraries
+  it loaded, their bytes and the time, and that showed compiling is all of it
+  (see H17).
 - 2026-10-20: H16 done: `wasm.persist`, an immutable `bool` config (default
   `yes`). `redis_module!` applies module configs before `init`, so `init`
   registers the `wasm-libs` type only when it is on; with it off, loading an

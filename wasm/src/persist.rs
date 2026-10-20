@@ -17,6 +17,7 @@
 
 use std::ffi::c_int;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use anyhow::{Context as _, bail};
 use redis_module::native_types::RedisType;
@@ -132,6 +133,7 @@ fn load(rdb: &mut RedisModuleIO, encver: c_int) -> anyhow::Result<()> {
     if !(0..=ENCODING_VERSION).contains(&encver) {
         bail!("unknown encoding version {encver}");
     }
+    let started = Instant::now();
     let mut libraries = Vec::new();
     for _ in 0..rdb.read_unsigned()? {
         let name = rdb.read_string()?;
@@ -150,14 +152,28 @@ fn load(rdb: &mut RedisModuleIO, encver: c_int) -> anyhow::Result<()> {
         libraries.push((name, component, functions));
     }
 
+    let read = started.elapsed();
+    let bytes: usize = libraries
+        .iter()
+        .map(|(_, component, _)| component.len())
+        .sum();
+
     // Compile without holding the host, as WASM.LOAD does.
     let compiler = crate::with_host(|host| host.compiler())?;
+    let count = libraries.len();
     for (name, component, functions) in libraries {
         let compiled = compiler
             .compile(component)
             .with_context(|| format!("library '{name}'"))?;
         crate::with_host(|host| host.restore(&name, compiled, functions))?
             .with_context(|| format!("library '{name}'"))?;
+    }
+    if count > 0 {
+        logging::log_notice(format!(
+            "wasm: loaded {count} libraries ({bytes} bytes) from the RDB in {} ms, {} ms of it reading",
+            started.elapsed().as_millis(),
+            read.as_millis()
+        ));
     }
     Ok(())
 }
