@@ -52,6 +52,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - **Breaking:** an error in a call reply, also inside an array or map, converts to `RedisValue::Error` instead of `StringBuffer`, so a forwarded reply keeps it as an error.
 - **Breaking:** `RedisError` implements `std::error::Error`, which replaces the blanket `From<T: Error>` conversion with `From` for a list of standard library errors; other errors convert with `RedisError::from_error`.
 - **Breaking:** `register_i64_configuration`, `register_string_configuration`, `register_bool_configuration` and `register_enum_configuration` return `Result<(), RedisError>`.
+- **Breaking:** `register_i64_configuration` rejects defaults outside the declared inclusive bounds, including defaults supplied as module arguments. Boolean module arguments accept only `yes` or `no`, ignoring ASCII case; other values fail the load instead of becoming false.
 - **Breaking:** `RedisGILGuard<T>` is `Send` only when `T` is, and locking it twice panics. `ConfigurationContext` is neither `Send` nor `Sync`. `ConfigurationValue` no longer requires `Send`.
 - **Breaking:** `RedisType::raw_type` is a method instead of a public `RefCell` field, `create_data_type` takes `&Context`, and an invalid type name or encoding version fails to compile.
 - **Breaking:** command flags in `redis_module!` must be a constant expression and are checked at compile time. `redis_command!` and `redis_event_handler!` take `&Context`.
@@ -88,6 +89,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - `RedisAlloc` ignored alignments above 16 bytes.
 - String configuration getters leaked their replies.
 - The `configurations` block of `redis_module!` compiled only with all four groups and `module_args_as_configuration` listed, and a memory configuration given as a module argument with a unit, such as `8mb`, failed the module load.
+- Module arguments used as configuration are read in name/value pairs, so a value matching another configuration's name does not override it. Numeric bounds are checked after memory units are converted, and mixed-case boolean values are parsed correctly.
 - The stream iterator deleted an entry when dropped instead of stopping.
 - `RedisKey::to_raw_parts` closed the key it handed over.
 - Cron event handlers received 1 instead of the server's `hz`.
