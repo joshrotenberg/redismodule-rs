@@ -13,6 +13,8 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `Context::get_selected_db`, `select_db`, and `with_db`, which restores the
+  original database after a closure returns or unwinds.
 - `ArgCursor`, which parses command arguments by borrowing them.
 - `Context::get_command_keys`, the positions of a command's keys (`RedisModule_GetCommandKeysWithFlags`), and `cluster::key_slot`, a key's hash slot computed without the server. `ContextFlags` derives `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq` and `Hash`.
 - `Context::yield_now` and `YieldMode`, for long-running commands (`RedisModule_Yield`).
