@@ -86,9 +86,11 @@ impl redis_module_wasm::host::redis::Host for CallState {
 }
 
 /// A loaded library: its component, linked and ready to instantiate, the
-/// functions it provides, and the instance its calls reuse.
+/// component's bytes, which the RDB keeps, the functions it provides, and the
+/// instance its calls reuse.
 struct LoadedLibrary {
     pre: LibraryPre<CallState>,
+    component: Vec<u8>,
     functions: Vec<String>,
     kept: KeptInstance,
 }
@@ -191,7 +193,7 @@ impl Host {
         &mut self,
         ctx: &Context,
         name: &str,
-        pre: Compiled,
+        compiled: Compiled,
         replace: bool,
     ) -> anyhow::Result<Vec<String>> {
         // Checked again here: another load may have added the name while this
@@ -200,9 +202,33 @@ impl Host {
 
         // Listing the functions runs guest code too, so it can be killed.
         let running = Running::start();
-        let mut instance = Instance::new(&self.engine, &pre, ctx)?;
+        let mut instance = Instance::new(&self.engine, &compiled.pre, ctx)?;
         let functions = instance.call(ctx, |library, store| library.call_functions(store))?;
         drop(running);
+        // The instance that listed the functions serves the first call.
+        self.insert(name, compiled, functions.clone(), Some(instance))?;
+        Ok(functions)
+    }
+
+    /// Adds library `name` from an RDB, which also lists its functions,
+    /// replacing a library of that name. Loading runs no guest code: the
+    /// library's first call creates its instance.
+    pub(crate) fn restore(
+        &mut self,
+        name: &str,
+        compiled: Compiled,
+        functions: Vec<String>,
+    ) -> anyhow::Result<()> {
+        self.insert(name, compiled, functions, None)
+    }
+
+    fn insert(
+        &mut self,
+        name: &str,
+        compiled: Compiled,
+        functions: Vec<String>,
+        instance: Option<Instance>,
+    ) -> anyhow::Result<()> {
         for function in &functions {
             match self.functions.get(function) {
                 Some(owner) if owner != name => {
@@ -219,13 +245,13 @@ impl Host {
         self.libraries.insert(
             name.to_owned(),
             LoadedLibrary {
-                pre,
-                functions: functions.clone(),
-                // The instance that listed the functions serves the first call.
-                kept: Arc::new(Mutex::new(Some(instance))),
+                pre: compiled.pre,
+                component: compiled.component,
+                functions,
+                kept: Arc::new(Mutex::new(instance)),
             },
         );
-        Ok(functions)
+        Ok(())
     }
 
     /// Stops the epoch thread, so the module can be unloaded.
@@ -244,11 +270,29 @@ impl Host {
         true
     }
 
+    /// Removes every library.
+    pub(crate) fn clear(&mut self) {
+        self.libraries.clear();
+        self.functions.clear();
+    }
+
     /// The loaded libraries and their functions, by library name.
     pub(crate) fn list(&self) -> impl Iterator<Item = (&str, &[String])> {
         self.libraries
             .iter()
             .map(|(name, library)| (name.as_str(), library.functions.as_slice()))
+    }
+
+    /// What the RDB keeps of each library: its name, its component's bytes and
+    /// its functions.
+    pub(crate) fn saved(&self) -> impl Iterator<Item = (&str, &[u8], &[String])> {
+        self.libraries.iter().map(|(name, library)| {
+            (
+                name.as_str(),
+                library.component.as_slice(),
+                library.functions.as_slice(),
+            )
+        })
     }
 
     /// What a call of `function` needs, so the caller can release the host
@@ -263,8 +307,11 @@ impl Host {
     }
 }
 
-/// A compiled component, linked and ready to instantiate.
-pub(crate) type Compiled = LibraryPre<CallState>;
+/// A compiled component, linked and ready to instantiate, and its bytes.
+pub(crate) struct Compiled {
+    pre: LibraryPre<CallState>,
+    component: Vec<u8>,
+}
 
 /// Compiles components. It holds clones of the engine and linker, so it can run
 /// on another thread while the server keeps serving.
@@ -274,9 +321,10 @@ pub(crate) struct Compiler {
 }
 
 impl Compiler {
-    pub(crate) fn compile(&self, component: &[u8]) -> anyhow::Result<Compiled> {
-        let component = Component::new(&self.engine, component).context("invalid component")?;
-        LibraryPre::new(self.linker.instantiate_pre(&component)?)
+    pub(crate) fn compile(&self, component: Vec<u8>) -> anyhow::Result<Compiled> {
+        let compiled = Component::new(&self.engine, &component).context("invalid component")?;
+        let pre = LibraryPre::new(self.linker.instantiate_pre(&compiled)?)?;
+        Ok(Compiled { pre, component })
     }
 }
 

@@ -88,13 +88,30 @@ struct Server {
     port: u16,
 }
 
+fn server_dir(port: u16) -> PathBuf {
+    target_dir().join(format!("wasm-test-{port}"))
+}
+
 impl Server {
+    /// Starts a server in a new, empty directory.
     fn start(port: u16, extra_args: &[&str]) -> Self {
-        let dir = target_dir().join(format!("wasm-test-{port}"));
+        let dir = server_dir(port);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("server directory");
+        Self::launch(port, extra_args, true)
+    }
+
+    /// Starts a server in the directory the last server on `port` used, so it
+    /// loads that server's RDB or AOF.
+    fn restart(port: u16, extra_args: &[&str]) -> Self {
+        Self::launch(port, extra_args, true)
+    }
+
+    fn launch(port: u16, extra_args: &[&str], with_module: bool) -> Self {
+        let dir = server_dir(port);
         let log = dir.join("redis.log");
-        let child = Command::new("redis-server")
+        let mut command = Command::new("redis-server");
+        command
             .args([
                 "--port",
                 &port.to_string(),
@@ -107,9 +124,11 @@ impl Server {
             .arg(&dir)
             .arg("--logfile")
             .arg(&log)
-            .args(extra_args)
-            .arg("--loadmodule")
-            .arg(module_path())
+            .args(extra_args);
+        if with_module {
+            command.arg("--loadmodule").arg(module_path());
+        }
+        let child = command
             .stdout(Stdio::null())
             .spawn()
             .expect("start redis-server");
@@ -134,6 +153,14 @@ impl Server {
 
     fn log(&self) -> String {
         std::fs::read_to_string(&self.log).unwrap_or_default()
+    }
+
+    /// Stops the server with `SHUTDOWN`, which writes out the AOF, and waits
+    /// for it to exit.
+    fn shutdown(mut self) {
+        let _ = redis::cmd("SHUTDOWN").query::<Value>(&mut self.connection());
+        let child = &mut self.child;
+        wait_for("redis-server to exit", || child.try_wait().ok().flatten());
     }
 }
 
@@ -593,4 +620,156 @@ fn a_load_inside_multi_compiles_inline() {
         .expect("WASM.LOAD in MULTI");
     assert_eq!(functions, FUNCTIONS);
     assert_eq!(counter(&mut con), 1);
+}
+
+/// Loads the example guest as library `name`.
+fn load(con: &mut Connection, name: &str) {
+    let functions: Vec<String> = redis::cmd("WASM.LOAD")
+        .arg(name)
+        .arg(hello_component())
+        .query(con)
+        .expect("WASM.LOAD");
+    assert_eq!(functions, FUNCTIONS);
+}
+
+/// `WASM.LIST` as `(library, functions)` pairs.
+fn list(con: &mut Connection) -> Vec<(String, Vec<String>)> {
+    // redis-rs reads a Vec of pairs from a flat array, so read each pair.
+    let entries: Vec<Value> = redis::cmd("WASM.LIST").query(con).expect("WASM.LIST");
+    entries
+        .iter()
+        .map(|entry| redis::from_redis_value(entry).expect("a [library, functions] pair"))
+        .collect()
+}
+
+/// What `list` returns with the example guest loaded as each of `names`.
+fn listed(names: &[&str]) -> Vec<(String, Vec<String>)> {
+    names
+        .iter()
+        .map(|name| (name.to_string(), FUNCTIONS.map(String::from).to_vec()))
+        .collect()
+}
+
+#[test]
+fn libraries_survive_a_reload_and_a_restart() {
+    let args = ["--enable-debug-command", "yes"];
+    let server = Server::start(6618, &args);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    assert_eq!([counter(&mut con), counter(&mut con)], [1, 2]);
+
+    // DEBUG RELOAD saves an RDB, empties the server and loads the RDB. The
+    // library comes back with a new instance.
+    let _: () = redis::cmd("DEBUG").arg("RELOAD").query(&mut con).unwrap();
+    assert_eq!(list(&mut con), listed(&["hello"]));
+    assert_eq!(counter(&mut con), 1);
+
+    let _: () = redis::cmd("SAVE").query(&mut con).unwrap();
+    server.shutdown();
+    let server = Server::restart(6618, &args);
+    let mut con = server.connection();
+    assert_eq!(list(&mut con), listed(&["hello"]));
+    assert_eq!(
+        call(&mut con, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+    assert_eq!(counter(&mut con), 1);
+
+    // An RDB saved with no libraries has nothing from the module, so a server
+    // without the module loads it.
+    let _: () = redis::cmd("WASM.DELETE")
+        .arg("hello")
+        .query(&mut con)
+        .unwrap();
+    let _: () = redis::cmd("SET").arg(&["k", "v"]).query(&mut con).unwrap();
+    let _: () = redis::cmd("SAVE").query(&mut con).unwrap();
+    server.shutdown();
+    let server = Server::launch(6618, &[], false);
+    let value: String = redis::cmd("GET")
+        .arg("k")
+        .query(&mut server.connection())
+        .unwrap_or_else(|e| panic!("{e}; log:\n{}", server.log()));
+    assert_eq!(value, "v");
+}
+
+#[test]
+fn libraries_survive_a_restart_with_the_aof() {
+    let args = ["--appendonly", "yes"];
+    let server = Server::start(6621, &args);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+
+    // The AOF has the WASM.LOAD, which runs again when the server starts.
+    server.shutdown();
+    let server = Server::restart(6621, &args);
+    let mut con = server.connection();
+    assert_eq!(list(&mut con), listed(&["hello"]));
+
+    // A rewritten AOF starts with an RDB, which has the library.
+    let _: () = redis::cmd("BGREWRITEAOF").query(&mut con).unwrap();
+    wait_for("the AOF rewrite", || {
+        let info: String = redis::cmd("INFO").arg("persistence").query(&mut con).ok()?;
+        (info.contains("aof_rewrite_in_progress:0") && info.contains("aof_rewrite_scheduled:0"))
+            .then_some(())
+    });
+    server.shutdown();
+    let server = Server::restart(6621, &args);
+    let mut con = server.connection();
+    assert_eq!(list(&mut con), listed(&["hello"]));
+    assert_eq!(
+        call(&mut con, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+}
+
+#[test]
+fn a_replica_gets_the_libraries_and_their_changes() {
+    let primary = Server::start(6619, &[]);
+    let mut p = primary.connection();
+    load(&mut p, "hello");
+    assert_eq!(
+        call(&mut p, &["incr_twice", "1", "counter"]).unwrap(),
+        Value::Bulk(vec![Value::Int(1), Value::Int(2)])
+    );
+
+    // The replica has a library of its own, which the full sync replaces.
+    let replica = Server::start(6620, &[]);
+    let mut r = replica.connection();
+    load(&mut r, "local");
+    let _: () = redis::cmd("REPLICAOF")
+        .arg(&["127.0.0.1", "6619"])
+        .query(&mut r)
+        .unwrap();
+    wait_for("the replica to sync", || {
+        let info: String = redis::cmd("INFO").arg("replication").query(&mut r).ok()?;
+        info.contains("master_link_status:up").then_some(())
+    });
+    assert_eq!(list(&mut r), listed(&["hello"]));
+    let value: String = redis::cmd("GET").arg("counter").query(&mut r).unwrap();
+    assert_eq!(value, "2");
+
+    // Loads and deletes replicate in order: a delete right after a load does
+    // not reach the replica before the load.
+    let wait = |p: &mut Connection| {
+        let acked: i64 = redis::cmd("WAIT").arg(1).arg(5000).query(p).unwrap();
+        assert_eq!(acked, 1, "replica log:\n{}", replica.log());
+    };
+    let delete = |p: &mut Connection, library: &str| {
+        let _: () = redis::cmd("WASM.DELETE").arg(library).query(p).unwrap();
+    };
+    delete(&mut p, "hello");
+    load(&mut p, "again");
+    delete(&mut p, "again");
+    wait(&mut p);
+    assert_eq!(list(&mut r), listed(&[]));
+
+    load(&mut p, "again");
+    assert_eq!(
+        call(&mut p, &["incr_twice", "1", "counter"]).unwrap(),
+        Value::Bulk(vec![Value::Int(3), Value::Int(4)])
+    );
+    wait(&mut p);
+    assert_eq!(list(&mut r), listed(&["again"]));
+    let value: String = redis::cmd("GET").arg("counter").query(&mut r).unwrap();
+    assert_eq!(value, "4");
 }

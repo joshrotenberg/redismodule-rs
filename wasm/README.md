@@ -4,7 +4,7 @@ A Redis module that runs WebAssembly components as functions, the way
 `FUNCTION LOAD` and `FCALL` run Lua. It is built on `redis-module` and
 [wasmtime](https://wasmtime.dev) with the component model.
 
-This is an early prototype: libraries live in memory only.
+This is an early prototype.
 
 ## Commands
 
@@ -31,9 +31,28 @@ must not see.
 `WASM.LOAD` compiles the component on a thread while its client waits, so the
 server keeps serving other clients; once it has compiled, the library is
 instantiated and added on the main thread, and the client gets the reply.
-Inside `MULTI` or a script, where a client cannot block, it compiles on the
-main thread. If two loads of the same library overlap, the second to finish
-fails as if it had come second, unless it has `REPLACE`.
+Inside `MULTI`, a script or an AOF being loaded, where a client cannot block,
+it compiles on the main thread. If two loads of the same library overlap, the
+second to finish fails as if it had come second, unless it has `REPLACE`.
+
+## Persistence and replication
+
+The RDB keeps the libraries, as Redis does for `FUNCTION` libraries, so they
+come back after a restart, `DEBUG RELOAD` or a replica's full sync. Loading an
+RDB or AOF replaces the libraries: it compiles each saved component again and
+runs no guest code, so a library's first call creates its instance. An RDB
+saved with no libraries has nothing from the module, and a server without the
+module can load it.
+
+`WASM.LOAD` and `WASM.DELETE` replicate as they are, and go to the AOF. On a
+replica, a replicated `WASM.LOAD` compiles on a thread while the link to the
+primary waits, so the replica keeps serving and the commands after it still
+run in order. A function's writes replicate as its effects, as a Lua
+function's do.
+
+The libraries are aux data, which needs a data type, so Redis refuses
+`MODULE UNLOAD` for this module. With `aof-use-rdb-preamble no`, a rewritten
+AOF does not have the libraries; the default, `yes`, does.
 
 ## Long-running functions
 
@@ -134,6 +153,5 @@ workspace `Cargo.toml`); unoptimized, loading the JavaScript component took
 [TRACKING.md](TRACKING.md) has every open item, with IDs and what done means. The main ones:
 
 - Function flags, read-only calls, and ACL and RESP helpers for guests.
-- Saving libraries in RDB and AOF, and replicating `WASM.LOAD`.
 - Memory limits per instance and an `INFO` section.
 - Key specs on `WASM.CALL`, so a cluster can route it by its keys.

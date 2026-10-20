@@ -15,6 +15,7 @@ crate-type = ["cdylib"]
 # RedisModule_CallReplyProto, when it runs. Another floor here would combine
 # with the workspace's default one in workspace builds.
 redis-module = { path = ".." }
+redis-module-macros = { path = "../redismodule-rs-macros" }
 # 36 is a long-term support release whose MSRV fits this workspace.
 wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime", "component-model", "std", "parallel-compilation"] }
 anyhow = "1"

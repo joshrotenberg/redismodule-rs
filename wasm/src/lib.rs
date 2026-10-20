@@ -15,18 +15,24 @@
 //!
 //! A function that runs past `busy-reply-threshold` yields to Redis, which
 //! answers other clients with `-BUSY` and accepts `WASM.KILL`; see `busy.rs`.
+//!
+//! `WASM.LOAD` and `WASM.DELETE` replicate as they are, and the RDB keeps the
+//! libraries; see `persist.rs`.
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use redis_module::{
-    ArgCursor, Context, RedisError, RedisResult, RedisString, RedisValue, Status, redis_module,
+    ArgCursor, Context, ModuleOptions, RedisError, RedisResult, RedisString, RedisValue, Status,
+    redis_module,
 };
 
 mod busy;
 mod host;
+mod persist;
 mod reply;
 
 use host::Host;
+use persist::LIBRARIES;
 
 /// Set when the module loads.
 static HOST: Mutex<Option<Host>> = Mutex::new(None);
@@ -52,7 +58,9 @@ fn error(context: &str, error: &anyhow::Error) -> RedisError {
 /// Compiling a large component takes seconds, so the component compiles on a
 /// thread while the client waits and the server keeps serving others; the
 /// library is added on the main thread once it has compiled. Where the client
-/// cannot block, inside `MULTI` or a script, it compiles here instead.
+/// cannot block, inside `MULTI`, a script or an AOF being loaded, it compiles
+/// here instead. On a replica, the link to the primary blocks like any client,
+/// so the commands after the load in the replication stream wait for it.
 fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = ArgCursor::new(&args[1..]);
     let name = args.next_str()?.to_owned();
@@ -67,7 +75,7 @@ fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         .map_err(|e| error("WASM.LOAD failed", &e))?;
 
     let Ok(blocked) = ctx.block_client_on_reply(None, finish_load, load_timed_out) else {
-        let result = compiler.compile(&component);
+        let result = compiler.compile(component);
         return finish_load(
             ctx,
             Loaded {
@@ -82,7 +90,7 @@ fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let _ = std::thread::Builder::new()
         .name("wasm-compile".into())
         .spawn(move || {
-            let result = compiler.compile(&component);
+            let result = compiler.compile(component);
             blocked.unblock(Loaded {
                 name,
                 replace,
@@ -104,6 +112,8 @@ fn finish_load(ctx: &Context, loaded: Loaded) -> RedisResult {
     let compiled = loaded.result.map_err(|e| error("WASM.LOAD failed", &e))?;
     let functions = with_host(|host| host.add(ctx, &loaded.name, compiled, loaded.replace))?
         .map_err(|e| error("WASM.LOAD failed", &e))?;
+    // A blocked client keeps its arguments until it is unblocked, after this.
+    ctx.replicate_verbatim();
     Ok(RedisValue::Array(
         functions.into_iter().map(RedisValue::BulkString).collect(),
     ))
@@ -165,11 +175,12 @@ fn wasm_list(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 }
 
 /// `WASM.DELETE <library>`
-fn wasm_delete(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+fn wasm_delete(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = ArgCursor::new(&args[1..]);
     let name = args.next_str()?;
     args.done()?;
     if with_host(|host| host.remove(name))? {
+        ctx.replicate_verbatim();
         Ok(RedisValue::SimpleStringStatic("OK"))
     } else {
         Err(RedisError::String(format!(
@@ -193,6 +204,9 @@ fn wasm_kill(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 }
 
 fn init(ctx: &Context, _args: &[RedisString]) -> Status {
+    // aux_load checks for read errors, so a replica can load its primary's RDB
+    // from the socket.
+    ctx.set_module_options(ModuleOptions::HANDLE_IO_ERRORS);
     match Host::new() {
         Ok(new_host) => {
             *host() = Some(new_host);
@@ -216,7 +230,7 @@ redis_module! {
     name: "wasm",
     version: 1,
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
-    data_types: [],
+    data_types: [LIBRARIES],
     init: init,
     deinit: deinit,
     commands: [

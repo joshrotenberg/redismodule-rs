@@ -16,12 +16,16 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
 - A running function yields every 10 ms (wasmtime epochs and
   `RedisModule_Yield`): past `busy-reply-threshold` other clients get `-BUSY`,
   and `WASM.KILL` stops a function that has not written (`UNKILLABLE` if it has,
-  `NOTBUSY` if none runs), as `FUNCTION KILL` does. The module unloads cleanly.
+  `NOTBUSY` if none runs), as `FUNCTION KILL` does.
 - Guests are components implementing `wit/redis.wit`. They import `call`
   (RedisModule_Call in script mode, as the caller's ACL user, errors as replies,
   effects replicated, RESP3) and `log`. No WASI imports.
 - `WASM.LOAD` compiles on a thread behind a blocked client, so loading the
   11 MB JavaScript component no longer stops the server.
+- Libraries persist and replicate: the RDB keeps them as aux data, so a
+  restart, `DEBUG RELOAD` or a replica's full sync brings them back, and
+  `WASM.LOAD` and `WASM.DELETE` go to replicas and the AOF as they are. Because
+  aux data needs a data type, `MODULE UNLOAD` now refuses the module (H16).
 - Guests in Rust (`guests/hello`) and JavaScript (`guests/js`, componentize-js);
   the same integration tests pass against both.
 - Reply types survive both ways, including simple versus bulk strings, maps,
@@ -32,8 +36,9 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
   about twice Lua's server time, a call with no Redis calls slightly less, and
   the checksum and the sieve run 9 and 16 times faster, and `median`, which
   moves 1000 strings into the guest, 1.4 times faster.
-- The host is about 400 lines. The example guest is 22 KB as a core module and
-  23 KB as a component. The integration test runs in about 1.3 seconds.
+- The host is about 790 lines of code, not counting comments and unit tests.
+  The example guest is 22 KB as a core module and 23 KB as a component. The
+  ten integration tests take about 11 seconds.
 
 Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
@@ -98,7 +103,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H2 | done | **Per-call cost.** Measure where the 26 µs goes, then reuse instances per library or use wasmtime's pooling allocator. | The benchmark table is updated, with the cause named. |
 | H3 | done | **A fair benchmark.** Add a compute-heavy function next to the two-INCR one, in both wasm and Lua, and keep the script in the repository. | `wasm/bench/` reproduces both rows on one command. |
 | H4 | done | **A guest in another language.** JavaScript (componentize-js), Python (componentize-py) or Go (TinyGo), whichever produces components wasmtime 36 loads. | The integration test loads and calls a non-Rust guest. |
-| H5 | next | **Persistence and replication.** Save libraries in aux data (`aux_save`, `aux_load`) and replicate `WASM.LOAD` and `WASM.DELETE` verbatim. | Tests with a restart and with a replica see the same libraries. |
+| H5 | done | **Persistence and replication.** The RDB keeps each library's name, component and functions as aux data before the keyspace, under a data type no key uses; loading compiles each component again and runs no guest code. Loading an RDB or AOF clears the libraries first. `WASM.LOAD` and `WASM.DELETE` replicate verbatim; a replica's link blocks while a replicated load compiles. | Tests with a restart and with a replica see the same libraries. |
 
 ### Then
 
@@ -113,6 +118,8 @@ avoids both instantiating and tearing down, and was adopted.
 | H12 | todo | **Context in the store.** The store holds a raw pointer to the command's `Context`. Write down the safety argument or replace it with an SDK pattern (S3). | Reviewed and documented, or replaced. |
 | H13 | todo | **Footprint.** Trim wasmtime features and measure the dylib and RSS. After loading the JavaScript component, RSS was 722 MB (serial compilation) and 959 MB (parallel) while `used_memory` stayed under 10 MB: find how much is compiled code, the instance's memory, and allocator memory kept after compiling. | Sizes recorded before and after. |
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
+| H16 | todo | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one ("the module exports one or more module-side data types, can't unload"). A module argument that leaves persistence off, and the type unregistered, would keep unloading for development. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
+| H17 | todo | **Load time.** Loading an RDB compiles each library's component on the main thread, one after another, before the server serves clients. With the JavaScript library in its RDB (5.4 MB), a release server took 2.6 to 3.9 s to start in three runs, against 0.07 s with an empty RDB. Compile them in parallel, or keep compiled code next to each component (`Component::serialize`; loading it is `unsafe`, and a replica's RDB comes from its primary). | Load time with the JavaScript library, before and after. |
 | H15 | todo | **Large replies into the guest.** `median` is only 1.4 times faster than Lua although sorting 1000 integers is cheap: the 1000 strings of its `LRANGE` reply are copied into nodes, then into the guest's memory. Measure how much of its 177 µs that is, then copy less (for example, give the guest a handle to read the reply from). | `median`'s time split, and a lower number. |
 
 ## Repository
@@ -161,6 +168,7 @@ evidence as the host meets them.
 | G1 | No module API registers an engine for `FUNCTION` or `EVAL` (checked in Redis 8.0.0 and unstable `module.c`). | The host needs its own `WASM.*` commands; `FUNCTION LIST`, `FCALL` and `SCRIPT KILL` do not see it. |
 | G2 | `RedisModule_CreateCommand` works only while the module loads. | A function loaded later cannot be a command of its own; every call goes through `WASM.CALL`. |
 | G3 | No module API adds memory allocated outside the Redis allocator to `used_memory`. | `maxmemory` and `INFO memory` do not count guest memory or compiled code (confirmed: 1.3 MB used, 16 to 18 MB RSS). |
+| G4 | Aux data reaches an AOF only inside its RDB preamble: no module API adds commands to a rewritten AOF without one (`aof_rewrite` is per key). Redis writes its own `FUNCTION` libraries into the rewrite (`rewriteFunctions` in `aof.c`). | With `aof-use-rdb-preamble no` (the default is `yes`), an AOF rewrite drops the libraries: `WASM.LIST` was empty after `BGREWRITEAOF` and a restart. |
 
 ## Open questions
 
@@ -170,6 +178,18 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H5 done: libraries are aux data in the RDB (data type
+  `wasm-libs`, encoding version 0, saved before the keyspace). `aux_save2`
+  saves nothing when there are no libraries, so such an RDB loads in a server
+  without the module (tested). Loading clears the libraries when an RDB, AOF
+  or replication load starts, then compiles each saved component and adds it
+  without running guest code; its first call creates the instance.
+  `WASM.LOAD` and `WASM.DELETE` replicate verbatim. A replicated load blocks
+  the replica's link to its primary (`flags=Mb` in `CLIENT LIST`) while the
+  replica keeps answering, so a delete right after a load arrives after it.
+  Tests: `DEBUG RELOAD`, `SAVE` and a restart; an AOF restart before and after
+  a rewrite; a replica whose own library the full sync replaces, then a load,
+  a delete and a call on the primary. Found G4; added H16 and H17.
 - 2026-10-20: H7 done: `WASM.LOAD` blocks its client (`block_client_on_reply`)
   and compiles on a thread; the library is instantiated and added in the reply
   callback, which checks the name again. Inside `MULTI` or a script it compiles
