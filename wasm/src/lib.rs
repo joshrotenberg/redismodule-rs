@@ -161,7 +161,7 @@ fn load_timed_out(_ctx: &Context) -> RedisResult {
 #[command(
     {
         name: "wasm.call",
-        flags: [MayReplicate, DenyScript, NoMandatoryKeys, AllowStale],
+        flags: [MayReplicate, DenyScript, NoMandatoryKeys, AllowStale, GetkeysApi],
         acl_categories: [Scripting],
         arity: -3,
         key_spec: [
@@ -175,6 +175,9 @@ fn load_timed_out(_ctx: &Context) -> RedisResult {
     }
 )]
 fn wasm_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if ctx.is_keys_position_request() {
+        return declare_keys(ctx, &args);
+    }
     run_function(ctx, &args, false)
 }
 
@@ -183,7 +186,7 @@ fn wasm_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 #[command(
     {
         name: "wasm.call_ro",
-        flags: [ReadOnly, DenyScript, NoMandatoryKeys, AllowStale],
+        flags: [ReadOnly, DenyScript, NoMandatoryKeys, AllowStale, GetkeysApi],
         acl_categories: [Scripting],
         arity: -3,
         key_spec: [
@@ -197,7 +200,26 @@ fn wasm_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 )]
 fn wasm_call_ro(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if ctx.is_keys_position_request() {
+        return declare_keys(ctx, &args);
+    }
     run_function(ctx, &args, true)
+}
+
+/// Gives Redis the positions of a call's keys, for the `getkeys-api` flag:
+/// before Redis 8.4, a cluster routes a module command by these or by its
+/// first, last and step, which a numkeys key spec cannot set, and not by its
+/// key spec.
+fn declare_keys(ctx: &Context, args: &[RedisString]) -> RedisResult {
+    let numkeys = args
+        .get(2)
+        .and_then(|n| n.to_string_lossy().parse::<usize>().ok())
+        .unwrap_or(0);
+    // A position past the arguments would crash Redis.
+    for pos in 3..args.len().min(3usize.saturating_add(numkeys)) {
+        ctx.key_at_pos(i32::try_from(pos).unwrap_or(i32::MAX));
+    }
+    Ok(RedisValue::NoReply)
 }
 
 fn run_function(ctx: &Context, args: &[RedisString], read_only: bool) -> RedisResult {

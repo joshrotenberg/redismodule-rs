@@ -23,7 +23,8 @@
 //!   it with the stale pointer.
 //! - Instances live in the host's state and are only touched on the main
 //!   thread. The fork that saves an RDB reads only component bytes, and the
-//!   compile thread has only clones of the engine and linker. `CallState` is
+//!   compile threads hold clones of the engine and linker and the code slots
+//!   they fill (`code.rs`), never an instance. `CallState` is
 //!   `Send` so that the host can sit in a static `Mutex`, and the pointer is
 //!   `None` whenever no call runs.
 //!

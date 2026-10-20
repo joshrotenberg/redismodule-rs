@@ -139,7 +139,7 @@ avoids both instantiating and tearing down, and was adopted.
 
 | ID | status | item | done when |
 |---|---|---|---|
-| H6 | done | **Key specs for `WASM.CALL`.** Declared with the `#[command]` macro and a key spec like `FCALL`'s: `numkeys` at argument 2, the keys after it, flags `RW`, `access` and `update`; `no-mandatory-keys`, arity -3. `COMMAND GETKEYS`, ACL key patterns and cluster routing (`MOVED`, `CROSSSLOT`) see the keys. | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
+| H6 | done | **Key specs for `WASM.CALL`.** Declared with the `#[command]` macro and a key spec like `FCALL`'s: `numkeys` at argument 2, the keys after it, flags `RW`, `access` and `update`; `no-mandatory-keys`, arity -3. `COMMAND GETKEYS`, ACL key patterns and cluster routing (`MOVED`, `CROSSSLOT`) see the keys. Redis before 8.4 routes a module command by the getkeys API or its first, last and step, not by its key spec, so the commands also have `getkeys-api` and answer key-position requests (G8). | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
 | H7 | done | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread; the main thread instantiates and adds the library. Precompiled components (`Engine::precompile_component`) would skip the compile entirely, but loading one is `unsafe`: only for trusted input. | The server answers other clients while a large component compiles. |
 | H8 | done | **Memory.** `wasm.max-memory` (default 64 MiB) limits each instance's linear memory through a wasmtime `ResourceLimiter`; a guest that grows past it traps and its call fails, which drops the instance. A function does not start while Redis is over `maxmemory`, and its calls use `RedisModule_Call`'s `M` flag. `INFO wasm` reports libraries, functions, component and compiled code bytes, live instances and their linear memory, and the limit. Not done: replacing a kept instance that grew large but stays under the limit; a failed call already drops it. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
 | H9 | done | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`) in the WIT, `WASM.CALL_RO`, Lua's checks before a function starts, read-only calls that refuse write and may-replicate commands, one slot per call on a cluster node, no calls while a library loads, flags in `WASM.LIST` and the RDB (H9a); `call`, which fails the function on an error reply, next to `pcall`, and `acl-check-command` and `set-resp` imports (H9b). Differences left: G5, G6, and RESP3 as the default. | Each has a test matching what Lua does. |
@@ -207,6 +207,7 @@ evidence as the host meets them.
 | G5 | No module API says whether writes are refused for a disk error (`MISCONF`) or for too few good replicas (`NOREPLICAS`). | Lua refuses a function that may write before it starts; here it starts, and its first write command fails with that error (`RedisModule_Call`'s script mode checks each write). |
 | G6 | `COMMAND INFO` hides the `may_replicate` flag ("Hidden on purpose" in `server.c`), and no module API returns a command's flags. | Lua's read-only functions refuse may-replicate commands. The host names them (`PUBLISH`, `SPUBLISH`, `PFCOUNT`; script mode refuses `EVAL`, `EVALSHA` and `FCALL`), so a module command with that flag is not refused. |
 | G7 | No module API installs fault handlers that Redis keeps: `CONFIG SET crash-log-enabled` calls `setupSigSegvHandler` or `removeSigSegvHandlers`, which replace every `SIGSEGV`, `SIGBUS`, `SIGFPE` and `SIGILL` handler. | A module cannot use signal-based bounds checks on Linux (H11): explicit checks cost 18% on the sieve. Redis's crash handler would have to pass faults in a module's code to the module. |
+| G8 | Before Redis 8.4, cluster routing (`getNodeByQuery`) finds a command's keys with `getKeysFromCommand`, which uses the module getkeys API, a getkeys function, or the legacy first, last and step, and not key specs. A numkeys key spec has no legacy range. | Fixed in the module: `WASM.CALL` and `WASM.CALL_RO` have `getkeys-api` and report the numkeys keys. Without it, Redis 7.2 to 8.2 ran a call on any node it reached (seen on 8.0.2 in Linux); 8.4 and later route from key specs. |
 
 ## Open questions
 
@@ -216,6 +217,10 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: the whole test suite ran on Linux (Redis 8.0.2 from Debian, in a
+  colima VM; the JavaScript tests skipped without Node) and found G8: the
+  cluster test failed because 8.0 did not route `WASM.CALL`. Fixed with
+  `getkeys-api`; all twenty-one tests then passed there.
 - 2026-10-20: H17 done: libraries from an RDB compile in the background (see
   H17). Test: after a restart with the JavaScript library saved, `INFO wasm`
   shows it compiling, a call waits and returns the right reply, and PINGs are
