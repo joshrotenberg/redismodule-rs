@@ -24,7 +24,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - `Context::reply_with_call_reply`, `StringCallReply::is_simple_string`, and the call options `dry_run`, `replicate_to_replicas_only` and `replicate_to_aof_only`.
 - `RedisValue::InsertionOrderedMap`, which replies with entries in insertion order.
 - `RedisValueKey::SimpleString`, a map key or set element replied as a simple string; a call reply's simple-string key converts to it.
-- `RedisValue::Error(String)`, an error reply with an owned message, which can sit inside an array, set or map.
+- `RedisValue::Error(String)`, an error reply with an owned message, which can be an array element or a map value.
 - `RedisString::from_bytes`, `from_owned_ptr`, `retain_from_ptr` and `as_ptr`.
 - `RedisKeyWritable::hash_set_by_string` and `hash_del_by_string`, for fields that hold any bytes.
 - `RedisKey::hash_get_by_string` and `RedisKeyWritable::hash_get_by_string`: `HGET` with the field passed as an existing `RedisString`, avoiding the per-call `CString` and the transient field object Redis creates for C-string fields (upstream PR 485).
@@ -96,7 +96,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - `DefragContext::defrag_alloc` passed a zero-size layout to the allocator.
 - Keyspace event names that are not UTF-8 no longer panic in the event macro (upstream PR 475).
 - `call_blocking` is available under the 8.0 floor.
-- Commands registered with `#[command]` load on Redis 7.0 when they declare no ACL categories; registration required Redis 7.2's `RedisModule_SetCommandACLCategories` for every command.
+- Commands registered with `#[command]` load on Redis 7.0 when they declare no ACL categories; registration required Redis 7.2's `RedisModule_SetCommandACLCategories` for every command. Under the 7.0 floor, an error registering one of those commands was also ignored and the module loaded anyway; it now fails the load, as under the other floors.
 
 ## [2.0.8](https://github.com/RedisLabsModules/redismodule-rs/compare/redis-module-v2.0.7...redis-module-v2.0.8) - 2026-05-04
 

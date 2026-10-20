@@ -132,7 +132,7 @@ if let Some(value) = key.get_value::<MyType>(&MY_TYPE)? {
 
 `RedisValue` has two new variants: `InsertionOrderedMap`, which replies with
 the entries in the order the module added them, and `Error(String)`, an error
-reply with an owned message, which can sit inside an array, set or map. An
+reply with an owned message, which can be an array element or a map value. An
 exhaustive `match` on `RedisValue` needs two more arms.
 
 `RedisValueKey` has a new variant, `SimpleString`, for a map key or set element

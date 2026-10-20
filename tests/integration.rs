@@ -1965,27 +1965,6 @@ fn test_string_configuration_getter_releases_replies() -> Result<()> {
     Ok(())
 }
 
-/// The path of an example module built by `cargo test`.
-fn example_module_path(module_name: &str) -> String {
-    let extension = if cfg!(target_os = "macos") {
-        "dylib"
-    } else {
-        "so"
-    };
-    let profile = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    };
-    std::env::current_dir()
-        .expect("current directory")
-        .join(format!(
-            "target/{profile}/examples/lib{module_name}.{extension}"
-        ))
-        .display()
-        .to_string()
-}
-
 #[test]
 fn test_memory_configuration_takes_units() -> Result<()> {
     let mut con = TestConnection::new("configuration");
@@ -2016,7 +1995,7 @@ fn test_memory_configuration_takes_units() -> Result<()> {
 #[test]
 fn test_configuration_registration_errors_fail_the_load() -> Result<()> {
     let mut con = TestConnection::new("hello");
-    let module = example_module_path("configuration_registration");
+    let module = utils::module_path("configuration_registration")?;
 
     for kind in ["i64", "string", "bool", "enum"] {
         let error = redis::cmd("MODULE")
@@ -2066,7 +2045,7 @@ fn test_configuration_registration_errors_fail_the_load() -> Result<()> {
 #[test]
 fn test_configuration_load_errors_fail_the_load() -> Result<()> {
     let mut con = TestConnection::with_log_file("hello");
-    let module = example_module_path("configuration");
+    let module = utils::module_path("configuration")?;
 
     // configuration.i64 accepts 0 to 1000.
     let error = redis::cmd("MODULE")
