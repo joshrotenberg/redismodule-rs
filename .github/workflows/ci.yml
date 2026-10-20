@@ -111,6 +111,24 @@ jobs:
       - name: Clippy with bindgen
         run: cargo clippy --workspace --all-targets --features bindgen-runtime -- -D warnings
 
+  deny:
+    name: Check advisories, bans, licenses and sources with cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      # Third-party actions are not allowed here, so install it with cargo;
+      # the toolchain action's cache keeps it between runs.
+      - name: Install cargo-deny
+        run: command -v cargo-deny || cargo install cargo-deny --locked
+
+      - name: cargo deny check
+        run: cargo deny check
+
   msrv:
     # Without clang installed, so the default build with the committed
     # bindings is checked too.
