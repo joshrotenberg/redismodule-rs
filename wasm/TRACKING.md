@@ -220,6 +220,15 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: rebased onto SDK master `00b7c4d`, which adds runtime keyspace
+  subscriptions and enforces module ownership for subscription cleanup. No
+  host adaptation needed. Rust 1.94.0 and Redis 8.10.2: workspace/guest
+  formatting, workspace Clippy, separate SDK 7.2 Clippy, example builds, and
+  guest Clippy passed. The first default-concurrency run hit 12 SDK Redis
+  startup timeouts. A complete rerun with `RUST_TEST_THREADS=4`, unchanged
+  startup bounds and test cases, passed: 102 SDK integration tests, four
+  standalone harness cases, seven host unit tests, 21 host integration tests
+  with JavaScript, 35 SDK doctests, and the guest helper's four tests.
 - 2026-10-20: rebased onto SDK master `bfacc11`, which adds optional command
   builders alongside legacy command tuples. No host adaptation needed. Rust
   1.94.0 and Redis 8.10.2: workspace and guest formatting, default workspace

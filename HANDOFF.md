@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-20.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `bfacc11`, optional command builders merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `00b7c4d`, runtime keyspace subscriptions merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `bfacc11` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `00b7c4d` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -125,10 +125,16 @@ Optional command builders merged in `bfacc11`: `redis_command!(name, handler)`
 with typed flags, named key positions, and ACL settings. Builder expressions
 and legacy tuples share registration and can be mixed in `redis_module!`.
 
-Next: subscribing to keyspace events with a runtime-selected mask.
+Runtime keyspace subscriptions merged in `00b7c4d`: a fallible Context method
+and a reusable event-handler adapter, with proven module ownership required
+for unload cleanup. The migration guide covers the tightened ownership
+requirement on the legacy three-argument event macro.
 
-Then: the server-event payloads for flush and `SWAPDB`, a guide on writing to
-the keyspace from a notification, and a wider CI matrix.
+Next discussion: separating registration and runtime context types, including
+module ownership and client reply capabilities. No context split implemented.
+
+The next survey items remain server-event payloads for flush and `SWAPDB`, a
+guide on writing to the keyspace from a notification, and a wider CI matrix.
 
 Also open:
 
