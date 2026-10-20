@@ -112,6 +112,7 @@ these in October 2026.
 
 | change | addition |
 |---|---|
+| [Database selection helpers](examples/database.rs) | `Context::get_selected_db`, `select_db`, and `with_db`, which restores the original database after synchronous scoped access, including returned errors and unwinding. |
 | [ce0c36d] | `ArgCursor`, a borrowing argument parser (upstream issue 7). |
 | [b0135e0] | `Context::dbsize`, the shutdown server event, `RedisAlloc` trait derives (upstream PRs 397, 477, 386). |
 | [a6841fb] | The `system-allocator-fallback` feature (upstream issue 89). |

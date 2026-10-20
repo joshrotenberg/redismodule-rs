@@ -12,6 +12,142 @@ use redis_module::RedisValue;
 mod utils;
 
 #[test]
+fn test_database_selection_changes_the_client_database() -> Result<()> {
+    let mut con = TestConnection::new("database");
+    assert_eq!(redis::cmd("database.selected").query::<i32>(&mut con)?, 0);
+    assert_eq!(
+        redis::cmd("database.select")
+            .arg(2)
+            .query::<i32>(&mut con)?,
+        2
+    );
+    redis::cmd("SET")
+        .arg(&["same-key", "db-two"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SELECT").arg(0).query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("database.selected").query::<i32>(&mut con)?, 0);
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("same-key")
+            .query::<Option<String>>(&mut con)?,
+        None
+    );
+    assert_eq!(
+        redis::cmd("database.select")
+            .arg(2)
+            .query::<i32>(&mut con)?,
+        2
+    );
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("same-key")
+            .query::<String>(&mut con)?,
+        "db-two"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_database_scoped_reads_and_nested_restoration() -> Result<()> {
+    let mut con = TestConnection::new("database");
+    redis::cmd("SELECT").arg(2).query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["same-key", "db-two"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["same-key", "db-three"])
+        .query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("database.get_in")
+            .arg(&["2", "same-key"])
+            .query::<String>(&mut con)?,
+        "db-two"
+    );
+    assert_eq!(redis::cmd("database.selected").query::<i32>(&mut con)?, 3);
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("same-key")
+            .query::<String>(&mut con)?,
+        "db-three"
+    );
+    assert_eq!(
+        redis::cmd("database.nested")
+            .arg(&[4, 5])
+            .query::<Vec<i32>>(&mut con)?,
+        [3, 4, 5, 4, 3]
+    );
+    // Selecting the same database must also preserve nested restoration.
+    assert_eq!(
+        redis::cmd("database.nested")
+            .arg(&[3, 3])
+            .query::<Vec<i32>>(&mut con)?,
+        [3, 3, 3, 3, 3]
+    );
+    Ok(())
+}
+
+#[test]
+fn test_database_invalid_selection_preserves_the_client_database() -> Result<()> {
+    let mut con = TestConnection::new("database");
+    redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
+    let config: HashMap<String, i32> = redis::cmd("CONFIG")
+        .arg(&["GET", "databases"])
+        .query(&mut con)?;
+    for db in [-1, config["databases"], i32::MAX] {
+        for command in [
+            "database.select",
+            "database.scoped_error",
+            "database.scoped_panic",
+        ] {
+            let error = redis::cmd(command)
+                .arg(db)
+                .query::<Value>(&mut con)
+                .expect_err("invalid database was accepted");
+            assert!(
+                error.to_string().contains("DB index is out of range"),
+                "{command}: {error}"
+            );
+            assert!(
+                !error.to_string().contains("scoped database"),
+                "invalid selection ran its closure: {error}"
+            );
+            assert_eq!(redis::cmd("database.selected").query::<i32>(&mut con)?, 3);
+        }
+        // A failed inner selection must still restore the successful outer scope.
+        let error = redis::cmd("database.nested")
+            .arg(&[4, db])
+            .query::<Value>(&mut con)
+            .expect_err("invalid inner database was accepted");
+        assert!(
+            error.to_string().contains("DB index is out of range"),
+            "{error}"
+        );
+        assert_eq!(redis::cmd("database.selected").query::<i32>(&mut con)?, 3);
+    }
+    Ok(())
+}
+
+#[test]
+fn test_database_scopes_restore_after_errors_and_panics() -> Result<()> {
+    let mut con = TestConnection::new("database");
+    redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
+    for (command, message) in [
+        ("database.scoped_error", "scoped database error"),
+        ("database.scoped_panic", "scoped database panic"),
+    ] {
+        let error = redis::cmd(command)
+            .arg(4)
+            .query::<Value>(&mut con)
+            .expect_err("scope unexpectedly succeeded");
+        assert!(error.to_string().contains(message), "{command}: {error}");
+        assert_eq!(redis::cmd("database.selected").query::<i32>(&mut con)?, 3);
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    Ok(())
+}
+
+#[test]
 fn test_harness_starts_with_module_arguments() -> Result<()> {
     let mut con = TestConnection::try_with_args(
         "configuration",

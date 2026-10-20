@@ -377,6 +377,20 @@ pub struct Context {
     pub(crate) ctx: *mut raw::RedisModuleCtx,
 }
 
+struct SelectedDbGuard<'ctx> {
+    ctx: &'ctx Context,
+    previous: i32,
+}
+
+impl Drop for SelectedDbGuard<'_> {
+    fn drop(&mut self) {
+        // The previous database was valid before the scope, and Redis's
+        // configured database count cannot change while the server runs.
+        // Do not introduce a second panic while unwinding the callback.
+        let _ = self.ctx.select_db(self.previous);
+    }
+}
+
 /// A guerd that protected a user that has
 /// been set on a context using `autenticate_user`.
 /// This guerd make sure to unset the user when freed.
@@ -1034,6 +1048,49 @@ impl Context {
 
     fn deautenticate_user(&self) {
         unsafe { crate::__required_api!(RedisModule_SetContextUser)(self.ctx, ptr::null_mut()) };
+    }
+
+    /// Returns the database selected on this context.
+    #[must_use]
+    pub fn get_selected_db(&self) -> i32 {
+        unsafe { crate::__required_api!(RedisModule_GetSelectedDb)(self.ctx) }
+    }
+
+    /// Selects a database, returning an error if `db` is out of range.
+    ///
+    /// For a client context, the client retains this selection after the
+    /// module command returns. Use [`Self::with_db`] for temporary access.
+    pub fn select_db(&self, db: i32) -> Result<(), RedisError> {
+        let status: Status =
+            unsafe { crate::__required_api!(RedisModule_SelectDb)(self.ctx, db) }.into();
+        match status {
+            Status::Ok => Ok(()),
+            Status::Err => Err(RedisError::Str("ERR DB index is out of range")),
+        }
+    }
+
+    /// Runs `f` in `db`, restoring the original database when `f` returns or
+    /// unwinds. Scopes may be nested. An invalid database returns an error
+    /// without running `f` or changing the current selection.
+    ///
+    /// The closure's value is returned unchanged, including a `Result` value.
+    /// Selection covers only the synchronous execution of `f`. Drop any
+    /// database-bound resources opened inside the closure before it returns.
+    ///
+    /// ```no_run
+    /// use redis_module::{Context, RedisResult};
+    /// fn read_from_db(ctx: &Context, db: i32, key: &str) -> RedisResult {
+    ///     ctx.with_db(db, |ctx| ctx.call("GET", &[key]))?
+    /// }
+    /// ```
+    pub fn with_db<T>(&self, db: i32, f: impl FnOnce(&Context) -> T) -> Result<T, RedisError> {
+        let previous = self.get_selected_db();
+        self.select_db(db)?;
+        let _restore = SelectedDbGuard {
+            ctx: self,
+            previous,
+        };
+        Ok(f(self))
     }
 
     /// Returns the number of keys in the currently selected database.
