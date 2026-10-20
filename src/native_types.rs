@@ -2,7 +2,6 @@ use std::ffi::CString;
 use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
 
-use crate::Context;
 use crate::raw;
 
 /// A native data type that a module registers with Redis.
@@ -128,7 +127,7 @@ impl RedisType {
 
     /// Registers this type with Redis. `redis_module!` calls it for each entry
     /// in `data_types`; call it during the module's load.
-    pub fn create_data_type(&self, ctx: &Context) -> Result<(), &str> {
+    pub fn create_data_type(&self, ctx: &crate::RegistrationContext<'_>) -> Result<(), &str> {
         let type_name = CString::new(self.name).unwrap();
 
         let redis_type = unsafe {

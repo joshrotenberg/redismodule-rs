@@ -4,7 +4,7 @@ use redis_module::{Context, RedisString, Status, logging::RedisLogLevel, redis_m
 
 static GLOBAL_STATE: Mutex<Option<String>> = Mutex::new(None);
 
-fn init(ctx: &Context, args: &[RedisString]) -> Status {
+fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> Status {
     let mut state = GLOBAL_STATE.lock().unwrap();
     let before = state.clone();
     *state = Some(format!("Args passed: {}", args.join(", ")));

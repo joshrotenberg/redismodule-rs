@@ -42,6 +42,7 @@ pub use crate::raw::{KeyType, ModuleOptions, NotifyEvent, Status, Version};
 
 pub use crate::configuration::ConfigurationValue;
 pub use crate::configuration::EnumConfigurationValue;
+pub use crate::context::RegistrationContext;
 pub use crate::context::call_reply::FutureCallReply;
 pub use crate::context::call_reply::{CallReply, CallResult, ErrorReply, PromiseCallReply};
 pub use crate::context::commands;

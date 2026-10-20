@@ -13,6 +13,8 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- Borrowed `RegistrationContext` for module initialization, with access to
+  runtime helpers and the Redis lock proof used by configuration guards.
 - `Context::subscribe_to_keyspace_events` for runtime-selected notification
   masks, with `redis_event_handler!(handler)` providing the shared panic-safe
   callback adapter. Existing `redis_module!` event handlers remain supported.
@@ -58,6 +60,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- **Breaking:** command registration, data-type registration, configuration
+  registration/loading, and module options require `RegistrationContext`.
+  `redis_module!` supplies it during load. Init functions that register items
+  must update their context parameter; command handlers and both command
+  declaration syntaxes are unchanged. Runtime contexts cannot safely acquire
+  the load-time capability.
 - **Breaking:** the three-argument `redis_event_handler!(ctx, mask, handler)`
   requires a context with proven module ownership. SDK module-load, command,
   and keyspace callbacks provide one. Contexts wrapped with `Context::new` and

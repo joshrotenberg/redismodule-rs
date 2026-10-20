@@ -28,6 +28,43 @@ without a `From` conversion.
 
 ## Changes the compiler reports
 
+### Load-time registration uses `RegistrationContext`
+
+`CommandBuilder::register`, `commands::register_commands`,
+`RedisType::create_data_type`, all four `configuration::register_*_configuration`
+functions, and `configuration::load_configurations` now take
+`&RegistrationContext<'_>`. `set_module_options` moved from `Context` to
+`RegistrationContext`.
+
+Change the parameter of an initialization hook that uses these APIs:
+
+```rust,ignore
+fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
+    // Register commands, types, configurations, and module options here.
+}
+```
+
+`redis_module!` creates the registration context after native initialization
+succeeds and passes it through the load sequence. Both command declaration
+syntaxes and ordinary `fn command(ctx: &Context, ...)` handlers are unchanged.
+The registration wrapper dereferences to `Context`, so shared runtime helpers
+can continue accepting `&Context`. It also implements `RedisLockIndicator`,
+so configuration guards still accept it. Init hooks that only use runtime
+helpers can retain their old `&Context` signature through coercion.
+
+There is no safe conversion from runtime `Context` to `RegistrationContext`.
+Move late command/type/configuration registration into initialization. Custom
+native loaders may use unsafe `RegistrationContext::from_context` only during
+their own active `RedisModule_OnLoad`, after successful initialization and
+with a live native module association and the Redis lock held. It cannot be
+used to promote a command or worker context outside load.
+
+The wrapper borrows the load invocation and cannot be cloned or retained after
+it. Module options are intentionally configured during initialization by this
+SDK, even where Redis itself permits changing them later. Keyspace and server
+event subscriptions remain runtime operations; this change does not split
+event/worker views or restrict client replies.
+
 ### Raw items are under `redis_module::raw`
 
 2.x re-exported all of `raw` at the crate root. 3.0 re-exports only `Status`,

@@ -281,6 +281,9 @@ macro_rules! redis_event_handler {
 /// Custom `acl_categories` are shared across modules and remain registered
 /// after unload. Existing categories are reused; other registration errors
 /// fail the module load.
+///
+/// Initialization hooks receive a borrowed [`RegistrationContext`](crate::RegistrationContext).
+/// Load-only APIs require it; command handlers continue receiving [`Context`](crate::Context).
 #[macro_export]
 macro_rules! redis_module {
     (
@@ -432,7 +435,9 @@ macro_rules! redis_module {
                 "module load",
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
-                    let context = unsafe { $crate::Context::from_module_context(ctx) };
+                    let runtime_context = unsafe { $crate::Context::from_module_context(ctx) };
+                    // SAFETY: Init succeeded and this scope is inside OnLoad.
+                    let context = unsafe { $crate::RegistrationContext::from_context(&runtime_context) };
                     unsafe {
                         let _ = $crate::MODULE_CONTEXT.set_context(&context);
                     }

@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI64};
 
 use redis_module::{
-    Context, RedisError, RedisString, Status,
+    RedisError, RedisString, Status,
     configuration::{
         ConfigurationFlags, load_configurations, register_bool_configuration,
         register_enum_configuration, register_i64_configuration, register_string_configuration,
@@ -29,7 +29,11 @@ static TOGGLE: AtomicBool = AtomicBool::new(false);
 static CHOICE: Mutex<Choice> = Mutex::new(Choice::One);
 static TEXT: Mutex<String> = Mutex::new(String::new());
 
-fn register(ctx: &Context, kind: &str, name: &str) -> Result<(), RedisError> {
+fn register(
+    ctx: &redis_module::RegistrationContext<'_>,
+    kind: &str,
+    name: &str,
+) -> Result<(), RedisError> {
     let flags = ConfigurationFlags::DEFAULT;
     match kind {
         "i64" => register_i64_configuration(ctx, name, &NUMBER, 7, 0, 100, flags, None),
@@ -42,7 +46,7 @@ fn register(ctx: &Context, kind: &str, name: &str) -> Result<(), RedisError> {
     }
 }
 
-fn init(ctx: &Context, args: &[RedisString]) -> Status {
+fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> Status {
     let result = match args.first().map(RedisString::try_as_str) {
         Some(Ok("valid")) => ["i64", "string", "bool", "enum"]
             .into_iter()
