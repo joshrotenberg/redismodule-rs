@@ -19,7 +19,7 @@ Released with redis-module 3.0.0; see its changelog and docs/MIGRATING-3.0.md.
 
 - `#[command]` handlers that panic reply `ERR command panicked: <message>` instead of aborting the server.
 - Modules no longer need a direct `linkme` dependency for the registration attributes.
-- The generated code follows redis-module 3.0's `RedisString` and `Context` APIs.
+- The generated code needs redis-module 3.0: it calls the `unsafe` `Context::new`, the panic guard in `redis_module::panic`, and the `linkme` re-export.
 - Edition 2024; `rust-version = "1.87"`. Depends on redis-module-common 0.1.2.
 
 ## [2.0.8](https://github.com/RedisLabsModules/redismodule-rs/compare/redis-module-macros-v2.0.7...redis-module-macros-v2.0.8) - 2026-05-04
