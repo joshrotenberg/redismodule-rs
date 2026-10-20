@@ -1016,26 +1016,6 @@ fn test_yield_lets_clients_get_busy_replies() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_error_inside_an_array() -> Result<()> {
-    use std::io::{Read, Write};
-
-    let con = TestConnection::new("response");
-    // redis-rs 0.23 fails the whole reply on an error inside an array, so
-    // read the RESP bytes.
-    let mut stream = std::net::TcpStream::connect(("127.0.0.1", con.port()))?;
-    stream.write_all(b"*1\r\n$15\r\nerrors.in_array\r\n")?;
-    stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
-    let expected = b"*3\r\n:1\r\n-ERR item 2 failed\r\n$5\r\nthree\r\n";
-    let mut reply = vec![0; expected.len()];
-    stream.read_exact(&mut reply)?;
-    assert_eq!(
-        String::from_utf8_lossy(&reply),
-        String::from_utf8_lossy(expected)
-    );
-    Ok(())
-}
-
 /// Sends `command` with no arguments on a new connection and reads the raw
 /// RESP reply, which must be `expected.len()` bytes.
 fn raw_reply(con: &TestConnection, command: &str, expected: &str) -> Result<String> {
@@ -1046,6 +1026,16 @@ fn raw_reply(con: &TestConnection, command: &str, expected: &str) -> Result<Stri
     let mut reply = vec![0; expected.len()];
     stream.read_exact(&mut reply)?;
     Ok(String::from_utf8_lossy(&reply).into_owned())
+}
+
+#[test]
+fn test_error_inside_an_array() -> Result<()> {
+    // redis-rs 0.23 fails the whole reply on an error inside an array, so
+    // read the RESP bytes.
+    let con = TestConnection::new("response");
+    let expected = "*3\r\n:1\r\n-ERR item 2 failed\r\n$5\r\nthree\r\n";
+    assert_eq!(raw_reply(&con, "errors.in_array", expected)?, expected);
+    Ok(())
 }
 
 #[test]
