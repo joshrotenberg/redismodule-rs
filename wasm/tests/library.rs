@@ -6,15 +6,14 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::OnceLock;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use redis::{Connection, RedisResult, Value};
 
-const PORT: u16 = 6610;
-
 /// The functions the example guest provides, in its order.
-const FUNCTIONS: [&str; 7] = [
+const FUNCTIONS: [&str; 9] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -22,6 +21,8 @@ const FUNCTIONS: [&str; 7] = [
     "nested",
     "fail",
     "recurse",
+    "spin",
+    "write_then_spin",
 ];
 
 /// The workspace's `target` directory, from this test binary's path
@@ -45,8 +46,14 @@ fn module_path() -> PathBuf {
         .join(format!("libredis_module_wasm.{ext}"))
 }
 
+/// The example guest as a component, built once for all tests.
+fn hello_component() -> &'static [u8] {
+    static COMPONENT: OnceLock<Vec<u8>> = OnceLock::new();
+    COMPONENT.get_or_init(build_hello_component)
+}
+
 /// Builds the example guest and turns the core module into a component.
-fn hello_component() -> Vec<u8> {
+fn build_hello_component() -> Vec<u8> {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("guests/hello/Cargo.toml");
     let guest_target = target_dir().join("wasm-guests");
     let status = Command::new("cargo")
@@ -77,18 +84,19 @@ fn hello_component() -> Vec<u8> {
 struct Server {
     child: Child,
     log: PathBuf,
+    port: u16,
 }
 
 impl Server {
-    fn start() -> Self {
-        let dir = target_dir().join(format!("wasm-test-{PORT}"));
+    fn start(port: u16, extra_args: &[&str]) -> Self {
+        let dir = target_dir().join(format!("wasm-test-{port}"));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("server directory");
         let log = dir.join("redis.log");
         let child = Command::new("redis-server")
             .args([
                 "--port",
-                &PORT.to_string(),
+                &port.to_string(),
                 "--save",
                 "",
                 "--appendonly",
@@ -98,14 +106,15 @@ impl Server {
             .arg(&dir)
             .arg("--logfile")
             .arg(&log)
+            .args(extra_args)
             .arg("--loadmodule")
             .arg(module_path())
             .stdout(Stdio::null())
             .spawn()
             .expect("start redis-server");
-        let server = Self { child, log };
+        let server = Self { child, log, port };
         let deadline = Instant::now() + Duration::from_secs(10);
-        while TcpStream::connect(("127.0.0.1", PORT)).is_err() {
+        while TcpStream::connect(("127.0.0.1", port)).is_err() {
             assert!(
                 Instant::now() < deadline,
                 "redis-server did not start; log:\n{}",
@@ -117,7 +126,7 @@ impl Server {
     }
 
     fn connection(&self) -> Connection {
-        redis::Client::open(format!("redis://127.0.0.1:{PORT}/"))
+        redis::Client::open(format!("redis://127.0.0.1:{}/", self.port))
             .and_then(|client| client.get_connection())
             .expect("connect")
     }
@@ -153,8 +162,8 @@ fn error_text(result: RedisResult<Value>) -> String {
 
 /// Sends a command in RESP and returns the raw reply, for replies the client
 /// library cannot represent, such as an error inside an array.
-fn raw_reply(args: &[&str]) -> String {
-    let mut stream = TcpStream::connect(("127.0.0.1", PORT)).expect("connect");
+fn raw_reply(port: u16, args: &[&str]) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
     let mut request = format!("*{}\r\n", args.len());
     for arg in args {
         request.push_str(&format!("${}\r\n{arg}\r\n", arg.len()));
@@ -177,12 +186,12 @@ fn raw_reply(args: &[&str]) -> String {
 #[test]
 fn load_call_list_and_delete_a_library() {
     let component = hello_component();
-    let server = Server::start();
+    let server = Server::start(6610, &[]);
     let mut con = server.connection();
 
     let functions: Vec<String> = redis::cmd("WASM.LOAD")
         .arg("hello")
-        .arg(&component)
+        .arg(component)
         .query(&mut con)
         .expect("WASM.LOAD");
     assert_eq!(functions, FUNCTIONS);
@@ -229,7 +238,7 @@ fn load_call_list_and_delete_a_library() {
     );
     // The map key goes out as a bulk string: see `to_key` in src/reply.rs.
     assert_eq!(
-        raw_reply(&["WASM.CALL", "nested", "0"]),
+        raw_reply(server.port, &["WASM.CALL", "nested", "0"]),
         "*3\r\n*2\r\n$6\r\nanswer\r\n:42\r\n$-1\r\n-ERR an error inside an array\r\n"
     );
     let recurse = error_text(call(&mut con, &["recurse", "0"]));
@@ -245,12 +254,12 @@ fn load_call_list_and_delete_a_library() {
     // Loading again needs REPLACE; a broken component is refused.
     let again: RedisResult<Value> = redis::cmd("WASM.LOAD")
         .arg("hello")
-        .arg(&component)
+        .arg(component)
         .query(&mut con);
     assert!(error_text(again).contains("already exists"));
     let _: Vec<String> = redis::cmd("WASM.LOAD")
         .arg("hello")
-        .arg(&component)
+        .arg(component)
         .arg("REPLACE")
         .query(&mut con)
         .expect("WASM.LOAD REPLACE");
@@ -284,4 +293,96 @@ fn load_call_list_and_delete_a_library() {
         error_text(call(&mut con, &["hello", "0"])),
         "ERR function 'hello' not found"
     );
+}
+
+/// Polls `f` until it returns `Some`, for up to ten seconds.
+fn wait_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(value) = f() {
+            return value;
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        sleep(Duration::from_millis(20));
+    }
+}
+
+/// A server where a running function counts as busy after 100 ms, with the
+/// example guest loaded.
+fn busy_server(port: u16) -> (Server, Connection) {
+    let server = Server::start(port, &["--busy-reply-threshold", "100"]);
+    let mut con = server.connection();
+    let _: Vec<String> = redis::cmd("WASM.LOAD")
+        .arg("hello")
+        .arg(hello_component())
+        .query(&mut con)
+        .expect("WASM.LOAD");
+    (server, con)
+}
+
+/// The `-BUSY` reply another client gets while a function runs.
+fn wait_for_busy(con: &mut Connection) -> String {
+    wait_for("a BUSY reply", || {
+        match redis::cmd("PING").query::<Value>(con) {
+            Err(error) if error.code() == Some("BUSY") => Some(error_text(Err(error))),
+            _ => None,
+        }
+    })
+}
+
+fn kill(con: &mut Connection) -> RedisResult<Value> {
+    redis::cmd("WASM.KILL").query(con)
+}
+
+#[test]
+fn a_busy_function_gets_busy_replies_and_can_be_killed() {
+    let (server, mut con) = busy_server(6611);
+    assert_eq!(
+        error_text(kill(&mut con)),
+        "NOTBUSY No wasm function is running."
+    );
+
+    let mut spinner = server.connection();
+    let spin = std::thread::spawn(move || error_text(call(&mut spinner, &["spin", "0"])));
+
+    let busy = wait_for_busy(&mut con);
+    assert_eq!(
+        busy,
+        "BUSY a wasm function is running. You can only call WASM.KILL or SHUTDOWN NOSAVE."
+    );
+    // Commands without allow-busy, including the module's own, get -BUSY too.
+    let list: RedisResult<Value> = redis::cmd("WASM.LIST").query(&mut con);
+    assert!(error_text(list).starts_with("BUSY"));
+
+    assert_eq!(kill(&mut con).unwrap(), Value::Okay);
+    assert_eq!(
+        spin.join().unwrap(),
+        "ERR function 'spin' failed: killed by WASM.KILL"
+    );
+    assert_eq!(
+        redis::cmd("PING").query::<String>(&mut con).unwrap(),
+        "PONG"
+    );
+    assert!(error_text(kill(&mut con)).starts_with("NOTBUSY"));
+}
+
+#[test]
+fn a_function_that_wrote_cannot_be_killed() {
+    let (mut server, mut con) = busy_server(6612);
+    let mut spinner = server.connection();
+    let spin = std::thread::spawn(move || call(&mut spinner, &["write_then_spin", "1", "k"]));
+
+    wait_for_busy(&mut con);
+    assert!(
+        error_text(kill(&mut con))
+            .starts_with("UNKILLABLE The function has already run write commands."),
+    );
+
+    // SHUTDOWN NOSAVE is the way out, as with a Lua script.
+    let _ = redis::cmd("SHUTDOWN")
+        .arg("NOSAVE")
+        .query::<Value>(&mut con);
+    let child = &mut server.child;
+    wait_for("redis-server to exit", || child.try_wait().ok().flatten());
+    assert!(spin.join().unwrap().is_err());
 }

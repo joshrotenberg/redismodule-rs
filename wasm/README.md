@@ -4,8 +4,7 @@ A Redis module that runs WebAssembly components as functions, the way
 `FUNCTION LOAD` and `FCALL` run Lua. It is built on `redis-module` and
 [wasmtime](https://wasmtime.dev) with the component model.
 
-This is an early prototype: libraries live in memory only, and there is no time
-limit on a running function yet.
+This is an early prototype: libraries live in memory only.
 
 ## Commands
 
@@ -14,10 +13,22 @@ WASM.LOAD <library> <component> [REPLACE]       load a library; replies with its
 WASM.CALL <function> <numkeys> [key ...] [arg ...]
 WASM.LIST                                       [[library, [function ...]] ...]
 WASM.DELETE <library>
+WASM.KILL                                       stop the running function, as FUNCTION KILL does
 ```
 
 Function names are global across libraries, as with `FUNCTION`. Each call runs
 in a fresh instance of its library, so calls share no guest state.
+
+## Long-running functions
+
+A running function yields to Redis every 10 ms. Once it has run longer than
+`busy-reply-threshold`, Redis answers other clients with `-BUSY a wasm function
+is running. You can only call WASM.KILL or SHUTDOWN NOSAVE.`, as it does for a
+long Lua script. `WASM.KILL` stops the function, which fails with `ERR function
+'<name>' failed: killed by WASM.KILL`, unless it has already called a write
+command: then `WASM.KILL` replies `UNKILLABLE`, so the function's writes are not
+left half done, and `SHUTDOWN NOSAVE` is the way out. With no function running,
+`WASM.KILL` replies `NOTBUSY`.
 
 ## Writing a library
 
@@ -69,7 +80,6 @@ calls each function. It needs `redis-server` on the `PATH` and the
 
 [TRACKING.md](TRACKING.md) has every open item, with IDs and what done means. The main ones:
 
-- A time limit, with `-BUSY` replies and a kill command.
 - Function flags, read-only calls, and ACL and RESP helpers for guests.
 - Saving libraries in RDB and AOF, and replicating `WASM.LOAD`.
 - Memory limits per instance and an `INFO` section.

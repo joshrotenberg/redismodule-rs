@@ -10,6 +10,7 @@ use redis_module::{CallOptionResp, CallOptions, CallOptionsBuilder, CallResult, 
 use wasmtime::component::{Component, HasSelf, Linker};
 use wasmtime::{Config, Engine, Store};
 
+use crate::busy::{self, Running, Ticker};
 use crate::reply::push_call_result;
 
 wasmtime::component::bindgen!({
@@ -54,6 +55,7 @@ impl CallState {
 impl redis_module_wasm::host::redis::Host for CallState {
     fn call(&mut self, command: String, args: Vec<Vec<u8>>) -> Vec<Node> {
         let args: Vec<&[u8]> = args.iter().map(Vec::as_slice).collect();
+        busy::note_call(self.ctx(), &command, &args);
         let result: CallResult<'static> =
             self.ctx()
                 .call_ext(&command, &self.options, args.as_slice());
@@ -83,6 +85,7 @@ struct LoadedLibrary {
 /// The engine and the libraries loaded with `WASM.LOAD`.
 pub(crate) struct Host {
     engine: Engine,
+    ticker: Ticker,
     linker: Linker<CallState>,
     libraries: BTreeMap<String, LoadedLibrary>,
     /// Which library provides each function.
@@ -97,11 +100,17 @@ impl Host {
         // keep wasmtime from installing signal handlers: guests get explicit
         // bounds checks instead.
         config.signals_based_traps(false);
+        // Long-running guests yield at each epoch; see busy.rs.
+        config.epoch_interruption(true);
+        // Keep trap errors to one line: they become error replies.
+        config.wasm_backtrace(false);
         let engine = Engine::new(&config)?;
+        let ticker = Ticker::start(engine.clone())?;
         let mut linker = Linker::new(&engine);
         Library::add_to_linker::<CallState, HasSelf<CallState>>(&mut linker, |state| state)?;
         Ok(Self {
             engine,
+            ticker,
             linker,
             libraries: BTreeMap::new(),
             functions: BTreeMap::new(),
@@ -123,8 +132,11 @@ impl Host {
         let component = Component::new(&self.engine, component).context("invalid component")?;
         let pre = LibraryPre::new(self.linker.instantiate_pre(&component)?)?;
 
-        let mut store = Store::new(&self.engine, CallState::new(ctx));
+        let mut store = new_store(&self.engine, ctx);
+        // Listing the functions runs guest code too, so it can be killed.
+        let running = Running::start();
         let functions = pre.instantiate(&mut store)?.call_functions(&mut store)?;
+        drop(running);
         for function in &functions {
             match self.functions.get(function) {
                 Some(owner) if owner != name => {
@@ -146,6 +158,11 @@ impl Host {
             },
         );
         Ok(functions)
+    }
+
+    /// Stops the epoch thread, so the module can be unloaded.
+    pub(crate) fn shutdown(self) {
+        self.ticker.stop();
     }
 
     /// Removes library `name`; returns whether it existed.
@@ -193,8 +210,17 @@ impl PreparedCall {
         keys: &[Vec<u8>],
         args: &[Vec<u8>],
     ) -> anyhow::Result<Vec<Node>> {
-        let mut store = Store::new(&self.engine, CallState::new(ctx));
+        let mut store = new_store(&self.engine, ctx);
+        let _running = Running::start();
         let library = self.pre.instantiate(&mut store)?;
         library.call_invoke(&mut store, function, keys, args)
     }
+}
+
+/// A store for one call, which yields to Redis at each epoch.
+fn new_store(engine: &Engine, ctx: &Context) -> Store<CallState> {
+    let mut store = Store::new(engine, CallState::new(ctx));
+    store.set_epoch_deadline(1);
+    store.epoch_deadline_callback(|store| busy::on_epoch(store.data().ctx()));
+    store
 }

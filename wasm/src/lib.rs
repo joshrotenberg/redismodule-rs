@@ -10,7 +10,11 @@
 //! WASM.CALL <function> <numkeys> [key ...] [arg ...]
 //! WASM.LIST
 //! WASM.DELETE <library>
+//! WASM.KILL
 //! ```
+//!
+//! A function that runs past `busy-reply-threshold` yields to Redis, which
+//! answers other clients with `-BUSY` and accepts `WASM.KILL`; see `busy.rs`.
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -18,6 +22,7 @@ use redis_module::{
     ArgCursor, Context, RedisError, RedisResult, RedisString, RedisValue, Status, redis_module,
 };
 
+mod busy;
 mod host;
 mod reply;
 
@@ -124,6 +129,20 @@ fn wasm_delete(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 }
 
+/// `WASM.KILL`: stops the running function if it has not called a write
+/// command, as `FUNCTION KILL` does for Lua.
+fn wasm_kill(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    ArgCursor::new(&args[1..]).done()?;
+    match busy::kill() {
+        busy::Kill::Killed => Ok(RedisValue::SimpleStringStatic("OK")),
+        busy::Kill::NotBusy => Err(RedisError::Str("NOTBUSY No wasm function is running.")),
+        busy::Kill::Unkillable => Err(RedisError::Str(
+            "UNKILLABLE The function has already run write commands. \
+             Wait for it to finish, or stop the server with SHUTDOWN NOSAVE.",
+        )),
+    }
+}
+
 fn init(ctx: &Context, _args: &[RedisString]) -> Status {
     match Host::new() {
         Ok(new_host) => {
@@ -137,16 +156,25 @@ fn init(ctx: &Context, _args: &[RedisString]) -> Status {
     }
 }
 
+fn deinit(_ctx: &Context) -> Status {
+    if let Some(host) = host().take() {
+        host.shutdown();
+    }
+    Status::Ok
+}
+
 redis_module! {
     name: "wasm",
     version: 1,
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
     init: init,
+    deinit: deinit,
     commands: [
         ["wasm.load", wasm_load, "write deny-oom deny-script", 0, 0, 0, ""],
         ["wasm.call", wasm_call, "write deny-script", 0, 0, 0, ""],
         ["wasm.list", wasm_list, "readonly deny-script", 0, 0, 0, ""],
         ["wasm.delete", wasm_delete, "write deny-script", 0, 0, 0, ""],
+        ["wasm.kill", wasm_kill, "allow-busy deny-script fast", 0, 0, 0, ""],
     ],
 }

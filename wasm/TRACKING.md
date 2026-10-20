@@ -12,7 +12,11 @@ Last updated 2026-10-20.
 Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
 
 - `WASM.LOAD <library> <component> [REPLACE]`, `WASM.CALL <function> <numkeys>
-  [key ...] [arg ...]`, `WASM.LIST`, `WASM.DELETE <library>`.
+  [key ...] [arg ...]`, `WASM.LIST`, `WASM.DELETE <library>`, `WASM.KILL`.
+- A running function yields every 10 ms (wasmtime epochs and
+  `RedisModule_Yield`): past `busy-reply-threshold` other clients get `-BUSY`,
+  and `WASM.KILL` stops a function that has not written (`UNKILLABLE` if it has,
+  `NOTBUSY` if none runs), as `FUNCTION KILL` does. The module unloads cleanly.
 - Guests are components implementing `wit/redis.wit`. They import `call`
   (RedisModule_Call in script mode, as the caller's ACL user, errors as replies,
   effects replicated, RESP3) and `log`. No WASI imports.
@@ -31,10 +35,12 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 |---|---|---|
 | `PING` | 11.7k/s | |
 | Lua `FCALL incr_twice` (two INCRs) | 12.5k/s | 153k/s (about 6.5 µs per call) |
-| `WASM.CALL incr_twice` (same work) | 9.7k/s | 39k/s (about 26 µs per call) |
+| `WASM.CALL incr_twice` (same work) | 9.7k/s | 37k/s (about 27 µs per call) |
 
 - One client is bound by the round trip; the 50-client column is the server's
-  cost. A fresh instance per call is the likely cause of the difference; not yet
+  cost. The 50-client wasm figure is with H1's epoch checks and write tracking
+  (39k/s before them; Lua varied between 133k and 153k/s across runs, so the
+  difference is within the noise). A fresh instance per call is the likely cause of the difference; not yet
   measured (H2).
 - `WASM.LOAD` of the 23 KB component: 23 ms, compilation included, on the main
   thread.
@@ -48,8 +54,8 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 | ID | status | item | done when |
 |---|---|---|---|
-| H1 | next | **Time limit and kill.** wasmtime epoch interruption; at each epoch the host calls `Context::yield_now(YieldMode::Clients, ..)`, so other clients get `-BUSY` past `busy-reply-threshold`. `WASM.KILL`, flagged `allow-busy`, stops a running guest that has not written, as `FUNCTION KILL` does. | A test runs a guest that loops forever, sees `-BUSY` from another client, kills it, and the server keeps serving. |
-| H2 | todo | **Per-call cost.** Measure where the 26 µs goes, then reuse instances per library or use wasmtime's pooling allocator. | The benchmark table is updated, with the cause named. |
+| H1 | done | **Time limit and kill.** wasmtime epoch interruption; at each epoch the host calls `Context::yield_now(YieldMode::Clients, ..)`, so other clients get `-BUSY` past `busy-reply-threshold`. `WASM.KILL`, flagged `allow-busy`, stops a running guest that has not written, as `FUNCTION KILL` does. | A test runs a guest that loops forever, sees `-BUSY` from another client, kills it, and the server keeps serving. |
+| H2 | next | **Per-call cost.** Measure where the 26 µs goes, then reuse instances per library or use wasmtime's pooling allocator. | The benchmark table is updated, with the cause named. |
 | H3 | todo | **A fair benchmark.** Add a compute-heavy function next to the two-INCR one, in both wasm and Lua, and keep the script in the repository. | `wasm/bench/` reproduces both rows on one command. |
 | H4 | todo | **A guest in another language.** JavaScript (componentize-js), Python (componentize-py) or Go (TinyGo), whichever produces components wasmtime 36 loads. | The integration test loads and calls a non-Rust guest. |
 | H5 | todo | **Persistence and replication.** Save libraries in aux data (`aux_save`, `aux_load`) and replicate `WASM.LOAD` and `WASM.DELETE` verbatim. | Tests with a restart and with a replica see the same libraries. |
@@ -103,5 +109,11 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H1 done: epoch interruption with a 10 ms ticker thread,
+  `yield_now` at each epoch, `WASM.KILL` with `NOTBUSY` and `UNKILLABLE`, write
+  tracking from `COMMAND INFO` (cached, subcommands included), killable
+  `WASM.LOAD`, a ticker that stops on unload. Tests: a looping guest gets
+  `-BUSY` for other clients and is killed; one that wrote is `UNKILLABLE` and
+  `SHUTDOWN NOSAVE` stops the server; five runs in a row passed.
 - 2026-10-20: milestone 1 done (the `RedisValue::Error` and `redis-module-wasm`
   commits on this branch); numbers above; tracking document added.

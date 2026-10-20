@@ -8,6 +8,8 @@
 //! WASM.CALL nested 0             an array holding a map, a nil and an error
 //! WASM.CALL fail 0               an error reply
 //! WASM.CALL recurse 0            calls WASM.LIST, which a guest may not run
+//! WASM.CALL spin 0               loops until WASM.KILL stops it
+//! WASM.CALL write_then_spin 1 key  SETs the key, then loops; WASM.KILL refuses
 //! ```
 
 wit_bindgen::generate!({
@@ -17,7 +19,7 @@ wit_bindgen::generate!({
 
 use redis_module_wasm::host::redis::{LogLevel, call, log};
 
-const FUNCTIONS: [&str; 7] = [
+const FUNCTIONS: [&str; 9] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -25,6 +27,8 @@ const FUNCTIONS: [&str; 7] = [
     "nested",
     "fail",
     "recurse",
+    "spin",
+    "write_then_spin",
 ];
 
 struct Hello;
@@ -71,8 +75,23 @@ impl Guest for Hello {
             ],
             "fail" => vec![Node::Error("ERR this function always fails".into())],
             "recurse" => call("WASM.LIST", &[]),
+            "spin" => spin(),
+            "write_then_spin" => match keys.first() {
+                Some(key) => {
+                    call("SET", &[key.clone(), b"1".to_vec()]);
+                    spin()
+                }
+                None => vec![Node::Error("ERR write_then_spin needs a key".into())],
+            },
             _ => vec![Node::Error(format!("ERR unknown function '{name}'"))],
         }
+    }
+}
+
+/// Loops until the host stops the guest.
+fn spin() -> Vec<Node> {
+    loop {
+        std::hint::black_box(());
     }
 }
 
