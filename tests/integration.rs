@@ -453,6 +453,11 @@ fn test_info_string_view_migration() -> Result<()> {
         .arg(&["server", "field_that_does_not_exist"][..])
         .query(&mut con)?;
     assert_eq!(absent, None);
+    // A NUL byte in either name names nothing, as an unknown name does.
+    for args in [["server", "redis\0version"], ["ser\0ver", "redis_version"]] {
+        let absent: Option<String> = redis::cmd("infoex").arg(&args[..]).query(&mut con)?;
+        assert_eq!(absent, None, "{args:?}");
+    }
     let error = redis::cmd("infoex")
         .arg("server")
         .query::<Value>(&mut con)
