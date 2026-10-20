@@ -114,9 +114,8 @@ args.done()?;
   `true` when the key held a value.
 - `hash_set` and `hash_del` return `Result<usize, RedisError>`, the number of
   existing fields replaced or deleted, instead of a `Status` that read a
-  replaced field as an error. They return `WrongType` for a key that is not a
-  hash. `hash_set_by_string` and `hash_del_by_string` take the field as a
-  `RedisString`, so it can hold any bytes.
+  replaced field as an error. `hash_set_by_string` and `hash_del_by_string`
+  take the field as a `RedisString`, so it can hold any bytes.
 - `RedisKeyWritable::get_value` and `as_string_dma` take `&mut self`, so the
   reference they return cannot outlive the key or alias another one. Bind the
   key with `let mut`.
@@ -129,16 +128,6 @@ if let Some(value) = key.get_value::<MyType>(&MY_TYPE)? {
 }
 ```
 
-### Calls
-
-- A call that fails without the `E` flag returns an error naming the reason
-  (for example `ERR RedisModule_Call failed: unknown command`) instead of
-  `CallReply::Unknown`, or a `StaticError` value from `Context::call`.
-- `Context::call` returns `SimpleString` for a simple string reply and
-  `BulkString` for a bulk string reply (`StringBuffer` when it is not UTF-8).
-  2.x returned `SimpleString` for both when the text was UTF-8.
-  `StringCallReply::is_simple_string` tells the two apart in `call_ext`.
-
 ### Replies
 
 `RedisValue` has a new variant, `InsertionOrderedMap`, which replies with the
@@ -150,8 +139,9 @@ entries in the order the module added them. An exhaustive `match` on
 `RedisError` implements `std::error::Error`. That replaces 2.x's blanket
 `impl<T: std::error::Error> From<T> for RedisError` with an explicit list of
 `From` conversions: the standard library errors module code meets (`io::Error`,
-`Utf8Error`, `ParseIntError`, `NulError`, `PoisonError<T>` and the others listed
-in the `RedisError` docs). For any other error type, convert explicitly:
+`Utf8Error`, `ParseIntError`, `NulError`, `PoisonError<T>` and the others among
+`RedisError`'s trait implementations). For any other error type, convert
+explicitly:
 
 ```rust
 let value = parse(text).map_err(RedisError::from_error)?;
@@ -168,8 +158,7 @@ let value = parse(text).map_err(RedisError::from_error)?;
   `configuration::load_configurations` after the last registration.
 - `ConfigurationValue` no longer requires `Send`. `ConfigurationContext` is
   neither `Send` nor `Sync`.
-- `RedisGILGuard<T>` is `Send` only when `T` is, and locking a guard that is
-  already locked panics instead of returning a second mutable reference.
+- `RedisGILGuard<T>` is `Send` only when `T` is.
 
 ### Data types
 
@@ -196,35 +185,53 @@ take `&Context` instead of a raw pointer.
   convert from an `i32` with `From` instead of panicking.
 - The raw enums are `#[repr(i32)]` and no longer have the `FromPrimitive`
   methods; the `enum-primitive-derive` and `num-traits` dependencies are gone.
-- `Status::from(c_int)` maps every value other than `REDISMODULE_OK` to `Err`.
 - The opaque handle types in `raw` (`RedisModuleCtx`, `RedisModuleKey`,
   `RedisModuleString` and the others with no fields) no longer derive `Copy`
   and `Clone`. Modules hold pointers to them, never values.
 
 ## Changes that compile unchanged
 
-These need no code change, but a module's tests, or clients that match on reply
-text, may notice them.
+These compile without a change, so the compiler will not point at them. Check
+the code that depends on them, and the tests and clients that match on reply
+text.
 
+- **Call results.** `Context::call` returns `SimpleString` for a simple string
+  reply and `BulkString` for a bulk string reply (`StringBuffer` when it is not
+  UTF-8); 2.x returned `SimpleString` for both when the text was UTF-8, so a
+  `match` on `RedisValue::SimpleString` may now miss. A bulk reply a command
+  returns reaches the client as a bulk string, as Redis sent it.
+  `StringCallReply::is_simple_string` tells the two apart in `call_ext`, and
+  `Context::reply_with_call_reply` forwards a reply exactly.
+- **Failed calls.** A call that fails without the `E` flag returns `Err` naming
+  the reason, for example `ERR RedisModule_Call failed: unknown command`. In
+  2.x, `call_ext` returned `CallReply::Unknown` and `Context::call` returned
+  `Ok(RedisValue::StaticError("Error on method call"))`.
 - **Panics.** A panic in a command replies `ERR command panicked: <message>`
   instead of aborting the server. A panic in a callback with no client (events,
   timers, INFO, configuration getters, defrag) is logged at warning level.
   A panic in a configuration setter fails the `CONFIG SET`; one in OnLoad
-  fails the load.
+  fails the load. This needs the default `panic = "unwind"`; callbacks a module
+  registers itself, such as native type methods, can use `panic::catch_panic`.
+- **`RedisGILGuard`.** Locking a guard that is already locked panics instead of
+  returning a second mutable reference.
 - **Missing module APIs.** Calling an API the running Redis lacks returns or
   panics with `RedisModule_X is not available in this Redis server` instead of
   `called Option::unwrap() on a None value`.
 - **Errors on the wire.** A key of the wrong type replies the standard
-  `WRONGTYPE` error from `get_value` and the hash getters. A failed ACL key
+  `WRONGTYPE` error from `get_value`, `hash_set`, `hash_del` and the hash
+  getters. A failed ACL key
   check replies `NOPERM User does not have permissions on the key`, and an
   unknown or disabled user `ERR the user does not exist or is disabled`.
-- **Forwarded call replies.** A bulk string reply from `Context::call` that a
-  command returns reaches the client as a bulk string, as Redis sent it (2.x
-  sent it as a status). `Context::reply_with_call_reply` forwards a reply
-  exactly.
 - **Load failures.** `redis_module!` fails the load when a configuration
-  registration fails or when `LoadConfigs` rejects a value given at load time,
-  instead of loading without the configuration.
+  registration fails, where 2.x loaded without that configuration. It also
+  fails the load, before `init` runs, when `LoadConfigs` rejects a value given
+  at load time; 2.x ran `init` with the default values, and then Redis
+  unloaded the module.
+- **Status values.** `Status::from(c_int)` maps every value other than
+  `REDISMODULE_OK` to `Err`.
+- **Keys.** `RedisKey::to_raw_parts` leaves the key open for the caller to
+  close, instead of closing it, and is `#[must_use]`. Dropping a stream iterator
+  stops it instead of deleting the current entry.
 - **Strings.** `RedisString::create` and `Context::create_string` keep NUL
   bytes instead of panicking. Simple string and error replies replace CR, LF
   and NUL with spaces byte by byte, so non-ASCII text arrives intact.
