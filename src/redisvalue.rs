@@ -10,10 +10,14 @@ use std::{
 #[derive(Debug, PartialEq, Eq, Hash, Clone, PartialOrd, Ord)]
 pub enum RedisValueKey {
     Integer(i64),
+    /// Replied as a bulk string.
     String(String),
     BulkRedisString(RedisString),
     BulkString(Vec<u8>),
     Bool(bool),
+    /// Replied as a simple string, as a call reply's simple-string key is.
+    /// Last, so the derived order of the other variants stays as it was.
+    SimpleString(String),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -235,6 +239,12 @@ impl<'root> TryFrom<&CallReply<'root>> for RedisValueKey {
     fn try_from(reply: &CallReply<'root>) -> Result<Self, Self::Error> {
         match reply {
             CallReply::I64(reply) => Ok(RedisValueKey::Integer(reply.to_i64())),
+            CallReply::String(reply) if reply.is_simple_string() => {
+                match String::from_utf8(reply.as_bytes().to_vec()) {
+                    Ok(text) => Ok(RedisValueKey::SimpleString(text)),
+                    Err(error) => Ok(RedisValueKey::BulkString(error.into_bytes())),
+                }
+            }
             CallReply::String(reply) => Ok(call_string_key(reply.as_bytes().to_vec())),
             CallReply::Bool(b) => Ok(RedisValueKey::Bool(b.to_bool())),
             _ => Err(RedisError::String(format!(

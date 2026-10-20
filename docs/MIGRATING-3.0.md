@@ -135,6 +135,11 @@ the entries in the order the module added them, and `Error(String)`, an error
 reply with an owned message, which can sit inside an array, set or map. An
 exhaustive `match` on `RedisValue` needs two more arms.
 
+`RedisValueKey` has a new variant, `SimpleString`, for a map key or set element
+replied as a simple string. A map or set converted from a call reply holds it
+for a simple-string key or element, where 2.x gave `String`; an exhaustive
+`match` on `RedisValueKey` needs another arm.
+
 ### Errors
 
 `RedisError` implements `std::error::Error`. That replaces 2.x's blanket

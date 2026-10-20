@@ -23,6 +23,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - The `event_loop` module: `add` and `remove` (both `unsafe`), `add_one_shot`, and `EventLoopMask` (`RedisModule_EventLoopAdd`, `EventLoopDel` and `EventLoopAddOneShot`).
 - `Context::reply_with_call_reply`, `StringCallReply::is_simple_string`, and the call options `dry_run`, `replicate_to_replicas_only` and `replicate_to_aof_only`.
 - `RedisValue::InsertionOrderedMap`, which replies with entries in insertion order.
+- `RedisValueKey::SimpleString`, a map key or set element replied as a simple string; a call reply's simple-string key converts to it.
 - `RedisValue::Error(String)`, an error reply with an owned message, which can sit inside an array, set or map.
 - `RedisString::from_bytes`, `from_owned_ptr`, `retain_from_ptr` and `as_ptr`.
 - `RedisKeyWritable::hash_set_by_string` and `hash_del_by_string`, for fields that hold any bytes.
@@ -47,6 +48,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - **Breaking:** `RedisKeyWritable::get_value` and `as_string_dma` take `&mut self`.
 - **Breaking:** `Context::call` returns `BulkString` for a bulk string reply and `SimpleString` only for a simple string reply, and a call that fails without the `E` flag returns an error naming the reason instead of `CallReply::Unknown` (adapted from upstream PR 93).
 - **Breaking:** `RedisValue` has two new variants, `InsertionOrderedMap` and `Error`.
+- **Breaking:** `RedisValueKey` has a new variant, `SimpleString`, and a call reply's simple-string map key or set element converts to it instead of `String`.
 - **Breaking:** `RedisError` implements `std::error::Error`, which replaces the blanket `From<T: Error>` conversion with `From` for a list of standard library errors; other errors convert with `RedisError::from_error`.
 - **Breaking:** `register_i64_configuration`, `register_string_configuration`, `register_bool_configuration` and `register_enum_configuration` return `Result<(), RedisError>`.
 - **Breaking:** `RedisGILGuard<T>` is `Send` only when `T` is, and locking it twice panics. `ConfigurationContext` is neither `Send` nor `Sync`. `ConfigurationValue` no longer requires `Send`.
