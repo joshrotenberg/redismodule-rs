@@ -10,6 +10,7 @@ struct Events {
     counts: [i64; 5],
     last: Option<(String, Vec<u8>, i32)>,
 }
+static SUBSCRIPTION_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 static EVENTS: Mutex<Events> = Mutex::new(Events {
     counts: [0; 5],
     last: None,
@@ -89,8 +90,12 @@ fn runtime_subscribe_proc(ctx: &Context, args: Vec<RedisString>) -> RedisResult 
 }
 
 fn subscribe_on_thread(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let mut task = SUBSCRIPTION_THREAD.lock().unwrap();
+    if task.is_some() {
+        return Err(RedisError::Str("ERR subscription thread already started"));
+    }
     let blocked = ctx.block_client();
-    std::thread::spawn(move || {
+    *task = Some(std::thread::spawn(move || {
         let thread_ctx = redis_module::ThreadSafeContext::new();
         let guard = thread_ctx.lock();
         let result =
@@ -99,8 +104,24 @@ fn subscribe_on_thread(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
         drop(thread_ctx);
         let reply = redis_module::ThreadSafeContext::with_blocked_client(blocked);
         reply.reply(result.map(|()| "OK".into()));
-    });
+    }));
     Ok(RedisValue::NoReply)
+}
+
+fn finish_thread(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    let mut task = SUBSCRIPTION_THREAD.lock().unwrap();
+    if !task
+        .as_ref()
+        .is_some_and(std::thread::JoinHandle::is_finished)
+    {
+        // Never join a live worker while holding Redis's lock.
+        return Ok(0i64.into());
+    }
+    task.take()
+        .unwrap()
+        .join()
+        .map_err(|_| RedisError::Str("ERR subscription thread panicked"))?;
+    Ok(1i64.into())
 }
 
 fn counts(_: &Context, _: Vec<RedisString>) -> RedisResult {
@@ -138,6 +159,7 @@ redis_module! {
         redis_command!("runtime.subscribe", subscribe),
         ["runtime.subscribe_legacy", subscribe, "", 0, 0, 0, ""],
         redis_command!("runtime.subscribe_on_thread", subscribe_on_thread),
+        redis_command!("runtime.finish_thread", finish_thread),
         redis_command!("runtime.counts", counts).read_only(),
         redis_command!("runtime.last", last).read_only(),
         redis_command!("runtime.send", send),

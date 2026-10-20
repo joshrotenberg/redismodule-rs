@@ -156,6 +156,11 @@ fn test_runtime_keyspace_subscriptions_reject_unowned_thread_contexts() -> Resul
         error.to_string().contains("module-owned context"),
         "{error}"
     );
+    // Finish the test's own worker before unloading its code. A client reply
+    // can arrive before the worker has returned through its final epilogue.
+    utils::wait_until(Duration::from_secs(2), "subscription worker exit", || {
+        Ok(redis::cmd("runtime.finish_thread").query::<i64>(&mut con)? == 1)
+    })?;
     redis::cmd("SET")
         .arg(&["before-unload", "value"])
         .query::<()>(&mut con)?;
