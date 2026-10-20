@@ -298,3 +298,24 @@ all-features-but-xor = ["system-allocator-fallback"]
 # dylib that dyld refuses to load ("mis-aligned LINKEDIT string pool").
 [profile.release.package.redis-module-wasm]
 strip = "none"
+
+# Debug builds of the wasm host compile guests with an unoptimized Cranelift:
+# loading an 11 MB JavaScript component took 28 s. Optimize the compiler.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+[profile.dev.package.cranelift-entity]
+opt-level = 3
+[profile.dev.package.cranelift-bforest]
+opt-level = 3
+[profile.dev.package.cranelift-bitset]
+opt-level = 3
+[profile.dev.package.regalloc2]
+opt-level = 3
+[profile.dev.package.wasmparser]
+opt-level = 3
+[profile.dev.package.wasmtime-environ]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3

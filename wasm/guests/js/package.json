@@ -1,0 +1,16 @@
+{
+  "name": "redis-module-wasm-js-example",
+  "private": true,
+  "type": "module",
+  "description": "An example library for redis-module-wasm in JavaScript",
+  "scripts": {
+    "build": "node build.mjs library.wasm"
+  },
+  "dependencies": {
+    "@bytecodealliance/componentize-js": "0.18.5",
+    "@bytecodealliance/jco": "1.14.0"
+  },
+  "overrides": {
+    "@bytecodealliance/jco": "1.14.0"
+  }
+}

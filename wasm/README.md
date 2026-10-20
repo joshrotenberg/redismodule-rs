@@ -79,6 +79,30 @@ redis-cli WASM.CALL hello 0 redis
 
 Guests get no WASI imports: no clocks, randomness, files or network.
 
+### In JavaScript
+
+[`guests/js`](guests/js) is the same library in JavaScript, built with
+[componentize-js](https://github.com/bytecodealliance/ComponentizeJS), which
+embeds a JavaScript engine in the component. With Node.js installed:
+
+```bash
+cd wasm/guests/js
+npm ci
+node build.mjs library.wasm
+redis-cli -x WASM.LOAD js < library.wasm
+```
+
+`package.json` pins componentize-js 0.18.5 and jco 1.14.0, releases from the
+same weeks as wasmtime 36: newer jco releases bring a WASI shim that
+componentize-js 0.18 cannot use. `build.mjs` disables the WASI features the
+library does not use, so the component imports only the host's `redis`
+interface.
+
+The component is 11 MB, and loading it compiles all of it: about 1.4 s in a
+release build of the module (11.7 s without parallel compilation), during
+which the server answers no one. A Rust library of the same functions is
+23 KB and loads in milliseconds.
+
 ## Benchmark
 
 [`bench/`](bench) compares the same functions in wasm and in Lua: calls into
@@ -87,10 +111,15 @@ latest numbers are in [TRACKING.md](TRACKING.md).
 
 ## Tests
 
-`cargo test -p redis-module-wasm` builds the example guest, encodes it as a
-component with `wit-component`, starts a `redis-server` with the module, and
-calls each function. It needs `redis-server` on the `PATH` and the
-`wasm32-unknown-unknown` target.
+`cargo test -p redis-module-wasm` builds the example guests, starts a
+`redis-server` with the module, and calls each function. It needs
+`redis-server` on the `PATH` and the `wasm32-unknown-unknown` target. The
+JavaScript guest's test runs when Node.js is installed and is skipped
+otherwise; the first run installs its dependencies with `npm ci`.
+
+Debug builds optimize Cranelift and the other compiler crates (see the
+workspace `Cargo.toml`); unoptimized, loading the JavaScript component took
+28 s.
 
 ## Not done yet
 

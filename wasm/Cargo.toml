@@ -16,7 +16,7 @@ crate-type = ["cdylib"]
 # with the workspace's default one in workspace builds.
 redis-module = { path = ".." }
 # 36 is a long-term support release whose MSRV fits this workspace.
-wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime", "component-model", "std"] }
+wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime", "component-model", "std", "parallel-compilation"] }
 anyhow = "1"
 
 [dev-dependencies]

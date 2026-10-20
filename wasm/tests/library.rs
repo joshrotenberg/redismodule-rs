@@ -424,3 +424,104 @@ fn a_library_keeps_its_instance_until_a_call_fails_or_it_is_replaced() {
         .expect("WASM.LOAD REPLACE");
     assert_eq!(counter(&mut con), 1);
 }
+
+/// The JavaScript example (`guests/js`) as a component, built once, or `None`
+/// when Node.js is not installed.
+fn js_component() -> Option<&'static [u8]> {
+    static COMPONENT: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    COMPONENT.get_or_init(build_js_component).as_deref()
+}
+
+fn build_js_component() -> Option<Vec<u8>> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("guests/js");
+    if Command::new("node").arg("--version").output().is_err() {
+        eprintln!("skipping the JavaScript guest: node is not installed");
+        return None;
+    }
+    if !dir.join("node_modules").exists() {
+        let status = Command::new("npm")
+            .args(["ci", "--no-audit", "--no-fund"])
+            .current_dir(&dir)
+            .status()
+            .expect("run npm ci");
+        assert!(status.success(), "npm ci failed for the JavaScript guest");
+    }
+    let output = target_dir().join("wasm-guests/js-library.wasm");
+    std::fs::create_dir_all(output.parent().unwrap()).expect("guest output directory");
+    let status = Command::new("node")
+        .arg("build.mjs")
+        .arg(&output)
+        .current_dir(&dir)
+        .status()
+        .expect("run node build.mjs");
+    assert!(status.success(), "building the JavaScript guest failed");
+    Some(std::fs::read(&output).expect("read the JavaScript component"))
+}
+
+#[test]
+fn a_javascript_library_behaves_like_the_rust_one() {
+    let Some(component) = js_component() else {
+        return;
+    };
+    let server = Server::start(6615, &["--busy-reply-threshold", "100"]);
+    let mut con = server.connection();
+    let functions: Vec<String> = redis::cmd("WASM.LOAD")
+        .arg("js")
+        .arg(component)
+        .query(&mut con)
+        .expect("WASM.LOAD of the JavaScript library");
+    assert_eq!(
+        functions,
+        [
+            "hello",
+            "incr_twice",
+            "set",
+            "nested",
+            "fail",
+            "counter",
+            "spin"
+        ]
+    );
+
+    assert_eq!(
+        call(&mut con, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+    assert_eq!(
+        call(&mut con, &["hello", "0", "js"]).unwrap(),
+        Value::Status("hello, js".into())
+    );
+    assert!(
+        server.log().contains("hello called for js"),
+        "{}",
+        server.log()
+    );
+    assert_eq!(
+        call(&mut con, &["incr_twice", "1", "counter"]).unwrap(),
+        Value::Bulk(vec![Value::Int(1), Value::Int(2)])
+    );
+    assert_eq!(
+        call(&mut con, &["set", "1", "k", "v"]).unwrap(),
+        Value::Okay
+    );
+    assert_eq!(
+        raw_reply(server.port, &["WASM.CALL", "nested", "0"]),
+        "*3\r\n*2\r\n$6\r\nanswer\r\n:42\r\n$-1\r\n-ERR an error inside an array\r\n"
+    );
+    assert_eq!(
+        error_text(call(&mut con, &["fail", "0"])),
+        "ERR this function always fails"
+    );
+    assert_eq!([counter(&mut con), counter(&mut con)], [1, 2]);
+
+    // A JavaScript loop yields and can be killed like a Rust one.
+    let mut spinner = server.connection();
+    let spin = std::thread::spawn(move || error_text(call(&mut spinner, &["spin", "0"])));
+    wait_for_busy(&mut con);
+    assert_eq!(kill(&mut con).unwrap(), Value::Okay);
+    assert_eq!(
+        spin.join().unwrap(),
+        "ERR function 'spin' failed: killed by WASM.KILL"
+    );
+    assert_eq!(counter(&mut con), 1);
+}

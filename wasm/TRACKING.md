@@ -20,6 +20,8 @@ Milestone 1, the skeleton, works on Redis 8.10.2 with no server changes:
 - Guests are components implementing `wit/redis.wit`. They import `call`
   (RedisModule_Call in script mode, as the caller's ACL user, errors as replies,
   effects replicated, RESP3) and `log`. No WASI imports.
+- Guests in Rust (`guests/hello`) and JavaScript (`guests/js`, componentize-js);
+  the same integration tests pass against both.
 - Reply types survive both ways, including simple versus bulk strings, maps,
   sets, nil, and errors inside arrays. A guest cannot run `WASM.*` commands.
 - Each library keeps one instance between calls, so guest state persists
@@ -93,7 +95,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H1 | done | **Time limit and kill.** wasmtime epoch interruption; at each epoch the host calls `Context::yield_now(YieldMode::Clients, ..)`, so other clients get `-BUSY` past `busy-reply-threshold`. `WASM.KILL`, flagged `allow-busy`, stops a running guest that has not written, as `FUNCTION KILL` does. | A test runs a guest that loops forever, sees `-BUSY` from another client, kills it, and the server keeps serving. |
 | H2 | done | **Per-call cost.** Measure where the 26 µs goes, then reuse instances per library or use wasmtime's pooling allocator. | The benchmark table is updated, with the cause named. |
 | H3 | done | **A fair benchmark.** Add a compute-heavy function next to the two-INCR one, in both wasm and Lua, and keep the script in the repository. | `wasm/bench/` reproduces both rows on one command. |
-| H4 | next | **A guest in another language.** JavaScript (componentize-js), Python (componentize-py) or Go (TinyGo), whichever produces components wasmtime 36 loads. | The integration test loads and calls a non-Rust guest. |
+| H4 | done | **A guest in another language.** JavaScript (componentize-js), Python (componentize-py) or Go (TinyGo), whichever produces components wasmtime 36 loads. | The integration test loads and calls a non-Rust guest. |
 | H5 | todo | **Persistence and replication.** Save libraries in aux data (`aux_save`, `aux_load`) and replicate `WASM.LOAD` and `WASM.DELETE` verbatim. | Tests with a restart and with a replica see the same libraries. |
 
 ### Then
@@ -101,15 +103,35 @@ avoids both instantiating and tearing down, and was adopted.
 | ID | status | item | done when |
 |---|---|---|---|
 | H6 | todo | **Key specs for `WASM.CALL`.** A keynum key spec so a cluster routes it by its keys. `redis_module!`'s command table cannot express one; check the `#[command]` macro or `RedisModule_SetCommandInfo`. | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
-| H7 | todo | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread. | The server answers other clients while a large component compiles. |
+| H7 | next | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread. Urgent since H4: the 11 MB JavaScript component takes 1.4 s to compile with parallel compilation (11.7 s without), and the server answers no one meanwhile. Precompiled components (`Engine::precompile_component`) would also skip the compile, but loading one is `unsafe`: only for trusted input. | The server answers other clients while a large component compiles. |
 | H8 | todo | **Memory.** A memory limit per instance (wasmtime resource limiter), refusing writes when `used_memory_ratio` is at 1, and an `INFO` section with the host's memory. Kept instances (H2) only grow, so also replace an instance whose memory passes a size. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
 | H9 | todo | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`), `WASM.CALL_RO`, a `call` that fails where `pcall` returns the error, and `acl-check-command` and `set-resp` imports. | Each has a test matching what Lua does. |
 | H10 | todo | **Guest helper library.** A small Rust crate that builds the pre-order node list from typed values, so guests do not build it by hand. | The example guest uses it. |
 | H11 | todo | **Bounds check cost.** Signal-based traps are off so wasmtime installs no signal handlers over Redis's crash handler. Measured with H3's benchmark: turning them on made `primes` 18% faster (185 against 226 µs, with the old sieve loop), `median` 6%, `adler32` no different. Left: whether wasmtime's handlers and Redis's crash handler can coexist, and whether 18% is worth it. | A decision, with a crash report checked with handlers on. |
 | H12 | todo | **Context in the store.** The store holds a raw pointer to the command's `Context`. Write down the safety argument or replace it with an SDK pattern (S3). | Reviewed and documented, or replaced. |
-| H13 | todo | **Footprint.** Trim wasmtime features and measure the dylib and RSS. | Sizes recorded before and after. |
+| H13 | todo | **Footprint.** Trim wasmtime features and measure the dylib and RSS. After loading the JavaScript component, RSS was 722 MB (serial compilation) and 959 MB (parallel) while `used_memory` stayed under 10 MB: find how much is compiled code, the instance's memory, and allocator memory kept after compiling. | Sizes recorded before and after. |
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
 | H15 | todo | **Large replies into the guest.** `median` is only 1.4 times faster than Lua although sorting 1000 integers is cheap: the 1000 strings of its `LRANGE` reply are copied into nodes, then into the guest's memory. Measure how much of its 177 µs that is, then copy less (for example, give the guest a handle to read the reply from). | `median`'s time split, and a lower number. |
+
+## Repository
+
+Found by an audit of fork master outside the crates' sources (2026-10-20).
+These are ordinary fork PRs; none depends on the wasm host.
+
+| ID | status | item |
+|---|---|---|
+| R1 | todo | Delete `Dockerfile`, `.dockerignore`, `build/docker/` and `.gitmodules`: they run the `readies` setup and `Makefile` that upstream deleted in October 2024, and cannot build. |
+| R2 | todo | CI (`ci.yml`): drop `submodules: recursive` (no submodules) and the Python setup (no Python); run the matrix on the default features, so the tests use the committed bindings, and keep `bindgen-runtime`, clang and the bindings drift check in one job; use the pinned 1.94.0 toolchain or say why CI uses stable. |
+| R3 | todo | Release workflows: `release-pr.yml` is still enabled and would open a release-plz PR that rewrites the 3.0.0 changelog sections and bumps versions. Delete `release.yml` and `release-pr.yml`, or limit them to the upstream repository. |
+| R4 | todo | `dependabot.yml`: remove the ignore entry for bindgen 0.56; consider adding the `github-actions` ecosystem. |
+| R5 | todo | `deny.toml`: nothing runs it since upstream's `Makefile` went. Add a cargo-deny CI job (its license list likely needs `Unicode-3.0` for `unicode-ident`) or delete it. |
+| R6 | todo | `docs/MIGRATING-3.0.md`: the `system-allocator-fallback` dev-dependency example uses `version = "3"`, which does not resolve while 3.0 is unpublished; use the git and `rev` form. |
+| R7 | todo | `README.upstream.md` keeps upstream's dead `redis.io/topics/modules-intro` links: leave it verbatim, or say at its top that it is. |
+| R8 | todo | `build.sh` and `test.sh`: `--all` is the old spelling of `--workspace` (cosmetic). |
+
+The audit found nothing to change in `examples/`, `tests/`, `.gitignore`,
+`rust-toolchain.toml`, the changelogs and the side crates' manifests. The
+`repository` field is S8.
 
 ## SDK changes the spike found
 
@@ -146,6 +168,15 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H4 done: `guests/js`, the example library in JavaScript, built
+  with componentize-js 0.18.5 and jco 1.14.0 (pinned: jco 1.39 pulls a WASI shim
+  componentize-js 0.18 cannot use). With stdio, random, clocks and HTTP
+  disabled, the 11 MB component imports only the host's interface, so the host
+  still has no WASI. The same functions and checks pass as for the Rust guest,
+  including kill. Loading it compiled for 11.7 s on the main thread; parallel
+  compilation, now on, makes that 1.4 s (H7 now next), and RSS reached 722 to
+  959 MB (H13). Debug builds optimize the compiler crates (28 s to 3 s for the
+  test). Repository audit added as R1 to R8.
 - 2026-10-20: H3 done: `wasm/bench/` with a guest, the same functions in
   Lua, and `run.sh`, which checks both give the same results and prints server
   time per call. Computation is 9 to 16 times faster than Lua; calls into Redis
