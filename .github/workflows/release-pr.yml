@@ -7,6 +7,8 @@ jobs:
   # Create a PR with the new versions and changelog, preparing the next release.
   # A release will be automatically published when the PR is merged into master.
   release-pr:
+    # Publishing and release PRs belong to the upstream repository.
+    if: github.repository == 'RedisLabsModules/redismodule-rs'
     name: Open a release PR
     runs-on: ubuntu-latest
     permissions:
@@ -19,7 +21,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
-          submodules: recursive
           fetch-depth: 0
           persist-credentials: false
       - name: Install toolchain
