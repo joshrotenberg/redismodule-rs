@@ -1093,14 +1093,24 @@ impl Context {
 
     /// The positions in `args`, which start with the command name, of the keys
     /// the command would use, as Redis finds them for cluster routing and ACL
-    /// checks (`RedisModule_GetCommandKeysWithFlags`, Redis 7.0).
+    /// checks (`RedisModule_GetCommandKeysWithFlags`, Redis 7.0). The key
+    /// flags that API also gives are not returned.
+    ///
+    /// Redis checks whether a command has keys before its arity, so a command
+    /// without keys gives an empty list even with the wrong number of
+    /// arguments.
     ///
     /// # Errors
     ///
-    /// Returns an error if the command is unknown, `args` do not fit its
-    /// arity, or the running Redis does not provide the API.
+    /// Returns an error if `args` is empty, the command is unknown, `args` do
+    /// not fit the arity of a command with keys, or the running Redis does not
+    /// provide the API.
     pub fn get_command_keys(&self, args: &[RedisString]) -> Result<Vec<usize>, RedisError> {
         let get_keys = unsafe { crate::__available_api!(RedisModule_GetCommandKeysWithFlags) };
+        // Redis reads the command name without checking the count.
+        if args.is_empty() {
+            return Err(RedisError::Str("ERR no command to look up"));
+        }
         let argc = c_int::try_from(args.len())
             .map_err(|_| RedisError::Str("ERR too many command arguments"))?;
         let mut argv: Vec<*mut raw::RedisModuleString> =

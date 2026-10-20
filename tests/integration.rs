@@ -722,6 +722,10 @@ fn test_command_keys_and_key_slot() -> Result<()> {
         arity.to_string().contains("wrong number of arguments"),
         "{arity}"
     );
+    let empty = keys(&mut con, &[]).unwrap_err();
+    assert!(empty.to_string().contains("no command"), "{empty}");
+    // The server is still up.
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
 
     // Values from the Redis cluster documentation.
     for (key, slot) in [("somekey", 11058), ("foo{hash_tag}", 2515)] {

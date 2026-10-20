@@ -52,7 +52,9 @@ mod tests {
             key_slot(b"{user1000}.followers")
         );
         assert_eq!(key_slot(b"{user1000}.following"), key_slot(b"user1000"));
-        assert_eq!(key_slot(b"foo{}{bar}"), key_slot(b"foo{}{bar}"));
+        // An empty first tag: the whole key is hashed, not "bar".
+        assert_eq!(key_slot(b"foo{}{bar}"), 8363);
+        assert_eq!(key_slot(b"foo{}{bar}"), crc16(b"foo{}{bar}") % SLOTS);
         assert_ne!(key_slot(b"foo{}{bar}"), key_slot(b"bar"));
         assert_eq!(key_slot(b""), 0);
     }
