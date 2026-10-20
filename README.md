@@ -22,6 +22,8 @@ It allows writing Redis modules in Rust, without needing to use raw pointers or 
 
 See the [examples](examples) directory for some sample modules.
 
+Upgrading a module from 2.x? See the [3.0 migration guide](docs/MIGRATING-3.0.md).
+
 This crate tries to provide high-level wrappers around the standard Redis Modules API, while preserving the API's basic concepts.
 Therefore, following the [Redis Modules API](https://redis.io/docs/latest/develop/reference/modules/) documentation will be mostly relevant here as well.
 
