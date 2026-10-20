@@ -1,0 +1,248 @@
+# Migrating from redis-module 2.x to 3.0
+
+3.0 closes ways that safe code could reach undefined behavior, returns results
+that 2.x dropped, and reports errors the way Redis does. This guide lists what a
+module built on 2.x changes: first what to set up, then the changes the compiler
+reports, then the changes that compile unchanged but behave differently. The
+[changelog](../CHANGELOG.md) lists everything in the release, including what is
+new.
+
+Most modules meet only a few of these. The common ones are imports of raw items
+from the crate root, `NextArg::next_str`, `try_as_str` lifetimes, the return
+types of `delete`, `unlink`, `hash_set` and `hash_del`, and `?` on error types
+without a `From` conversion.
+
+## Before you start
+
+- Rust 1.87 or later.
+- Update `redis-module`, `redis-module-macros` and `redis-module-macros-internals`
+  together to 3.0. `redis-module-common` is 0.1.2.
+- The crate no longer needs libclang. The bindings are pregenerated in
+  `src/redisraw/bindings.rs`, and `bindgen-runtime` is no longer a default
+  feature. A manifest that enables `bindgen-runtime` or `bindgen-static` can drop
+  it, except for a 32-bit target: the pregenerated bindings are for 64-bit
+  targets, and the build says so.
+- The crate uses edition 2024. A module keeps its own edition: modules on
+  edition 2021 and on edition 2024 both build with `redis_module!` and the
+  proc macros.
+
+## Changes the compiler reports
+
+### Raw items are under `redis_module::raw`
+
+2.x re-exported all of `raw` at the crate root. 3.0 re-exports only `Status`,
+`KeyType`, `NotifyEvent`, `Version` and `ModuleOptions` there.
+
+```rust
+// 2.x
+use redis_module::{RedisModuleString, REDISMODULE_OK};
+
+// 3.0
+use redis_module::raw::{RedisModuleString, REDISMODULE_OK};
+```
+
+### Functions that take raw pointers are unsafe or private
+
+A safe function must not accept a pointer it dereferences or passes to Redis,
+so these are now `unsafe fn`, each with a `# Safety` section:
+
+- `Context::new` and `Context::dummy`
+- `RedisString::new`, `RedisString::from_redis_module_string`,
+  `RedisString::from_ptr`, `RedisString::string_as_slice` and `decode_args`
+- `RedisKey::open` and `open_with_flags`, and `RedisKeyWritable::open`,
+  `open_with_flags` and `open_with_redis_string`
+- `InfoContext::new`, `RedisBuffer::new`, `RedisModuleIO::new`
+- `logging::setup_for_context`, `logging::log_io_error`,
+  `DefragContext::defrag_dealloc`
+- in `raw`: the RDB `save_*` and `load_*` helpers, `is_io_error`, `redis_log`,
+  `call_reply_verbatim_string`, `notify_keyspace_event` and `export_shared_api`
+
+Inside a command or callback there is usually a `&Context` already; use its safe
+methods instead:
+
+```rust
+// 2.x
+let key = RedisKeyWritable::open(ctx.ctx, &name);
+
+// 3.0
+let key = ctx.open_key_writable(&name);
+```
+
+The other `raw` helpers that took pointers (replies, call replies, keys, hashes,
+lists, strings, info fields, replication) are no longer public. The methods on
+`Context`, `RedisKey`, `RedisKeyWritable`, the call reply types and
+`InfoContext` cover them, and the bindings in `raw` remain for anything else.
+`key::verify_type` is no longer public either.
+
+The `ctx` fields of `Context` and `InfoContext` are private. `get_raw()` returns
+the pointer.
+
+`raw::export_shared_api` and `Context::export_shared_api` return the `Status`
+Redis reports (`Err` when the name is taken), and the name must stay valid for
+as long as the server runs.
+
+### `RedisString` and argument parsing
+
+- `try_as_str` borrows from the `RedisString`, so the `&str` cannot outlive it.
+- `NextArg::next_str` is removed: it returned a view into the string it had
+  just dropped. Use `ArgCursor`, which borrows the arguments without copying,
+  or `next_arg` followed by `try_as_str`.
+- The `inner` field is private; use `as_ptr()`.
+- `Context::get_current_user` returns `Option<RedisString>`.
+- `ScanKeyCursor::scan` callbacks receive the value as `Option<&RedisString>`,
+  and `KeysCursor::scan` takes the callback as `&mut F`.
+- The key passed to a keyspace event handler is bound to the callback's
+  `Context`, so a handler cannot keep it.
+
+```rust
+// 2.x
+let mut args = args.into_iter().skip(1);
+let key = args.next_arg()?;
+let field = args.next_str()?;
+
+// 3.0
+let mut args = ArgCursor::new(&args[1..]);
+let key = args.next_arg()?; // &RedisString
+let field = args.next_str()?; // &str, borrowed from args
+args.done()?;
+```
+
+### Keys
+
+- `RedisKeyWritable::delete` and `unlink` return `Result<bool, RedisError>`:
+  `true` when the key held a value.
+- `hash_set` and `hash_del` return `Result<usize, RedisError>`, the number of
+  existing fields replaced or deleted, instead of a `Status` that read a
+  replaced field as an error. They return `WrongType` for a key that is not a
+  hash. `hash_set_by_string` and `hash_del_by_string` take the field as a
+  `RedisString`, so it can hold any bytes.
+- `RedisKeyWritable::get_value` and `as_string_dma` take `&mut self`, so the
+  reference they return cannot outlive the key or alias another one. Bind the
+  key with `let mut`.
+
+```rust
+// 3.0
+let mut key = ctx.open_key_writable(&name);
+if let Some(value) = key.get_value::<MyType>(&MY_TYPE)? {
+    value.count += 1;
+}
+```
+
+### Calls
+
+- A call that fails without the `E` flag returns an error naming the reason
+  (for example `ERR RedisModule_Call failed: unknown command`) instead of
+  `CallReply::Unknown`, or a `StaticError` value from `Context::call`.
+- `Context::call` returns `SimpleString` for a simple string reply and
+  `BulkString` for a bulk string reply (`StringBuffer` when it is not UTF-8).
+  2.x returned `SimpleString` for both when the text was UTF-8.
+  `StringCallReply::is_simple_string` tells the two apart in `call_ext`.
+
+### Replies
+
+`RedisValue` has a new variant, `InsertionOrderedMap`, which replies with the
+entries in the order the module added them. An exhaustive `match` on
+`RedisValue` needs another arm.
+
+### Errors
+
+`RedisError` implements `std::error::Error`. That replaces 2.x's blanket
+`impl<T: std::error::Error> From<T> for RedisError` with an explicit list of
+`From` conversions: the standard library errors module code meets (`io::Error`,
+`Utf8Error`, `ParseIntError`, `NulError`, `PoisonError<T>` and the others listed
+in the `RedisError` docs). For any other error type, convert explicitly:
+
+```rust
+let value = parse(text).map_err(RedisError::from_error)?;
+```
+
+`from_error` takes any `Display`, so `anyhow::Error` and `Box<dyn Error>` work.
+
+### Configuration
+
+- `register_i64_configuration`, `register_string_configuration`,
+  `register_bool_configuration` and `register_enum_configuration` return
+  `Result<(), RedisError>`. A module that registers configurations outside
+  the `redis_module!` `configurations` block calls
+  `configuration::load_configurations` after the last registration.
+- `ConfigurationValue` no longer requires `Send`. `ConfigurationContext` is
+  neither `Send` nor `Sync`.
+- `RedisGILGuard<T>` is `Send` only when `T` is, and locking a guard that is
+  already locked panics instead of returning a second mutable reference.
+
+### Data types
+
+- `RedisType::raw_type` is a method returning `*mut RedisModuleType` instead of
+  a public `RefCell` field.
+- `RedisType::create_data_type` takes `&Context`.
+- A type name or encoding version that Redis would reject fails to compile
+  instead of failing the module load. The name is 9 characters from
+  `A-Z a-z 0-9 - _`.
+
+### Command flags
+
+The flags in `redis_module!`'s `commands` list must be a constant expression,
+usually a string literal. They are checked when the module compiles, so a
+misspelled flag is a compile error instead of a load failure. Flags that start
+with `_` are accepted as they are. `redis_command!` and `redis_event_handler!`
+take `&Context` instead of a raw pointer.
+
+### Raw enums
+
+- `KeyType` and `ReplyType` are `#[non_exhaustive]`, have an `Unknown`
+  variant for values a newer Redis may return, and convert from an `i32`
+  with `From` instead of panicking.
+- The raw enums are `#[repr(i32)]` and no longer have the `FromPrimitive`
+  methods; the `enum-primitive-derive` and `num-traits` dependencies are gone.
+- `Status::from(c_int)` maps every value other than `REDISMODULE_OK` to `Err`.
+- The opaque handle types in `raw` (`RedisModuleCtx`, `RedisModuleKey`,
+  `RedisModuleString` and the others with no fields) no longer derive `Copy`
+  and `Clone`. Modules hold pointers to them, never values.
+
+## Changes that compile unchanged
+
+These need no code change, but a module's tests, or clients that match on reply
+text, may notice them.
+
+- **Panics.** A panic in a command replies `ERR command panicked: <message>`
+  instead of aborting the server. A panic in a callback with no client (events,
+  timers, INFO, configuration getters, defrag) is logged at warning level.
+  A panic in a configuration setter fails the `CONFIG SET`; one in OnLoad
+  fails the load.
+- **Missing module APIs.** Calling an API the running Redis lacks returns or
+  panics with `RedisModule_X is not available in this Redis server` instead of
+  `called Option::unwrap() on a None value`.
+- **Errors on the wire.** A key of the wrong type replies the standard
+  `WRONGTYPE` error from `get_value` and the hash getters. A failed ACL key
+  check replies `NOPERM User does not have permissions on the key`, and an
+  unknown or disabled user `ERR the user does not exist or is disabled`.
+- **Forwarded call replies.** A bulk string reply from `Context::call` that a
+  command returns reaches the client as a bulk string, as Redis sent it (2.x
+  sent it as a status). `Context::reply_with_call_reply` forwards a reply
+  exactly.
+- **Load failures.** `redis_module!` fails the load when a configuration
+  registration fails or when `LoadConfigs` rejects a value given at load time,
+  instead of loading without the configuration.
+- **Strings.** `RedisString::create` and `Context::create_string` keep NUL
+  bytes instead of panicking. Simple string and error replies replace CR, LF
+  and NUL with spaces byte by byte, so non-ASCII text arrives intact.
+- **Logging.** Messages go to Redis through a fixed `%s` format, so `%` in
+  logged text is printed as is; an embedded NUL is written as `\0`.
+- **Cron events.** Cron event handlers receive the server's `hz`; 2.x passed 1.
+- **Crash reports.** The `trace` field of the module's crash report section is
+  `std::backtrace::Backtrace` output (one line, no column numbers) instead of
+  the `backtrace` crate's numbered frames.
+
+## Testing a module with `cargo test`
+
+A module's unit tests that allocate abort under `RedisAlloc`, because there is
+no Redis allocator outside a server. The `system-allocator-fallback` feature
+lets them use the system allocator. Enable it for tests only:
+
+```toml
+[dev-dependencies]
+redis-module = { version = "3", features = ["system-allocator-fallback"] }
+```
+
+`redis_module!` fails the module load if a module built with the feature has
+already allocated from the system allocator when Redis loads it.
