@@ -4,7 +4,7 @@ members = [".", "redismodule-rs-macros", "redismodule-rs-macros-internals"]
 resolver = "3"
 
 [workspace.package]
-version = "2.0.8"
+version = "3.0.0"
 license = "BSD-3-Clause"
 edition = "2021"
 rust-version = "1.87"
@@ -191,9 +191,9 @@ libc = "0.2"
 linkme = "0.3"
 serde = { version = "1", features = ["derive"] }
 cfg-if = "1"
-redis-module-macros-internals = { path = "./redismodule-rs-macros-internals", version = "2.0.8" }
+redis-module-macros-internals = { path = "./redismodule-rs-macros-internals", version = "3.0.0" }
 log = "0.4"
-common = { path = "./common", package = "redis-module-common", version = "0.1.1" }
+common = { path = "./common", package = "redis-module-common", version = "0.1.2" }
 
 [[test]]
 name = "system_allocator_fallback"
