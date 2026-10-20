@@ -23,6 +23,7 @@ cases=(
   "nested|0|200000"
   "adler32|1 blob|20000"
   "median|1 numbers|20000"
+  "lrange|1 numbers|20000"
   "primes|0 10000|5000"
 )
 

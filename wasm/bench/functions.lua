@@ -35,6 +35,11 @@ redis.register_function('median', function(keys)
   return numbers[math.floor((#numbers + 1) / 2)]
 end)
 
+-- How many items the list at the key has, fetched as median fetches them.
+redis.register_function('lrange', function(keys)
+  return #redis.call('LRANGE', keys[1], 0, -1)
+end)
+
 -- How many primes there are up to n, with a sieve.
 redis.register_function('primes', function(keys, args)
   local n = tonumber(args[1])

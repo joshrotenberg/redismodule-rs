@@ -68,7 +68,11 @@ Redis 8.10.2, release build, 50 clients. Server time per call from
 | `nested`: a reply, no calls | 1.48 to 1.56 | 1.27 to 1.40 | 0.86 to 0.90 |
 | `adler32`: checksum of a 16 KiB value | 569 to 574 | 61 | 0.11 |
 | `median`: LRANGE 1000 integers, sort | 246 to 247 | 175 to 178 | 0.71 to 0.73 |
+| `lrange`: the same LRANGE, count only | 58 to 59 | 139 | 2.4 |
 | `primes`: sieve up to 10000 | 423 to 429 | 26 to 27 | 0.06 |
+
+Rerun after H8 and H9 (flags, memory limit): the same numbers within noise.
+`lrange` was added for H15 in that rerun.
 
 The sieve's time grows linearly with n in both (wasm 4.3, 28 and 309 µs for n
 of 1000, 10000 and 100000; Lua 34, 433 and 3863 µs).
@@ -128,11 +132,11 @@ avoids both instantiating and tearing down, and was adopted.
 | H10 | todo | **Guest helper library.** A small Rust crate that builds the pre-order node list from typed values, so guests do not build it by hand. | The example guest uses it. |
 | H11 | done | **Bounds check cost.** Decided: keep signal-based traps off, so guests get explicit bounds checks. With H3's benchmark, turning them on made `primes` 18% faster (185 against 226 µs, old sieve loop) and `median` 6%. On Linux they are not safe in a module: wasmtime installs `SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE` handlers that chain to Redis's crash handler, but `CONFIG SET crash-log-enabled` (either value) reinstalls Redis's handlers or the defaults over them, and the next out-of-bounds guest access kills the server: silently after `no`, with a crash report after `yes` (G7). On macOS wasmtime takes faults through Mach exception ports, so the same steps are safe there. A crash outside wasm (`DEBUG SEGFAULT`) still produced Redis's crash report with wasmtime's handlers installed. | A decision, with a crash report checked with handlers on. |
 | H12 | done | **Context in the store.** The store holds a raw pointer to the command's `Context`. The safety argument is written down in `host.rs` ("The context pointer"): set and cleared around each guest run, re-entrant calls use their own instance, a panic drops the instance with the stale pointer, and instances stay on the main thread. No SDK pattern replaces it yet (S3). | Reviewed and documented, or replaced. |
-| H13 | todo | **Footprint.** Trim wasmtime features and measure the dylib and RSS. After loading the JavaScript component, RSS was 722 MB (serial compilation) and 959 MB (parallel) while `used_memory` stayed under 10 MB. `INFO wasm` (H8) accounts for 95 MB of compiled code and 7.7 MB of linear memory; find the rest, likely allocator memory kept after compiling. | Sizes recorded before and after. |
+| H13 | todo | **Footprint.** The release dylib is 12.4 MB (macOS). Loading the JavaScript component (release build, macOS): `INFO wasm` accounts for 95 MB of compiled code and 7.7 MB of linear memory, and RSS reached 0.97 GB, then 1.35 GB after a delete and two more loads. The compiler allocates through the module's global allocator, Redis's, so `used_memory_peak` reached 1.05 GB during the load, and 57.7 MB stayed counted after `WASM.DELETE` (not growing on later loads: caches, not a leak). With `std::alloc::System` as the module's allocator, `used_memory` stayed near 1 MB (peak 25 MB, the argument itself) and RSS behaved the same. Decision needed: count wasmtime's heap in `used_memory`, so a load's transient 1 GB counts against `maxmemory`, or not, so 70 MB of lasting heap per JavaScript library is invisible to it. | Sizes recorded before and after. |
 | H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
 | H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30); not investigated. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
 | H17 | todo | **Load time.** Loading an RDB compiles each library's component on the main thread, one after another, before the server serves clients. Measured with the log line `aux_load` now writes (release build, quiet machine): the JavaScript library took 1.56 to 1.67 s, 15 ms of it reading the RDB, against a server ready in 0.03 s with an empty RDB; an earlier, busier run took 2.6 to 3.9 s. Compiling libraries on parallel threads would gain little, since wasmtime already compiles one component on all cores. Left: compile in the background and block a call to a library until its component is ready, or use wasmtime's on-disk code cache. | Load time with the JavaScript library, before and after. |
-| H15 | todo | **Large replies into the guest.** `median` is only 1.4 times faster than Lua although sorting 1000 integers is cheap: the 1000 strings of its `LRANGE` reply are copied into nodes, then into the guest's memory. Measure how much of its 177 µs that is, then copy less (for example, give the guest a handle to read the reply from). | `median`'s time split, and a lower number. |
+| H15 | todo | **Large replies into the guest.** Measured with `lrange`, which makes `median`'s LRANGE and returns only the count: 139 µs in wasm against 58 µs in Lua. So of `median`'s 175 µs, about 139 µs is the call and moving the 1000-item reply into the guest, and 36 µs parsing and sorting (Lua: 194 µs). Likely cause, not yet profiled: lowering `list<node>` calls the guest's `cabi_realloc` once per bulk string. Left: a flat encoding (one buffer, nodes holding offsets into it), or a handle the guest reads the reply through. | `median`'s time split, and a lower number. |
 
 ## Repository
 
@@ -196,6 +200,13 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: H15 measured (see H15): the benchmark gained `lrange` in both
+  libraries.
+- 2026-10-20: H13 measured (see H13): the compiler's temporary allocations
+  count in `used_memory` (peak 1.05 GB for one JavaScript load) with Redis's
+  allocator, and do not with the system allocator. Left as a decision. The
+  benchmark, rerun after H8 and H9, gave the same numbers as before: the flag
+  checks cost nothing measurable.
 - 2026-10-20: H11 done (keep signal-based traps off; see H11 and G7), with
   the experiment run on macOS and, in a colima VM, on Linux with Redis 8.10.
   The example guest gained `oob` and a test that an out-of-bounds access traps

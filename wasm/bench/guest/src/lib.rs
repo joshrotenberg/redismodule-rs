@@ -9,7 +9,14 @@ wit_bindgen::generate!({
 
 use redis_module_wasm::host::redis::call;
 
-const FUNCTIONS: [&str; 5] = ["incr_twice", "nested", "adler32", "median", "primes"];
+const FUNCTIONS: [&str; 6] = [
+    "incr_twice",
+    "nested",
+    "adler32",
+    "median",
+    "lrange",
+    "primes",
+];
 
 struct Bench;
 
@@ -31,6 +38,7 @@ impl Guest for Bench {
             "nested" => Ok(nested()),
             "adler32" => key(&keys).map(adler32),
             "median" => key(&keys).and_then(median),
+            "lrange" => key(&keys).map(lrange),
             "primes" => number(args.first()).map(primes),
             _ => Err(format!("ERR unknown function '{name}'")),
         };
@@ -97,6 +105,13 @@ fn median(key: &[u8]) -> Result<Vec<Node>, String> {
         0 => Node::Nil,
         len => Node::Integer(numbers[(len - 1) / 2]),
     }])
+}
+
+/// How many items the list at `key` has, fetched with LRANGE as `median`
+/// fetches them: the cost of the call and of moving its reply into the guest.
+fn lrange(key: &[u8]) -> Vec<Node> {
+    let reply = call("LRANGE", &[key.to_vec(), b"0".to_vec(), b"-1".to_vec()]);
+    vec![Node::Integer(reply.len() as i64 - 1)]
 }
 
 /// How many primes there are up to `n`, with a sieve, in loops like the Lua
