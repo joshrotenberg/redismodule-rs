@@ -12,6 +12,171 @@ use redis_module::RedisValue;
 mod utils;
 
 #[test]
+fn test_runtime_keyspace_mask_from_module_arguments() -> Result<()> {
+    for (mask, expected) in [
+        ("none", [0, 0, 0, 0, 0]),
+        ("string", [1, 0, 0, 0, 0]),
+        ("missed", [0, 1, 0, 0, 0]),
+        ("new", [0, 0, 1, 0, 0]),
+        ("string,missed,new", [1, 1, 1, 0, 0]),
+    ] {
+        let mut con = TestConnection::with_args("runtime_events", &[mask]);
+        // Server Pub/Sub notifications remain disabled.
+        let config: Vec<String> = redis::cmd("CONFIG")
+            .arg(&["GET", "notify-keyspace-events"])
+            .query(&mut con)?;
+        assert_eq!(config[1], "");
+        redis::cmd("GET").arg("missing").query::<()>(&mut con)?;
+        redis::cmd("SET")
+            .arg(&["key", "value"])
+            .query::<()>(&mut con)?;
+        let counts: Vec<i64> = redis::cmd("runtime.counts").query(&mut con)?;
+        assert_eq!(counts, expected, "mask {mask}");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_runtime_keyspace_subscriptions_after_load_are_additive() -> Result<()> {
+    let mut con = TestConnection::new("runtime_events");
+    redis::cmd("SET")
+        .arg(&["before", "value"])
+        .query::<()>(&mut con)?;
+    for (command, mask) in [
+        ("runtime.subscribe", "string"),
+        ("runtime_subscribe_proc", "missed"),
+        ("runtime.subscribe_legacy", "none"),
+    ] {
+        redis::cmd(command).arg(mask).query::<()>(&mut con)?;
+    }
+    redis::cmd("GET").arg("missing").query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["after", "value"])
+        .query::<()>(&mut con)?;
+    let counts: Vec<i64> = redis::cmd("runtime.counts").query(&mut con)?;
+    assert_eq!(counts, [1, 1, 0, 0, 0]);
+    // Registering again adds another callback, rather than replacing the mask.
+    redis::cmd("runtime.subscribe")
+        .arg("string")
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["again", "value"])
+        .query::<()>(&mut con)?;
+    let counts: Vec<i64> = redis::cmd("runtime.counts").query(&mut con)?;
+    assert_eq!(counts, [3, 1, 0, 0, 0]);
+    Ok(())
+}
+
+#[test]
+fn test_runtime_keyspace_masks_filter_unsupported_flags() -> Result<()> {
+    for (mask, expected) in [("unsupported", 0), ("unsupported,string", 1)] {
+        let mut con = TestConnection::with_args("runtime_events", &[mask]);
+        redis::cmd("SET")
+            .arg(&["key", "value"])
+            .query::<()>(&mut con)?;
+        let counts: Vec<i64> = redis::cmd("runtime.counts").query(&mut con)?;
+        assert_eq!(counts, [expected, 0, 0, 0, 0]);
+        assert!(con.server_log()?.contains("aren't supported"));
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_runtime_keyspace_callback_preserves_bytes_and_database_and_catches_panics() -> Result<()> {
+    let mut con = TestConnection::with_args("runtime_events", &["generic,string"]);
+    redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
+    let key = b"key\xff";
+    redis::cmd("runtime.send")
+        .arg(b"event\xff".as_slice())
+        .arg(key.as_slice())
+        .query::<()>(&mut con)?;
+    let (event, saved_key, db): (String, Vec<u8>, i32) =
+        redis::cmd("runtime.last").query(&mut con)?;
+    assert_eq!(event, "event\u{fffd}");
+    assert_eq!(saved_key, key);
+    assert_eq!(db, 3);
+    // Panic before taking the example's mutex so later deliveries remain usable.
+    redis::cmd("SET")
+        .arg(&["runtime:panic", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["after-panic", "value"])
+        .query::<()>(&mut con)?;
+    let (event, key, db): (String, String, i32) = redis::cmd("runtime.last").query(&mut con)?;
+    assert_eq!(
+        (event.as_str(), key.as_str(), db),
+        ("set", "after-panic", 3)
+    );
+    assert!(
+        con.server_log()?
+            .contains("runtime keyspace handler panicked")
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_runtime_keyspace_subscriptions_are_removed_on_unload() -> Result<()> {
+    let mut con = TestConnection::with_args("runtime_events", &["string"]);
+    redis::cmd("SET")
+        .arg(&["before", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "runtime_events"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["unloaded", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("runtime_events")?)
+        .arg("missed")
+        .query::<()>(&mut con)?;
+    // Some dynamic loaders keep the library's Rust statics across a reload.
+    // Assert delivery relative to the baseline, independent of that behavior.
+    let mut expected: Vec<i64> = redis::cmd("runtime.counts").query(&mut con)?;
+    expected[1] += 1;
+    redis::cmd("SET")
+        .arg(&["after", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("GET").arg("missing").query::<()>(&mut con)?;
+    let counts: Vec<i64> = redis::cmd("runtime.counts").query(&mut con)?;
+    assert_eq!(counts, expected);
+    Ok(())
+}
+
+#[test]
+fn test_runtime_keyspace_subscriptions_reject_unowned_thread_contexts() -> Result<()> {
+    let mut con = TestConnection::new("runtime_events");
+    let error = redis::cmd("runtime.subscribe_on_thread")
+        .query::<String>(&mut con)
+        .expect_err("a module-less thread context registered a subscription");
+    assert!(
+        error.to_string().contains("module-owned context"),
+        "{error}"
+    );
+    // Finish the test's own worker before unloading its code. A client reply
+    // can arrive before the worker has returned through its final epilogue.
+    utils::wait_until(Duration::from_secs(2), "subscription worker exit", || {
+        Ok(redis::cmd("runtime.finish_thread").query::<i64>(&mut con)? == 1)
+    })?;
+    redis::cmd("SET")
+        .arg(&["before-unload", "value"])
+        .query::<()>(&mut con)?;
+    let counts: Vec<i64> = redis::cmd("runtime.counts").query(&mut con)?;
+    assert_eq!(counts, [0; 5]);
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "runtime_events"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["after-unload", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_command_builders_mix_with_legacy_and_preserve_metadata() -> Result<()> {
     let mut con = TestConnection::new("command_builder");
     for command in [

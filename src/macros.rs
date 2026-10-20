@@ -130,7 +130,8 @@ macro_rules! __redis_command_callback {
                 argc: i32,
             ) -> i32 {
                 let command = || {
-                    let context = unsafe { $crate::Context::new(ctx) };
+                    // SAFETY: Redis associates this SDK module callback with its module.
+                    let context = unsafe { $crate::Context::from_module_context(ctx) };
                     // SAFETY: Redis supplies live argv/count for this callback.
                     let args = unsafe { $crate::decode_args(ctx, argv, argc) };
                     let response = $handler(&context, args);
@@ -157,8 +158,22 @@ macro_rules! __redis_register_commands {
     };
 }
 
-/// Subscribes a keyspace event handler. `redis_module!` calls this for each
-/// entry in `event_handlers`.
+/// Adapts a Rust function into a panic-safe [`crate::KeyspaceEventHandler`].
+///
+/// Pass `redis_event_handler!(handler)` to
+/// [`Context::subscribe_to_keyspace_events`](crate::Context::subscribe_to_keyspace_events)
+/// with a mask selected at runtime. Handlers are static functions or
+/// noncapturing expressions; captured state is not supported.
+///
+/// The existing three-argument form subscribes immediately and returns a native
+/// error status from the enclosing function on failure. `redis_module!` uses
+/// that form for each entry in `event_handlers`.
+///
+/// Both forms require proven module ownership for subscription. A context from
+/// [`Context::new`](crate::Context::new), including an ordinary thread-safe
+/// guard, is rejected. SDK load, command, and keyspace callbacks provide the
+/// proof. For a custom native callback, see the safety contract of
+/// [`Context::from_module_context`](crate::Context::from_module_context).
 ///
 /// The key slice a handler receives is valid only while the handler runs, so a
 /// handler cannot ask to keep it:
@@ -176,6 +191,14 @@ macro_rules! __redis_register_commands {
 ///     event_handlers: [[@STRING: on_event]],
 /// }
 /// # fn main() {}
+/// ```
+///
+/// The runtime adapter enforces the same lifetime:
+///
+/// ```compile_fail,E0716
+/// use redis_module::{Context, NotifyEvent, redis_event_handler};
+/// fn on_event(_: &Context, _: NotifyEvent, _: &str, _: &'static [u8]) {}
+/// let _handler = redis_event_handler!(on_event);
 /// ```
 ///
 /// A handler that borrows the key for the call compiles:
@@ -198,69 +221,54 @@ macro_rules! __redis_register_commands {
 /// ```
 #[macro_export]
 macro_rules! redis_event_handler {
-    (
-        $ctx: expr,
-        $event_type: expr,
-        $event_handler: expr
-    ) => {{
-        // See redis_command!: a &Context instead of a raw pointer.
-        let __module_context: &$crate::Context = $ctx;
-        let __module_ctx: *mut $crate::raw::RedisModuleCtx = __module_context.get_raw();
-        extern "C" fn __handle_event(
-            ctx: *mut $crate::raw::RedisModuleCtx,
-            event_type: c_int,
-            event: *const c_char,
-            key: *mut $crate::raw::RedisModuleString,
-        ) -> c_int {
-            fn borrow_key<'key>(_: &'key $crate::Context, key: &'key [u8]) -> &'key [u8] {
-                key
+    ($event_handler:expr) => {{
+        enum __RedisModuleEventCallback {}
+        impl __RedisModuleEventCallback {
+            extern "C" fn invoke(
+                ctx: *mut $crate::raw::RedisModuleCtx,
+                event_type: ::std::os::raw::c_int,
+                event: *const ::std::os::raw::c_char,
+                key: *mut $crate::raw::RedisModuleString,
+            ) -> ::std::os::raw::c_int {
+                fn borrow_key<'key>(_: &'key $crate::Context, key: &'key [u8]) -> &'key [u8] {
+                    key
+                }
+                $crate::panic::run_callback(
+                    "keyspace event handler",
+                    || {
+                        // SAFETY: Redis associates this SDK module callback with its module.
+                        let context = unsafe { $crate::Context::from_module_context(ctx) };
+                        // SAFETY: Redis supplies a live, read-only key for this
+                        // synchronous invocation. The context anchors its lifetime,
+                        // including handlers which would otherwise request 'static.
+                        // LOADED-event keys cannot be retained. Never make this
+                        // pointer into an owning RedisString.
+                        let redis_key = borrow_key(&context, unsafe {
+                            $crate::RedisString::string_as_slice(key)
+                        });
+                        let event_str = unsafe { ::std::ffi::CStr::from_ptr(event) };
+                        $event_handler(
+                            &context,
+                            $crate::NotifyEvent::from_bits_truncate(event_type),
+                            &event_str.to_string_lossy(),
+                            redis_key,
+                        );
+                    },
+                    || (),
+                );
+                $crate::raw::Status::Ok as ::std::os::raw::c_int
             }
-            $crate::panic::run_callback(
-                "keyspace event handler",
-                || {
-                    let context = unsafe { $crate::Context::new(ctx) };
-
-                    // SAFETY: Redis supplies a live, read-only key for this synchronous
-                    // callback. The local anchor bounds this view to the invocation,
-                    // including handlers which would otherwise request 'static. It
-                    // must not be retained or invalidated through a native alias.
-                    // In particular, LOADED-event keys cannot be retained. Do not turn
-                    // this borrowed pointer into an owning RedisString.
-                    let redis_key = borrow_key(&context, unsafe {
-                        $crate::RedisString::string_as_slice(key)
-                    });
-                    let event_str = unsafe { CStr::from_ptr(event) };
-                    $event_handler(
-                        &context,
-                        $crate::NotifyEvent::from_bits_truncate(event_type),
-                        &event_str.to_string_lossy(),
-                        redis_key,
-                    );
-                },
-                || (),
-            );
-
-            $crate::raw::Status::Ok as c_int
         }
-
-        let all_available_notification_flags = $crate::raw::get_keyspace_notification_flags_all();
-        let available_wanted_notification_flags = $event_type.intersection(all_available_notification_flags);
-        if !all_available_notification_flags.contains($event_type) {
-            let not_supported = $event_type.difference(all_available_notification_flags);
-            __module_context.log_notice(&format!(
-                "These event notification flags set aren't supported: {not_supported:?}. These flags will be used: {available_wanted_notification_flags:?}"
-            ));
-        }
-
-        if !available_wanted_notification_flags.is_empty() && unsafe {
-            $crate::__required_api!(RedisModule_SubscribeToKeyspaceEvents)(
-                __module_ctx,
-                available_wanted_notification_flags.bits(),
-                Some(__handle_event),
-            )
-        } == $crate::raw::Status::Err as c_int
+        // SAFETY: The adapter catches panics and bounds borrowed data to the call.
+        unsafe { $crate::KeyspaceEventHandler::__new(__RedisModuleEventCallback::invoke) }
+    }};
+    ($ctx:expr, $event_type:expr, $event_handler:expr) => {{
+        let __module_context: &$crate::Context = $ctx;
+        if let Err(error) = __module_context
+            .subscribe_to_keyspace_events($event_type, $crate::redis_event_handler!($event_handler))
         {
-            return $crate::raw::Status::Err as c_int;
+            __module_context.log_warning(&error.to_string());
+            return $crate::raw::Status::Err as ::std::os::raw::c_int;
         }
     }};
 }
@@ -423,7 +431,8 @@ macro_rules! redis_module {
             $crate::panic::run_callback(
                 "module load",
                 || {
-                    let context = unsafe { $crate::Context::new(ctx) };
+                    // SAFETY: Redis associates this SDK module callback with its module.
+                    let context = unsafe { $crate::Context::from_module_context(ctx) };
                     unsafe {
                         let _ = $crate::MODULE_CONTEXT.set_context(&context);
                     }
@@ -620,7 +629,8 @@ macro_rules! redis_module {
             $crate::panic::run_callback(
                 "module unload",
                 || {
-                    let context = unsafe { $crate::Context::new(ctx) };
+                    // SAFETY: Redis associates this SDK module callback with its module.
+                    let context = unsafe { $crate::Context::from_module_context(ctx) };
                     $(
                         if $deinit_func(&context) == $crate::Status::Err {
                             return $crate::Status::Err as c_int;

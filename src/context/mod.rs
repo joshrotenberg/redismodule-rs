@@ -35,6 +35,7 @@ pub mod event_loop;
 pub mod info;
 pub mod key_cursor;
 pub mod keys_cursor;
+pub mod keyspace_events;
 pub mod server_events;
 pub mod thread_safe;
 
@@ -375,6 +376,8 @@ pub struct Context {
     // Private: a Context built from any pointer would be a forged proof that
     // the Redis lock is held. Use Context::new or get_raw.
     pub(crate) ctx: *mut raw::RedisModuleCtx,
+    // Only a constructor with a proven native module association sets this.
+    pub(crate) module_owned: bool,
 }
 
 struct SelectedDbGuard<'ctx> {
@@ -479,8 +482,33 @@ impl Context {
     /// thread-safe context, and the `Context` must be used only on a thread
     /// that holds the Redis lock while `ctx` is valid. A `Context` is proof that
     /// the lock is held, which [`RedisGILGuard`](crate::RedisGILGuard) relies on.
+    /// This does not prove native module ownership; use [`Self::from_module_context`]
+    /// only when that stronger guarantee is known.
     pub const unsafe fn new(ctx: *mut raw::RedisModuleCtx) -> Self {
-        Self { ctx }
+        Self {
+            ctx,
+            module_owned: false,
+        }
+    }
+
+    /// Wraps a Redis context known to belong to the current module.
+    ///
+    /// SDK module-load, command, and keyspace-notification callbacks use this
+    /// constructor. Unlike [`Self::new`], it permits APIs that retain a callback
+    /// associated with the module, such as [`Self::subscribe_to_keyspace_events`].
+    ///
+    /// # Safety
+    ///
+    /// All requirements of [`Self::new`] apply. In addition, `ctx` must have a
+    /// live native module association for this module. A context obtained from
+    /// `RedisModule_GetThreadSafeContext(NULL)` has no such association and
+    /// must use [`Self::new`] instead.
+    #[must_use]
+    pub const unsafe fn from_module_context(ctx: *mut raw::RedisModuleCtx) -> Self {
+        Self {
+            ctx,
+            module_owned: true,
+        }
     }
 
     /// A `Context` without a Redis context pointer, for the APIs that accept a
@@ -494,6 +522,7 @@ impl Context {
     pub const unsafe fn dummy() -> Self {
         Self {
             ctx: ptr::null_mut(),
+            module_owned: false,
         }
     }
 

@@ -13,6 +13,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `Context::subscribe_to_keyspace_events` for runtime-selected notification
+  masks, with `redis_event_handler!(handler)` providing the shared panic-safe
+  callback adapter. Existing `redis_module!` event handlers remain supported.
+  Module ownership is tracked by SDK callback contexts; unproven contexts are
+  rejected before registration. `Context::from_module_context` lets custom
+  native callbacks establish ownership under an explicit unsafe contract.
 - Optional command builders in `redis_module!`: `redis_command!(name, handler)`
   returns a `CommandBuilder` with typed `CommandFlags`, `KeyRange`, and ACL
   settings. Builders can be mixed with existing command tuples.
@@ -52,6 +58,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- **Breaking:** the three-argument `redis_event_handler!(ctx, mask, handler)`
+  requires a context with proven module ownership. SDK module-load, command,
+  and keyspace callbacks provide one. Contexts wrapped with `Context::new` and
+  other unproven contexts are rejected to prevent subscriptions surviving
+  module unload; custom native callbacks can use `Context::from_module_context`
+  only when its native module-association contract holds.
 - `Context::notify_keyspace_event` returns `Status::Err` for NUL-containing
   event names instead of panicking.
 - **Breaking:** functions that take raw pointers they dereference are `unsafe`: `Context::new`, `Context::dummy`, `RedisString::new`, `RedisString::from_redis_module_string`, `RedisString::from_ptr`, `RedisString::string_as_slice`, `decode_args`, `RedisKey::open` and `open_with_flags`, `RedisKeyWritable::open`, `open_with_flags` and `open_with_redis_string`, `InfoContext::new`, `RedisBuffer::new`, `RedisModuleIO::new`, `logging::setup_for_context`, `logging::log_io_error`, `DefragContext::defrag_dealloc`, and in `raw` the RDB `save_*` and `load_*` helpers, `is_io_error`, `redis_log`, `call_reply_verbatim_string` and the doc-hidden `register_info_function`.

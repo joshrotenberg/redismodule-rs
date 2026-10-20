@@ -143,6 +143,23 @@ arity, detailed key specifications, summaries, and other rich metadata.
 See [examples/database.rs](examples/database.rs) for mixed syntax and
 [examples/command_builder.rs](examples/command_builder.rs) for more settings.
 
+### Runtime keyspace subscriptions
+
+Keyspace subscriptions can also use a mask chosen from module arguments or a
+command:
+
+```rust,ignore
+ctx.subscribe_to_keyspace_events(mask, redis_module::redis_event_handler!(on_event))?;
+```
+
+Use a module-owned context from initialization or a command. Ordinary
+thread-safe context guards are rejected because Redis cannot associate their
+subscriptions with a module for unload cleanup. The existing `event_handlers`
+list still works. Each subscription is additive
+and lasts until the module unloads. See
+[examples/runtime_events.rs](examples/runtime_events.rs) for load-time and
+command-time subscriptions.
+
 ### Feature flags
 
 | feature | effect |

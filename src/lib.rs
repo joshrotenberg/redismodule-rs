@@ -50,6 +50,7 @@ pub use crate::context::defrag;
 pub use crate::context::event_loop;
 pub use crate::context::key_cursor::ScanKeyCursor;
 pub use crate::context::keys_cursor::KeysCursor;
+pub use crate::context::keyspace_events::KeyspaceEventHandler;
 pub use crate::context::server_events;
 pub use common::AclCategory;
 
