@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-20.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `1d918e7`, error-code and byte-event helpers merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `bfacc11`, optional command builders merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `1d918e7` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `bfacc11` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -121,12 +121,14 @@ errors, and panics.
 Error-code and notification helpers merged in `1d918e7`: borrowed error
 prefixes on both call-error wrappers and byte event names with NUL rejection.
 
-Next: an optional command builder alongside the legacy `redis_module!` syntax,
-with shared registration, typed flags, named key positions, and ACL settings.
+Optional command builders merged in `bfacc11`: `redis_command!(name, handler)`
+with typed flags, named key positions, and ACL settings. Builder expressions
+and legacy tuples share registration and can be mixed in `redis_module!`.
 
-Then: subscribing to keyspace events after load, the server-event payloads for
-flush and `SWAPDB`, a guide on writing to the keyspace from a notification, and
-a wider CI matrix.
+Next: subscribing to keyspace events with a runtime-selected mask.
+
+Then: the server-event payloads for flush and `SWAPDB`, a guide on writing to
+the keyspace from a notification, and a wider CI matrix.
 
 Also open:
 
