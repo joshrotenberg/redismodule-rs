@@ -85,8 +85,12 @@ pub(crate) fn log_internal<L: Into<RedisLogLevel>>(
 /// to the caller since cannot load or save the data for some critical reason.
 /// Embedded NUL bytes in the message are rendered as `\0`, which reads the same
 /// as a literal backslash and zero; other text is passed literally.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn log_io_error(io: *mut raw::RedisModuleIO, level: RedisLogLevel, message: &str) {
+///
+/// # Safety
+///
+/// `io` must be the `RedisModuleIO` pointer Redis passed to the running RDB
+/// callback.
+pub unsafe fn log_io_error(io: *mut raw::RedisModuleIO, level: RedisLogLevel, message: &str) {
     if cfg!(test) {
         return;
     }
@@ -133,14 +137,14 @@ pub fn log_warning<T: AsRef<str>>(message: T) {
 
 /// The [log] crate implementation of logging.
 pub mod standard_log_implementation {
-    use std::sync::atomic::Ordering;
+    use std::sync::atomic::{AtomicPtr, Ordering};
 
     use crate::RedisError;
 
     use super::*;
     use log::{Metadata, Record, SetLoggerError};
 
-    static mut LOGGER: RedisGlobalLogger = RedisGlobalLogger(ptr::null_mut());
+    static LOGGER: RedisGlobalLogger = RedisGlobalLogger(AtomicPtr::new(ptr::null_mut()));
 
     /// The struct which has an implementation of the [log] crate's
     /// logging interface.
@@ -150,15 +154,7 @@ pub mod standard_log_implementation {
     /// Redis does not support logging at the [log::Level::Error] level,
     /// so logging at this level will be converted to logging at the
     /// [log::Level::Warn] level under the hood.
-    struct RedisGlobalLogger(*mut raw::RedisModuleCtx);
-
-    // The pointer of the Global logger can only be changed once during
-    // the startup. Once one of the [std::sync::OnceLock] or
-    // [std::sync::OnceCell] is stabilised, we can remove these unsafe
-    // trait implementations in favour of using the aforementioned safe
-    // types.
-    unsafe impl Send for RedisGlobalLogger {}
-    unsafe impl Sync for RedisGlobalLogger {}
+    struct RedisGlobalLogger(AtomicPtr<raw::RedisModuleCtx>);
 
     /// Sets this logger as a global logger. Use this method to set
     /// up the logger. If this method is never called, the default
@@ -190,18 +186,30 @@ pub mod standard_log_implementation {
         if pointer.is_null() {
             return Err(RedisError::Str(NOT_INITIALISED_MESSAGE));
         }
-        setup_for_context(pointer)
+        // SAFETY: the module's detached context lives as long as the module.
+        unsafe { setup_for_context(pointer) }
             .map_err(|e| RedisError::String(format!("Couldn't set up the logger: {e}")))
     }
 
     /// The same as [setup] but sets the custom module context.
-    #[allow(dead_code)]
-    pub fn setup_for_context(context: *mut raw::RedisModuleCtx) -> Result<(), SetLoggerError> {
-        unsafe {
-            LOGGER.0 = context;
-            log::set_logger(&*std::ptr::addr_of!(LOGGER))
-                .map(|()| log::set_max_level(log::LevelFilter::Trace))
-        }
+    ///
+    /// # Safety
+    ///
+    /// `context` must be null or a context that stays valid for as long as
+    /// the logger is used, such as a detached context.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a logger is already set, by this function or another; the
+    /// logger's context is then left as it was.
+    pub unsafe fn setup_for_context(
+        context: *mut raw::RedisModuleCtx,
+    ) -> Result<(), SetLoggerError> {
+        log::set_logger(&LOGGER)?;
+        // Records logged before this store use no context, which Redis allows.
+        LOGGER.0.store(context, Ordering::Release);
+        log::set_max_level(log::LevelFilter::Trace);
+        Ok(())
     }
 
     impl log::Log for RedisGlobalLogger {
@@ -227,7 +235,7 @@ pub mod standard_log_implementation {
                 _ => record.args().to_string(),
             };
 
-            log_internal(self.0, record.level(), &message);
+            log_internal(self.0.load(Ordering::Acquire), record.level(), &message);
         }
 
         fn flush(&self) {

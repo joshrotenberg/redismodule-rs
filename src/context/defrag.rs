@@ -2,11 +2,11 @@ use std::alloc::Layout;
 use std::fmt::{Debug, Formatter};
 use std::ptr::NonNull;
 
-use crate::{
-    raw, Context, RedisModule_DefragAlloc, RedisModule_DefragCursorGet,
-    RedisModule_DefragCursorSet, RedisModule_DefragRedisModuleString, RedisModule_DefragShouldStop,
-    RedisString, Status,
+use crate::raw::{
+    RedisModule_DefragAlloc, RedisModule_DefragCursorGet, RedisModule_DefragCursorSet,
+    RedisModule_DefragRedisModuleString, RedisModule_DefragShouldStop,
 };
+use crate::{raw, Context, RedisString, Status};
 use crate::{RedisError, RedisLockIndicator};
 use linkme::distributed_slice;
 
@@ -149,15 +149,25 @@ impl DefragContext {
         ptr
     }
 
-    /// Allocate memory using defrag allocator if supported by the
-    /// current Redis server, fallback to regular allocation otherwise.
+    /// Allocates `layout` with the global allocator. Returns null when
+    /// `layout` has zero size or the allocation fails.
     pub fn defrag_alloc<T>(&self, layout: Layout) -> *mut T {
+        if layout.size() == 0 {
+            return std::ptr::null_mut();
+        }
+        // SAFETY: the layout has a non-zero size.
         unsafe { std::alloc::alloc(layout) }.cast()
     }
 
     /// Deallocate memory using defrag deallocator if supported by the
     /// current Redis server, fallback to regular deallocation otherwise.
-    pub fn defrag_dealloc<T>(&self, ptr: *mut T, layout: Layout) {
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must be a non-null block from [`Self::defrag_alloc`] (or the
+    /// global allocator) for `layout`, or the pointer
+    /// [`Self::defrag_realloc`] moved such a block to, and not freed already.
+    pub unsafe fn defrag_dealloc<T>(&self, ptr: *mut T, layout: Layout) {
         unsafe { std::alloc::dealloc(ptr.cast(), layout) }
     }
 

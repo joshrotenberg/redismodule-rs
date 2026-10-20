@@ -220,9 +220,11 @@ fn call_verbatim(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     let (format, data) = reply
         .as_parts()
         .ok_or(RedisError::Str("ERR as_parts returned None"))?;
-    let (raw_format, raw_data) = raw::call_reply_verbatim_string(reply.get_raw()).ok_or(
-        RedisError::Str("ERR call_reply_verbatim_string returned None"),
-    )?;
+    // SAFETY: the reply is alive for this call.
+    let (raw_format, raw_data) = unsafe { raw::call_reply_verbatim_string(reply.get_raw()) }
+        .ok_or(RedisError::Str(
+            "ERR call_reply_verbatim_string returned None",
+        ))?;
     Ok(RedisValue::Array(vec![
         RedisValue::BulkString(format.to_owned()),
         RedisValue::BulkString(raw_format),

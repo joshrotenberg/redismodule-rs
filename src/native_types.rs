@@ -3,6 +3,7 @@ use std::ptr;
 use std::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::raw;
+use crate::Context;
 
 /// A native data type that a module registers with Redis.
 ///
@@ -125,13 +126,14 @@ impl RedisType {
         self.raw_type.load(Ordering::Acquire)
     }
 
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn create_data_type(&self, ctx: *mut raw::RedisModuleCtx) -> Result<(), &str> {
+    /// Registers this type with Redis. `redis_module!` calls it for each entry
+    /// in `data_types`; call it during the module's load.
+    pub fn create_data_type(&self, ctx: &Context) -> Result<(), &str> {
         let type_name = CString::new(self.name).unwrap();
 
         let redis_type = unsafe {
             crate::__required_api!(RedisModule_CreateDataType)(
-                ctx,
+                ctx.ctx,
                 type_name.as_ptr(),
                 self.version, // Encoding version
                 &mut self.type_methods.clone(),
@@ -139,16 +141,13 @@ impl RedisType {
         };
 
         if redis_type.is_null() {
-            raw::redis_log(ctx, "Error: created data type is null");
+            ctx.log_notice("Error: created data type is null");
             return Err("Error: created data type is null");
         }
 
         self.raw_type.store(redis_type, Ordering::Release);
 
-        raw::redis_log(
-            ctx,
-            format!("Created new data type '{}'", self.name).as_str(),
-        );
+        ctx.log_notice(&format!("Created new data type '{}'", self.name));
 
         Ok(())
     }

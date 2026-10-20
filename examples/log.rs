@@ -8,7 +8,8 @@ use std::os::raw::c_void;
 fn init(_ctx: &Context, _args: &[RedisString]) -> Status {
     // The load callback's context is temporary. The persistent log facade uses
     // context-free logging; each command's Context is used only for that command.
-    match logging::setup_for_context(std::ptr::null_mut()) {
+    // SAFETY: a null context is always valid.
+    match unsafe { logging::setup_for_context(std::ptr::null_mut()) } {
         Ok(()) => Status::Ok,
         Err(_) => Status::Err,
     }
@@ -21,7 +22,8 @@ fn log_message(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let message = args[1].try_as_str()?;
     ctx.log_notice(&format!("log-context: {message}"));
     logging::log_notice(format!("log-global: {message}"));
-    raw::redis_log(ctx.get_raw(), &format!("log-raw: {message}"));
+    // SAFETY: the command's own context, during the command.
+    unsafe { raw::redis_log(ctx.get_raw(), &format!("log-raw: {message}")) };
     log::info!("log-standard: {message}");
     Ok("Logged".into())
 }

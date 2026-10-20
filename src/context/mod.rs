@@ -9,14 +9,14 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::key::{KeyFlags, RedisKey, RedisKeyWritable};
 use crate::logging::RedisLogLevel;
+use crate::raw::{
+    add_info_begin_dict_field, add_info_end_dict_field, add_info_field_double,
+    add_info_field_long_long, add_info_field_str, add_info_field_unsigned_long_long,
+    add_info_section,
+};
 use crate::raw::{ModuleOptions, Version};
 use crate::redisvalue::RedisValueKey;
-use crate::{
-    add_info_begin_dict_field, add_info_end_dict_field, add_info_field_double,
-    add_info_field_long_long, add_info_field_str, add_info_field_unsigned_long_long, raw, utils,
-    Status,
-};
-use crate::{add_info_section, RedisResult};
+use crate::{raw, utils, RedisResult, Status};
 use crate::{RedisError, RedisString, RedisValue};
 use std::ops::Deref;
 
@@ -765,17 +765,23 @@ impl Context {
 
     #[must_use]
     pub fn open_key(&self, key: &RedisString) -> RedisKey {
-        RedisKey::open(self.ctx, key)
+        // SAFETY: a Context comes from Redis or the unsafe Context::new, so
+        // self.ctx is valid and the lock is held now. The key's type does not
+        // tie it to the Context or the lock; callers must not keep it past
+        // them (the context split, upstream issue 351, is to close this).
+        unsafe { RedisKey::open(self.ctx, key) }
     }
 
     #[must_use]
     pub fn open_key_with_flags(&self, key: &RedisString, flags: KeyFlags) -> RedisKey {
-        RedisKey::open_with_flags(self.ctx, key, flags)
+        // SAFETY: as for open_key.
+        unsafe { RedisKey::open_with_flags(self.ctx, key, flags) }
     }
 
     #[must_use]
     pub fn open_key_writable(&self, key: &RedisString) -> RedisKeyWritable {
-        RedisKeyWritable::open(self.ctx, key)
+        // SAFETY: as for open_key.
+        unsafe { RedisKeyWritable::open(self.ctx, key) }
     }
 
     #[must_use]
@@ -784,7 +790,8 @@ impl Context {
         key: &RedisString,
         flags: KeyFlags,
     ) -> RedisKeyWritable {
-        RedisKeyWritable::open_with_flags(self.ctx, key, flags)
+        // SAFETY: as for open_key.
+        unsafe { RedisKeyWritable::open_with_flags(self.ctx, key, flags) }
     }
 
     pub fn replicate_verbatim(&self) {
@@ -889,13 +896,11 @@ impl Context {
         &self,
         func: *const ::std::os::raw::c_void,
         name: *const ::std::os::raw::c_char,
-    ) {
-        raw::export_shared_api(self.ctx, func, name);
+    ) -> raw::Status {
+        unsafe { raw::export_shared_api(self.ctx, func, name) }
     }
 
-    /// # Safety
-    ///
-    /// See [raw::notify_keyspace_event].
+    /// Fires a keyspace notification for `keyname`.
     #[allow(clippy::must_use_candidate)]
     pub fn notify_keyspace_event(
         &self,
@@ -946,7 +951,6 @@ impl Context {
         Err(RedisError::Str("Error getting redis_version"))
     }
 
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn get_redis_version_internal(&self, force_use_rm_call: bool) -> Result<Version, RedisError> {
         match unsafe { raw::RedisModule_GetServerVersion } {
             Some(api) if !force_use_rm_call => {
@@ -1724,12 +1728,25 @@ impl<'a> From<&'a InfoContext> for InfoContextBuilder<'a> {
 
 #[derive(Debug)]
 pub struct InfoContext {
-    pub ctx: *mut raw::RedisModuleInfoCtx,
+    pub(crate) ctx: *mut raw::RedisModuleInfoCtx,
 }
 
 impl InfoContext {
-    pub const fn new(ctx: *mut raw::RedisModuleInfoCtx) -> Self {
+    /// Wraps the info context Redis passed to the module's info callback.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be the context of the running info callback, and the
+    /// `InfoContext` must not outlive the callback.
+    pub const unsafe fn new(ctx: *mut raw::RedisModuleInfoCtx) -> Self {
         Self { ctx }
+    }
+
+    /// The raw info context, for calls to the `RedisModule_Info*` functions
+    /// in [`raw`].
+    #[must_use]
+    pub const fn get_raw(&self) -> *mut raw::RedisModuleInfoCtx {
+        self.ctx
     }
 
     /// Returns a builder for the [`InfoContext`].

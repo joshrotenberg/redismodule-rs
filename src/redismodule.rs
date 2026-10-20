@@ -624,7 +624,14 @@ pub struct RedisBuffer {
 }
 
 impl RedisBuffer {
-    pub const fn new(buffer: *mut c_char, len: usize) -> Self {
+    /// Takes ownership of a buffer Redis allocated; dropping it frees the
+    /// buffer with `RedisModule_Free`.
+    ///
+    /// # Safety
+    ///
+    /// `buffer` must point to `len` bytes that Redis allocated, such as the
+    /// result of `RedisModule_LoadStringBuffer`, owned by no one else.
+    pub const unsafe fn new(buffer: *mut c_char, len: usize) -> Self {
         Self { buffer, len }
     }
 

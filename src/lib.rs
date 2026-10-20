@@ -34,7 +34,9 @@ pub use crate::context::thread_safe::{
     ContextGuard, DetachedFromClient, RedisGILGuard, RedisLockIndicator, ThreadSafeContext,
 };
 pub use crate::io::RedisModuleIO;
-pub use crate::raw::NotifyEvent;
+// The raw types that the safe API uses; the rest of the raw bindings are
+// under `raw`.
+pub use crate::raw::{KeyType, ModuleOptions, NotifyEvent, Status, Version};
 
 pub use crate::configuration::ConfigurationValue;
 pub use crate::configuration::EnumConfigurationValue;
@@ -69,7 +71,7 @@ pub use crate::context::{
     InfoContextBuilderFieldBottomLevelValue, InfoContextBuilderFieldTopLevelValue,
     InfoContextFieldBottomLevelData, InfoContextFieldTopLevelData, OneInfoSectionData,
 };
-pub use crate::raw::*;
+
 pub use crate::redismodule::*;
 use backtrace::Backtrace;
 use context::server_events::INFO_COMMAND_HANDLER_LIST;

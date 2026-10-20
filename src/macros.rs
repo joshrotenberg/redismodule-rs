@@ -117,10 +117,11 @@ macro_rules! redis_command {
             )
         } == $crate::raw::Status::Err as c_int
         {
-            $crate::raw::redis_log(
+            // SAFETY: __module_ctx comes from the load Context.
+            unsafe { $crate::raw::redis_log(
                 __module_ctx,
                 &format!("Error: failed to create command {}", $command_name),
-            );
+            ) };
             return $crate::raw::Status::Err as c_int;
         }
 
@@ -129,10 +130,11 @@ macro_rules! redis_command {
             let command =
             unsafe { $crate::__required_api!(RedisModule_GetCommand)(__module_ctx, name.as_ptr()) };
             if command.is_null() {
-                $crate::raw::redis_log(
+                // SAFETY: __module_ctx comes from the load Context.
+                unsafe { $crate::raw::redis_log(
                     __module_ctx,
                     &format!("Error: failed to get command {}", $command_name),
-                );
+                ) };
                 return $crate::raw::Status::Err as c_int;
             }
             let mut optional_failed = true;
@@ -149,13 +151,14 @@ macro_rules! redis_command {
                 // Warn if optional ACL categories are not set, but don't fail.
                 if RM_SetCommandACLCategories(command, acl_categories.as_ptr()) == $crate::raw::Status::Err as c_int {
                     optional_failed = true;
-                    $crate::raw::redis_log(
+                    // SAFETY: __module_ctx comes from the load Context.
+                    unsafe { $crate::raw::redis_log(
                         __module_ctx,
                         &format!(
                             "Warning: failed to set command `{}` ACL categories `{}`",
                             $command_name, &acl_categories.to_string_lossy()
                         ),
-                    );
+                    ) };
                 }
             )?
             if optional_failed && mandatory != AclCategory::None {
@@ -165,21 +168,23 @@ macro_rules! redis_command {
                 if RM_SetCommandACLCategories(command, acl_categories.as_ptr())
                     == $crate::raw::Status::Err as c_int
                 {
-                    $crate::raw::redis_log(
+                    // SAFETY: __module_ctx comes from the load Context.
+                    unsafe { $crate::raw::redis_log(
                         __module_ctx,
                         &format!(
                             "Error: failed to set command `{}` mandatory ACL categories `{mandatory}`",
                             $command_name
                         ),
-                    );
+                    ) };
                     return $crate::raw::Status::Err as c_int;
                 }
             }
         } else if mandatory != AclCategory::None {
-            $crate::raw::redis_log(
+            // SAFETY: __module_ctx comes from the load Context.
+            unsafe { $crate::raw::redis_log(
                 __module_ctx,
                 "Error: Redis version does not support ACL categories",
-            );
+            ) };
             return $crate::raw::Status::Err as c_int;
         }
     }};
@@ -386,13 +391,14 @@ macro_rules! redis_module {
             }
         )?
 
-        extern "C" fn __info_func(
+        unsafe extern "C" fn __info_func(
             ctx: *mut $crate::raw::RedisModuleInfoCtx,
             for_crash_report: i32,
         ) {
             $crate::panic::run_callback(
                 "INFO handler",
-                || $crate::basic_info_command_handler(&$crate::InfoContext::new(ctx), for_crash_report == 1),
+                // SAFETY: Redis passes a valid info context for this call.
+                || $crate::basic_info_command_handler(&unsafe { $crate::InfoContext::new(ctx) }, for_crash_report == 1),
                 || (),
             );
         }
@@ -465,7 +471,7 @@ macro_rules! redis_module {
                     let args = unsafe { $crate::decode_args(ctx, argv, argc) };
 
                     $(
-                        if (&$data_type).create_data_type(ctx).is_err() {
+                        if (&$data_type).create_data_type(&context).is_err() {
                             return raw::Status::Err as c_int;
                         }
                     )*
@@ -477,12 +483,14 @@ macro_rules! redis_module {
                                 if module_acl_category != AclCategory::None {
                                     let category = CString::new(format!("{module_acl_category}")).unwrap();
                                     if RM_AddACLCategory(ctx, category.as_ptr()) == raw::Status::Err as c_int {
-                                        raw::redis_log(ctx, &format!("Error: failed to add ACL category `{module_acl_category}`"));
+                                        // SAFETY: ctx is the module's load context.
+                                        unsafe { raw::redis_log(ctx, &format!("Error: failed to add ACL category `{module_acl_category}`")) };
                                         return raw::Status::Err as c_int;
                                     }
                                 }
                             } else {
-                                raw::redis_log(ctx, "Warning: Redis version does not support adding new ACL categories");
+                                // SAFETY: ctx is the module's load context.
+                                unsafe { raw::redis_log(ctx, "Warning: Redis version does not support adding new ACL categories") };
                             }
                         )*
                     )?
@@ -607,7 +615,8 @@ macro_rules! redis_module {
                         )?
                     )?
 
-                    raw::register_info_function(ctx, Some(__info_func));
+                    // SAFETY: ctx is the module's load context.
+                    unsafe { raw::register_info_function(ctx, Some(__info_func)) };
 
                     if let Err(e) = register_server_events(&context) {
                         context.log_warning(&format!("{e}"));

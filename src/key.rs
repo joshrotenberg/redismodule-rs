@@ -62,12 +62,28 @@ pub struct RedisKey {
 }
 
 impl RedisKey {
-    pub fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
+    /// Opens `key` for reading.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a context Redis passed to the module, and this thread must
+    /// hold the Redis lock, from this call until the key is dropped (closing
+    /// the key uses the context). Prefer
+    /// [`Context::open_key`](crate::Context::open_key) and its siblings.
+    pub unsafe fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
         let key_inner = raw::open_key(ctx, key.as_ptr(), to_raw_mode(KeyMode::Read));
         Self { ctx, key_inner }
     }
 
-    pub fn open_with_flags(
+    /// Opens `key` for reading with `flags`.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a context Redis passed to the module, and this thread must
+    /// hold the Redis lock, from this call until the key is dropped (closing
+    /// the key uses the context). Prefer
+    /// [`Context::open_key`](crate::Context::open_key) and its siblings.
+    pub unsafe fn open_with_flags(
         ctx: *mut raw::RedisModuleCtx,
         key: &RedisString,
         flags: KeyFlags,
@@ -249,12 +265,28 @@ pub struct RedisKeyWritable {
 }
 
 impl RedisKeyWritable {
-    pub fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
+    /// Opens `key` for reading and writing.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a context Redis passed to the module, and this thread must
+    /// hold the Redis lock, from this call until the key is dropped (closing
+    /// the key uses the context). Prefer
+    /// [`Context::open_key`](crate::Context::open_key) and its siblings.
+    pub unsafe fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
         let key_inner = raw::open_key(ctx, key.as_ptr(), to_raw_mode(KeyMode::ReadWrite));
         Self { ctx, key_inner }
     }
 
-    pub fn open_with_flags(
+    /// Opens `key` for reading and writing with `flags`.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a context Redis passed to the module, and this thread must
+    /// hold the Redis lock, from this call until the key is dropped (closing
+    /// the key uses the context). Prefer
+    /// [`Context::open_key`](crate::Context::open_key) and its siblings.
+    pub unsafe fn open_with_flags(
         ctx: *mut raw::RedisModuleCtx,
         key: &RedisString,
         flags: KeyFlags,
@@ -513,7 +545,16 @@ impl RedisKeyWritable {
         unsafe { crate::__required_api!(RedisModule_KeyType)(self.key_inner) }.into()
     }
 
-    pub fn open_with_redis_string(
+    /// Opens the key named by a raw Redis string for reading and writing.
+    ///
+    /// # Safety
+    ///
+    /// `ctx` must be a context Redis passed to the module, and this thread must
+    /// hold the Redis lock, from this call until the key is dropped (closing
+    /// the key uses the context). Prefer
+    /// [`Context::open_key`](crate::Context::open_key) and its siblings.
+    /// `key` must be a live Redis string.
+    pub unsafe fn open_with_redis_string(
         ctx: *mut raw::RedisModuleCtx,
         key: *mut raw::RedisModuleString,
     ) -> Self {
@@ -828,8 +869,10 @@ fn to_raw_mode(mode: KeyMode) -> raw::KeyMode {
 /// Returns [`RedisError::WrongType`] if the key exists and holds a value of
 /// another type, and an error if the running Redis does not provide
 /// `RedisModule_KeyType` or `RedisModule_ModuleTypeGetType`.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn verify_type(key_inner: *mut raw::RedisModuleKey, redis_type: &RedisType) -> RedisResult {
+pub(crate) fn verify_type(
+    key_inner: *mut raw::RedisModuleKey,
+    redis_type: &RedisType,
+) -> RedisResult {
     let key_type: KeyType =
         unsafe { crate::__available_api!(RedisModule_KeyType)(key_inner) }.into();
 
