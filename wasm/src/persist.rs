@@ -23,7 +23,7 @@ use std::time::Instant;
 use anyhow::{Context as _, bail};
 use redis_module::native_types::RedisType;
 use redis_module::server_events::LoadingSubevent;
-use redis_module::{Context, RedisModuleIO, logging, raw};
+use redis_module::{EventContext, RedisModuleIO, logging, raw};
 use redis_module_macros::loading_event_handler;
 
 use crate::flags;
@@ -73,7 +73,7 @@ pub(crate) static LIBRARIES: RedisType = RedisType::new(
 /// (see `aux_save2`), so this is what removes a replica's libraries when its
 /// primary has none.
 #[loading_event_handler]
-fn on_loading(_ctx: &Context, event: LoadingSubevent) {
+fn on_loading(_ctx: &EventContext, event: LoadingSubevent) {
     if enabled()
         && matches!(
             event,

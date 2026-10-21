@@ -220,6 +220,16 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-20: rebased onto SDK master `5095c06`, which separates event and
+  worker capabilities from client commands. The loading-event and unload
+  callbacks now take `EventContext`; their bodies and command handlers are
+  unchanged. Rust 1.94.0 and Redis 8.10.2: workspace/guest formatting, workspace
+  Clippy, separate SDK 7.2 Clippy, example builds, and guest Clippy passed. With
+  `RUST_TEST_THREADS=4`, the full suite passed: 53 SDK unit tests, 107 SDK
+  integration tests, four standalone harness cases, seven host unit tests,
+  21 host integration tests with JavaScript, 58 SDK doctests, and four guest
+  helper tests.
+
 - 2026-10-20: rebased onto SDK master `960cd99`, which separates registration
   from runtime contexts. The host init hook now takes `RegistrationContext`.
   Rust 1.94.0 and Redis 8.10.2: workspace/guest formatting, workspace Clippy,

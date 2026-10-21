@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-20.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `960cd99`, registration context split merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `5095c06`, event and worker context views merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `960cd99` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `5095c06` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -131,11 +131,15 @@ for unload cleanup. The migration guide covers the tightened ownership
 requirement on the legacy three-argument event macro.
 
 Registration contexts merged in `960cd99`: `RegistrationContext` limits command,
-configuration and data-type registration to module load. Existing init hooks
-that only use runtime operations remain compatible through dereferencing.
+configuration and data-type registration to module load.
 
-Next: event and worker views, separating shared runtime operations from client
-reply and module-owner capabilities.
+Event and worker views merged in `5095c06`: `RuntimeContext` provides shared
+calls, keys, databases, logging and scoped ACL-call users. `EventContext` carries
+module-owned callback operations; borrowed worker guards expose `WorkerContext`.
+Client command and blocked-client reply handlers keep `Context`. Init hooks
+forward through the event view to the shared runtime view; shared helpers use
+`&RuntimeContext`. Event and worker views cannot reply to or block clients.
+The wasm loading and unload callbacks now take `EventContext`.
 
 The next survey items remain server-event payloads for flush and `SWAPDB`, a
 guide on writing to the keyspace from a notification, and a wider CI matrix.

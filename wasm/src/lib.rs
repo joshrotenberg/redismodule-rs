@@ -30,8 +30,8 @@ use anyhow::Context as _;
 
 use redis_module::configuration::ConfigurationFlags;
 use redis_module::{
-    ArgCursor, Context, ModuleOptions, RedisError, RedisResult, RedisString, RedisValue,
-    RegistrationContext, Status, redis_module,
+    ArgCursor, Context, EventContext, ModuleOptions, RedisError, RedisResult, RedisString,
+    RedisValue, RegistrationContext, Status, redis_module,
 };
 use redis_module_macros::command;
 
@@ -518,7 +518,7 @@ fn init(ctx: &RegistrationContext<'_>, _args: &[RedisString]) -> Status {
     }
 }
 
-fn deinit(_ctx: &Context) -> Status {
+fn deinit(_ctx: &EventContext) -> Status {
     if let Some(host) = host().take() {
         host.shutdown();
     }
