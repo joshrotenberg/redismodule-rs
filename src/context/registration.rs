@@ -84,6 +84,16 @@ pub struct RegistrationContext<'load> {
 }
 
 impl<'load> RegistrationContext<'load> {
+    /// Runs a call-user scope while preserving registration capabilities.
+    /// See [`RuntimeContext::with_call_user`](crate::RuntimeContext::with_call_user).
+    pub fn with_call_user<T>(
+        &self,
+        user_name: &crate::RedisString,
+        f: impl FnOnce(&RegistrationContext<'load>) -> T,
+    ) -> Result<T, crate::RedisError> {
+        self.context.with_call_user(user_name, |_| f(self))
+    }
+
     /// Wraps a module-owned context for its active load invocation.
     ///
     /// The SDK calls this after Redis module initialization succeeds. Custom

@@ -101,10 +101,10 @@ Event and worker views have no `reply*`, `block_client*`, key-position discovery
 to `Context` by safe code. Use explicit `replicate(command, args)` outside a
 command. `scoped_call_user` remains on `RuntimeContext`: it sets the context
 user for ACL-checked calls, including on workers and events, and does not
-authenticate a client connection. Dropping its scope clears that user, including
-when work unwinds. Leaking the scope skips cleanup; on a reused detached context,
-the identity then remains attached across later lock invocations. Worker guards
-cannot create timers or subscribe to events. Configuration
+authenticate a client connection. Dropping an inner scope restores the outer
+user, including when work unwinds. Forgotten scopes are cleaned up when their
+runtime view ends, before a worker unlocks. Worker guards cannot create timers
+or subscribe to events. Configuration
 and command/type registration still require `RegistrationContext`.
 
 Both guard types borrow their owner and cannot outlive it. Their runtime views
@@ -142,9 +142,29 @@ drop(scope);
 
 `acl_options` must enable `verify_acl`. The method selects the context's user
 for these calls; it does not authenticate a client connection. Dropping the
-guard still clears the override, including during unwind. When scopes are
-nested, dropping the inner guard clears the override even while the outer
-guard remains alive.
+guard restores the most recent SDK scope that is still active, including
+on unwind. An inner scope now restores its outer user instead of clearing
+the override. Guards can be dropped out of order; expired scopes are skipped.
+
+The closure form keeps the context view's capabilities:
+
+```rust,ignore
+let reply: CallResult = ctx.with_call_user(&username, |ctx| {
+    ctx.call_ext("GET", &acl_options, &["allowed:key"])
+})?;
+```
+
+A lookup failure returns `Err` without running the closure or changing the
+active user. Otherwise the helper returns `Ok(closure_result)`, so a closure
+returning `Result` produces a nested `Result`. A panic also ends the helper's
+scope. Explicit guards created inside the closure follow their own lifetimes.
+
+After all SDK scopes end, Redis 8.8+ restores any prior native context override;
+earlier versions clear it because they cannot query it. Avoid mixing scopes
+with raw `SetContextUser` calls. Forgetting a guard keeps its user active until
+its runtime view ends; worker guards clean up before unlocking. Do not delete
+an ACL account while its scopes are active: Redis's native user handles borrow
+the account.
 
 ### Raw items are under `redis_module::raw`
 

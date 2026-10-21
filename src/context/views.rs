@@ -1,5 +1,6 @@
 //! Capabilities shared by client, event, and locked worker invocations.
 use super::*;
+use std::cell::OnceCell;
 
 /// Operations that need a live Redis context and the Redis lock, but no client
 /// reply target or module ownership: calls, keys, database selection, logging,
@@ -16,6 +17,7 @@ use super::*;
 #[derive(Debug)]
 pub struct RuntimeContext {
     pub(crate) ctx: *mut raw::RedisModuleCtx,
+    pub(super) call_users: OnceCell<super::call_user::CallUserView>,
 }
 
 impl RuntimeContext {
@@ -26,9 +28,13 @@ impl RuntimeContext {
     /// `ctx` must be a live Redis callback or thread-safe context. The Redis lock
     /// must be held on this thread throughout every use of this wrapper and any
     /// references derived from it. Neither may outlive the native invocation or
-    /// lock scope. A raw pointer alone does not prove any of these conditions.
+    /// lock scope, including when the wrapper is dropped. A raw pointer alone
+    /// does not prove any of these conditions.
     pub const unsafe fn new(ctx: *mut raw::RedisModuleCtx) -> Self {
-        Self { ctx }
+        Self {
+            ctx,
+            call_users: OnceCell::new(),
+        }
     }
 
     /// A null context, only for native APIs that explicitly permit it (logging).
@@ -40,6 +46,7 @@ impl RuntimeContext {
     pub const unsafe fn dummy() -> Self {
         Self {
             ctx: ptr::null_mut(),
+            call_users: OnceCell::new(),
         }
     }
 }
@@ -81,6 +88,16 @@ pub struct EventContext {
 }
 
 impl EventContext {
+    /// Runs a call-user scope while preserving this view's capabilities.
+    /// See [`RuntimeContext::with_call_user`] for restoration and error behavior.
+    pub fn with_call_user<T>(
+        &self,
+        user_name: &RedisString,
+        f: impl FnOnce(&EventContext) -> T,
+    ) -> Result<T, RedisError> {
+        self.runtime.with_call_user(user_name, |_| f(self))
+    }
+
     /// Runs a database scope while preserving event capabilities.
     pub fn with_db<T>(&self, db: i32, f: impl FnOnce(&EventContext) -> T) -> Result<T, RedisError> {
         self.runtime.with_db(db, |_| f(self))
@@ -149,6 +166,20 @@ pub struct WorkerContext {
 }
 
 impl WorkerContext {
+    pub(super) fn release_call_users(&mut self) {
+        self.runtime.release_call_users();
+    }
+
+    /// Runs a call-user scope while preserving this view's capabilities.
+    /// See [`RuntimeContext::with_call_user`] for restoration and error behavior.
+    pub fn with_call_user<T>(
+        &self,
+        user_name: &RedisString,
+        f: impl FnOnce(&WorkerContext) -> T,
+    ) -> Result<T, RedisError> {
+        self.runtime.with_call_user(user_name, |_| f(self))
+    }
+
     /// Runs a database scope while preserving the worker view.
     pub fn with_db<T>(
         &self,
@@ -228,6 +259,7 @@ mod tests {
         let worker = WorkerContext {
             runtime: RuntimeContext {
                 ctx: ptr::null_mut(),
+                call_users: OnceCell::new(),
             },
             module_owned: false,
         };

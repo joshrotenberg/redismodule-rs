@@ -13,6 +13,9 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `with_call_user` runs a closure with a user for ACL-checked calls while
+  preserving runtime, client, event, worker, or registration capabilities.
+
 - `RuntimeContext` for shared locked operations and scoped ACL-call users,
   `EventContext` for module-owned
   callbacks, and `WorkerContext` for locked workers. Client command handlers keep
@@ -66,8 +69,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 - **Breaking:** `authenticate_user` is now `RuntimeContext::scoped_call_user`,
   returning the root-exported `CallUserScope` (previously `ContextUserScope`).
-  The guard still clears the call-user override on drop; ACL checks remain
-  opt-in through `CallOptionsBuilder::verify_acl`.
+  Nested guards now restore the latest still-active scope on drop, including
+  during unwind or out-of-order drops. Forgotten guards are cleaned up when
+  their runtime view ends, before worker unlock. Redis 8.8+ also preserves a
+  preexisting native override. ACL checks remain opt-in through
+  `CallOptionsBuilder::verify_acl`.
 
 - **Breaking:** non-client callbacks use `EventContext`; database scan callbacks
   and shared helpers use `RuntimeContext`. Both worker guard types dereference

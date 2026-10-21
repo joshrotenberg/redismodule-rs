@@ -70,7 +70,7 @@ pub struct RedisGILGuard<T> {
 }
 
 impl<T> RedisGILGuard<T> {
-    pub fn new(obj: T) -> RedisGILGuard<T> {
+    pub const fn new(obj: T) -> RedisGILGuard<T> {
         RedisGILGuard {
             obj: UnsafeCell::new(obj),
             locked: Cell::new(false),
@@ -144,6 +144,8 @@ unsafe impl RedisLockIndicator for ContextGuard<'_> {}
 
 impl Drop for ContextGuard<'_> {
     fn drop(&mut self) {
+        // Clear even forgotten call-user scopes before freeing the view or unlocking.
+        self.ctx.release_call_users();
         unsafe {
             crate::__required_api!(RedisModule_FreeThreadSafeContext)(self.ctx.ctx);
             crate::__required_api!(RedisModule_ThreadSafeContextUnlock)(self.unlock_ctx);
