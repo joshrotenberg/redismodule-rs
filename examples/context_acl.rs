@@ -137,8 +137,13 @@ fn nested_scopes(ctx: &RuntimeContext, reader: &RedisString) -> Result<Vec<i64>,
 
     // Redis 8.8+ exposes a borrowed prior override. Refresh it for each new
     // group of scopes, even if this Rust view has been used before.
+    let version = ctx.get_redis_version()?;
+    let get_context_user = unsafe { redis_module::raw::RedisModule_GetContextUser };
+    // A missing API on a supporting server must fail rather than silently
+    // skipping the native-baseline checks below.
+    flags.push((version.major, version.minor) < (8, 8) || get_context_user.is_some());
     unsafe {
-        if let Some(_get) = redis_module::raw::RedisModule_GetContextUser {
+        if let Some(_get) = get_context_user {
             for (name, expected) in [(&other, other_permissions), (reader, reader_permissions)] {
                 let user = redis_module::raw::RedisModule_GetModuleUserFromUserName.unwrap()(
                     name.as_ptr(),
