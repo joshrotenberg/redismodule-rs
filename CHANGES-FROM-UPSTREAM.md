@@ -146,6 +146,10 @@ these in October 2026.
 `cluster::key_for_slot` generates a tagged ASCII key for any valid hash slot,
 without a server or the native canonical-name API.
 
+The integration harness retries confirmed TCP address-in-use failures at
+`listen()` as well as `bind()`, requiring the matching socket and fatal port
+diagnostics. Other startup failures propagate immediately.
+
 ## Changes that break compatibility with upstream
 
 A module written against upstream needs changes for these; the

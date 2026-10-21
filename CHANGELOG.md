@@ -159,6 +159,9 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- The integration harness retries confirmed TCP address-in-use failures at
+  `listen()` as well as `bind()`, while preserving other startup failures.
+
 - Rejected `add_post_notification_job` submissions now release the closure and
   captured data immediately. Redis does not take ownership when it rejects a
   job during loading or on a readonly replica.
