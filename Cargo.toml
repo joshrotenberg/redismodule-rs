@@ -162,6 +162,11 @@ name = "events"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "keyspace_to_stream"
+crate-type = ["cdylib"]
+required-features = ["redis-7-2-examples"]
+
+[[example]]
 name = "test_helper"
 crate-type = ["cdylib"]
 

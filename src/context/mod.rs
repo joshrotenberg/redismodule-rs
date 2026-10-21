@@ -1257,24 +1257,31 @@ impl EventContext {
 
     api!(
         [RedisModule_AddPostNotificationJob],
-        /// When running inside a key space notification callback, it is dangerous and highly discouraged to perform any write
-        /// operation. In order to still perform write actions in this scenario, Redis provides this API ([`Self::add_post_notification_job`])
-        /// that allows to register a job callback which Redis will call when the following condition holds:
+        /// Defers work from a keyspace notification until Redis permits writes.
+        /// Requires Redis 7.2+. The job receives a fresh event view in the
+        /// database selected when it was queued and runs as part of the same
+        /// execution unit, rather than on a worker thread or timer.
         ///
-        /// 1. It is safe to perform any write operation.
-        /// 2. The job will be called atomically along side the key space notification.
+        /// Capture owned data: callback key bytes and context references must
+        /// not escape their invocation. Jobs can produce more notifications;
+        /// exclude output keys before scheduling to prevent feedback loops.
         ///
-        /// Notice, one job might trigger key space notifications that will trigger more jobs.
-        /// This raises a concerns of entering an infinite loops, we consider infinite loops
-        /// as a logical bug that need to be fixed in the module, an attempt to protect against
-        /// infinite loops by halting the execution could result in violation of the feature correctness
-        /// and so Redis will make no attempt to protect the module from infinite loops.
+        /// Redis rejects submission while loading or on a readonly replica.
+        /// On rejection, the closure and its captures are dropped immediately.
+        /// On acceptance, Redis owns the job until execution and cleanup.
+        /// Callback panics are caught and logged by the SDK.
+        ///
+        /// With a 7.2+ compatibility floor the result is [`Status`]; older
+        /// floors return `APIResult<Status>` and can report a missing API.
+        /// Scheduling successfully does not promise the later write succeeds.
+        /// See the [notification write guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/KEYSPACE-NOTIFICATIONS.md)
+        /// for replication, role/loading gates, database scopes and teardown.
         pub fn add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
             &self,
             callback: F,
         ) -> Status {
             let callback = Box::into_raw(Box::new(Some(callback)));
-            unsafe {
+            let status = unsafe {
                 RedisModule_AddPostNotificationJob(
                     self.ctx,
                     Some(post_notification_job::<F>),
@@ -1282,7 +1289,13 @@ impl EventContext {
                     Some(post_notification_job_free_callback::<F>),
                 )
             }
-            .into()
+            .into();
+            if status == Status::Err {
+                // Redis rejected the job before taking ownership. It will not
+                // invoke either callback, so release our closure and captures.
+                unsafe { drop(Box::from_raw(callback)) };
+            }
+            status
         }
     );
 }

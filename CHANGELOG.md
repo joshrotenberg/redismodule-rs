@@ -13,6 +13,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- A [notification-write guide](docs/KEYSPACE-NOTIFICATIONS.md) and
+  `keyspace_to_stream` example covering owned callback data, deferred writes,
+  feedback prevention, database selection, replication, loading and unload.
+
 - `flush_info_event_handler` receives `FlushSubevent` and copied `FlushInfo`
   with the affected database (or all databases).
   `swapdb_event_handler` receives both database IDs in `SwapDbInfo` after a
@@ -144,6 +148,9 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- Rejected `add_post_notification_job` submissions now release the closure and
+  captured data immediately. Redis does not take ownership when it rejects a
+  job during loading or on a readonly replica.
 - `RedisString` views could outlive their owner, and strings freed themselves through the context they were created with; several producers leaked strings or freed them twice (stream iterators, `ListPop`, server info, the keys cursor, the scan cursor).
 - Reading through a `RedisKeyWritable` value or string buffer could alias a second one.
 - `RedisGILGuard` could hand out two mutable references, and safe code could build a `Context` from any pointer.
