@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `15389f7`, server millisecond clock merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `55ec6f1`, validated parsed string configurations merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `15389f7` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `55ec6f1` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -171,8 +171,12 @@ adaptation needed.
 
 Server wall-clock time merged in `15389f7`: `milliseconds()` reads Unix
 milliseconds without a context or Redis lock after API initialization.
-No host adaptation needed. The next SDK item is a validated string
-configuration helper.
+No host adaptation needed.
+
+Validated string configurations merged in `55ec6f1`: `ParsedStringConfig<T>`
+validates raw text before publishing the raw and parsed values together.
+Existing registration, defaults, arguments and callbacks remain supported.
+No host adaptation needed. The next SDK item is the module-version helper.
 
 Also open:
 
