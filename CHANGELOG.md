@@ -64,6 +64,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- **Breaking:** `authenticate_user` is now `RuntimeContext::scoped_call_user`,
+  returning the root-exported `CallUserScope` (previously `ContextUserScope`).
+  The guard still clears the call-user override on drop; ACL checks remain
+  opt-in through `CallOptionsBuilder::verify_acl`.
+
 - **Breaking:** non-client callbacks use `EventContext`; database scan callbacks
   and shared helpers use `RuntimeContext`. Both worker guard types dereference
   to `WorkerContext` and borrow their owner. Init no longer exposes client APIs.

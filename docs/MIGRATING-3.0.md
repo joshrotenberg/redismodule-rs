@@ -99,7 +99,7 @@ fn on_timer(ctx: &EventContext, key: String) {
 Event and worker views have no `reply*`, `block_client*`, key-position discovery,
 `replicate_verbatim`, or current-client user queries, and cannot be converted
 to `Context` by safe code. Use explicit `replicate(command, args)` outside a
-command. `authenticate_user` remains on `RuntimeContext`: it sets the context
+command. `scoped_call_user` remains on `RuntimeContext`: it sets the context
 user for ACL-checked calls, including on workers and events, and does not
 authenticate a client connection. Dropping its scope clears that user, including
 when work unwinds. Leaking the scope skips cleanup; on a reused detached context,
@@ -126,6 +126,25 @@ for APIs that explicitly accept a null context, such as logging.
 This split limits capabilities. It does not yet tie every key, server-info,
 call-reply, or other native resource to its invocation or lock lifetime. Close
 those resources before the callback returns or the worker guard is dropped.
+
+### Scoped call users
+
+Rename `ctx.authenticate_user(&username)` to `ctx.scoped_call_user(&username)`.
+The returned guard is `CallUserScope`, replacing `ContextUserScope`, and can be
+imported from `redis_module::CallUserScope`. Keep it alive while making calls
+with `CallOptionsBuilder::verify_acl` enabled:
+
+```rust,ignore
+let scope: CallUserScope<'_> = ctx.scoped_call_user(&username)?;
+let reply: CallResult = ctx.call_ext("GET", &acl_options, &["allowed:key"]);
+drop(scope);
+```
+
+`acl_options` must enable `verify_acl`. The method selects the context's user
+for these calls; it does not authenticate a client connection. Dropping the
+guard still clears the override, including during unwind. When scopes are
+nested, dropping the inner guard clears the override even while the outer
+guard remains alive.
 
 ### Raw items are under `redis_module::raw`
 

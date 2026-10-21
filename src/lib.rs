@@ -52,7 +52,9 @@ pub use crate::context::key_cursor::ScanKeyCursor;
 pub use crate::context::keys_cursor::KeysCursor;
 pub use crate::context::keyspace_events::KeyspaceEventHandler;
 pub use crate::context::server_events;
-pub use crate::context::{EventContext, RegistrationContext, RuntimeContext, WorkerContext};
+pub use crate::context::{
+    CallUserScope, EventContext, RegistrationContext, RuntimeContext, WorkerContext,
+};
 pub use common::AclCategory;
 
 pub use crate::context::AclChannelPermissions;

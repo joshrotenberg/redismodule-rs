@@ -1,7 +1,7 @@
 //! ACL-checked calls use a scoped context user on events and workers.
 use redis_module::{
-    CallOptionsBuilder, CallResult, Context, EventContext, RedisError, RedisResult, RedisString,
-    RedisValue, RuntimeContext, ThreadSafeContext, redis_command, redis_module,
+    CallOptionsBuilder, CallResult, CallUserScope, Context, EventContext, RedisError, RedisResult,
+    RedisString, RedisValue, RuntimeContext, ThreadSafeContext, redis_command, redis_module,
 };
 use std::sync::Mutex;
 use std::time::Duration;
@@ -17,7 +17,7 @@ fn exercise(ctx: &RuntimeContext, username: &str) -> Result<Vec<i64>, RedisError
     };
     let before = [can_read("allowed:item"), can_read("denied:item")];
     let username = ctx.create_string(username);
-    let scope = ctx.authenticate_user(&username)?;
+    let scope: CallUserScope<'_> = ctx.scoped_call_user(&username)?;
     let allowed = can_read("allowed:item");
     let denied = !can_read("denied:item");
     drop(scope);
@@ -26,7 +26,7 @@ fn exercise(ctx: &RuntimeContext, username: &str) -> Result<Vec<i64>, RedisError
     // Check the same identity cleanup when work unwinds before returning.
     let mut active_before_panic = false;
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _scope = ctx.authenticate_user(&username).unwrap();
+        let _scope: CallUserScope<'_> = ctx.scoped_call_user(&username).unwrap();
         active_before_panic = can_read("allowed:item") && !can_read("denied:item");
         panic!("scoped context user unwind");
     }))
