@@ -13,6 +13,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- [Configuration notes](docs/CONFIGURATION.md) explain registration and load
+  precedence, argument syntax, UTF-8 versus binary storage, validation,
+  observers and rollback. Regression tests cover explicit Redis settings over
+  SDK argument defaults and callback observations during rejected updates.
+
 - A [module upgrade guide](docs/UPGRADING-MODULES.md) covering unload/load
   constraints, configuration replay, transient state, cleanup and failure
   recovery, with a tested `lifecycle` example. API documentation links are

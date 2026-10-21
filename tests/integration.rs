@@ -3619,6 +3619,104 @@ fn assert_configuration_module_arg_rejected(
 }
 
 #[test]
+fn test_configuration_string_storage_utf8_and_binary_values() -> Result<()> {
+    let mut con = TestConnection::new("configuration");
+    let bytes = b"binary\xff\0value";
+    redis::cmd("CONFIG")
+        .arg(&["SET", "configuration.redis_string"])
+        .arg(bytes.as_slice())
+        .query::<()>(&mut con)?;
+    let reply: HashMap<String, Vec<u8>> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.redis_string"])
+        .query(&mut con)?;
+    assert_eq!(reply["configuration.redis_string"], bytes);
+    for name in ["configuration.string", "configuration.mutex_string"] {
+        assert!(
+            redis::cmd("CONFIG")
+                .arg(&["SET", name])
+                .arg(bytes.as_slice())
+                .query::<()>(&mut con)
+                .is_err()
+        );
+        let reply: HashMap<String, String> =
+            redis::cmd("CONFIG").arg(&["GET", name]).query(&mut con)?;
+        assert_eq!(reply[name], "default");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_configuration_loadex_precedence_and_registration_validation() -> Result<()> {
+    let mut con = TestConnection::with_log_file("hello");
+    let module = utils::module_path("configuration")?;
+    // Module arguments become registration defaults and must pass SDK bounds
+    // validation even when an explicit Redis configuration would replace them.
+    assert!(
+        redis::cmd("MODULE")
+            .arg(&[
+                "LOADEX",
+                &module,
+                "CONFIG",
+                "configuration.i64",
+                "500",
+                "ARGS",
+                "i64",
+                "1001"
+            ])
+            .query::<()>(&mut con)
+            .is_err()
+    );
+    assert!(!con.server_log()?.contains("configuration init:"));
+    let configs: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.*"])
+        .query(&mut con)?;
+    assert!(configs.is_empty());
+
+    redis::cmd("MODULE")
+        .arg(&[
+            "LOADEX",
+            &module,
+            "CONFIG",
+            "configuration.i64",
+            "500",
+            "CONFIG",
+            "configuration.bool",
+            "yes",
+            "CONFIG",
+            "configuration.memory",
+            "1kb",
+            "ARGS",
+            "i64",
+            "25",
+            "bool",
+            "NO",
+            "memory",
+            "2kb",
+            "string",
+            "from-args",
+        ])
+        .query::<()>(&mut con)?;
+    let configs: HashMap<String, String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.*"])
+        .query(&mut con)?;
+    for (name, expected) in [
+        ("i64", "500"),
+        ("bool", "yes"),
+        ("memory", "1024"),
+        ("string", "from-args"),
+        ("atomic_i64", "10"),
+    ] {
+        assert_eq!(
+            configs[&format!("configuration.{name}")],
+            expected,
+            "{name}"
+        );
+    }
+    assert!(con.server_log()?.contains("configuration init: i64 is 500"));
+    Ok(())
+}
+
+#[test]
 fn test_configuration_module_args_validate_numeric_range() -> Result<()> {
     for value in ["-1", "1001"] {
         assert_configuration_module_arg_rejected("i64", value, &["0", "1000"])?;
@@ -3664,6 +3762,9 @@ fn test_configuration_module_args_keep_names_and_values_paired() -> Result<()> {
         &["string", "i64", "i64", "25"],
         &[("string", "i64"), ("i64", "25")],
     )?;
+    // Lookup is first-match and does not validate the complete argument list.
+    assert_configuration_module_args(&["i64", "25", "i64", "30"], &[("i64", "25")])?;
+    assert_configuration_module_args(&["unknown", "ignored", "i64"], &[("i64", "10")])?;
     Ok(())
 }
 
@@ -3742,6 +3843,43 @@ mod parsed_configuration_tests {
             .arg(&["GET", &format!("parsed_configuration.{name}")])
             .query(con)?;
         Ok(values[&format!("parsed_configuration.{name}")].clone())
+    }
+
+    #[test]
+    fn test_parsed_configuration_multi_set_rollback_is_visible_to_observers() -> Result<()> {
+        let mut con = TestConnection::new("parsed_configuration");
+        let observations = |con: &mut TestConnection| -> Result<Vec<Vec<Value>>> {
+            Ok(redis::cmd("parsed_config.observed").query(con)?)
+        };
+        assert!(observations(&mut con)?.is_empty());
+        assert!(
+            redis::cmd("CONFIG")
+                .arg(&[
+                    "SET",
+                    "parsed_configuration.workers",
+                    "8",
+                    "parsed_configuration.prefix",
+                    "invalid"
+                ])
+                .query::<()>(&mut con)
+                .is_err()
+        );
+        assert_eq!(value(&mut con)?, ("4".into(), 4));
+        assert_eq!(config(&mut con, "workers")?, "4");
+        assert_eq!(config(&mut con, "prefix")?, "items:");
+        let seen = observations(&mut con)?;
+        assert!(
+            seen.contains(&vec![Value::Data(b"8".to_vec()), Value::Int(8)]),
+            "an accepted intermediate value must be observable: {seen:?}"
+        );
+        assert_eq!(
+            seen.last(),
+            Some(&vec![Value::Data(b"4".to_vec()), Value::Int(4)]),
+            "rollback must restore the old raw/parsed pair"
+        );
+        // The callback history is not rolled back with the stored values.
+        assert!(seen.len() >= 2);
+        Ok(())
     }
 
     #[test]

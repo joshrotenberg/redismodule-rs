@@ -29,6 +29,9 @@ On macOS the extension is normally `.dylib`; on Linux it is `.so`.
 
 ## Record configuration and pause module traffic
 
+See the [configuration notes](CONFIGURATION.md) for load precedence, argument
+syntax, validation and callback behavior.
+
 Record `MODULE LIST`, the effective configuration, and the old artifact's path.
 `MODULE LIST` reports the original load arguments; it does not capture later
 `CONFIG SET` changes. Query the module's registered configuration, including

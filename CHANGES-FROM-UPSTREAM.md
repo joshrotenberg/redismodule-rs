@@ -143,6 +143,12 @@ these in October 2026.
 | [d100d13] | `Context::get_command_keys` (`RedisModule_GetCommandKeysWithFlags`), `cluster::key_slot`, which computes a key's hash slot without the server, and `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq` and `Hash` for `ContextFlags`. |
 | [dabad65] | `configuration::get_memory_default_config_value`. |
 
+The [configuration notes](docs/CONFIGURATION.md) document registration, load
+precedence, SDK argument parsing, validation, UTF-8 and binary storage, locked
+reads, observers and rollback. Integration tests verify explicit Redis load
+settings overriding SDK argument defaults and callbacks observing intermediate
+values and rollback during a rejected multi-setting command.
+
 The [module upgrade guide](docs/UPGRADING-MODULES.md) explains unload/load
 eligibility, configuration replay, explicit per-load state initialization,
 callback cleanup, platform loader behavior, and failure recovery. The

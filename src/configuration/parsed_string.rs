@@ -43,7 +43,8 @@ impl<T: Send> ParsedStringConfig<T> {
     /// Validate the initial text without using any Redis API.
     ///
     /// This initial value does not replace the default supplied at registration;
-    /// Redis validates and applies that default when configurations are loaded.
+    /// Redis later validates and applies the selected default or configured
+    /// load value.
     pub fn new(
         raw: impl Into<String>,
         parse: fn(&str) -> Result<T, RedisError>,

@@ -1,3 +1,21 @@
+//! Module configuration registration, storage and validation (Redis 7.0+).
+//!
+//! Register during module load using a [`RegistrationContext`]. The
+//! `configurations` block of [`redis_module!`](crate::redis_module!) applies
+//! values before `init`; manual registration must finish with
+//! [`load_configurations`]. Module arguments can replace registration defaults,
+//! while explicit Redis load configuration takes precedence over those defaults.
+//!
+//! Validate before storing in [`ConfigurationValue::set`], or use
+//! [`ParsedStringConfig`] for validated UTF-8 text with a parsed value.
+//! An `on_changed` callback observes each accepted setter call after storage;
+//! it cannot veto the update and is not a transaction commit notification.
+//! Loading and rollback can invoke setters repeatedly. Keep parsers free of
+//! side effects and do not assume callback effects will be rolled back.
+//!
+//! See the [configuration notes](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/CONFIGURATION.md)
+//! for argument syntax, precedence examples, storage choices and reload behavior.
+
 use crate::context::thread_safe::{RedisGILGuard, RedisLockIndicator};
 use crate::{CallOptionResp, CallOptionsBuilder, CallResult, RedisValue, raw};
 use crate::{Context, RedisError, RedisString, RegistrationContext};
@@ -91,9 +109,10 @@ macro_rules! enum_configuration {
     }
 }
 
-/// [`ConfigurationContext`] is used as a special context that indicate that we are
-/// running with the Redis GIL is held but we should not perform all the regular
-/// operation we can perfrom on the regular Context.
+/// A Redis lock proof supplied to configuration getters, setters and observers.
+///
+/// Use it to access [`RedisGILGuard`] storage. It does not expose Redis commands,
+/// client replies or registration operations.
 pub struct ConfigurationContext {
     // Private, so users cannot construct one, and a raw pointer type, so it is
     // neither Send nor Sync: it proves the lock is held on this thread only.
@@ -113,7 +132,11 @@ unsafe impl RedisLockIndicator for ConfigurationContext {}
 /// A configuration value. Values are registered as `&'static` references and only
 /// shared, so they need to be `Sync` but not `Send`.
 pub trait ConfigurationValue<T>: Sync {
+    /// Return the currently stored value under the configuration lock proof.
     fn get(&self, ctx: &ConfigurationContext) -> T;
+    /// Validate and store a candidate value. A rejection should leave the
+    /// previous value unchanged. Loading and rollback may call this repeatedly.
+    /// The SDK calls `on_changed` after this method returns `Ok(())`.
     fn set(&self, ctx: &ConfigurationContext, val: T) -> Result<(), RedisError>;
 }
 
