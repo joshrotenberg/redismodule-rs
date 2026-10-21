@@ -146,7 +146,7 @@ pub fn log_warning<T: AsRef<str>>(message: T) {
     log(RedisLogLevel::Warning, message.as_ref());
 }
 
-/// The [log] crate implementation of logging.
+/// The [`log` crate](mod@log) implementation of logging.
 pub mod standard_log_implementation {
     use std::sync::atomic::{AtomicPtr, Ordering};
 

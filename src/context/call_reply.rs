@@ -155,8 +155,8 @@ unsafe impl<'root> Send for ErrorCallReply<'root> {}
 impl<'root> ErrorReply<'root> {
     /// Borrows the error prefix from either a native error reply or a message.
     ///
-    /// Uses the same byte-preserving rules as [`ErrorCallReply::code`]. The
-    /// message after the prefix need not be valid UTF-8.
+    /// Returns the bytes before the first ASCII space, or the entire message
+    /// if no space exists. The message need not be valid UTF-8.
     ///
     /// ```
     /// use redis_module::ErrorReply;
@@ -171,7 +171,7 @@ impl<'root> ErrorReply<'root> {
         }
     }
 
-    /// Convert [ErrorCallReply] to [String] or [None] if its not a valid utf8.
+    /// Convert this reply to a [`String`], or return [`None`] for invalid UTF-8.
     pub fn to_utf8_string(&self) -> Option<String> {
         match self {
             ErrorReply::Message(s) => Some(s.clone()),
@@ -917,12 +917,11 @@ impl<C: FnOnce(&EventContext, CallResult<'static>)> Drop for FutureHandler<C> {
     }
 }
 
-/// A future call reply struct that will be return in case
-/// the module invoke a blocking command using [call_blocking].
-/// This struct can be used to set unblock handler. Notice that the
-/// struct can not outlive the `ctx lifetime, This is because
-/// the future handler must be set before the Redis GIL will
-/// be released.
+/// A reply from `EventContext::call_blocking`, available at the Redis 7.2 and
+/// later compatibility floors.
+///
+/// Install an unblock handler before releasing the Redis lock. This reply
+/// cannot outlive its borrowed context.
 pub struct FutureCallReply<'ctx> {
     _ctx: &'ctx RuntimeContext,
     reply: Option<NonNull<RedisModuleCallReply>>,
@@ -944,8 +943,8 @@ extern "C" fn on_unblock<C: FnOnce(&EventContext, CallResult<'static>)>(
 }
 
 impl<'ctx> FutureCallReply<'ctx> {
-    /// Allow to set an handler that will be called when the command gets
-    /// unblock. Return [FutureHandler] that can be used to abort the command.
+    /// Install a handler called when the command unblocks. Returns a handle
+    /// that can be used to abort the command.
     pub fn set_unblock_handler<C: FnOnce(&EventContext, CallResult<'static>)>(
         mut self,
         unblock_handler: C,

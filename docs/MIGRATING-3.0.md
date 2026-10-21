@@ -7,6 +7,9 @@ reports, then the changes that compile unchanged but behave differently. The
 [changelog](../CHANGELOG.md) lists everything in the release, including what is
 new.
 
+For replacing an already running module, see the separate
+[module upgrade guide](UPGRADING-MODULES.md).
+
 Most modules meet only a few of these. The common ones are imports of raw items
 from the crate root, `NextArg::next_str`, `try_as_str` lifetimes, the return
 types of `delete`, `unlink`, `hash_set` and `hash_del`, and `?` on error types

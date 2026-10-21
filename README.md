@@ -278,6 +278,15 @@ The first valid call builds a shared 48 KiB lookup table; subsequent calls
 allocate only the returned key. The `keys_pos` example
 provides `key_for_slot <slot>` to try it from a client.
 
+## Upgrading a loaded module
+
+The [module upgrade guide](docs/UPGRADING-MODULES.md) covers unload eligibility,
+configuration replay, transient state, callback cleanup, platform loader
+behavior, and recovery after a failed replacement load. The
+[lifecycle example](examples/lifecycle.rs) demonstrates reloads with immutable
+and mutable configuration. Modules registering native data types require a
+server restart rather than `MODULE UNLOAD`.
+
 ## Building and testing this repository
 
 ```bash

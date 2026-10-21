@@ -33,7 +33,7 @@ impl Parse for Args {
 
 /// This proc macro allows specifying which RedisModuleAPI is required by some redismodue-rs
 /// function. The macro finds, for a given set of RedisModuleAPI, what the minimal Redis version is
-/// that contains all those APIs and decides whether or not the function might raise an [APIError].
+/// that contains all those APIs and decides whether or not the function might raise an `APIError`.
 ///
 /// In addition, for each RedisModuleAPI, the proc macro injects a code that extracts the actual
 /// API function pointer and raises an error or panics if the API is invalid.
@@ -45,7 +45,7 @@ impl Parse for Args {
 ///
 /// # Examples
 ///
-/// Creating a wrapper for the [`RedisModule_AddPostNotificationJob`]
+/// Creating a wrapper for `RedisModule_AddPostNotificationJob`:
 /// ```rust,no_run,ignore
 ///    redismodule_api!(
 ///         [RedisModule_AddPostNotificationJob],

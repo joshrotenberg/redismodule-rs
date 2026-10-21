@@ -250,7 +250,7 @@ impl CallOptionsBuilder {
 
     /// Construct a CallOption object that can be used to run commands using call_blocking.
     /// The commands can be either blocking or none blocking. In case the command are blocking
-    /// (like `blpop`) a [FutureCallReply] will be returned.
+    /// (like `blpop`) a [`FutureCallReply`](crate::FutureCallReply) will be returned.
     #[cfg(any(
         feature = "min-redis-compatibility-version-8-0",
         feature = "min-redis-compatibility-version-7-4",
