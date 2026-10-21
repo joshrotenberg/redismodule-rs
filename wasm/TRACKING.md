@@ -220,6 +220,16 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-21: rebased onto SDK master `1a715a0`, which adds configuration notes
+  and regression coverage for load precedence, rollback observations and
+  UTF-8/binary storage. No host adaptation needed. Rust 1.94.0 and Redis
+  8.10.2: workspace/guest formatting, workspace Clippy, separate SDK 7.2
+  Clippy, example builds, guest Clippy and strict SDK documentation passed.
+  With `RUST_TEST_THREADS=4`, the full suite passed: 63 SDK unit tests,
+  123 SDK integration tests, five standalone harness cases, seven host unit
+  tests, 21 host integration tests with JavaScript, 72 SDK doctests, and
+  four guest helper tests.
+
 - 2026-10-21: rebased onto SDK master `083f98b`, which adds the module upgrade
   guide, tested lifecycle example, and strict documentation checks. No host
   adaptation needed. Rust 1.94.0 and Redis 8.10.2: workspace/guest formatting,
