@@ -35,6 +35,61 @@ fn test_registration_context_registers_load_time_and_declarative_commands() -> R
     Ok(())
 }
 
+fn configure_context_acl_user(con: &mut TestConnection) -> Result<()> {
+    redis::cmd("ACL")
+        .arg(&[
+            "SETUSER",
+            "context-reader",
+            "on",
+            "nopass",
+            "~allowed:*",
+            "+get",
+        ])
+        .query::<()>(con)?;
+    Ok(())
+}
+
+#[test]
+fn test_worker_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Result<()> {
+    for mode in ["plain", "detached"] {
+        let mut con = TestConnection::new("context_acl");
+        configure_context_acl_user(&mut con)?;
+        let flags: Vec<i64> = redis::cmd("context_acl.worker")
+            .arg(&[mode, "context-reader"])
+            .query(&mut con)?;
+        assert_eq!(flags, [1; 5], "{mode}");
+        utils::wait_until(Duration::from_secs(2), "ACL worker exit", || {
+            Ok(redis::cmd("context_acl.finish").query::<i64>(&mut con)? == 1)
+        })?;
+        // The detached context is reused. Its scoped identity must not leak
+        // into a later lock invocation either.
+        let flags: Vec<i64> = redis::cmd("context_acl.worker")
+            .arg(&[mode, "context-reader"])
+            .query(&mut con)?;
+        assert_eq!(flags, [1; 5], "reused {mode}");
+        utils::wait_until(Duration::from_secs(2), "second ACL worker exit", || {
+            Ok(redis::cmd("context_acl.finish").query::<i64>(&mut con)? == 1)
+        })?;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_event_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Result<()> {
+    let mut con = TestConnection::new("context_acl");
+    configure_context_acl_user(&mut con)?;
+    redis::cmd("context_acl.timer")
+        .arg("context-reader")
+        .query::<()>(&mut con)?;
+    let mut flags: Option<Vec<i64>> = None;
+    utils::wait_until(Duration::from_secs(2), "ACL event callback", || {
+        flags = redis::cmd("context_acl.result").query(&mut con)?;
+        Ok(flags.is_some())
+    })?;
+    assert_eq!(flags.unwrap(), [1; 5]);
+    Ok(())
+}
+
 #[test]
 fn test_timer_event_context_uses_its_selected_database() -> Result<()> {
     let mut con = TestConnection::new("timer");

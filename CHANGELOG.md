@@ -13,7 +13,8 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
-- `RuntimeContext` for shared locked operations, `EventContext` for module-owned
+- `RuntimeContext` for shared locked operations and scoped ACL-call users,
+  `EventContext` for module-owned
   callbacks, and `WorkerContext` for locked workers. Client command handlers keep
   `Context`; event and worker views cannot reply to or block clients.
 - Borrowed `RegistrationContext` for module initialization, with access to

@@ -2,7 +2,8 @@
 use super::*;
 
 /// Operations that need a live Redis context and the Redis lock, but no client
-/// reply target or module ownership: calls, keys, database selection, and logging.
+/// reply target or module ownership: calls, keys, database selection, logging,
+/// and scoped users for ACL-checked calls.
 /// Helpers shared by commands, events, init hooks, and workers should take this
 /// type. Each more specialized view dereferences to it.
 ///

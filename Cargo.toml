@@ -25,6 +25,10 @@ keywords = ["redis", "plugin"]
 categories = ["database", "api-bindings"]
 
 [[example]]
+name = "context_acl"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "hello"
 crate-type = ["cdylib"]
 

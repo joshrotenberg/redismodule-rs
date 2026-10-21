@@ -97,9 +97,12 @@ fn on_timer(ctx: &EventContext, key: String) {
 ```
 
 Event and worker views have no `reply*`, `block_client*`, key-position discovery,
-`replicate_verbatim`, or client authentication methods, and cannot be converted
+`replicate_verbatim`, or current-client user queries, and cannot be converted
 to `Context` by safe code. Use explicit `replicate(command, args)` outside a
-command. Worker guards cannot create timers or subscribe to events. Configuration
+command. `authenticate_user` remains on `RuntimeContext`: it sets the context
+user for ACL-checked calls, including on workers and events, and does not
+authenticate a client connection. Its scope clears that user before the context
+or worker guard can expire. Worker guards cannot create timers or subscribe to events. Configuration
 and command/type registration still require `RegistrationContext`.
 
 Both guard types borrow their owner and cannot outlive it. Their runtime views

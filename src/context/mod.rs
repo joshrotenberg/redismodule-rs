@@ -373,8 +373,10 @@ unsafe impl Sync for DetachedContext {}
 /// SDK command handlers receive this type. Event callbacks and worker guards
 /// cannot be converted to it by safe code.
 ///
-/// ```compile_fail
-/// let forged = redis_module::Context { ctx: std::ptr::null_mut() };
+/// ```compile_fail,E0451
+/// fn forge(event: redis_module::EventContext) -> redis_module::Context {
+///     redis_module::Context { event }
+/// }
 /// ```
 #[derive(Debug)]
 pub struct Context {
@@ -402,14 +404,11 @@ impl Drop for SelectedDbGuard<'_> {
     }
 }
 
-/// A guerd that protected a user that has
-/// been set on a context using `autenticate_user`.
-/// This guerd make sure to unset the user when freed.
-/// It prevent privilege escalation security issues
-/// that can happened by forgeting to unset the user.
+/// A scoped user for ACL-checked calls through [`RuntimeContext::authenticate_user`].
+/// Dropping it clears the context user before freeing its native handle.
 #[derive(Debug)]
 pub struct ContextUserScope<'ctx> {
-    ctx: &'ctx Context,
+    ctx: &'ctx RuntimeContext,
     user: *mut raw::RedisModuleUser,
 }
 
@@ -421,7 +420,7 @@ impl<'ctx> Drop for ContextUserScope<'ctx> {
 }
 
 impl<'ctx> ContextUserScope<'ctx> {
-    fn new(ctx: &'ctx Context, user: *mut raw::RedisModuleUser) -> ContextUserScope<'ctx> {
+    fn new(ctx: &'ctx RuntimeContext, user: *mut raw::RedisModuleUser) -> ContextUserScope<'ctx> {
         ContextUserScope { ctx, user }
     }
 }
@@ -618,31 +617,6 @@ impl Context {
         unsafe { RedisString::from_owned_ptr_or_none(NonNull::new(self.ctx), user) }
     }
 
-    /// Attach the given user to the current context so each operation performed from
-    /// now on using this context will be validated againts this new user.
-    /// Return [ContextUserScope] which make sure to unset the user when freed and
-    /// can not outlive the current [Context].
-    pub fn authenticate_user(
-        &self,
-        user_name: &RedisString,
-    ) -> Result<ContextUserScope<'_>, RedisError> {
-        // Look up every API first, so a missing one cannot leave `user` allocated.
-        let get_user = unsafe { crate::__available_api!(RedisModule_GetModuleUserFromUserName) };
-        let set_context_user = unsafe { crate::__available_api!(RedisModule_SetContextUser) };
-        let user = unsafe { get_user(user_name.as_ptr()) };
-        if user.is_null() {
-            return Err(RedisError::Str(
-                "ERR the user does not exist or is disabled",
-            ));
-        }
-        unsafe { set_context_user(self.ctx, user) };
-        Ok(ContextUserScope::new(self, user))
-    }
-
-    fn deautenticate_user(&self) {
-        unsafe { crate::__required_api!(RedisModule_SetContextUser)(self.ctx, ptr::null_mut()) };
-    }
-
     /// Adds an entry to the ACL log, which `ACL LOG` lists, for the user named
     /// `user_name` and the denied `object` (a command, key or channel name), as
     /// `RedisModule_ACLAddLogEntryByUserName` does. The entry records the
@@ -696,6 +670,32 @@ impl Context {
 }
 
 impl RuntimeContext {
+    /// Sets the user used by ACL-checked calls (`CallOptionsBuilder::verify_acl`).
+    /// This is a context-scoped identity, including on events and workers; it
+    /// does not authenticate or modify a client connection. The returned scope
+    /// clears that identity when dropped, including during unwind, and borrows
+    /// this view so it cannot outlive the invocation or worker lock guard.
+    pub fn authenticate_user(
+        &self,
+        user_name: &RedisString,
+    ) -> Result<ContextUserScope<'_>, RedisError> {
+        // Look up every API first, so a missing one cannot leave `user` allocated.
+        let get_user = unsafe { crate::__available_api!(RedisModule_GetModuleUserFromUserName) };
+        let set_context_user = unsafe { crate::__available_api!(RedisModule_SetContextUser) };
+        let user = unsafe { get_user(user_name.as_ptr()) };
+        if user.is_null() {
+            return Err(RedisError::Str(
+                "ERR the user does not exist or is disabled",
+            ));
+        }
+        unsafe { set_context_user(self.ctx, user) };
+        Ok(ContextUserScope::new(self, user))
+    }
+
+    fn deautenticate_user(&self) {
+        unsafe { crate::__required_api!(RedisModule_SetContextUser)(self.ctx, ptr::null_mut()) };
+    }
+
     /// Logs `message` at `level` with the module name.
     /// Embedded NUL bytes are written as `\0`, which reads the same as a literal
     /// backslash and zero; other text is passed literally.
