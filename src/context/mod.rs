@@ -404,7 +404,7 @@ impl Drop for SelectedDbGuard<'_> {
     }
 }
 
-/// A scoped user for ACL-checked calls through [`RuntimeContext::authenticate_user`].
+/// A scoped user for ACL-checked calls through [`RuntimeContext::scoped_call_user`].
 /// Dropping it clears the context user before freeing its native handle.
 /// It borrows the runtime view, including the worker guard that provides it:
 ///
@@ -414,27 +414,27 @@ impl Drop for SelectedDbGuard<'_> {
 ///     {
 ///         let guard = owner.lock();
 ///         let username = guard.create_string("default");
-///         scope = guard.authenticate_user(&username).unwrap();
+///         scope = guard.scoped_call_user(&username).unwrap();
 ///     }
 ///     drop(scope);
 /// }
 /// ```
 #[derive(Debug)]
-pub struct ContextUserScope<'ctx> {
+pub struct CallUserScope<'ctx> {
     ctx: &'ctx RuntimeContext,
     user: *mut raw::RedisModuleUser,
 }
 
-impl<'ctx> Drop for ContextUserScope<'ctx> {
+impl<'ctx> Drop for CallUserScope<'ctx> {
     fn drop(&mut self) {
-        self.ctx.deautenticate_user();
+        self.ctx.clear_call_user();
         unsafe { crate::__required_api!(RedisModule_FreeModuleUser)(self.user) };
     }
 }
 
-impl<'ctx> ContextUserScope<'ctx> {
-    fn new(ctx: &'ctx RuntimeContext, user: *mut raw::RedisModuleUser) -> ContextUserScope<'ctx> {
-        ContextUserScope { ctx, user }
+impl<'ctx> CallUserScope<'ctx> {
+    fn new(ctx: &'ctx RuntimeContext, user: *mut raw::RedisModuleUser) -> CallUserScope<'ctx> {
+        CallUserScope { ctx, user }
     }
 }
 
@@ -683,17 +683,18 @@ impl Context {
 }
 
 impl RuntimeContext {
-    /// Sets the user used by ACL-checked calls (`CallOptionsBuilder::verify_acl`).
+    /// Selects the user used by calls with [`CallOptionsBuilder::verify_acl`] enabled.
+    /// Keep the returned [`CallUserScope`] alive while making those calls.
     /// This is a context-scoped identity, including on events and workers; it
     /// does not authenticate or modify a client connection. The returned scope
     /// clears that identity when dropped, including during unwind, and borrows
     /// this view so it cannot outlive the invocation or worker lock guard.
     /// Leaking the scope (for example with `mem::forget`) skips cleanup and leaves
     /// the user attached, including across later locks of a reused detached context.
-    pub fn authenticate_user(
+    pub fn scoped_call_user(
         &self,
         user_name: &RedisString,
-    ) -> Result<ContextUserScope<'_>, RedisError> {
+    ) -> Result<CallUserScope<'_>, RedisError> {
         // Look up every API first, so a missing one cannot leave `user` allocated.
         let get_user = unsafe { crate::__available_api!(RedisModule_GetModuleUserFromUserName) };
         let set_context_user = unsafe { crate::__available_api!(RedisModule_SetContextUser) };
@@ -704,10 +705,10 @@ impl RuntimeContext {
             ));
         }
         unsafe { set_context_user(self.ctx, user) };
-        Ok(ContextUserScope::new(self, user))
+        Ok(CallUserScope::new(self, user))
     }
 
-    fn deautenticate_user(&self) {
+    fn clear_call_user(&self) {
         unsafe { crate::__required_api!(RedisModule_SetContextUser)(self.ctx, ptr::null_mut()) };
     }
 
