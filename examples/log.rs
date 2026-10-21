@@ -5,7 +5,7 @@ use redis_module::native_types::RedisType;
 use redis_module::{Context, RedisError, RedisResult, RedisString, Status, raw, redis_module};
 use std::os::raw::c_void;
 
-fn init(_ctx: &Context, _args: &[RedisString]) -> Status {
+fn init(_ctx: &redis_module::RegistrationContext<'_>, _args: &[RedisString]) -> Status {
     // The load callback's context is temporary. The persistent log facade uses
     // context-free logging; each command's Context is used only for that command.
     // SAFETY: a null context is always valid.

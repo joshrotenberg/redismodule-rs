@@ -50,7 +50,7 @@ impl ConfigurationValue<RedisString> for Text {
     }
 }
 
-fn init(_: &Context, _: &[RedisString]) -> Status {
+fn init(_: &redis_module::RegistrationContext<'_>, _: &[RedisString]) -> Status {
     // SAFETY: OnLoad runs on the main thread before any command, so nothing
     // reads the module's FreeString pointer while it is replaced.
     unsafe {

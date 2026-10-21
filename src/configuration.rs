@@ -1,6 +1,6 @@
 use crate::context::thread_safe::{RedisGILGuard, RedisLockIndicator};
 use crate::{CallOptionResp, CallOptionsBuilder, CallResult, RedisValue, raw};
-use crate::{Context, RedisError, RedisString};
+use crate::{Context, RedisError, RedisString, RegistrationContext};
 use bitflags::bitflags;
 use std::cell::RefCell;
 use std::ffi::{CStr, CString};
@@ -256,7 +256,7 @@ extern "C" fn i64_configuration_get<T: ConfigurationValue<i64> + 'static>(
 /// registration.
 #[expect(clippy::too_many_arguments)]
 pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
-    ctx: &Context,
+    ctx: &RegistrationContext<'_>,
     name: &str,
     variable: &'static T,
     default: i64,
@@ -409,7 +409,7 @@ extern "C" fn string_configuration_get<T: ConfigurationValue<RedisString> + 'sta
 /// `configurations` block of `redis_module!`, call [`load_configurations`]
 /// after the last registration.
 pub fn register_string_configuration<T: ConfigurationValue<RedisString>>(
-    ctx: &Context,
+    ctx: &RegistrationContext<'_>,
     name: &str,
     variable: &'static T,
     default: &str,
@@ -488,7 +488,7 @@ extern "C" fn bool_configuration_get<T: ConfigurationValue<bool> + 'static>(
 /// `configurations` block of `redis_module!`, call [`load_configurations`]
 /// after the last registration.
 pub fn register_bool_configuration<T: ConfigurationValue<bool>>(
-    ctx: &Context,
+    ctx: &RegistrationContext<'_>,
     name: &str,
     variable: &'static T,
     default: bool,
@@ -591,7 +591,7 @@ extern "C" fn enum_configuration_get<
 /// `configurations` block of `redis_module!`, call [`load_configurations`]
 /// after the last registration.
 pub fn register_enum_configuration<G: EnumConfigurationValue, T: ConfigurationValue<G>>(
-    ctx: &Context,
+    ctx: &RegistrationContext<'_>,
     name: &str,
     variable: &'static T,
     default: G,
@@ -672,9 +672,9 @@ pub fn get_enum_default_config_value<G: EnumConfigurationValue>(
 /// should fail: Redis unloads a module whose values were not applied. Setters
 /// that ran before the rejected value are not undone.
 ///
-/// Also returns an error, with nothing in the Redis log, when called outside the
-/// module's load.
-pub fn load_configurations(ctx: &Context) -> Result<(), RedisError> {
+/// Requires a [`RegistrationContext`] from the module's active load invocation.
+/// Safe runtime code cannot call this function.
+pub fn load_configurations(ctx: &RegistrationContext<'_>) -> Result<(), RedisError> {
     let load_configs = unsafe { crate::__available_api!(RedisModule_LoadConfigs) };
     if unsafe { load_configs(ctx.ctx) } == raw::REDISMODULE_OK as c_int {
         Ok(())

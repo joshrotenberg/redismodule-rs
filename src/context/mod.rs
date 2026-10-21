@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 
 use crate::key::{KeyFlags, RedisKey, RedisKeyWritable};
 use crate::logging::RedisLogLevel;
-use crate::raw::{ModuleOptions, Version};
+use crate::raw::Version;
 use crate::raw::{
     add_info_begin_dict_field, add_info_end_dict_field, add_info_field_double,
     add_info_field_long_long, add_info_field_str, add_info_field_unsigned_long_long,
@@ -25,7 +25,9 @@ use std::ffi::CStr;
 use self::call_reply::{CallResult, ErrorReply, PromiseCallReply, create_promise_call_reply};
 use self::thread_safe::RedisLockIndicator;
 
+mod registration;
 mod timer;
+pub use registration::RegistrationContext;
 
 pub mod blocked;
 pub mod call_reply;
@@ -1061,9 +1063,6 @@ impl Context {
                 }
             }
         }
-    }
-    pub fn set_module_options(&self, options: ModuleOptions) {
-        unsafe { crate::__required_api!(RedisModule_SetModuleOptions)(self.ctx, options.bits()) };
     }
 
     /// Return ContextFlags object that allows to check properties related to the state of

@@ -57,7 +57,7 @@ fn mask(value: &str) -> Result<NotifyEvent, RedisError> {
     Ok(mask)
 }
 
-fn init(ctx: &Context, args: &[RedisString]) -> Status {
+fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> Status {
     let result = (|| {
         if let Some(value) = args.first() {
             ctx.subscribe_to_keyspace_events(

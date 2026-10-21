@@ -49,7 +49,7 @@ fn num_changes(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
 }
 
 /// Runs after the configuration values are applied, so it sees the loaded value.
-fn init(ctx: &Context, _: &[RedisString]) -> Status {
+fn init(ctx: &redis_module::RegistrationContext<'_>, _: &[RedisString]) -> Status {
     let value = *CONFIGURATION_I64.lock(ctx);
     ctx.log_notice(&format!("configuration init: i64 is {value}"));
     Status::Ok

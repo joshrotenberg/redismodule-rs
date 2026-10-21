@@ -112,6 +112,7 @@ these in October 2026.
 
 | change | addition |
 |---|---|
+| [Registration context](examples/registration.rs) | A borrowed `RegistrationContext` separates load-time command, type, configuration, and option setup from runtime `Context`. The macro supplies it to init hooks; runtime code cannot safely promote a context to registration. Event and worker views remain unchanged. |
 | [Runtime keyspace subscriptions](examples/runtime_events.rs) | `Context::subscribe_to_keyspace_events` accepts a runtime mask and a `redis_event_handler!(handler)` adapter. It shares supported-flag filtering, borrowed keys, lossy event decoding, and panic protection with declarative handlers. Module ownership is tracked on SDK callback contexts; unproven contexts are rejected to preserve unload cleanup, including in the legacy three-argument event macro (see the migration guide). |
 | [Optional command builders](examples/command_builder.rs) | Fluent command definitions with typed flags, named key positions, and required/optional ACL categories, alongside the legacy tuple syntax. The forms share base registration, validation, and panic-safe callbacks. |
 | [Error and notification helpers](examples/events.rs) | `ErrorReply::code` and `ErrorCallReply::code` borrow the error prefix as bytes; `Context::notify_keyspace_event_bytes` sends non-UTF-8 event names and rejects NUL bytes. The existing text helper returns `Status::Err` on a NUL-containing name instead of panicking. |

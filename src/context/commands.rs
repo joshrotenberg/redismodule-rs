@@ -1,8 +1,8 @@
 mod builder;
 pub use builder::{CommandBuilder, CommandFlags, KeyRange};
 
-use crate::Context;
 use crate::RedisError;
+use crate::RegistrationContext;
 use crate::Status;
 use crate::raw;
 use bitflags::bitflags;
@@ -558,7 +558,7 @@ api! {[
         RedisModule_SetCommandInfo,
     ],
     /// Register all the commands located on `COMMNADS_LIST`.
-    fn register_commands_internal(ctx: &Context) -> Result<(), RedisError> {
+    fn register_commands_internal(ctx: &RegistrationContext<'_>) -> Result<(), RedisError> {
         let is_enterprise = ctx.is_enterprise();
         COMMANDS_LIST.iter().try_for_each(|command| {
             let command_info = command()?;
@@ -674,7 +674,7 @@ api! {[
         feature = "min-redis-compatibility-version-6-0"
     ))
 ))]
-pub fn register_commands(ctx: &Context) -> Status {
+pub fn register_commands(ctx: &RegistrationContext<'_>) -> Status {
     register_commands_internal(ctx).map_or_else(
         |e| {
             ctx.log_warning(&e.to_string());
@@ -696,7 +696,7 @@ pub fn register_commands(ctx: &Context) -> Status {
         feature = "min-redis-compatibility-version-7-0"
     ))
 ))]
-pub fn register_commands(ctx: &Context) -> Status {
+pub fn register_commands(ctx: &RegistrationContext<'_>) -> Status {
     register_commands_internal(ctx).map_or_else(
         |e| {
             /* Make sure new command registration API is not been used. */

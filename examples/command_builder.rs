@@ -34,7 +34,7 @@ fn panic_command(_: &Context, _: Vec<RedisString>) -> RedisResult {
     panic!("builder command panicked");
 }
 
-fn init(ctx: &Context, args: &[RedisString]) -> Status {
+fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> Status {
     let Some(mode) = args.first() else {
         return Status::Ok;
     };

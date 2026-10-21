@@ -54,7 +54,7 @@ unsafe extern "C" fn copy(
     COUNTERS[1].fetch_add(1, Ordering::Relaxed);
     unsafe { COPY.get().unwrap()(c, s) }
 }
-fn init(_: &Context, _: &[RedisString]) -> Status {
+fn init(_: &redis_module::RegistrationContext<'_>, _: &[RedisString]) -> Status {
     unsafe {
         RETAIN.set(raw::RedisModule_RetainString.unwrap()).unwrap();
         FREE.set(raw::RedisModule_FreeString.unwrap()).unwrap();

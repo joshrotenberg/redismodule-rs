@@ -12,6 +12,30 @@ use redis_module::RedisValue;
 mod utils;
 
 #[test]
+fn test_registration_context_registers_load_time_and_declarative_commands() -> Result<()> {
+    for name in [None, Some("registration.from_args")] {
+        let args = name.into_iter().collect::<Vec<_>>();
+        let mut con = TestConnection::with_args("registration", &args);
+        for command in [
+            name.unwrap_or("registration.manual"),
+            "registration.legacy",
+            "registration.builder",
+        ] {
+            assert_eq!(redis::cmd(command).query::<String>(&mut con)?, "PONG");
+        }
+        assert!(
+            con.server_log()?
+                .contains("registration runtime helper succeeded")
+        );
+        assert!(
+            con.server_log()?
+                .contains("registration runtime init hook succeeded")
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn test_runtime_keyspace_mask_from_module_arguments() -> Result<()> {
     for (mask, expected) in [
         ("none", [0, 0, 0, 0, 0]),

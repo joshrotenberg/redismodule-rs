@@ -143,6 +143,17 @@ arity, detailed key specifications, summaries, and other rich metadata.
 See [examples/database.rs](examples/database.rs) for mixed syntax and
 [examples/command_builder.rs](examples/command_builder.rs) for more settings.
 
+### Module initialization
+
+Use `RegistrationContext` in `init` hooks that register commands, native data
+types, or configurations, or set module options. `redis_module!` supplies a
+borrowed context for its load invocation. Runtime helpers remain available,
+and ordinary command handlers continue taking `&Context`. A runtime context
+cannot acquire the registration capability through safe code.
+
+See [examples/registration.rs](examples/registration.rs) for manual registration
+alongside legacy and builder command declarations.
+
 ### Runtime keyspace subscriptions
 
 Keyspace subscriptions can also use a mask chosen from module arguments or a
