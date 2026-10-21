@@ -210,7 +210,13 @@ changing the header, build with the `bindgen-runtime` feature and copy the
 generated `OUT_DIR/bindings.rs` over `src/redisraw/bindings.rs`; CI fails when
 the two differ.
 
-## Validated string configurations
+## Module configurations
+
+The [configuration notes](docs/CONFIGURATION.md) explain registration, load
+precedence, module arguments, validation, observers and rollback across all
+configuration types.
+
+### Validated string configurations
 
 `configuration::ParsedStringConfig<T>` stores accepted UTF-8 text together
 with a parsed value. The parser can reject a load value or `CONFIG SET` before
