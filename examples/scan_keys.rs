@@ -17,9 +17,10 @@ fn scan_keys(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
     let cursor = KeysCursor::new();
     let mut res = Vec::new();
 
-    let mut scan_callback = |ctx: &Context, key_name: &RedisString, _key: Option<&RedisKey>| {
-        res.push(RedisValue::BulkRedisString(key_name.safe_clone(ctx)));
-    };
+    let mut scan_callback =
+        |ctx: &redis_module::RuntimeContext, key_name: &RedisString, _key: Option<&RedisKey>| {
+            res.push(RedisValue::BulkRedisString(key_name.safe_clone(ctx)));
+        };
 
     while cursor.scan(ctx, &mut scan_callback) {
         // do nothing

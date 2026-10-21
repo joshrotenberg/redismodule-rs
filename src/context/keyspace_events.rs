@@ -1,5 +1,5 @@
 //! Keyspace notification subscriptions with masks chosen at runtime.
-use crate::{Context, NotifyEvent, RedisError, raw};
+use crate::{EventContext, NotifyEvent, RedisError, raw};
 use std::os::raw::{c_char, c_int};
 
 type NotificationCallback = extern "C" fn(
@@ -31,24 +31,21 @@ impl KeyspaceEventHandler {
     }
 }
 
-impl Context {
+impl EventContext {
     /// Subscribes to a keyspace event mask chosen at runtime.
     ///
     /// ```no_run
-    /// use redis_module::{Context, NotifyEvent, RedisError, redis_event_handler};
-    /// fn on_event(_: &Context, _: NotifyEvent, _: &str, _: &[u8]) {}
-    /// fn subscribe(ctx: &Context, include_misses: bool) -> Result<(), RedisError> {
+    /// use redis_module::{EventContext, NotifyEvent, RedisError, redis_event_handler};
+    /// fn on_event(_: &EventContext, _: NotifyEvent, _: &str, _: &[u8]) {}
+    /// fn subscribe(ctx: &EventContext, include_misses: bool) -> Result<(), RedisError> {
     ///     let mut mask = NotifyEvent::STRING;
     ///     if include_misses { mask |= NotifyEvent::MISSED; }
     ///     ctx.subscribe_to_keyspace_events(mask, redis_event_handler!(on_event))
     /// }
     /// ```
     ///
-    /// Use a module-owned context from SDK module initialization, a command,
-    /// or a keyspace callback. Unproven contexts, including ordinary
-    /// [`crate::ThreadSafeContext`] guards and [`Self::new`], return an error
-    /// before registering. Custom native callbacks can establish ownership with
-    /// [`Self::from_module_context`] when its safety requirements hold.
+    /// Module load and command contexts dereference to this event view. Worker
+    /// guards cannot subscribe. For custom native callbacks, see [`Self::new`].
     /// Each call adds a subscription; repeated calls do not replace an earlier
     /// mask. Redis removes subscriptions when the module unloads. Notifications
     /// do not depend on the server's `notify-keyspace-events` configuration.
@@ -64,11 +61,6 @@ impl Context {
         mask: NotifyEvent,
         handler: KeyspaceEventHandler,
     ) -> Result<(), RedisError> {
-        if !self.module_owned {
-            return Err(RedisError::Str(
-                "ERR keyspace subscriptions require a module-owned context",
-            ));
-        }
         let flags_all = unsafe { raw::RedisModule_GetKeyspaceNotificationFlagsAll }.ok_or(
             RedisError::Str("ERR keyspace notification flags API is unavailable"),
         )?;

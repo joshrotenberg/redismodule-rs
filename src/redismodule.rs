@@ -12,7 +12,6 @@ use std::{fmt, ptr};
 
 use serde::de::{Error, SeqAccess};
 
-use crate::Context;
 pub use crate::raw;
 pub use crate::rediserror::RedisError;
 pub use crate::redisvalue::RedisValue;
@@ -234,7 +233,7 @@ impl RedisString {
     /// Command argv may be buffer-trimmed at command return: retain the owner,
     /// then derive a fresh view in the later legal phase. Do not carry an old
     /// byte pointer/view across that boundary. No thread sharing is certified.
-    pub fn safe_clone(&self, _ctx: &Context) -> Self {
+    pub fn safe_clone(&self, _ctx: &crate::RuntimeContext) -> Self {
         unsafe { Self::retain_from_ptr(self.inner) }
     }
 

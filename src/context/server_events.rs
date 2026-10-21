@@ -1,7 +1,7 @@
 use std::ffi::CStr;
 
 use crate::{InfoContext, RedisResult, raw};
-use crate::{RedisError, context::Context};
+use crate::{RedisError, context::EventContext};
 use linkme::distributed_slice;
 
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug)]
@@ -33,33 +33,33 @@ pub enum ModuleChangeSubevent {
 
 #[derive(Clone)]
 pub enum ServerEventHandler {
-    RuleChanged(fn(&Context, ServerRole)),
-    Loading(fn(&Context, LoadingSubevent)),
-    Flush(fn(&Context, FlushSubevent)),
-    ModuleChange(fn(&Context, ModuleChangeSubevent)),
-    Shutdown(fn(&Context)),
+    RuleChanged(fn(&EventContext, ServerRole)),
+    Loading(fn(&EventContext, LoadingSubevent)),
+    Flush(fn(&EventContext, FlushSubevent)),
+    ModuleChange(fn(&EventContext, ModuleChangeSubevent)),
+    Shutdown(fn(&EventContext)),
 }
 
 #[distributed_slice()]
-pub static ROLE_CHANGED_SERVER_EVENTS_LIST: [fn(&Context, ServerRole)] = [..];
+pub static ROLE_CHANGED_SERVER_EVENTS_LIST: [fn(&EventContext, ServerRole)] = [..];
 
 #[distributed_slice()]
-pub static LOADING_SERVER_EVENTS_LIST: [fn(&Context, LoadingSubevent)] = [..];
+pub static LOADING_SERVER_EVENTS_LIST: [fn(&EventContext, LoadingSubevent)] = [..];
 
 #[distributed_slice()]
-pub static FLUSH_SERVER_EVENTS_LIST: [fn(&Context, FlushSubevent)] = [..];
+pub static FLUSH_SERVER_EVENTS_LIST: [fn(&EventContext, FlushSubevent)] = [..];
 
 #[distributed_slice()]
-pub static MODULE_CHANGED_SERVER_EVENTS_LIST: [fn(&Context, ModuleChangeSubevent)] = [..];
+pub static MODULE_CHANGED_SERVER_EVENTS_LIST: [fn(&EventContext, ModuleChangeSubevent)] = [..];
 
 #[distributed_slice()]
-pub static CONFIG_CHANGED_SERVER_EVENTS_LIST: [fn(&Context, &[&str])] = [..];
+pub static CONFIG_CHANGED_SERVER_EVENTS_LIST: [fn(&EventContext, &[&str])] = [..];
 
 #[distributed_slice()]
-pub static CRON_SERVER_EVENTS_LIST: [fn(&Context, u64)] = [..];
+pub static CRON_SERVER_EVENTS_LIST: [fn(&EventContext, u64)] = [..];
 
 #[distributed_slice()]
-pub static SHUTDOWN_SERVER_EVENTS_LIST: [fn(&Context)] = [..];
+pub static SHUTDOWN_SERVER_EVENTS_LIST: [fn(&EventContext)] = [..];
 
 #[distributed_slice()]
 pub static INFO_COMMAND_HANDLER_LIST: [fn(&InfoContext, bool) -> RedisResult<()>] = [..];
@@ -73,7 +73,7 @@ extern "C" fn cron_callback(
     // SAFETY: Redis passes a RedisModuleCronLoopV1 with the cron loop event.
     let data: &raw::RedisModuleCronLoopV1 = unsafe { &*(data as *mut raw::RedisModuleCronLoopV1) };
     let hz = data.hz as u64;
-    let ctx = unsafe { Context::new(ctx) };
+    let ctx = unsafe { EventContext::new(ctx) };
     CRON_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback("cron event handler", || callback(&ctx, hz), || ());
     });
@@ -90,7 +90,7 @@ extern "C" fn role_changed_callback(
     } else {
         ServerRole::Replica
     };
-    let ctx = unsafe { Context::new(ctx) };
+    let ctx = unsafe { EventContext::new(ctx) };
     ROLE_CHANGED_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback(
             "role changed event handler",
@@ -113,7 +113,7 @@ extern "C" fn loading_event_callback(
         raw::REDISMODULE_SUBEVENT_LOADING_ENDED => LoadingSubevent::Ended,
         _ => LoadingSubevent::Failed,
     };
-    let ctx = unsafe { Context::new(ctx) };
+    let ctx = unsafe { EventContext::new(ctx) };
     LOADING_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback(
             "loading event handler",
@@ -134,7 +134,7 @@ extern "C" fn flush_event_callback(
     } else {
         FlushSubevent::Ended
     };
-    let ctx = unsafe { Context::new(ctx) };
+    let ctx = unsafe { EventContext::new(ctx) };
     FLUSH_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback(
             "flush event handler",
@@ -155,7 +155,7 @@ extern "C" fn module_change_event_callback(
     } else {
         ModuleChangeSubevent::Unloaded
     };
-    let ctx = unsafe { Context::new(ctx) };
+    let ctx = unsafe { EventContext::new(ctx) };
     MODULE_CHANGED_SERVER_EVENTS_LIST
         .iter()
         .for_each(|callback| {
@@ -173,7 +173,7 @@ extern "C" fn shutdown_event_callback(
     _subevent: u64,
     _data: *mut ::std::os::raw::c_void,
 ) {
-    let ctx = unsafe { Context::new(ctx) };
+    let ctx = unsafe { EventContext::new(ctx) };
     SHUTDOWN_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback("shutdown event handler", || callback(&ctx), || ());
     });
@@ -200,7 +200,7 @@ extern "C" fn config_change_event_callback(
                 .expect("Got a configuration name which is not a valid utf8")
         })
         .collect();
-    let ctx = unsafe { Context::new(ctx) };
+    let ctx = unsafe { EventContext::new(ctx) };
     CONFIG_CHANGED_SERVER_EVENTS_LIST
         .iter()
         .for_each(|callback| {
@@ -213,7 +213,7 @@ extern "C" fn config_change_event_callback(
 }
 
 fn register_single_server_event_type<F>(
-    ctx: &Context,
+    ctx: &EventContext,
     callbacks: &[F],
     server_event: u64,
     inner_callback: raw::RedisModuleEventCallback,
@@ -237,7 +237,7 @@ fn register_single_server_event_type<F>(
     Ok(())
 }
 
-pub fn register_server_events(ctx: &Context) -> Result<(), RedisError> {
+pub fn register_server_events(ctx: &EventContext) -> Result<(), RedisError> {
     register_single_server_event_type(
         ctx,
         &ROLE_CHANGED_SERVER_EVENTS_LIST,

@@ -37,7 +37,7 @@ fn bytes(_: &Context, argv: Vec<RedisString>) -> RedisResult {
     ]))
 }
 
-fn on_key(_: &Context, _: NotifyEvent, _: &str, key: &[u8]) {
+fn on_key(_: &redis_module::EventContext, _: NotifyEvent, _: &str, key: &[u8]) {
     // Retain Rust-owned bytes, never the callback's borrowed native key/view.
     *LAST_KEY.lock().unwrap() = key.to_vec();
 }

@@ -13,14 +13,17 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `RuntimeContext` for shared locked operations, `EventContext` for module-owned
+  callbacks, and `WorkerContext` for locked workers. Client command handlers keep
+  `Context`; event and worker views cannot reply to or block clients.
 - Borrowed `RegistrationContext` for module initialization, with access to
   runtime helpers and the Redis lock proof used by configuration guards.
 - `Context::subscribe_to_keyspace_events` for runtime-selected notification
   masks, with `redis_event_handler!(handler)` providing the shared panic-safe
   callback adapter. Existing `redis_module!` event handlers remain supported.
-  Module ownership is tracked by SDK callback contexts; unproven contexts are
-  rejected before registration. `Context::from_module_context` lets custom
-  native callbacks establish ownership under an explicit unsafe contract.
+  Module ownership is carried by the event view, also exposed by load and
+  command contexts. Worker guards cannot subscribe; custom native callbacks use
+  `EventContext::new` with a proven module association.
 - Optional command builders in `redis_module!`: `redis_command!(name, handler)`
   returns a `CommandBuilder` with typed `CommandFlags`, `KeyRange`, and ACL
   settings. Builders can be mixed with existing command tuples.
@@ -60,21 +63,30 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- **Breaking:** non-client callbacks use `EventContext`; database scan callbacks
+  and shared helpers use `RuntimeContext`. Both worker guard types dereference
+  to `WorkerContext` and borrow their owner. Init no longer exposes client APIs.
+  `Context::new` now requires a module association and client target;
+  `Context::dummy` moved to `RuntimeContext`. See the migration guide.
+- Worker guard cleanup frees its temporary context while still locked and
+  unlocks through the borrowed owner's live native context. Blocked-client
+  replies use a private reply adapter without fabricating a Redis lock proof.
+- Blocking calls from module-less workers return an error before entering Redis.
+  Module-owned detached workers retain blocking calls and receive event views
+  in their unblock handlers.
 - **Breaking:** command registration, data-type registration, configuration
   registration/loading, and module options require `RegistrationContext`.
   `redis_module!` supplies it during load. Init functions that register items
   must update their context parameter; command handlers and both command
   declaration syntaxes are unchanged. Runtime contexts cannot safely acquire
   the load-time capability.
-- **Breaking:** the three-argument `redis_event_handler!(ctx, mask, handler)`
-  requires a context with proven module ownership. SDK module-load, command,
-  and keyspace callbacks provide one. Contexts wrapped with `Context::new` and
-  other unproven contexts are rejected to prevent subscriptions surviving
-  module unload; custom native callbacks can use `Context::from_module_context`
-  only when its native module-association contract holds.
+- **Breaking:** `redis_event_handler!(ctx, mask, handler)` requires an
+  `EventContext` or a load/command context that exposes it. Worker guards cannot
+  register subscriptions. Custom native event contexts require proven module
+  ownership and the Redis lock through `EventContext::new`.
 - `Context::notify_keyspace_event` returns `Status::Err` for NUL-containing
   event names instead of panicking.
-- **Breaking:** functions that take raw pointers they dereference are `unsafe`: `Context::new`, `Context::dummy`, `RedisString::new`, `RedisString::from_redis_module_string`, `RedisString::from_ptr`, `RedisString::string_as_slice`, `decode_args`, `RedisKey::open` and `open_with_flags`, `RedisKeyWritable::open`, `open_with_flags` and `open_with_redis_string`, `InfoContext::new`, `RedisBuffer::new`, `RedisModuleIO::new`, `logging::setup_for_context`, `logging::log_io_error`, `DefragContext::defrag_dealloc`, and in `raw` the RDB `save_*` and `load_*` helpers, `is_io_error`, `redis_log`, `call_reply_verbatim_string` and the doc-hidden `register_info_function`.
+- **Breaking:** functions that take raw pointers they dereference are `unsafe`: `Context::new`, `RuntimeContext::new`, `RuntimeContext::dummy`, `RedisString::new`, `RedisString::from_redis_module_string`, `RedisString::from_ptr`, `RedisString::string_as_slice`, `decode_args`, `RedisKey::open` and `open_with_flags`, `RedisKeyWritable::open`, `open_with_flags` and `open_with_redis_string`, `InfoContext::new`, `RedisBuffer::new`, `RedisModuleIO::new`, `logging::setup_for_context`, `logging::log_io_error`, `DefragContext::defrag_dealloc`, and in `raw` the RDB `save_*` and `load_*` helpers, `is_io_error`, `redis_log`, `call_reply_verbatim_string` and the doc-hidden `register_info_function`.
 - **Breaking:** the `ctx` fields of `Context` and `InfoContext` and `RedisString`'s `inner` field are private; use `get_raw()` and `as_ptr()`.
 - **Breaking:** `RedisString::try_as_str` borrows from the string, and `RedisString` no longer stores a context. `Context::get_current_user` returns `Option<RedisString>`. `ScanKeyCursor::scan` and `for_each` callbacks receive the value as `Option<&RedisString>`, and `KeysCursor::scan` takes `&mut F`.
 - **Breaking:** keyspace event handlers registered with `redis_event_handler!` get the event name and key borrowed for the callback, so a handler that asks for `&'static str` or `&'static [u8]` no longer compiles.

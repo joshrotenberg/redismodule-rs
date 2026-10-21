@@ -1,16 +1,16 @@
 //! Module initialization capabilities, borrowed for one load invocation.
 use std::ops::Deref;
 
-use crate::{Context, ModuleOptions};
+use crate::{EventContext, ModuleOptions};
 
 /// A module's load-time registration context.
 ///
 /// `redis_module!` provides this to `init` functions. Commands, data types, and
 /// configurations require it for registration. Ordinary command handlers keep
-/// using [`Context`], which cannot be promoted to registration by safe code.
+/// using [`Context`](crate::Context), which cannot be promoted to registration by safe code.
 /// The wrapper borrows the load invocation and cannot be cloned or retained.
-/// Runtime operations are forwarded to `Context`; event/worker and client-reply
-/// capability separation is a subsequent change.
+/// Shared operations are forwarded through [`EventContext`] to
+/// [`RuntimeContext`](crate::RuntimeContext). This view cannot reply to or block a client.
 ///
 /// A command context cannot register a command:
 ///
@@ -48,7 +48,7 @@ use crate::{Context, ModuleOptions};
 /// Runtime code cannot construct the capability without an unsafe call:
 ///
 /// ```compile_fail,E0133
-/// fn promote(ctx: &redis_module::Context) {
+/// fn promote(ctx: &redis_module::EventContext) {
 ///     let _ = redis_module::RegistrationContext::from_context(ctx);
 /// }
 /// ```
@@ -66,15 +66,21 @@ use crate::{Context, ModuleOptions};
 /// The load context cannot escape its backing context:
 ///
 /// ```compile_fail,E0515
-/// use redis_module::{Context, RegistrationContext};
-/// fn escape() -> RegistrationContext<'static> {
-///     let context = unsafe { Context::dummy() };
+/// use redis_module::{EventContext, RegistrationContext};
+/// fn escape(raw: *mut redis_module::raw::RedisModuleCtx) -> RegistrationContext<'static> {
+///     let context = unsafe { EventContext::new(raw) };
 ///     unsafe { RegistrationContext::from_context(&context) }
 /// }
 /// ```
+///
+/// Initialization has no client reply target:
+///
+/// ```compile_fail,E0599
+/// fn init(ctx: &redis_module::RegistrationContext<'_>) { ctx.reply(Ok("OK".into())); }
+/// ```
 #[derive(Debug)]
 pub struct RegistrationContext<'load> {
-    context: &'load Context,
+    context: &'load EventContext,
 }
 
 impl<'load> RegistrationContext<'load> {
@@ -89,7 +95,7 @@ impl<'load> RegistrationContext<'load> {
     /// invocation, after successful module initialization. Its native module
     /// association must be live, and the Redis lock must be held. The wrapper
     /// and any references derived from it must not outlive that invocation.
-    pub const unsafe fn from_context(context: &'load Context) -> Self {
+    pub const unsafe fn from_context(context: &'load EventContext) -> Self {
         Self { context }
     }
 
@@ -108,7 +114,7 @@ impl<'load> RegistrationContext<'load> {
 }
 
 impl Deref for RegistrationContext<'_> {
-    type Target = Context;
+    type Target = EventContext;
 
     fn deref(&self) -> &Self::Target {
         self.context

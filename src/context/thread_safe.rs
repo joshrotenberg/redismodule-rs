@@ -3,8 +3,10 @@ use std::cell::{Cell, UnsafeCell};
 use std::ops::{Deref, DerefMut};
 use std::ptr;
 
+use super::ReplyContext;
 use crate::context::blocked::BlockedClient;
-use crate::{Context, RedisResult, raw};
+use crate::{RedisResult, RuntimeContext, WorkerContext, raw};
+use std::marker::PhantomData;
 
 pub struct RedisGILGuardScope<'ctx, 'mutex, T, G: RedisLockIndicator> {
     _context: &'ctx G,
@@ -47,7 +49,7 @@ impl<'ctx, 'mutex, T, G: RedisLockIndicator> Drop for RedisGILGuardScope<'ctx, '
 /// In general this trait should not be implemented by the
 /// user, the crate knows when the Redis GIL is held and will
 /// make sure to implement this trait correctly on different
-/// struct (such as [Context], [ConfigurationContext], [ContextGuard]).
+/// struct (such as [crate::Context], [`ConfigurationContext`](crate::configuration::ConfigurationContext), [ContextGuard]).
 /// User might also decide to implement this trait but he should
 /// carefully consider that because it is easy to make mistakes,
 /// this is why the trait is marked as unsafe.
@@ -111,31 +113,54 @@ unsafe impl<T> Sync for RedisGILGuard<T> {}
 // Moving the guard moves the value to another thread, so T must be Send.
 unsafe impl<T: Send> Send for RedisGILGuard<T> {}
 
-pub struct ContextGuard {
-    ctx: Context,
+/// A worker view borrowed from its [`ThreadSafeContext`] while Redis is locked.
+/// The owner cannot be freed before the guard, and the view cannot escape it.
+///
+/// ```compile_fail,E0515
+/// fn escape() -> redis_module::ContextGuard<'static> {
+///     let owner = redis_module::ThreadSafeContext::new();
+///     owner.lock()
+/// }
+/// ```
+///
+/// ```compile_fail,E0505
+/// fn free_owner(owner: redis_module::ThreadSafeContext<redis_module::DetachedFromClient>) {
+///     let guard = owner.lock();
+///     drop(owner);
+///     guard.log_notice("owner is gone");
+/// }
+/// ```
+///
+/// ```compile_fail,E0599
+/// fn reply(guard: &redis_module::ContextGuard<'_>) { guard.reply(Ok("OK".into())); }
+/// ```
+pub struct ContextGuard<'context> {
+    ctx: WorkerContext,
+    unlock_ctx: *mut raw::RedisModuleCtx,
+    _context: PhantomData<&'context ()>,
 }
 
-unsafe impl RedisLockIndicator for ContextGuard {}
+unsafe impl RedisLockIndicator for ContextGuard<'_> {}
 
-impl Drop for ContextGuard {
+impl Drop for ContextGuard<'_> {
     fn drop(&mut self) {
         unsafe {
-            crate::__required_api!(RedisModule_ThreadSafeContextUnlock)(self.ctx.ctx);
             crate::__required_api!(RedisModule_FreeThreadSafeContext)(self.ctx.ctx);
+            crate::__required_api!(RedisModule_ThreadSafeContextUnlock)(self.unlock_ctx);
         };
     }
 }
 
-impl Deref for ContextGuard {
-    type Target = Context;
+impl Deref for ContextGuard<'_> {
+    type Target = WorkerContext;
 
     fn deref(&self) -> &Self::Target {
         &self.ctx
     }
 }
 
-impl Borrow<Context> for ContextGuard {
-    fn borrow(&self) -> &Context {
+impl Borrow<RuntimeContext> for ContextGuard<'_> {
+    fn borrow(&self) -> &RuntimeContext {
         &self.ctx
     }
 }
@@ -188,23 +213,24 @@ impl ThreadSafeContext<BlockedClient> {
     /// so we pass through its functionality directly.
     #[allow(clippy::must_use_candidate)]
     pub fn reply(&self, r: RedisResult) -> raw::Status {
-        // SAFETY: replies to a blocked client's thread-safe context are
-        // collected without the lock and sent when Redis unblocks the client;
-        // the Context is used only for this reply and is not kept.
-        let ctx = unsafe { Context::new(self.ctx) };
-        ctx.reply(r)
+        // ReplyContext grants no RedisLockIndicator or general runtime access.
+        ReplyContext { ctx: self.ctx }.reply(r)
     }
 }
 
 impl<B: Send> ThreadSafeContext<B> {
     /// All other APIs require locking the context, so we wrap it in a way
     /// similar to `std::sync::Mutex`.
-    pub fn lock(&self) -> ContextGuard {
+    pub fn lock(&self) -> ContextGuard<'_> {
         unsafe { crate::__required_api!(RedisModule_ThreadSafeContextLock)(self.ctx) };
         let ctx =
             unsafe { crate::__required_api!(RedisModule_GetThreadSafeContext)(ptr::null_mut()) };
-        let ctx = unsafe { Context::new(ctx) };
-        ContextGuard { ctx }
+        let ctx = unsafe { WorkerContext::new(ctx) };
+        ContextGuard {
+            ctx,
+            unlock_ctx: self.ctx,
+            _context: PhantomData,
+        }
     }
 }
 

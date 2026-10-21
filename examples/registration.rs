@@ -8,15 +8,15 @@ fn ping(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     ctx.call("PING", &[] as &[&str])
 }
 
-// Helpers shared with command handlers keep taking a runtime Context.
-fn check_runtime(ctx: &Context) -> Result<(), RedisError> {
+// Helpers shared by commands, init, events, and workers take the shared view.
+fn check_runtime(ctx: &redis_module::RuntimeContext) -> Result<(), RedisError> {
     ctx.call("PING", &[] as &[&str])?;
     ctx.log_notice("registration runtime helper succeeded");
     Ok(())
 }
 
-// Runtime-only hooks keep their existing Context signature through coercion.
-fn runtime_init(ctx: &Context, _: &[RedisString]) -> Status {
+// Runtime-only hooks also accept the shared view through coercion.
+fn runtime_init(ctx: &redis_module::RuntimeContext, _: &[RedisString]) -> Status {
     ctx.log_notice("registration runtime init hook succeeded");
     Status::Ok
 }

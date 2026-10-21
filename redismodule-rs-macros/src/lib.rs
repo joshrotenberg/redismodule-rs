@@ -86,13 +86,13 @@ pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Proc macro which is set on a function that need to be called whenever the server role changes.
-/// The function must accept a [Context] and [ServerRole].
+/// The function must accept a [EventContext] and [ServerRole].
 ///
 /// Example:
 ///
 /// ```rust,no_run,ignore
 /// #[role_changed_event_handler]
-/// fn role_changed_event_handler(ctx: &Context, values: ServerRole) { ... }
+/// fn role_changed_event_handler(ctx: &EventContext, values: ServerRole) { ... }
 /// ```
 #[proc_macro_attribute]
 pub fn role_changed_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -103,13 +103,13 @@ pub fn role_changed_event_handler(_attr: TokenStream, item: TokenStream) -> Toke
 }
 
 /// Proc macro which is set on a function that need to be called whenever a loading event happened.
-/// The function must accept a [Context] and [LoadingSubevent].
+/// The function must accept a [EventContext] and [LoadingSubevent].
 ///
 /// Example:
 ///
 /// ```rust,no_run,ignore
 /// #[loading_event_handler]
-/// fn loading_event_handler(ctx: &Context, values: LoadingSubevent) { ... }
+/// fn loading_event_handler(ctx: &EventContext, values: LoadingSubevent) { ... }
 /// ```
 #[proc_macro_attribute]
 pub fn loading_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -120,13 +120,13 @@ pub fn loading_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStre
 }
 
 /// Proc macro which is set on a function that need to be called whenever a flush event happened.
-/// The function must accept a [Context] and [FlushSubevent].
+/// The function must accept a [EventContext] and [FlushSubevent].
 ///
 /// Example:
 ///
 /// ```rust,no_run,ignore
 /// #[flush_event_handler]
-/// fn flush_event_handler(ctx: &Context, values: FlushSubevent) { ... }
+/// fn flush_event_handler(ctx: &EventContext, values: FlushSubevent) { ... }
 /// ```
 #[proc_macro_attribute]
 pub fn flush_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -137,13 +137,13 @@ pub fn flush_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream
 }
 
 /// Proc macro which is set on a function that need to be called whenever a module is loaded or unloaded on the server.
-/// The function must accept a [Context] and [ModuleChangeSubevent].
+/// The function must accept a [EventContext] and [ModuleChangeSubevent].
 ///
 /// Example:
 ///
 /// ```rust,no_run,ignore
 /// #[module_changed_event_handler]
-/// fn module_changed_event_handler(ctx: &Context, values: ModuleChangeSubevent) { ... }
+/// fn module_changed_event_handler(ctx: &EventContext, values: ModuleChangeSubevent) { ... }
 /// ```
 #[proc_macro_attribute]
 pub fn module_changed_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -154,14 +154,14 @@ pub fn module_changed_event_handler(_attr: TokenStream, item: TokenStream) -> To
 }
 
 /// Proc macro which is set on a function that need to be called whenever a configuration change
-/// event is happening. The function must accept a [Context] and [&[&str]] that contains the names
+/// event is happening. The function must accept a [EventContext] and [&[&str]] that contains the names
 /// of the configiration values that was changed.
 ///
 /// Example:
 ///
 /// ```rust,no_run,ignore
 /// #[config_changed_event_handler]
-/// fn configuration_changed_event_handler(ctx: &Context, values: &[&str]) { ... }
+/// fn configuration_changed_event_handler(ctx: &EventContext, values: &[&str]) { ... }
 /// ```
 #[proc_macro_attribute]
 pub fn config_changed_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -172,13 +172,13 @@ pub fn config_changed_event_handler(_attr: TokenStream, item: TokenStream) -> To
 }
 
 /// Proc macro which is set on a function that need to be called on Redis cron.
-/// The function must accept a [Context] and [u64] that represent the cron hz.
+/// The function must accept a [EventContext] and [u64] that represent the cron hz.
 ///
 /// Example:
 ///
 /// ```rust,no_run,ignore
 /// #[cron_event_handler]
-/// fn cron_event_handler(ctx: &Context, hz: u64) { ... }
+/// fn cron_event_handler(ctx: &EventContext, hz: u64) { ... }
 /// ```
 #[proc_macro_attribute]
 pub fn cron_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -189,13 +189,13 @@ pub fn cron_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream 
 }
 
 /// Proc macro which is set on a function that needs to be called when Redis
-/// shuts down. The function must accept a [Context].
+/// shuts down. The function must accept a [EventContext].
 ///
 /// Example:
 ///
 /// ```rust,no_run,ignore
 /// #[shutdown_event_handler]
-/// fn shutdown_event_handler(ctx: &Context) { ... }
+/// fn shutdown_event_handler(ctx: &EventContext) { ... }
 /// ```
 #[proc_macro_attribute]
 pub fn shutdown_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {

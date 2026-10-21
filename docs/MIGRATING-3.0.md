@@ -47,10 +47,11 @@ fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
 `redis_module!` creates the registration context after native initialization
 succeeds and passes it through the load sequence. Both command declaration
 syntaxes and ordinary `fn command(ctx: &Context, ...)` handlers are unchanged.
-The registration wrapper dereferences to `Context`, so shared runtime helpers
-can continue accepting `&Context`. It also implements `RedisLockIndicator`,
-so configuration guards still accept it. Init hooks that only use runtime
-helpers can retain their old `&Context` signature through coercion.
+The registration wrapper dereferences to `EventContext`, then `RuntimeContext`.
+Helpers shared with commands or workers should take `&RuntimeContext` (see below).
+It also implements `RedisLockIndicator`, so configuration guards still accept it.
+Runtime-only init hooks must change their `&Context` parameter to
+`&RuntimeContext`, `&EventContext`, or `&RegistrationContext<'_>`.
 
 There is no safe conversion from runtime `Context` to `RegistrationContext`.
 Move late command/type/configuration registration into initialization. Custom
@@ -62,8 +63,64 @@ used to promote a command or worker context outside load.
 The wrapper borrows the load invocation and cannot be cloned or retained after
 it. Module options are intentionally configured during initialization by this
 SDK, even where Redis itself permits changing them later. Keyspace and server
-event subscriptions remain runtime operations; this change does not split
-event/worker views or restrict client replies.
+event subscriptions remain available through the module-owned event view.
+
+### Events and locked workers have separate context views
+
+Ordinary command handlers and blocked-client reply/timeout handlers keep
+`&Context`. Other callbacks use a narrower type:
+
+| Where | Context | Capabilities |
+|---|---|---|
+| Module init | `&RegistrationContext<'_>` | Registration, event operations, shared runtime operations |
+| Client command or blocked-client reply/timeout | `&Context` | Client replies/blocking/key positions, event operations, shared runtime operations |
+| Keyspace/server/timer/post-notification/event-loop callback, module unload, blocking-call unblock handler | `&EventContext` | Module-owned timers/subscriptions/shared APIs, shared runtime operations |
+| `ThreadSafeContext::lock` or `DetachedContext::lock` | Guard dereferencing to `WorkerContext` | Shared runtime operations; blocking calls only for module-owned detached workers |
+| Database scan callback or helper shared across these scopes | `&RuntimeContext` | Calls, keys, database selection, logging, server info, explicit replication |
+
+Change callback parameters from `&Context` to the type in this table. A helper
+that calls Redis without needing a client or module ownership should accept
+`&RuntimeContext`; commands, events, init hooks, and worker guards all coerce to
+it. Method calls on ordinary command contexts still work through dereferencing.
+Qualified references to moved methods, such as `Context::get_selected_db`, must
+use `RuntimeContext::get_selected_db` or a closure such as `|ctx| ctx.get_selected_db()`.
+`RedisString::safe_clone` and `init_api` also accept `&RuntimeContext`.
+
+```rust,ignore
+fn read(ctx: &RuntimeContext, key: &str) -> RedisResult {
+    ctx.call("GET", &[key])
+}
+fn on_timer(ctx: &EventContext, key: String) {
+    let value = read(ctx, &key);
+    // Store the result or notify a blocked client through its reply handle.
+}
+```
+
+Event and worker views have no `reply*`, `block_client*`, key-position discovery,
+`replicate_verbatim`, or client authentication methods, and cannot be converted
+to `Context` by safe code. Use explicit `replicate(command, args)` outside a
+command. Worker guards cannot create timers or subscribe to events. Configuration
+and command/type registration still require `RegistrationContext`.
+
+Both guard types borrow their owner and cannot outlive it. Their runtime views
+are neither `Send` nor `Sync` and cannot outlive the lock guard. A
+`ThreadSafeContext<BlockedClient>` retains its separate `reply` method, callable
+without the Redis lock. It does not create a general context or lock proof.
+`WorkerContext::call_blocking` returns an error for ordinary module-less worker
+contexts before entering Redis, where a real blocking result requires a module
+association. `MODULE_CONTEXT.lock()` retains that association and supports it.
+
+Custom native integrations must choose their unsafe constructor deliberately:
+`Context::new` (and its `from_module_context` alias) now requires both a live
+module association and a client reply target or key-position request.
+`EventContext::new` requires module ownership but no client; `RuntimeContext::new`
+requires only a live context and the Redis lock. All require valid invocation and
+lock scope throughout use. Replace `Context::dummy` with `RuntimeContext::dummy`
+for APIs that explicitly accept a null context, such as logging.
+
+This split limits capabilities. It does not yet tie every key, server-info,
+call-reply, or other native resource to its invocation or lock lifetime. Close
+those resources before the callback returns or the worker guard is dropped.
 
 ### Raw items are under `redis_module::raw`
 
@@ -83,7 +140,7 @@ use redis_module::raw::{RedisModuleString, REDISMODULE_OK};
 A safe function must not accept a pointer it dereferences or passes to Redis,
 so these are now `unsafe fn`, each with a `# Safety` section:
 
-- `Context::new` and `Context::dummy`
+- `Context::new`, `EventContext::new`, `RuntimeContext::new` and `RuntimeContext::dummy`
 - `RedisString::new`, `RedisString::from_redis_module_string`,
   `RedisString::from_ptr`, `RedisString::string_as_slice` and `decode_args`
 - `RedisKey::open` and `open_with_flags`, and `RedisKeyWritable::open`,
@@ -94,7 +151,7 @@ so these are now `unsafe fn`, each with a `# Safety` section:
 - in `raw`: the RDB `save_*` and `load_*` helpers, `is_io_error`, `redis_log`,
   `call_reply_verbatim_string`, and the doc-hidden `register_info_function`
 
-Inside a command or callback there is usually a `&Context` already; use its safe
+Inside a command or callback there is already a typed context; use its safe
 methods instead:
 
 ```rust
@@ -212,7 +269,7 @@ let value = parse(text).map_err(RedisError::from_error)?;
 
 - `RedisType::raw_type` is a method returning `*mut RedisModuleType` instead of
   a public `RefCell` field.
-- `RedisType::create_data_type` takes `&Context`.
+- `RedisType::create_data_type` takes `&RegistrationContext<'_>`.
 - A type name or encoding version that Redis would reject fails to compile
   instead of failing the module load. The name is 9 characters from
   `A-Z a-z 0-9 - _`.
@@ -243,19 +300,12 @@ These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
 
-- **Keyspace subscription ownership.** The three-argument
-  `redis_event_handler!(ctx, mask, handler)` now rejects contexts without proven
-  module ownership, logging a warning and returning a native error status from
-  its enclosing function. SDK module-load, command, and keyspace callbacks
-  provide the proof, so normal `redis_module!` event-handler lists are unchanged.
-  `Context::new` does not establish ownership, even if its raw pointer happens
-  to belong to a module; custom native callbacks must use the unsafe
-  `Context::from_module_context` constructor only after verifying its stronger
-  contract. Other SDK callback contexts that do not carry this proof are also
-  rejected; move their subscriptions into initialization or a command.
-  A context from `RedisModule_GetThreadSafeContext(NULL)` has no native module
-  identity and must never be promoted this way. Register from a module-owned
-  context instead, so Redis can remove the callback when the module unloads.
+- **Keyspace subscription ownership.** Subscriptions require `EventContext`,
+  also exposed by command and registration contexts. Redis removes the callback
+  when its owning module unloads. A raw context obtained from
+  `RedisModule_GetThreadSafeContext(NULL)` has no native module identity and must
+  never be promoted to an event or command context. Worker subscriptions are
+  rejected by the compiler; register them from init, commands, or event callbacks.
 - **Call results.** `Context::call` returns `SimpleString` for a simple string
   reply and `BulkString` for a bulk string reply (`StringBuffer` when it is not
   UTF-8); 2.x returned `SimpleString` for both when the text was UTF-8, so a

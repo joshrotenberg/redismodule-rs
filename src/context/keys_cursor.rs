@@ -1,4 +1,4 @@
-use crate::context::Context;
+use crate::context::RuntimeContext;
 use crate::key::RedisKey;
 use crate::raw;
 use crate::redismodule::RedisString;
@@ -10,13 +10,13 @@ pub struct KeysCursor {
     inner_cursor: *mut raw::RedisModuleScanCursor,
 }
 
-extern "C" fn scan_callback<C: FnMut(&Context, &RedisString, Option<&RedisKey>)>(
+extern "C" fn scan_callback<C: FnMut(&RuntimeContext, &RedisString, Option<&RedisKey>)>(
     ctx: *mut raw::RedisModuleCtx,
     key_name: *mut raw::RedisModuleString,
     key: *mut raw::RedisModuleKey,
     private_data: *mut ::std::os::raw::c_void,
 ) {
-    let context = unsafe { Context::new(ctx) };
+    let context = unsafe { RuntimeContext::new(ctx) };
     // SAFETY: this synchronous native callback supplies a retainable borrowed name.
     let key_name =
         unsafe { RedisString::retain_from_ptr(NonNull::new(key_name).expect("scan key name")) };
@@ -42,9 +42,9 @@ impl KeysCursor {
         Self { inner_cursor }
     }
 
-    pub fn scan<F: FnMut(&Context, &RedisString, Option<&RedisKey>)>(
+    pub fn scan<F: FnMut(&RuntimeContext, &RedisString, Option<&RedisKey>)>(
         &self,
-        ctx: &Context,
+        ctx: &RuntimeContext,
         callback: &mut F,
     ) -> bool {
         let res = unsafe {

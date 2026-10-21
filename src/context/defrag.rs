@@ -6,7 +6,7 @@ use crate::raw::{
     RedisModule_DefragAlloc, RedisModule_DefragCursorGet, RedisModule_DefragCursorSet,
     RedisModule_DefragRedisModuleString, RedisModule_DefragShouldStop,
 };
-use crate::{Context, RedisString, Status, raw};
+use crate::{EventContext, RedisString, Status, raw};
 use crate::{RedisError, RedisLockIndicator};
 use linkme::distributed_slice;
 
@@ -232,7 +232,7 @@ extern "C" fn defrag_end_function(defrag_ctx: *mut raw::RedisModuleDefragCtx) {
 }
 
 /// Register defrag functions if exists.
-pub fn register_defrag_functions(ctx: &Context) -> Result<(), RedisError> {
+pub fn register_defrag_functions(ctx: &EventContext) -> Result<(), RedisError> {
     let register_defrag_function = match unsafe { raw::RedisModule_RegisterDefragFunc } {
         Some(f) => f,
         None => {

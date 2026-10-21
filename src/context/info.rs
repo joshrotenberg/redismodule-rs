@@ -1,7 +1,7 @@
 use std::ffi::CString;
 use std::ptr::NonNull;
 
-use crate::Context;
+use crate::RuntimeContext;
 use crate::{RedisString, raw};
 
 pub struct ServerInfo {
@@ -44,7 +44,7 @@ impl ServerInfo {
     }
 }
 
-impl Context {
+impl RuntimeContext {
     /// The server's `INFO` fields in `section`. A section name with a NUL
     /// byte names no section, so its `ServerInfo` has no fields.
     #[must_use]

@@ -9,7 +9,9 @@ use std::{
 
 use libc::c_void;
 
-use crate::{Context, RedisError, RedisLockIndicator, deallocate_pointer, raw::*};
+use crate::{
+    EventContext, RedisError, RedisLockIndicator, RuntimeContext, deallocate_pointer, raw::*,
+};
 
 pub struct StringCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
@@ -862,7 +864,7 @@ fn fmt_call_result(res: CallResult<'_>, f: &mut Formatter<'_>) -> fmt::Result {
 
 pub type CallResult<'root> = Result<CallReply<'root>, ErrorReply<'root>>;
 
-pub struct FutureHandler<C: FnOnce(&Context, CallResult<'static>)> {
+pub struct FutureHandler<C: FnOnce(&EventContext, CallResult<'static>)> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<C>,
     reply_freed: bool,
@@ -870,7 +872,7 @@ pub struct FutureHandler<C: FnOnce(&Context, CallResult<'static>)> {
 
 impl<C> FutureHandler<C>
 where
-    C: FnOnce(&Context, CallResult<'static>),
+    C: FnOnce(&EventContext, CallResult<'static>),
 {
     /// Dispose the future, handler. This function must be called in order to
     /// release the [FutureHandler]. The reason we must have a dispose function
@@ -907,7 +909,7 @@ where
     }
 }
 
-impl<C: FnOnce(&Context, CallResult<'static>)> Drop for FutureHandler<C> {
+impl<C: FnOnce(&EventContext, CallResult<'static>)> Drop for FutureHandler<C> {
     fn drop(&mut self) {
         if !self.reply_freed {
             log::warn!("Memory leak detected!!! FutureHandler was freed without disposed.")
@@ -922,17 +924,17 @@ impl<C: FnOnce(&Context, CallResult<'static>)> Drop for FutureHandler<C> {
 /// the future handler must be set before the Redis GIL will
 /// be released.
 pub struct FutureCallReply<'ctx> {
-    _ctx: &'ctx Context,
+    _ctx: &'ctx RuntimeContext,
     reply: Option<NonNull<RedisModuleCallReply>>,
 }
 
-extern "C" fn on_unblock<C: FnOnce(&Context, CallResult<'static>)>(
+extern "C" fn on_unblock<C: FnOnce(&EventContext, CallResult<'static>)>(
     ctx: *mut RedisModuleCtx,
     reply: *mut RedisModuleCallReply,
     private_data: *mut ::std::os::raw::c_void,
 ) {
     let on_unblock = unsafe { Box::from_raw(private_data as *mut C) };
-    let ctx = unsafe { Context::new(ctx) };
+    let ctx = unsafe { EventContext::new(ctx) };
     let reply = NonNull::new(reply).map_or(Ok(CallReply::Unknown), create_call_reply);
     crate::panic::run_callback(
         "blocking call unblock handler",
@@ -944,7 +946,7 @@ extern "C" fn on_unblock<C: FnOnce(&Context, CallResult<'static>)>(
 impl<'ctx> FutureCallReply<'ctx> {
     /// Allow to set an handler that will be called when the command gets
     /// unblock. Return [FutureHandler] that can be used to abort the command.
-    pub fn set_unblock_handler<C: FnOnce(&Context, CallResult<'static>)>(
+    pub fn set_unblock_handler<C: FnOnce(&EventContext, CallResult<'static>)>(
         mut self,
         unblock_handler: C,
     ) -> FutureHandler<C> {
@@ -976,7 +978,7 @@ pub enum PromiseCallReply<'root, 'ctx> {
 }
 
 pub(crate) fn create_promise_call_reply(
-    ctx: &Context,
+    ctx: &RuntimeContext,
     reply: Option<NonNull<RedisModuleCallReply>>,
 ) -> PromiseCallReply<'static, '_> {
     reply.map_or(PromiseCallReply::Resolved(Ok(CallReply::Unknown)), |val| {

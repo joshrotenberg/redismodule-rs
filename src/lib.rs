@@ -42,7 +42,6 @@ pub use crate::raw::{KeyType, ModuleOptions, NotifyEvent, Status, Version};
 
 pub use crate::configuration::ConfigurationValue;
 pub use crate::configuration::EnumConfigurationValue;
-pub use crate::context::RegistrationContext;
 pub use crate::context::call_reply::FutureCallReply;
 pub use crate::context::call_reply::{CallReply, CallResult, ErrorReply, PromiseCallReply};
 pub use crate::context::commands;
@@ -53,6 +52,7 @@ pub use crate::context::key_cursor::ScanKeyCursor;
 pub use crate::context::keys_cursor::KeysCursor;
 pub use crate::context::keyspace_events::KeyspaceEventHandler;
 pub use crate::context::server_events;
+pub use crate::context::{EventContext, RegistrationContext, RuntimeContext, WorkerContext};
 pub use common::AclCategory;
 
 pub use crate::context::AclChannelPermissions;
@@ -133,7 +133,7 @@ pub fn basic_info_command_handler(ctx: &InfoContext, for_crash_report: bool) {
 }
 
 /// Initialize RedisModuleAPI without register as a module.
-pub fn init_api(ctx: &Context) {
+pub fn init_api(ctx: &RuntimeContext) {
     unsafe { crate::raw::Export_RedisModule_InitAPI(ctx.ctx) };
 }
 

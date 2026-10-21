@@ -10,14 +10,14 @@ struct Events {
     counts: [i64; 5],
     last: Option<(String, Vec<u8>, i32)>,
 }
-static SUBSCRIPTION_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
+static WORKER_THREAD: Mutex<Option<std::thread::JoinHandle<()>>> = Mutex::new(None);
 static EVENTS: Mutex<Events> = Mutex::new(Events {
     counts: [0; 5],
     last: None,
 });
 
 // The name also checks that the generated adapter does not shadow its handler.
-fn invoke(ctx: &Context, event_type: NotifyEvent, event: &str, key: &[u8]) {
+fn invoke(ctx: &redis_module::EventContext, event_type: NotifyEvent, event: &str, key: &[u8]) {
     if key == b"runtime:panic" {
         panic!("runtime keyspace handler panicked");
     }
@@ -89,27 +89,51 @@ fn runtime_subscribe_proc(ctx: &Context, args: Vec<RedisString>) -> RedisResult 
     subscribe(ctx, args)
 }
 
-fn subscribe_on_thread(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
-    let mut task = SUBSCRIPTION_THREAD.lock().unwrap();
+// Shared helpers require no command/client capabilities.
+fn worker_runtime(ctx: &redis_module::RuntimeContext) -> RedisResult {
+    let selected = ctx.get_selected_db();
+    ctx.with_db(3, |ctx| -> RedisResult {
+        ctx.call("SET", &["worker:runtime", "value"])?;
+        let name = ctx.create_string("worker:runtime");
+        let value = ctx.open_key(&name).read()?.unwrap().to_vec();
+        let cursor = redis_module::KeysCursor::new();
+        let mut found = false;
+        let mut visit = |ctx: &redis_module::RuntimeContext,
+                         name: &RedisString,
+                         _: Option<&redis_module::key::RedisKey>| {
+            assert_eq!(ctx.get_selected_db(), 3);
+            found |= name.as_slice() == b"worker:runtime";
+        };
+        while cursor.scan(ctx, &mut visit) {}
+        assert!(found);
+        assert_eq!(value, b"value");
+        Ok(RedisValue::NoReply)
+    })??;
+    assert_eq!(ctx.get_selected_db(), selected);
+    ctx.log_notice("worker runtime helper succeeded");
+    ctx.call("PING", &[] as &[&str])
+}
+
+fn worker(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let mut task = WORKER_THREAD.lock().unwrap();
     if task.is_some() {
-        return Err(RedisError::Str("ERR subscription thread already started"));
+        return Err(RedisError::Str("ERR runtime worker already started"));
     }
     let blocked = ctx.block_client();
     *task = Some(std::thread::spawn(move || {
         let thread_ctx = redis_module::ThreadSafeContext::new();
         let guard = thread_ctx.lock();
-        let result =
-            guard.subscribe_to_keyspace_events(NotifyEvent::STRING, redis_event_handler!(invoke));
+        let result = worker_runtime(&guard);
         drop(guard);
         drop(thread_ctx);
         let reply = redis_module::ThreadSafeContext::with_blocked_client(blocked);
-        reply.reply(result.map(|()| "OK".into()));
+        reply.reply(result);
     }));
     Ok(RedisValue::NoReply)
 }
 
-fn finish_thread(_: &Context, _: Vec<RedisString>) -> RedisResult {
-    let mut task = SUBSCRIPTION_THREAD.lock().unwrap();
+fn finish_worker(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    let mut task = WORKER_THREAD.lock().unwrap();
     if !task
         .as_ref()
         .is_some_and(std::thread::JoinHandle::is_finished)
@@ -120,7 +144,7 @@ fn finish_thread(_: &Context, _: Vec<RedisString>) -> RedisResult {
     task.take()
         .unwrap()
         .join()
-        .map_err(|_| RedisError::Str("ERR subscription thread panicked"))?;
+        .map_err(|_| RedisError::Str("ERR runtime worker panicked"))?;
     Ok(1i64.into())
 }
 
@@ -158,8 +182,8 @@ redis_module! {
     commands: [
         redis_command!("runtime.subscribe", subscribe),
         ["runtime.subscribe_legacy", subscribe, "", 0, 0, 0, ""],
-        redis_command!("runtime.subscribe_on_thread", subscribe_on_thread),
-        redis_command!("runtime.finish_thread", finish_thread),
+        redis_command!("runtime.worker", worker),
+        redis_command!("runtime.finish_worker", finish_worker),
         redis_command!("runtime.counts", counts).read_only(),
         redis_command!("runtime.last", last).read_only(),
         redis_command!("runtime.send", send),
