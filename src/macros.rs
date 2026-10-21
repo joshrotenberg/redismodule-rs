@@ -161,7 +161,7 @@ macro_rules! __redis_register_commands {
 /// Adapts a Rust function into a panic-safe [`crate::KeyspaceEventHandler`].
 ///
 /// Pass `redis_event_handler!(handler)` to
-/// [`Context::subscribe_to_keyspace_events`](crate::Context::subscribe_to_keyspace_events)
+/// [`EventContext::subscribe_to_keyspace_events`](crate::EventContext::subscribe_to_keyspace_events)
 /// with a mask selected at runtime. Handlers are static functions or
 /// noncapturing expressions; captured state is not supported.
 ///
@@ -169,19 +169,18 @@ macro_rules! __redis_register_commands {
 /// error status from the enclosing function on failure. `redis_module!` uses
 /// that form for each entry in `event_handlers`.
 ///
-/// Both forms require proven module ownership for subscription. A context from
-/// [`Context::new`](crate::Context::new), including an ordinary thread-safe
-/// guard, is rejected. SDK load, command, and keyspace callbacks provide the
-/// proof. For a custom native callback, see the safety contract of
-/// [`Context::from_module_context`](crate::Context::from_module_context).
+/// Both forms require an [`EventContext`](crate::EventContext), which SDK load
+/// and command contexts also expose. Worker guards cannot subscribe. Custom
+/// native callbacks must meet [`EventContext::new`](crate::EventContext::new)'s
+/// module ownership and Redis lock requirements.
 ///
 /// The key slice a handler receives is valid only while the handler runs, so a
 /// handler cannot ask to keep it:
 ///
 /// ```compile_fail,E0716
-/// use redis_module::{redis_module, Context, NotifyEvent};
+/// use redis_module::{redis_module, EventContext, NotifyEvent};
 ///
-/// fn on_event(_: &Context, _: NotifyEvent, _: &str, _key: &'static [u8]) {}
+/// fn on_event(_: &EventContext, _: NotifyEvent, _: &str, _key: &'static [u8]) {}
 ///
 /// redis_module! {
 ///     name: "keep_key",
@@ -196,17 +195,17 @@ macro_rules! __redis_register_commands {
 /// The runtime adapter enforces the same lifetime:
 ///
 /// ```compile_fail,E0716
-/// use redis_module::{Context, NotifyEvent, redis_event_handler};
-/// fn on_event(_: &Context, _: NotifyEvent, _: &str, _: &'static [u8]) {}
+/// use redis_module::{EventContext, NotifyEvent, redis_event_handler};
+/// fn on_event(_: &EventContext, _: NotifyEvent, _: &str, _: &'static [u8]) {}
 /// let _handler = redis_event_handler!(on_event);
 /// ```
 ///
 /// A handler that borrows the key for the call compiles:
 ///
 /// ```no_run
-/// use redis_module::{redis_module, Context, NotifyEvent};
+/// use redis_module::{redis_module, EventContext, NotifyEvent};
 ///
-/// fn on_event(_: &Context, _: NotifyEvent, _: &str, key: &[u8]) {
+/// fn on_event(_: &EventContext, _: NotifyEvent, _: &str, key: &[u8]) {
 ///     let _owned = key.to_vec();
 /// }
 ///
@@ -230,14 +229,14 @@ macro_rules! redis_event_handler {
                 event: *const ::std::os::raw::c_char,
                 key: *mut $crate::raw::RedisModuleString,
             ) -> ::std::os::raw::c_int {
-                fn borrow_key<'key>(_: &'key $crate::Context, key: &'key [u8]) -> &'key [u8] {
+                fn borrow_key<'key>(_: &'key $crate::EventContext, key: &'key [u8]) -> &'key [u8] {
                     key
                 }
                 $crate::panic::run_callback(
                     "keyspace event handler",
                     || {
                         // SAFETY: Redis associates this SDK module callback with its module.
-                        let context = unsafe { $crate::Context::from_module_context(ctx) };
+                        let context = unsafe { $crate::EventContext::new(ctx) };
                         // SAFETY: Redis supplies a live, read-only key for this
                         // synchronous invocation. The context anchors its lifetime,
                         // including handlers which would otherwise request 'static.
@@ -263,7 +262,7 @@ macro_rules! redis_event_handler {
         unsafe { $crate::KeyspaceEventHandler::__new(__RedisModuleEventCallback::invoke) }
     }};
     ($ctx:expr, $event_type:expr, $event_handler:expr) => {{
-        let __module_context: &$crate::Context = $ctx;
+        let __module_context: &$crate::EventContext = $ctx;
         if let Err(error) = __module_context
             .subscribe_to_keyspace_events($event_type, $crate::redis_event_handler!($event_handler))
         {
@@ -422,7 +421,7 @@ macro_rules! redis_module {
             // With the system-allocator-fallback feature, an allocation made
             // before Init picked the system allocator for the whole process.
             if $crate::alloc::__uses_system_allocator() {
-                unsafe { $crate::Context::new(ctx) }.log_warning(
+                unsafe { $crate::RuntimeContext::new(ctx) }.log_warning(
                     "The module allocated before RedisModule_OnLoad and uses the system allocator. \
                      It was built with the system-allocator-fallback feature, which is meant for tests.",
                 );
@@ -435,7 +434,7 @@ macro_rules! redis_module {
                 "module load",
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
-                    let runtime_context = unsafe { $crate::Context::from_module_context(ctx) };
+                    let runtime_context = unsafe { $crate::EventContext::new(ctx) };
                     // SAFETY: Init succeeded and this scope is inside OnLoad.
                     let context = unsafe { $crate::RegistrationContext::from_context(&runtime_context) };
                     unsafe {
@@ -635,7 +634,7 @@ macro_rules! redis_module {
                 "module unload",
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
-                    let context = unsafe { $crate::Context::from_module_context(ctx) };
+                    let context = unsafe { $crate::EventContext::new(ctx) };
                     $(
                         if $deinit_func(&context) == $crate::Status::Err {
                             return $crate::Status::Err as c_int;

@@ -13,14 +13,14 @@ static LAST_CRON_HZ: AtomicI64 = AtomicI64::new(0);
 static NUM_MAX_MEMORY_CONFIGURATION_CHANGES: AtomicI64 = AtomicI64::new(0);
 
 #[flush_event_handler]
-fn flushed_event_handler(_ctx: &Context, flush_event: FlushSubevent) {
+fn flushed_event_handler(_ctx: &redis_module::EventContext, flush_event: FlushSubevent) {
     if let FlushSubevent::Started = flush_event {
         NUM_FLUSHES.fetch_add(1, Ordering::SeqCst);
     }
 }
 
 #[config_changed_event_handler]
-fn config_changed_event_handler(_ctx: &Context, changed_configs: &[&str]) {
+fn config_changed_event_handler(_ctx: &redis_module::EventContext, changed_configs: &[&str]) {
     changed_configs
         .iter()
         .find(|v| **v == "maxmemory")
@@ -28,13 +28,13 @@ fn config_changed_event_handler(_ctx: &Context, changed_configs: &[&str]) {
 }
 
 #[cron_event_handler]
-fn cron_event_handler(_ctx: &Context, hz: u64) {
+fn cron_event_handler(_ctx: &redis_module::EventContext, hz: u64) {
     NUM_CRONS.fetch_add(1, Ordering::SeqCst);
     LAST_CRON_HZ.store(hz as i64, Ordering::SeqCst);
 }
 
 #[shutdown_event_handler]
-fn shutdown_event_handler(ctx: &Context) {
+fn shutdown_event_handler(ctx: &redis_module::EventContext) {
     ctx.log_notice("server_events: shutdown event received");
 }
 

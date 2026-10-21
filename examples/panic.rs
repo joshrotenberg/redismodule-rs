@@ -24,7 +24,7 @@ fn panic_proc_macro(_: &Context, _: Vec<RedisString>) -> RedisResult {
 /// comes back out of `scan` and fails this command.
 fn panic_scan(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     let cursor = KeysCursor::new();
-    let mut callback = |_: &Context, _: &RedisString, _: Option<&RedisKey>| {
+    let mut callback = |_: &redis_module::RuntimeContext, _: &RedisString, _: Option<&RedisKey>| {
         panic!("scan callback panicked");
     };
     while cursor.scan(ctx, &mut callback) {}
@@ -34,14 +34,14 @@ fn panic_scan(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
 fn panic_timer(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     ctx.create_timer(
         Duration::from_millis(1),
-        |_: &Context, _: ()| panic!("timer callback panicked"),
+        |_: &redis_module::EventContext, _: ()| panic!("timer callback panicked"),
         (),
     );
     Ok("timer created".into())
 }
 
 /// Panics on keyspace events for the key `panic:notify`.
-fn on_string_event(_: &Context, _: NotifyEvent, _: &str, key: &[u8]) {
+fn on_string_event(_: &redis_module::EventContext, _: NotifyEvent, _: &str, key: &[u8]) {
     if key == b"panic:notify" {
         panic!("keyspace event handler panicked");
     }

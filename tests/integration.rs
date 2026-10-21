@@ -35,6 +35,109 @@ fn test_registration_context_registers_load_time_and_declarative_commands() -> R
     Ok(())
 }
 
+fn configure_context_acl_user(con: &mut TestConnection) -> Result<()> {
+    redis::cmd("ACL")
+        .arg(&[
+            "SETUSER",
+            "context-reader",
+            "on",
+            "nopass",
+            "~allowed:*",
+            "+get",
+        ])
+        .query::<()>(con)?;
+    Ok(())
+}
+
+#[test]
+fn test_worker_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Result<()> {
+    for mode in ["plain", "detached"] {
+        let mut con = TestConnection::new("context_acl");
+        configure_context_acl_user(&mut con)?;
+        let flags: Vec<i64> = redis::cmd("context_acl.worker")
+            .arg(&[mode, "context-reader"])
+            .query(&mut con)?;
+        let baseline = &flags[..2];
+        assert_eq!(&flags[2..], [1; 6], "{mode}");
+        utils::wait_until(Duration::from_secs(2), "ACL worker exit", || {
+            Ok(redis::cmd("context_acl.finish").query::<i64>(&mut con)? == 1)
+        })?;
+        // The detached context is reused. Its scoped identity must not leak
+        // into a later lock invocation either.
+        let repeated: Vec<i64> = redis::cmd("context_acl.worker")
+            .arg(&[mode, "context-reader"])
+            .query(&mut con)?;
+        assert_eq!(
+            &repeated[..2],
+            baseline,
+            "baseline changed on reused {mode}"
+        );
+        assert_eq!(&repeated[2..], [1; 6], "reused {mode}");
+        utils::wait_until(Duration::from_secs(2), "second ACL worker exit", || {
+            Ok(redis::cmd("context_acl.finish").query::<i64>(&mut con)? == 1)
+        })?;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_event_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Result<()> {
+    let mut con = TestConnection::new("context_acl");
+    configure_context_acl_user(&mut con)?;
+    redis::cmd("context_acl.timer")
+        .arg("context-reader")
+        .query::<()>(&mut con)?;
+    let mut flags: Option<Vec<i64>> = None;
+    utils::wait_until(Duration::from_secs(2), "ACL event callback", || {
+        flags = redis::cmd("context_acl.result").query(&mut con)?;
+        Ok(flags.is_some())
+    })?;
+    assert_eq!(&flags.unwrap()[2..], [1; 6]);
+    Ok(())
+}
+
+#[test]
+fn test_timer_event_context_uses_its_selected_database() -> Result<()> {
+    let mut con = TestConnection::new("timer");
+    redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
+    redis::cmd("timer.create")
+        .arg(&["1", "payload"])
+        .query::<String>(&mut con)?;
+    utils::wait_until(Duration::from_secs(2), "timer event callback", || {
+        Ok(redis::cmd("GET")
+            .arg("timer:fired")
+            .query::<Option<String>>(&mut con)?
+            .as_deref()
+            == Some("payload"))
+    })?;
+    redis::cmd("SELECT").arg(0).query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("timer:fired")
+            .query::<Option<String>>(&mut con)?,
+        None
+    );
+    Ok(())
+}
+
+#[test]
+fn test_event_context_post_notification_writes_in_selected_database() -> Result<()> {
+    let mut con = TestConnection::new("events");
+    redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["event:source", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("GET").arg("num_sets").query::<i64>(&mut con)?, 1);
+    redis::cmd("SELECT").arg(0).query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("num_sets")
+            .query::<Option<String>>(&mut con)?,
+        None
+    );
+    Ok(())
+}
+
 #[test]
 fn test_runtime_keyspace_mask_from_module_arguments() -> Result<()> {
     for (mask, expected) in [
@@ -171,19 +274,34 @@ fn test_runtime_keyspace_subscriptions_are_removed_on_unload() -> Result<()> {
 }
 
 #[test]
-fn test_runtime_keyspace_subscriptions_reject_unowned_thread_contexts() -> Result<()> {
+fn test_worker_runtime_call_and_blocked_client_reply() -> Result<()> {
     let mut con = TestConnection::new("runtime_events");
-    let error = redis::cmd("runtime.subscribe_on_thread")
-        .query::<String>(&mut con)
-        .expect_err("a module-less thread context registered a subscription");
+    assert_eq!(
+        redis::cmd("runtime.worker").query::<String>(&mut con)?,
+        "PONG"
+    );
     assert!(
-        error.to_string().contains("module-owned context"),
-        "{error}"
+        con.server_log()?
+            .contains("worker runtime helper succeeded")
+    );
+    redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("worker:runtime")
+            .query::<String>(&mut con)?,
+        "value"
+    );
+    redis::cmd("SELECT").arg(0).query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("worker:runtime")
+            .query::<Option<String>>(&mut con)?,
+        None
     );
     // Finish the test's own worker before unloading its code. A client reply
     // can arrive before the worker has returned through its final epilogue.
-    utils::wait_until(Duration::from_secs(2), "subscription worker exit", || {
-        Ok(redis::cmd("runtime.finish_thread").query::<i64>(&mut con)? == 1)
+    utils::wait_until(Duration::from_secs(2), "runtime worker exit", || {
+        Ok(redis::cmd("runtime.finish_worker").query::<i64>(&mut con)? == 1)
     })?;
     redis::cmd("SET")
         .arg(&["before-unload", "value"])

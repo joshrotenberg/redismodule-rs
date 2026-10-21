@@ -2,7 +2,7 @@
 //! descriptors with Redis's event loop.
 //!
 //! Callbacks run on the main thread with the Redis lock held, through the
-//! panic guard, and receive a [`Context`] for the module's detached context.
+//! panic guard, and receive a [`EventContext`] for the module's detached context.
 
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use bitflags::bitflags;
 
-use crate::{Context, MODULE_CONTEXT, RedisError, raw};
+use crate::{EventContext, MODULE_CONTEXT, RedisError, raw};
 
 bitflags! {
     /// Which events on a file descriptor a callback from [`add`] handles.
@@ -25,8 +25,8 @@ bitflags! {
     }
 }
 
-type FdCallback = Arc<Mutex<dyn FnMut(&Context, RawFd, EventLoopMask) + Send>>;
-type OneShot = Box<dyn FnOnce(&Context) + Send>;
+type FdCallback = Arc<Mutex<dyn FnMut(&EventContext, RawFd, EventLoopMask) + Send>>;
+type OneShot = Box<dyn FnOnce(&EventContext) + Send>;
 
 /// The callbacks registered for one file descriptor.
 #[derive(Default)]
@@ -46,13 +46,13 @@ fn fd_callbacks() -> std::sync::MutexGuard<'static, BTreeMap<RawFd, FdCallbacks>
 }
 
 /// The context passed to event loop callbacks.
-fn callback_context() -> Context {
+fn callback_context() -> EventContext {
     let ctx = MODULE_CONTEXT
         .ctx
         .load(std::sync::atomic::Ordering::Relaxed);
     // SAFETY: Redis runs event loop callbacks on the main thread, and the
     // module's detached context lives as long as the module.
-    unsafe { Context::new(ctx) }
+    unsafe { EventContext::new(ctx) }
 }
 
 /// The error for a failed call, with the `errno` it left.
@@ -84,7 +84,7 @@ fn call_error(api: &str) -> RedisError {
 pub unsafe fn add(
     fd: RawFd,
     mask: EventLoopMask,
-    callback: impl FnMut(&Context, RawFd, EventLoopMask) + Send + 'static,
+    callback: impl FnMut(&EventContext, RawFd, EventLoopMask) + Send + 'static,
 ) -> Result<(), RedisError> {
     let event_loop_add = unsafe { crate::__available_api!(RedisModule_EventLoopAdd) };
     let event_loop_del = unsafe { crate::__available_api!(RedisModule_EventLoopDel) };
@@ -215,7 +215,7 @@ fn run_fd_callback(fd: RawFd, direction: EventLoopMask) {
             "event loop callback",
             || {
                 // A callback that lets Redis process events, such as through
-                // Context::yield_now, can be reached again while it runs;
+                // EventContext::yield_now, can be reached again while it runs;
                 // that nested call is skipped.
                 if let Ok(mut callback) = callback.try_lock() {
                     callback(&callback_context(), fd, direction);
@@ -233,7 +233,9 @@ fn run_fd_callback(fd: RawFd, direction: EventLoopMask) {
 ///
 /// Returns an error if the running Redis does not provide
 /// `RedisModule_EventLoopAddOneShot` (before 7.0), or rejects the call.
-pub fn add_one_shot(callback: impl FnOnce(&Context) + Send + 'static) -> Result<(), RedisError> {
+pub fn add_one_shot(
+    callback: impl FnOnce(&EventContext) + Send + 'static,
+) -> Result<(), RedisError> {
     let add_one_shot = unsafe { crate::__available_api!(RedisModule_EventLoopAddOneShot) };
     let callback: Box<OneShot> = Box::new(Box::new(callback));
     let user_data = Box::into_raw(callback);

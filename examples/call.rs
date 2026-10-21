@@ -113,12 +113,16 @@ fn call_test(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok("pass".into())
 }
 
-fn call_blocking_internal(ctx: &Context) -> PromiseCallReply<'_, '_> {
+fn call_blocking_internal(ctx: &redis_module::EventContext) -> PromiseCallReply<'_, '_> {
     let call_options = CallOptionsBuilder::new().build_blocking();
     ctx.call_blocking("blpop", &call_options, &["list", "1"])
 }
 
-fn call_blocking_handle_future(ctx: &Context, f: FutureCallReply, blocked_client: BlockedClient) {
+fn call_blocking_handle_future(
+    ctx: &redis_module::RuntimeContext,
+    f: FutureCallReply,
+    blocked_client: BlockedClient,
+) {
     let future_handler = f.set_unblock_handler(move |_ctx, reply| {
         let thread_ctx = ThreadSafeContext::with_blocked_client(blocked_client);
         thread_ctx.reply(reply.map_or_else(|e| Err(e.into()), |v| Ok((&v).into())));
@@ -142,7 +146,11 @@ fn call_blocking_from_detach_ctx(ctx: &Context, _: Vec<RedisString>) -> RedisRes
     let blocked_client = ctx.block_client();
     thread::spawn(move || {
         let ctx_guard = redis_module::MODULE_CONTEXT.lock();
-        let res = call_blocking_internal(&ctx_guard);
+        let res = ctx_guard.call_blocking(
+            "blpop",
+            &CallOptionsBuilder::new().build_blocking(),
+            &["list", "1"],
+        );
         match res {
             PromiseCallReply::Resolved(r) => {
                 let thread_ctx = ThreadSafeContext::with_blocked_client(blocked_client);

@@ -26,6 +26,8 @@ use self::call_reply::{CallResult, ErrorReply, PromiseCallReply, create_promise_
 use self::thread_safe::RedisLockIndicator;
 
 mod registration;
+mod views;
+pub use views::{EventContext, RuntimeContext, WorkerContext};
 mod timer;
 pub use registration::RegistrationContext;
 
@@ -114,7 +116,7 @@ fn call_failure(errno: Option<i32>) -> Option<String> {
     Some(format!("ERR RedisModule_Call failed: {reason}"))
 }
 
-/// What Redis may do while a command yields with [`Context::yield_now`].
+/// What Redis may do while a command yields with [`RuntimeContext::yield_now`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum YieldMode {
     /// Process file events, such as replication traffic and client
@@ -281,19 +283,17 @@ impl Default for DetachedContext {
     }
 }
 
-/// This object is returned after locking Redis from [DetachedContext].
-/// On dispose, Redis will be unlocked.
-/// This object implements [Deref] for [Context] so it can be used
-/// just like any Redis [Context] for command invocation.
-/// **This object should not be used to return replies** because there is
-/// no real client behind this context to return replies to.
-pub struct DetachedContextGuard {
-    pub(crate) ctx: Context,
+/// A worker view borrowed while [`DetachedContext`] holds the Redis lock.
+/// Dropping the guard unlocks Redis. It dereferences to [`WorkerContext`], which
+/// has shared runtime operations and no client replies or registration APIs.
+pub struct DetachedContextGuard<'context> {
+    pub(crate) ctx: WorkerContext,
+    _context: std::marker::PhantomData<&'context DetachedContext>,
 }
 
-unsafe impl RedisLockIndicator for DetachedContextGuard {}
+unsafe impl RedisLockIndicator for DetachedContextGuard<'_> {}
 
-impl Drop for DetachedContextGuard {
+impl Drop for DetachedContextGuard<'_> {
     fn drop(&mut self) {
         unsafe {
             crate::__required_api!(RedisModule_ThreadSafeContextUnlock)(self.ctx.ctx);
@@ -301,8 +301,8 @@ impl Drop for DetachedContextGuard {
     }
 }
 
-impl Deref for DetachedContextGuard {
-    type Target = Context;
+impl Deref for DetachedContextGuard<'_> {
+    type Target = WorkerContext;
 
     fn deref(&self) -> &Self::Target {
         &self.ctx
@@ -338,7 +338,7 @@ impl DetachedContext {
         self.log(RedisLogLevel::Warning, message);
     }
 
-    pub fn set_context(&self, ctx: &Context) -> Result<(), RedisError> {
+    pub fn set_context(&self, ctx: &EventContext) -> Result<(), RedisError> {
         let c = self.ctx.load(Ordering::Relaxed);
         if !c.is_null() {
             return Err(RedisError::Str("Detached context is already set"));
@@ -350,40 +350,48 @@ impl DetachedContext {
     }
 
     /// Lock Redis for command invocation. Returns [DetachedContextGuard] which will unlock Redis when dispose.
-    /// [DetachedContextGuard] implements [Deref<Target = Context>] so it can be used just like any Redis [Context] for command invocation.
+    /// The guard dereferences to [`WorkerContext`], then [`RuntimeContext`].
     /// Locking Redis when Redis is already locked by the current thread is left unspecified.
     /// However, this function will not return on the second call (it might panic or deadlock, for example)..
-    pub fn lock(&self) -> DetachedContextGuard {
+    pub fn lock(&self) -> DetachedContextGuard<'_> {
         let c = self.ctx.load(Ordering::Relaxed);
+        assert!(!c.is_null(), "Detached context has not been initialized");
         unsafe { crate::__required_api!(RedisModule_ThreadSafeContextLock)(c) };
-        let ctx = unsafe { Context::new(c) };
-        DetachedContextGuard { ctx }
+        let ctx = unsafe { WorkerContext::from_module_context(c) };
+        DetachedContextGuard {
+            ctx,
+            _context: std::marker::PhantomData,
+        }
     }
 }
 
 unsafe impl Send for DetachedContext {}
 unsafe impl Sync for DetachedContext {}
 
-/// `Context` is a structure that's designed to give us a high-level interface to
-/// the Redis module API by abstracting away the raw C FFI calls.
-///
-/// Holding a `Context` proves the Redis lock is held on this thread, so one can
-/// only be made with the unsafe [`Context::new`], not from a struct literal:
+/// A client command invocation, with replies, key-position discovery, and
+/// client blocking in addition to [`EventContext`] and [`RuntimeContext`].
+/// SDK command handlers receive this type. Event callbacks and worker guards
+/// cannot be converted to it by safe code.
 ///
 /// ```compile_fail,E0451
-/// let forged = redis_module::Context { ctx: std::ptr::null_mut() };
+/// fn forge(event: redis_module::EventContext) -> redis_module::Context {
+///     redis_module::Context { event }
+/// }
 /// ```
 #[derive(Debug)]
 pub struct Context {
-    // Private: a Context built from any pointer would be a forged proof that
-    // the Redis lock is held. Use Context::new or get_raw.
-    pub(crate) ctx: *mut raw::RedisModuleCtx,
-    // Only a constructor with a proven native module association sets this.
-    pub(crate) module_owned: bool,
+    event: EventContext,
+}
+
+impl Deref for Context {
+    type Target = EventContext;
+    fn deref(&self) -> &Self::Target {
+        &self.event
+    }
 }
 
 struct SelectedDbGuard<'ctx> {
-    ctx: &'ctx Context,
+    ctx: &'ctx RuntimeContext,
     previous: i32,
 }
 
@@ -396,14 +404,24 @@ impl Drop for SelectedDbGuard<'_> {
     }
 }
 
-/// A guerd that protected a user that has
-/// been set on a context using `autenticate_user`.
-/// This guerd make sure to unset the user when freed.
-/// It prevent privilege escalation security issues
-/// that can happened by forgeting to unset the user.
+/// A scoped user for ACL-checked calls through [`RuntimeContext::authenticate_user`].
+/// Dropping it clears the context user before freeing its native handle.
+/// It borrows the runtime view, including the worker guard that provides it:
+///
+/// ```compile_fail,E0597
+/// fn escape(owner: &redis_module::ThreadSafeContext<redis_module::DetachedFromClient>) {
+///     let scope;
+///     {
+///         let guard = owner.lock();
+///         let username = guard.create_string("default");
+///         scope = guard.authenticate_user(&username).unwrap();
+///     }
+///     drop(scope);
+/// }
+/// ```
 #[derive(Debug)]
 pub struct ContextUserScope<'ctx> {
-    ctx: &'ctx Context,
+    ctx: &'ctx RuntimeContext,
     user: *mut raw::RedisModuleUser,
 }
 
@@ -415,7 +433,7 @@ impl<'ctx> Drop for ContextUserScope<'ctx> {
 }
 
 impl<'ctx> ContextUserScope<'ctx> {
-    fn new(ctx: &'ctx Context, user: *mut raw::RedisModuleUser) -> ContextUserScope<'ctx> {
+    fn new(ctx: &'ctx RuntimeContext, user: *mut raw::RedisModuleUser) -> ContextUserScope<'ctx> {
         ContextUserScope { ctx, user }
     }
 }
@@ -476,56 +494,221 @@ impl<'a> StrCallArgs<'a> {
 }
 
 impl Context {
-    /// Wraps a context pointer that Redis passed to the module.
+    /// Wraps a module command or blocked-client reply callback.
     ///
     /// # Safety
     ///
-    /// `ctx` must be a context Redis passed to a module callback or a
-    /// thread-safe context, and the `Context` must be used only on a thread
-    /// that holds the Redis lock while `ctx` is valid. A `Context` is proof that
-    /// the lock is held, which [`RedisGILGuard`](crate::RedisGILGuard) relies on.
-    /// This does not prove native module ownership; use [`Self::from_module_context`]
-    /// only when that stronger guarantee is known.
+    /// `ctx` must have a live association with this module and a client reply
+    /// target (or a command key-position request). The Redis lock must be held
+    /// on this thread. This wrapper and references derived from it must only
+    /// be used while the native invocation is valid. Use [`EventContext::new`]
+    /// for callbacks without a reply target and [`RuntimeContext::new`] for
+    /// locked contexts without a module association.
     pub const unsafe fn new(ctx: *mut raw::RedisModuleCtx) -> Self {
         Self {
-            ctx,
-            module_owned: false,
+            event: unsafe { EventContext::new(ctx) },
         }
     }
 
-    /// Wraps a Redis context known to belong to the current module.
-    ///
-    /// SDK module-load, command, and keyspace-notification callbacks use this
-    /// constructor. Unlike [`Self::new`], it permits APIs that retain a callback
-    /// associated with the module, such as [`Self::subscribe_to_keyspace_events`].
+    /// Alias for [`Self::new`].
     ///
     /// # Safety
     ///
-    /// All requirements of [`Self::new`] apply. In addition, `ctx` must have a
-    /// live native module association for this module. A context obtained from
-    /// `RedisModule_GetThreadSafeContext(NULL)` has no such association and
-    /// must use [`Self::new`] instead.
-    #[must_use]
+    /// The pointer must satisfy every requirement of [`Self::new`].
     pub const unsafe fn from_module_context(ctx: *mut raw::RedisModuleCtx) -> Self {
-        Self {
-            ctx,
-            module_owned: true,
+        unsafe { Self::new(ctx) }
+    }
+
+    /// Parses the Redis version from an INFO response.
+    pub fn version_from_info(info: RedisValue) -> Result<Version, RedisError> {
+        RuntimeContext::version_from_info(info)
+    }
+
+    /// Runs a database scope while preserving client command capabilities.
+    pub fn with_db<T>(&self, db: i32, f: impl FnOnce(&Context) -> T) -> Result<T, RedisError> {
+        self.event.with_db(db, |_| f(self))
+    }
+
+    /// # Panics
+    ///
+    /// Will panic if `RedisModule_IsKeysPositionRequest` is missing in redismodule.h
+    #[must_use]
+    pub fn is_keys_position_request(&self) -> bool {
+        // We want this to be available in tests where we don't have an actual Redis to call
+        if cfg!(test) {
+            return false;
+        }
+
+        (unsafe { crate::__required_api!(RedisModule_IsKeysPositionRequest)(self.ctx) }) != 0
+    }
+
+    /// # Panics
+    ///
+    /// Will panic if `RedisModule_KeyAtPos` is missing in redismodule.h
+    pub fn key_at_pos(&self, pos: i32) {
+        // TODO: This will crash redis if `pos` is out of range.
+        // Think of a way to make this safe by checking the range.
+        unsafe {
+            crate::__required_api!(RedisModule_KeyAtPos)(self.ctx, pos as c_int);
         }
     }
 
-    /// A `Context` without a Redis context pointer, for the APIs that accept a
-    /// null context, such as logging.
-    ///
-    /// # Safety
-    ///
-    /// The `Context` must be used only on a thread that holds the Redis lock,
-    /// as for [`Context::new`].
+    /// Converts text for a simple string or error reply, which cannot carry CR,
+    /// LF or NUL, by replacing each of those bytes with a space. Other text,
+    /// non-ASCII included, is kept: no UTF-8 multibyte sequence contains them.
     #[must_use]
-    pub const unsafe fn dummy() -> Self {
-        Self {
-            ctx: ptr::null_mut(),
-            module_owned: false,
+    pub fn str_as_legal_resp_string(s: &str) -> CString {
+        CString::new(
+            s.bytes()
+                .map(|b| match b {
+                    b'\r' | b'\n' | b'\0' => b' ',
+                    b => b,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .expect("NUL bytes were replaced")
+    }
+
+    pub fn replicate_verbatim(&self) {
+        raw::replicate_verbatim(self.ctx);
+    }
+
+    /// Replies to the client with `result` exactly as Redis sent it to the
+    /// call: a simple string stays a simple string, and an error reply is
+    /// passed on as an error. Uses `RedisModule_ReplyWithCallReply` for replies,
+    /// and an error reply for an error message the crate built.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error, without replying, if `result` holds no reply (such as
+    /// the result of a dry run), if Redis cannot send it to this client (RESP3
+    /// types to a RESP2 client), or if the running Redis lacks the API.
+    pub fn reply_with_call_reply(&self, result: &CallResult) -> Result<(), RedisError> {
+        let reply_with_call_reply =
+            unsafe { crate::__available_api!(RedisModule_ReplyWithCallReply) };
+        let reply = match result {
+            Ok(reply) => reply.get_raw(),
+            Err(ErrorReply::RedisError(error)) => Some(error.get_raw()),
+            Err(ErrorReply::Message(message)) => {
+                self.reply_error_string(message);
+                return Ok(());
+            }
+        };
+        let reply = reply.ok_or(RedisError::Str("ERR the call result holds no reply"))?;
+        if unsafe { reply_with_call_reply(self.ctx, reply) } != raw::REDISMODULE_OK as c_int {
+            return Err(RedisError::Str(
+                "ERR Redis cannot send this reply to the client, for example RESP3 types to a RESP2 client",
+            ));
         }
+        Ok(())
+    }
+
+    pub fn current_command_name(&self) -> Result<String, RedisError> {
+        unsafe {
+            match raw::RedisModule_GetCurrentCommandName {
+                Some(cmd) => {
+                    let name = cmd(self.ctx);
+                    if name.is_null() {
+                        return Err(RedisError::Str("ERR no current command"));
+                    }
+                    Ok(CStr::from_ptr(name).to_string_lossy().into_owned())
+                }
+                None => Err(RedisError::Str(
+                    "API RedisModule_GetCurrentCommandName is not available",
+                )),
+            }
+        }
+    }
+
+    /// Return the current user name attached to a legal native user-query context.
+    /// Redis 8.10 can return None when the native API reports no user. Older
+    /// hosts require a client/user; Option does not make arbitrary constructed
+    /// or missing-client contexts legal. A present string is independently owned.
+    pub fn get_current_user(&self) -> Option<RedisString> {
+        let user = unsafe { crate::__required_api!(RedisModule_GetCurrentUserName)(self.ctx) };
+        // SAFETY: native result is owned; self.ctx is its actual producer.
+        unsafe { RedisString::from_owned_ptr_or_none(NonNull::new(self.ctx), user) }
+    }
+
+    /// Adds an entry to the ACL log, which `ACL LOG` lists, for the user named
+    /// `user_name` and the denied `object` (a command, key or channel name), as
+    /// `RedisModule_ACLAddLogEntryByUserName` does. The entry records the
+    /// client of this context, so call it from a command or another context
+    /// with a client.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the context has no client, or the running Redis does
+    /// not provide the API (before 7.2).
+    pub fn acl_add_log_entry(
+        &self,
+        user_name: &RedisString,
+        object: &RedisString,
+        reason: AclLogReason,
+    ) -> Result<(), RedisError> {
+        let add_log_entry =
+            unsafe { crate::__available_api!(RedisModule_ACLAddLogEntryByUserName) };
+        let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
+        // Redis records the context's client in the entry, and crashes without one.
+        if unsafe { client_id(self.ctx) } == 0 {
+            return Err(RedisError::Str(
+                "ERR an ACL log entry needs a context with a client",
+            ));
+        }
+        // The vendored header declares no result. Redis fails only for an
+        // unknown reason, and every AclLogReason is a known one.
+        unsafe { add_log_entry(self.ctx, user_name.as_ptr(), object.as_ptr(), reason.into()) };
+        Ok(())
+    }
+
+    /// Sends a reply to this invocation's client.
+    pub fn reply_simple_string(&self, s: &str) -> raw::Status {
+        ReplyContext { ctx: self.ctx }.reply_simple_string(s)
+    }
+
+    /// Sends a reply to this invocation's client.
+    pub fn reply_error_string(&self, s: &str) -> raw::Status {
+        ReplyContext { ctx: self.ctx }.reply_error_string(s)
+    }
+
+    /// Sends a reply to this invocation's client.
+    pub fn reply_with_key(&self, result: RedisValueKey) -> raw::Status {
+        ReplyContext { ctx: self.ctx }.reply_with_key(result)
+    }
+
+    /// Sends a reply to this invocation's client.
+    pub fn reply(&self, result: RedisResult) -> raw::Status {
+        ReplyContext { ctx: self.ctx }.reply(result)
+    }
+}
+
+impl RuntimeContext {
+    /// Sets the user used by ACL-checked calls (`CallOptionsBuilder::verify_acl`).
+    /// This is a context-scoped identity, including on events and workers; it
+    /// does not authenticate or modify a client connection. The returned scope
+    /// clears that identity when dropped, including during unwind, and borrows
+    /// this view so it cannot outlive the invocation or worker lock guard.
+    /// Leaking the scope (for example with `mem::forget`) skips cleanup and leaves
+    /// the user attached, including across later locks of a reused detached context.
+    pub fn authenticate_user(
+        &self,
+        user_name: &RedisString,
+    ) -> Result<ContextUserScope<'_>, RedisError> {
+        // Look up every API first, so a missing one cannot leave `user` allocated.
+        let get_user = unsafe { crate::__available_api!(RedisModule_GetModuleUserFromUserName) };
+        let set_context_user = unsafe { crate::__available_api!(RedisModule_SetContextUser) };
+        let user = unsafe { get_user(user_name.as_ptr()) };
+        if user.is_null() {
+            return Err(RedisError::Str(
+                "ERR the user does not exist or is disabled",
+            ));
+        }
+        unsafe { set_context_user(self.ctx, user) };
+        Ok(ContextUserScope::new(self, user))
+    }
+
+    fn deautenticate_user(&self) {
+        unsafe { crate::__required_api!(RedisModule_SetContextUser)(self.ctx, ptr::null_mut()) };
     }
 
     /// Logs `message` at `level` with the module name.
@@ -561,30 +744,6 @@ impl Context {
     pub fn auto_memory(&self) {
         unsafe {
             crate::__required_api!(RedisModule_AutoMemory)(self.ctx);
-        }
-    }
-
-    /// # Panics
-    ///
-    /// Will panic if `RedisModule_IsKeysPositionRequest` is missing in redismodule.h
-    #[must_use]
-    pub fn is_keys_position_request(&self) -> bool {
-        // We want this to be available in tests where we don't have an actual Redis to call
-        if cfg!(test) {
-            return false;
-        }
-
-        (unsafe { crate::__required_api!(RedisModule_IsKeysPositionRequest)(self.ctx) }) != 0
-    }
-
-    /// # Panics
-    ///
-    /// Will panic if `RedisModule_KeyAtPos` is missing in redismodule.h
-    pub fn key_at_pos(&self, pos: i32) {
-        // TODO: This will crash redis if `pos` is out of range.
-        // Think of a way to make this safe by checking the range.
-        unsafe {
-            crate::__required_api!(RedisModule_KeyAtPos)(self.ctx, pos as c_int);
         }
     }
 
@@ -631,7 +790,7 @@ impl Context {
     /// A simple-string reply, such as `+OK`, is a `SimpleString`. A bulk-string
     /// reply is bulk text for valid UTF-8, or a byte buffer otherwise. Use
     /// `call_ext` for typed reply access and borrow bytes from that reply's
-    /// owner, and [`Self::reply_with_call_reply`] to pass a reply on as it is.
+    /// owner, and [`Context::reply_with_call_reply`] to pass a reply on as it is.
     pub fn call<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> RedisResult {
         self.call_internal::<_, CallResult>(command, raw::FMT, args)
             .map_or_else(|e| Err(e.into()), |v| Ok((&v).into()))
@@ -651,197 +810,12 @@ impl Context {
         R::from(res)
     }
 
-    /// Same as [call_ext] but also allow to perform blocking commands like BLPOP.
-    #[cfg(any(
-        feature = "min-redis-compatibility-version-8-0",
-        feature = "min-redis-compatibility-version-7-4",
-        feature = "min-redis-compatibility-version-7-2"
-    ))]
-    pub fn call_blocking<
-        'ctx,
-        'a,
-        T: Into<StrCallArgs<'a>>,
-        R: From<PromiseCallReply<'static, 'ctx>>,
-    >(
-        &'ctx self,
-        command: &str,
-        options: &BlockingCallOptions,
-        args: T,
-    ) -> R {
-        self.call_internal(command, options.options.as_ptr() as *const c_char, args)
-    }
-
-    /// Converts text for a simple string or error reply, which cannot carry CR,
-    /// LF or NUL, by replacing each of those bytes with a space. Other text,
-    /// non-ASCII included, is kept: no UTF-8 multibyte sequence contains them.
-    #[must_use]
-    pub fn str_as_legal_resp_string(s: &str) -> CString {
-        CString::new(
-            s.bytes()
-                .map(|b| match b {
-                    b'\r' | b'\n' | b'\0' => b' ',
-                    b => b,
-                })
-                .collect::<Vec<_>>(),
-        )
-        .expect("NUL bytes were replaced")
-    }
-
-    #[allow(clippy::must_use_candidate)]
-    pub fn reply_simple_string(&self, s: &str) -> raw::Status {
-        let msg = Self::str_as_legal_resp_string(s);
-        raw::reply_with_simple_string(self.ctx, msg.as_ptr())
-    }
-
-    #[allow(clippy::must_use_candidate)]
-    pub fn reply_error_string(&self, s: &str) -> raw::Status {
-        let msg = Self::str_as_legal_resp_string(s);
-        unsafe { crate::__required_api!(RedisModule_ReplyWithError)(self.ctx, msg.as_ptr()).into() }
-    }
-
-    pub fn reply_with_key(&self, result: RedisValueKey) -> raw::Status {
-        match result {
-            RedisValueKey::Integer(i) => raw::reply_with_long_long(self.ctx, i),
-            RedisValueKey::String(s) => {
-                raw::reply_with_string_buffer(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
-            }
-            RedisValueKey::SimpleString(s) => self.reply_simple_string(&s),
-            RedisValueKey::BulkString(b) => {
-                raw::reply_with_string_buffer(self.ctx, b.as_ptr().cast::<c_char>(), b.len())
-            }
-            RedisValueKey::BulkRedisString(s) => raw::reply_with_string(self.ctx, s.as_ptr()),
-            RedisValueKey::Bool(b) => raw::reply_with_bool(self.ctx, b.into()),
-        }
-    }
-
-    /// # Panics
-    ///
-    /// Will panic if methods used are missing in redismodule.h
-    #[allow(clippy::must_use_candidate)]
-    pub fn reply(&self, result: RedisResult) -> raw::Status {
-        match result {
-            Ok(RedisValue::Bool(v)) => raw::reply_with_bool(self.ctx, v.into()),
-            Ok(RedisValue::Integer(v)) => raw::reply_with_long_long(self.ctx, v),
-            Ok(RedisValue::Float(v)) => raw::reply_with_double(self.ctx, v),
-            Ok(RedisValue::SimpleStringStatic(s)) => self.reply_simple_string(s),
-
-            Ok(RedisValue::SimpleString(s)) => self.reply_simple_string(&s),
-
-            Ok(RedisValue::BulkString(s)) => {
-                raw::reply_with_string_buffer(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
-            }
-
-            Ok(RedisValue::BigNumber(s)) => {
-                raw::reply_with_big_number(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
-            }
-
-            Ok(RedisValue::VerbatimString((format, data))) => raw::reply_with_verbatim_string(
-                self.ctx,
-                data.as_ptr().cast(),
-                data.len(),
-                format.0.as_ptr().cast(),
-            ),
-
-            Ok(RedisValue::BulkRedisString(s)) => raw::reply_with_string(self.ctx, s.as_ptr()),
-
-            Ok(RedisValue::StringBuffer(s)) => {
-                raw::reply_with_string_buffer(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
-            }
-
-            Ok(RedisValue::Array(array)) => {
-                raw::reply_with_array(self.ctx, array.len() as c_long);
-
-                for elem in array {
-                    self.reply(Ok(elem));
-                }
-
-                raw::Status::Ok
-            }
-
-            Ok(RedisValue::Map(map)) => {
-                raw::reply_with_map(self.ctx, map.len() as c_long);
-
-                for (key, value) in map {
-                    self.reply_with_key(key);
-                    self.reply(Ok(value));
-                }
-
-                raw::Status::Ok
-            }
-
-            Ok(RedisValue::OrderedMap(map)) => {
-                raw::reply_with_map(self.ctx, map.len() as c_long);
-
-                for (key, value) in map {
-                    self.reply_with_key(key);
-                    self.reply(Ok(value));
-                }
-
-                raw::Status::Ok
-            }
-
-            Ok(RedisValue::InsertionOrderedMap(entries)) => {
-                raw::reply_with_map(self.ctx, entries.len() as c_long);
-
-                for (key, value) in entries {
-                    self.reply_with_key(key);
-                    self.reply(Ok(value));
-                }
-
-                raw::Status::Ok
-            }
-
-            Ok(RedisValue::Set(set)) => {
-                raw::reply_with_set(self.ctx, set.len() as c_long);
-                set.into_iter().for_each(|e| {
-                    self.reply_with_key(e);
-                });
-
-                raw::Status::Ok
-            }
-
-            Ok(RedisValue::OrderedSet(set)) => {
-                raw::reply_with_set(self.ctx, set.len() as c_long);
-                set.into_iter().for_each(|e| {
-                    self.reply_with_key(e);
-                });
-
-                raw::Status::Ok
-            }
-
-            Ok(RedisValue::Null) => raw::reply_with_null(self.ctx),
-
-            Ok(RedisValue::NoReply) => raw::Status::Ok,
-
-            Ok(RedisValue::StaticError(s)) => self.reply_error_string(s),
-
-            Ok(RedisValue::Error(s)) => self.reply_error_string(&s),
-
-            Err(RedisError::WrongArity) => unsafe {
-                if self.is_keys_position_request() {
-                    // We can't return a result since we don't have a client
-                    raw::Status::Err
-                } else {
-                    crate::__required_api!(RedisModule_WrongArity)(self.ctx).into()
-                }
-            },
-
-            Err(RedisError::WrongType) => {
-                self.reply_error_string(RedisError::WrongType.to_string().as_str())
-            }
-
-            Err(RedisError::String(s)) => self.reply_error_string(s.as_str()),
-
-            Err(RedisError::Str(s)) => self.reply_error_string(s),
-        }
-    }
-
     #[must_use]
     pub fn open_key(&self, key: &RedisString) -> RedisKey {
-        // SAFETY: a Context comes from Redis or the unsafe Context::new, so
+        // SAFETY: RuntimeContext construction requires a valid context and lock, so
         // self.ctx is valid and the lock is held now. The key's type does not
         // tie it to the Context or the lock; callers must not keep it past
-        // them (the context split, upstream issue 351, is to close this).
+        // them; borrowing native resources for their full lifetime is separate work.
         unsafe { RedisKey::open(self.ctx, key) }
     }
 
@@ -867,43 +841,9 @@ impl Context {
         unsafe { RedisKeyWritable::open_with_flags(self.ctx, key, flags) }
     }
 
-    pub fn replicate_verbatim(&self) {
-        raw::replicate_verbatim(self.ctx);
-    }
-
     /// Replicate command to the replica and AOF.
     pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) {
         raw::replicate(self.ctx, command, args);
-    }
-
-    /// Replies to the client with `result` exactly as Redis sent it to the
-    /// call: a simple string stays a simple string, and an error reply is
-    /// passed on as an error. Uses `RedisModule_ReplyWithCallReply` for replies,
-    /// and an error reply for an error message the crate built.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error, without replying, if `result` holds no reply (such as
-    /// the result of a dry run), if Redis cannot send it to this client (RESP3
-    /// types to a RESP2 client), or if the running Redis lacks the API.
-    pub fn reply_with_call_reply(&self, result: &CallResult) -> Result<(), RedisError> {
-        let reply_with_call_reply =
-            unsafe { crate::__available_api!(RedisModule_ReplyWithCallReply) };
-        let reply = match result {
-            Ok(reply) => reply.get_raw(),
-            Err(ErrorReply::RedisError(error)) => Some(error.get_raw()),
-            Err(ErrorReply::Message(message)) => {
-                self.reply_error_string(message);
-                return Ok(());
-            }
-        };
-        let reply = reply.ok_or(RedisError::Str("ERR the call result holds no reply"))?;
-        if unsafe { reply_with_call_reply(self.ctx, reply) } != raw::REDISMODULE_OK as c_int {
-            return Err(RedisError::Str(
-                "ERR Redis cannot send this reply to the client, for example RESP3 types to a RESP2 client",
-            ));
-        }
-        Ok(())
     }
 
     /// How much memory Redis uses relative to its `maxmemory` setting, through
@@ -953,24 +893,13 @@ impl Context {
             YieldMode::Events => raw::REDISMODULE_YIELD_FLAG_NONE,
             YieldMode::Clients => raw::REDISMODULE_YIELD_FLAG_CLIENTS,
         };
-        let busy_reply = busy_reply.map(Self::str_as_legal_resp_string);
+        let busy_reply = busy_reply.map(Context::str_as_legal_resp_string);
         let busy_reply = busy_reply
             .as_ref()
             .map_or(ptr::null(), |text| text.as_ptr());
         // SAFETY: Redis reads busy_reply only during the call.
         unsafe { yield_api(self.ctx, flags as c_int, busy_reply) };
         Ok(())
-    }
-
-    /// # Safety
-    ///
-    /// See [raw::export_shared_api].
-    pub unsafe fn export_shared_api(
-        &self,
-        func: *const ::std::os::raw::c_void,
-        name: *const ::std::os::raw::c_char,
-    ) -> raw::Status {
-        unsafe { raw::export_shared_api(self.ctx, func, name) }
     }
 
     /// Fires a keyspace notification for `keyname`.
@@ -1014,17 +943,6 @@ impl Context {
         match status {
             Status::Ok => Ok(()),
             Status::Err => Err(RedisError::Str("ERR keyspace notification failed")),
-        }
-    }
-
-    pub fn current_command_name(&self) -> Result<String, RedisError> {
-        unsafe {
-            match raw::RedisModule_GetCurrentCommandName {
-                Some(cmd) => Ok(CStr::from_ptr(cmd(self.ctx)).to_str().unwrap().to_string()),
-                None => Err(RedisError::Str(
-                    "API RedisModule_GetCurrentCommandName is not available",
-                )),
-            }
         }
     }
 
@@ -1076,41 +994,6 @@ impl Context {
         })
     }
 
-    /// Return the current user name attached to a legal native user-query context.
-    /// Redis 8.10 can return None when the native API reports no user. Older
-    /// hosts require a client/user; Option does not make arbitrary constructed
-    /// or missing-client contexts legal. A present string is independently owned.
-    pub fn get_current_user(&self) -> Option<RedisString> {
-        let user = unsafe { crate::__required_api!(RedisModule_GetCurrentUserName)(self.ctx) };
-        // SAFETY: native result is owned; self.ctx is its actual producer.
-        unsafe { RedisString::from_owned_ptr_or_none(NonNull::new(self.ctx), user) }
-    }
-
-    /// Attach the given user to the current context so each operation performed from
-    /// now on using this context will be validated againts this new user.
-    /// Return [ContextUserScope] which make sure to unset the user when freed and
-    /// can not outlive the current [Context].
-    pub fn authenticate_user(
-        &self,
-        user_name: &RedisString,
-    ) -> Result<ContextUserScope<'_>, RedisError> {
-        // Look up every API first, so a missing one cannot leave `user` allocated.
-        let get_user = unsafe { crate::__available_api!(RedisModule_GetModuleUserFromUserName) };
-        let set_context_user = unsafe { crate::__available_api!(RedisModule_SetContextUser) };
-        let user = unsafe { get_user(user_name.as_ptr()) };
-        if user.is_null() {
-            return Err(RedisError::Str(
-                "ERR the user does not exist or is disabled",
-            ));
-        }
-        unsafe { set_context_user(self.ctx, user) };
-        Ok(ContextUserScope::new(self, user))
-    }
-
-    fn deautenticate_user(&self) {
-        unsafe { crate::__required_api!(RedisModule_SetContextUser)(self.ctx, ptr::null_mut()) };
-    }
-
     /// Returns the database selected on this context.
     #[must_use]
     pub fn get_selected_db(&self) -> i32 {
@@ -1144,7 +1027,11 @@ impl Context {
     ///     ctx.with_db(db, |ctx| ctx.call("GET", &[key]))?
     /// }
     /// ```
-    pub fn with_db<T>(&self, db: i32, f: impl FnOnce(&Context) -> T) -> Result<T, RedisError> {
+    pub fn with_db<T>(
+        &self,
+        db: i32,
+        f: impl FnOnce(&RuntimeContext) -> T,
+    ) -> Result<T, RedisError> {
         let previous = self.get_selected_db();
         self.select_db(db)?;
         let _restore = SelectedDbGuard {
@@ -1338,68 +1225,6 @@ impl Context {
         }
     }
 
-    /// Adds an entry to the ACL log, which `ACL LOG` lists, for the user named
-    /// `user_name` and the denied `object` (a command, key or channel name), as
-    /// `RedisModule_ACLAddLogEntryByUserName` does. The entry records the
-    /// client of this context, so call it from a command or another context
-    /// with a client.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the context has no client, or the running Redis does
-    /// not provide the API (before 7.2).
-    pub fn acl_add_log_entry(
-        &self,
-        user_name: &RedisString,
-        object: &RedisString,
-        reason: AclLogReason,
-    ) -> Result<(), RedisError> {
-        let add_log_entry =
-            unsafe { crate::__available_api!(RedisModule_ACLAddLogEntryByUserName) };
-        let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
-        // Redis records the context's client in the entry, and crashes without one.
-        if unsafe { client_id(self.ctx) } == 0 {
-            return Err(RedisError::Str(
-                "ERR an ACL log entry needs a context with a client",
-            ));
-        }
-        // The vendored header declares no result. Redis fails only for an
-        // unknown reason, and every AclLogReason is a known one.
-        unsafe { add_log_entry(self.ctx, user_name.as_ptr(), object.as_ptr(), reason.into()) };
-        Ok(())
-    }
-
-    api!(
-        [RedisModule_AddPostNotificationJob],
-        /// When running inside a key space notification callback, it is dangerous and highly discouraged to perform any write
-        /// operation. In order to still perform write actions in this scenario, Redis provides this API ([add_post_notification_job])
-        /// that allows to register a job callback which Redis will call when the following condition holds:
-        ///
-        /// 1. It is safe to perform any write operation.
-        /// 2. The job will be called atomically along side the key space notification.
-        ///
-        /// Notice, one job might trigger key space notifications that will trigger more jobs.
-        /// This raises a concerns of entering an infinite loops, we consider infinite loops
-        /// as a logical bug that need to be fixed in the module, an attempt to protect against
-        /// infinite loops by halting the execution could result in violation of the feature correctness
-        /// and so Redis will make no attempt to protect the module from infinite loops.
-        pub fn add_post_notification_job<F: FnOnce(&Context) + 'static>(
-            &self,
-            callback: F,
-        ) -> Status {
-            let callback = Box::into_raw(Box::new(Some(callback)));
-            unsafe {
-                RedisModule_AddPostNotificationJob(
-                    self.ctx,
-                    Some(post_notification_job::<F>),
-                    callback as *mut c_void,
-                    Some(post_notification_job_free_callback::<F>),
-                )
-            }
-            .into()
-        }
-    );
-
     api!(
         [RedisModule_AvoidReplicaTraffic],
         /// Returns true if a client sent the CLIENT PAUSE command to the server or
@@ -1447,7 +1272,224 @@ impl Context {
     }
 }
 
-extern "C" fn post_notification_job_free_callback<F: FnOnce(&Context)>(pd: *mut c_void) {
+impl EventContext {
+    /// Like [`RuntimeContext::call_ext`], allowing blocking commands such as BLPOP.
+    #[cfg(any(
+        feature = "min-redis-compatibility-version-8-0",
+        feature = "min-redis-compatibility-version-7-4",
+        feature = "min-redis-compatibility-version-7-2"
+    ))]
+    pub fn call_blocking<
+        'ctx,
+        'a,
+        T: Into<StrCallArgs<'a>>,
+        R: From<PromiseCallReply<'static, 'ctx>>,
+    >(
+        &'ctx self,
+        command: &str,
+        options: &BlockingCallOptions,
+        args: T,
+    ) -> R {
+        self.call_internal(command, options.options.as_ptr() as *const c_char, args)
+    }
+
+    /// # Safety
+    ///
+    /// See [raw::export_shared_api].
+    pub unsafe fn export_shared_api(
+        &self,
+        func: *const ::std::os::raw::c_void,
+        name: *const ::std::os::raw::c_char,
+    ) -> raw::Status {
+        unsafe { raw::export_shared_api(self.ctx, func, name) }
+    }
+
+    api!(
+        [RedisModule_AddPostNotificationJob],
+        /// When running inside a key space notification callback, it is dangerous and highly discouraged to perform any write
+        /// operation. In order to still perform write actions in this scenario, Redis provides this API ([`Self::add_post_notification_job`])
+        /// that allows to register a job callback which Redis will call when the following condition holds:
+        ///
+        /// 1. It is safe to perform any write operation.
+        /// 2. The job will be called atomically along side the key space notification.
+        ///
+        /// Notice, one job might trigger key space notifications that will trigger more jobs.
+        /// This raises a concerns of entering an infinite loops, we consider infinite loops
+        /// as a logical bug that need to be fixed in the module, an attempt to protect against
+        /// infinite loops by halting the execution could result in violation of the feature correctness
+        /// and so Redis will make no attempt to protect the module from infinite loops.
+        pub fn add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
+            &self,
+            callback: F,
+        ) -> Status {
+            let callback = Box::into_raw(Box::new(Some(callback)));
+            unsafe {
+                RedisModule_AddPostNotificationJob(
+                    self.ctx,
+                    Some(post_notification_job::<F>),
+                    callback as *mut c_void,
+                    Some(post_notification_job_free_callback::<F>),
+                )
+            }
+            .into()
+        }
+    );
+}
+
+impl ReplyContext {
+    #[allow(clippy::must_use_candidate)]
+    pub fn reply_simple_string(&self, s: &str) -> raw::Status {
+        let msg = Context::str_as_legal_resp_string(s);
+        raw::reply_with_simple_string(self.ctx, msg.as_ptr())
+    }
+
+    #[allow(clippy::must_use_candidate)]
+    pub fn reply_error_string(&self, s: &str) -> raw::Status {
+        let msg = Context::str_as_legal_resp_string(s);
+        unsafe { crate::__required_api!(RedisModule_ReplyWithError)(self.ctx, msg.as_ptr()).into() }
+    }
+
+    pub fn reply_with_key(&self, result: RedisValueKey) -> raw::Status {
+        match result {
+            RedisValueKey::Integer(i) => raw::reply_with_long_long(self.ctx, i),
+            RedisValueKey::String(s) => {
+                raw::reply_with_string_buffer(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
+            }
+            RedisValueKey::SimpleString(s) => self.reply_simple_string(&s),
+            RedisValueKey::BulkString(b) => {
+                raw::reply_with_string_buffer(self.ctx, b.as_ptr().cast::<c_char>(), b.len())
+            }
+            RedisValueKey::BulkRedisString(s) => raw::reply_with_string(self.ctx, s.as_ptr()),
+            RedisValueKey::Bool(b) => raw::reply_with_bool(self.ctx, b.into()),
+        }
+    }
+
+    /// # Panics
+    ///
+    /// Will panic if methods used are missing in redismodule.h
+    #[allow(clippy::must_use_candidate)]
+    pub fn reply(&self, result: RedisResult) -> raw::Status {
+        match result {
+            Ok(RedisValue::Bool(v)) => raw::reply_with_bool(self.ctx, v.into()),
+            Ok(RedisValue::Integer(v)) => raw::reply_with_long_long(self.ctx, v),
+            Ok(RedisValue::Float(v)) => raw::reply_with_double(self.ctx, v),
+            Ok(RedisValue::SimpleStringStatic(s)) => self.reply_simple_string(s),
+
+            Ok(RedisValue::SimpleString(s)) => self.reply_simple_string(&s),
+
+            Ok(RedisValue::BulkString(s)) => {
+                raw::reply_with_string_buffer(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
+            }
+
+            Ok(RedisValue::BigNumber(s)) => {
+                raw::reply_with_big_number(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
+            }
+
+            Ok(RedisValue::VerbatimString((format, data))) => raw::reply_with_verbatim_string(
+                self.ctx,
+                data.as_ptr().cast(),
+                data.len(),
+                format.0.as_ptr().cast(),
+            ),
+
+            Ok(RedisValue::BulkRedisString(s)) => raw::reply_with_string(self.ctx, s.as_ptr()),
+
+            Ok(RedisValue::StringBuffer(s)) => {
+                raw::reply_with_string_buffer(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
+            }
+
+            Ok(RedisValue::Array(array)) => {
+                raw::reply_with_array(self.ctx, array.len() as c_long);
+
+                for elem in array {
+                    self.reply(Ok(elem));
+                }
+
+                raw::Status::Ok
+            }
+
+            Ok(RedisValue::Map(map)) => {
+                raw::reply_with_map(self.ctx, map.len() as c_long);
+
+                for (key, value) in map {
+                    self.reply_with_key(key);
+                    self.reply(Ok(value));
+                }
+
+                raw::Status::Ok
+            }
+
+            Ok(RedisValue::OrderedMap(map)) => {
+                raw::reply_with_map(self.ctx, map.len() as c_long);
+
+                for (key, value) in map {
+                    self.reply_with_key(key);
+                    self.reply(Ok(value));
+                }
+
+                raw::Status::Ok
+            }
+
+            Ok(RedisValue::InsertionOrderedMap(entries)) => {
+                raw::reply_with_map(self.ctx, entries.len() as c_long);
+
+                for (key, value) in entries {
+                    self.reply_with_key(key);
+                    self.reply(Ok(value));
+                }
+
+                raw::Status::Ok
+            }
+
+            Ok(RedisValue::Set(set)) => {
+                raw::reply_with_set(self.ctx, set.len() as c_long);
+                set.into_iter().for_each(|e| {
+                    self.reply_with_key(e);
+                });
+
+                raw::Status::Ok
+            }
+
+            Ok(RedisValue::OrderedSet(set)) => {
+                raw::reply_with_set(self.ctx, set.len() as c_long);
+                set.into_iter().for_each(|e| {
+                    self.reply_with_key(e);
+                });
+
+                raw::Status::Ok
+            }
+
+            Ok(RedisValue::Null) => raw::reply_with_null(self.ctx),
+
+            Ok(RedisValue::NoReply) => raw::Status::Ok,
+
+            Ok(RedisValue::StaticError(s)) => self.reply_error_string(s),
+
+            Ok(RedisValue::Error(s)) => self.reply_error_string(&s),
+
+            Err(RedisError::WrongArity) => unsafe {
+                if !cfg!(test)
+                    && crate::__required_api!(RedisModule_IsKeysPositionRequest)(self.ctx) != 0
+                {
+                    // We can't return a result since we don't have a client
+                    raw::Status::Err
+                } else {
+                    crate::__required_api!(RedisModule_WrongArity)(self.ctx).into()
+                }
+            },
+
+            Err(RedisError::WrongType) => {
+                self.reply_error_string(RedisError::WrongType.to_string().as_str())
+            }
+
+            Err(RedisError::String(s)) => self.reply_error_string(s.as_str()),
+
+            Err(RedisError::Str(s)) => self.reply_error_string(s),
+        }
+    }
+}
+
+extern "C" fn post_notification_job_free_callback<F: FnOnce(&EventContext)>(pd: *mut c_void) {
     crate::panic::run_callback(
         "post notification job free",
         || drop(unsafe { Box::from_raw(pd as *mut Option<F>) }),
@@ -1455,12 +1497,12 @@ extern "C" fn post_notification_job_free_callback<F: FnOnce(&Context)>(pd: *mut 
     );
 }
 
-extern "C" fn post_notification_job<F: FnOnce(&Context)>(
+extern "C" fn post_notification_job<F: FnOnce(&EventContext)>(
     ctx: *mut raw::RedisModuleCtx,
     pd: *mut c_void,
 ) {
     let callback = unsafe { &mut *(pd as *mut Option<F>) };
-    let ctx = unsafe { Context::new(ctx) };
+    let ctx = unsafe { EventContext::new(ctx) };
     callback.take().map_or_else(
         || {
             ctx.log(
@@ -1476,9 +1518,15 @@ extern "C" fn post_notification_job<F: FnOnce(&Context)>(
 
 unsafe impl RedisLockIndicator for Context {}
 
+// Private reply-only adapter: unlike runtime views this is not a Redis lock proof.
+// Blocked-client replies may use it without acquiring the Redis lock.
+struct ReplyContext {
+    ctx: *mut raw::RedisModuleCtx,
+}
+
 #[cfg(test)]
 mod call_text_tests {
-    use super::Context;
+    use super::RuntimeContext;
     use crate::RedisValue;
 
     #[test]
@@ -1487,11 +1535,13 @@ mod call_text_tests {
             RedisValue::SimpleString("redis_version:7.2.8\r\n".into()),
             RedisValue::BulkString("redis_version:7.2.8\r\n".into()),
         ] {
-            let version = Context::version_from_info(value).unwrap();
+            let version = RuntimeContext::version_from_info(value).unwrap();
             assert_eq!((version.major, version.minor, version.patch), (7, 2, 8));
         }
-        assert!(Context::version_from_info(RedisValue::BulkString("no version".into())).is_err());
-        let version = Context::version_from_info(RedisValue::BulkString(
+        assert!(
+            RuntimeContext::version_from_info(RedisValue::BulkString("no version".into())).is_err()
+        );
+        let version = RuntimeContext::version_from_info(RedisValue::BulkString(
             "redis_version:8.10.2-rc1\r\n".into(),
         ))
         .unwrap();
@@ -1508,9 +1558,11 @@ mod call_text_tests {
             "redis_version: 7.2.4",
             "redis_version:7..4",
         ] {
-            assert!(Context::version_from_info(RedisValue::BulkString(text.into())).is_err());
+            assert!(
+                RuntimeContext::version_from_info(RedisValue::BulkString(text.into())).is_err()
+            );
         }
-        assert!(Context::version_from_info(RedisValue::Integer(7)).is_err());
+        assert!(RuntimeContext::version_from_info(RedisValue::Integer(7)).is_err());
     }
 
     #[test]
@@ -1525,10 +1577,13 @@ mod call_text_tests {
                 RedisValue::SimpleString(text.into()),
                 RedisValue::BulkString(text.into()),
             ] {
-                assert_eq!(Context::enterprise_from_info(&value).unwrap(), enterprise);
+                assert_eq!(
+                    RuntimeContext::enterprise_from_info(&value).unwrap(),
+                    enterprise
+                );
             }
         }
-        assert!(Context::enterprise_from_info(&RedisValue::Integer(0)).is_err());
+        assert!(RuntimeContext::enterprise_from_info(&RedisValue::Integer(0)).is_err());
     }
 }
 

@@ -299,11 +299,12 @@ fn keys(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
     let cursor = KeysCursor::new();
     let mut result = Vec::new();
     let mut count = 0;
-    let mut callback =
-        |ctx: &Context, name: &RedisString, _: Option<&redis_module::key::RedisKey>| {
-            count += 1;
-            result.push(RedisValue::BulkRedisString(name.safe_clone(ctx)));
-        };
+    let mut callback = |ctx: &redis_module::RuntimeContext,
+                        name: &RedisString,
+                        _: Option<&redis_module::key::RedisKey>| {
+        count += 1;
+        result.push(RedisValue::BulkRedisString(name.safe_clone(ctx)));
+    };
     while cursor.scan(ctx, &mut callback) {}
     Ok(RedisValue::Array(vec![
         RedisValue::Integer(count),
@@ -322,7 +323,9 @@ fn churn(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
     match producer.try_as_str()? {
         "keys" => {
             let mut callback =
-                |_: &Context, _: &RedisString, _: Option<&redis_module::key::RedisKey>| {
+                |_: &redis_module::RuntimeContext,
+                 _: &RedisString,
+                 _: Option<&redis_module::key::RedisKey>| {
                     produced += 1;
                 };
             for _ in 0..iterations {

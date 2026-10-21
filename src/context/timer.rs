@@ -4,17 +4,17 @@ use std::time::Duration;
 
 use crate::raw;
 use crate::raw::RedisModuleTimerID;
-use crate::{Context, RedisError};
+use crate::{EventContext, RedisError};
 
 // We use `repr(C)` since we access the underlying data field directly.
 // The order matters: the data field must come first.
 #[repr(C)]
-struct CallbackData<F: FnOnce(&Context, T), T> {
+struct CallbackData<F: FnOnce(&EventContext, T), T> {
     data: T,
     callback: F,
 }
 
-impl Context {
+impl EventContext {
     /// Wrapper for `RedisModule_CreateTimer`.
     ///
     /// This function takes ownership of the provided data, and transfers it to Redis.
@@ -128,9 +128,9 @@ fn take_data<T>(data: *mut c_void) -> T {
 
 extern "C" fn raw_callback<F, T>(ctx: *mut raw::RedisModuleCtx, data: *mut c_void)
 where
-    F: FnOnce(&Context, T),
+    F: FnOnce(&EventContext, T),
 {
-    let ctx = &unsafe { Context::new(ctx) };
+    let ctx = &unsafe { EventContext::new(ctx) };
 
     if data.is_null() {
         ctx.log_debug("[callback] Data is null; this should not happen!");

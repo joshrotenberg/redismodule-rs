@@ -1,8 +1,9 @@
 use redis_module::{Context, NextArg, RedisResult, RedisString, redis_module};
 use std::time::Duration;
 
-fn callback(ctx: &Context, data: String) {
+fn callback(ctx: &redis_module::EventContext, data: String) {
     ctx.log_debug(format!("[callback]: {}", data).as_str());
+    ctx.call("SET", &["timer:fired", &data]).unwrap();
 }
 
 type MyData = String;

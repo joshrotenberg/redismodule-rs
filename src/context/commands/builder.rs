@@ -1,6 +1,6 @@
 use super::{CommandCallback, command_flags_valid};
 use crate::RegistrationContext;
-use crate::{AclCategory, Context, RedisError, Status, raw};
+use crate::{AclCategory, RedisError, Status, raw};
 use bitflags::bitflags;
 use std::ffi::CString;
 
@@ -196,7 +196,7 @@ impl CommandBuilder {
 
     /// Registers during module initialization. `redis_module!` calls this
     /// automatically for builder expressions in its command list. A runtime
-    /// [`Context`] cannot supply the required load-time capability.
+    /// [`Context`](crate::Context) cannot supply the required load-time capability.
     pub fn register(self, ctx: &RegistrationContext<'_>) -> Result<(), RedisError> {
         if self.legacy_flags.is_none() {
             if let Some(keys) = self.keys {
@@ -268,7 +268,7 @@ pub(super) fn register_base_command(
 }
 
 fn set_acl_categories(
-    ctx: &Context,
+    ctx: &RegistrationContext<'_>,
     name: &std::ffi::CStr,
     required: &std::ffi::CStr,
     optional: Option<&std::ffi::CStr>,

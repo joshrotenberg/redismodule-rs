@@ -9,7 +9,7 @@ static NUM_KEY_MISSES: AtomicI64 = AtomicI64::new(0);
 static NUM_KEYS: AtomicI64 = AtomicI64::new(0);
 static LAST_GENERIC_EVENT: Mutex<String> = Mutex::new(String::new());
 
-fn on_event(ctx: &Context, event_type: NotifyEvent, event: &str, key: &[u8]) {
+fn on_event(ctx: &redis_module::EventContext, event_type: NotifyEvent, event: &str, key: &[u8]) {
     if key == b"num_sets" {
         // break infinit look
         return;
@@ -30,7 +30,12 @@ fn on_event(ctx: &Context, event_type: NotifyEvent, event: &str, key: &[u8]) {
     });
 }
 
-fn on_stream(ctx: &Context, _event_type: NotifyEvent, _event: &str, _key: &[u8]) {
+fn on_stream(
+    ctx: &redis_module::EventContext,
+    _event_type: NotifyEvent,
+    _event: &str,
+    _key: &[u8],
+) {
     ctx.log_debug("Stream event received!");
 }
 
@@ -47,7 +52,12 @@ fn event_send(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 }
 
-fn on_generic(_ctx: &Context, _event_type: NotifyEvent, event: &str, _key: &[u8]) {
+fn on_generic(
+    _ctx: &redis_module::EventContext,
+    _event_type: NotifyEvent,
+    event: &str,
+    _key: &[u8],
+) {
     *LAST_GENERIC_EVENT.lock().unwrap() = event.to_string();
 }
 
@@ -85,7 +95,12 @@ fn last_generic_event(_ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
     Ok(LAST_GENERIC_EVENT.lock().unwrap().clone().into())
 }
 
-fn on_key_miss(_ctx: &Context, _event_type: NotifyEvent, _event: &str, _key: &[u8]) {
+fn on_key_miss(
+    _ctx: &redis_module::EventContext,
+    _event_type: NotifyEvent,
+    _event: &str,
+    _key: &[u8],
+) {
     NUM_KEY_MISSES.fetch_add(1, Ordering::SeqCst);
 }
 
@@ -93,7 +108,12 @@ fn num_key_miss(_ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Integer(NUM_KEY_MISSES.load(Ordering::SeqCst)))
 }
 
-fn on_new_key(_ctx: &Context, _event_type: NotifyEvent, _event: &str, _key: &[u8]) {
+fn on_new_key(
+    _ctx: &redis_module::EventContext,
+    _event_type: NotifyEvent,
+    _event: &str,
+    _key: &[u8],
+) {
     NUM_KEYS.fetch_add(1, Ordering::SeqCst);
 }
 

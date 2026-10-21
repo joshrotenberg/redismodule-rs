@@ -38,7 +38,7 @@ fn nested(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let before = ctx.get_selected_db();
     let (outer_before, inner, outer_after) = ctx.with_db(outer, |ctx| {
         let outer_before = ctx.get_selected_db();
-        let inner = ctx.with_db(inner, Context::get_selected_db)?;
+        let inner = ctx.with_db(inner, |ctx| ctx.get_selected_db())?;
         Ok::<_, RedisError>((outer_before, inner, ctx.get_selected_db()))
     })??;
     Ok(RedisValue::Array(

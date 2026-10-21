@@ -69,7 +69,7 @@ impl RedisKey {
     /// `ctx` must be a context Redis passed to the module, and this thread must
     /// hold the Redis lock, from this call until the key is dropped (closing
     /// the key uses the context). Prefer
-    /// [`Context::open_key`](crate::Context::open_key) and its siblings.
+    /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     pub unsafe fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
         let key_inner = raw::open_key(ctx, key.as_ptr(), to_raw_mode(KeyMode::Read));
         Self { ctx, key_inner }
@@ -82,7 +82,7 @@ impl RedisKey {
     /// `ctx` must be a context Redis passed to the module, and this thread must
     /// hold the Redis lock, from this call until the key is dropped (closing
     /// the key uses the context). Prefer
-    /// [`Context::open_key`](crate::Context::open_key) and its siblings.
+    /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     pub unsafe fn open_with_flags(
         ctx: *mut raw::RedisModuleCtx,
         key: &RedisString,
@@ -272,7 +272,7 @@ impl RedisKeyWritable {
     /// `ctx` must be a context Redis passed to the module, and this thread must
     /// hold the Redis lock, from this call until the key is dropped (closing
     /// the key uses the context). Prefer
-    /// [`Context::open_key`](crate::Context::open_key) and its siblings.
+    /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     pub unsafe fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
         let key_inner = raw::open_key(ctx, key.as_ptr(), to_raw_mode(KeyMode::ReadWrite));
         Self { ctx, key_inner }
@@ -285,7 +285,7 @@ impl RedisKeyWritable {
     /// `ctx` must be a context Redis passed to the module, and this thread must
     /// hold the Redis lock, from this call until the key is dropped (closing
     /// the key uses the context). Prefer
-    /// [`Context::open_key`](crate::Context::open_key) and its siblings.
+    /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     pub unsafe fn open_with_flags(
         ctx: *mut raw::RedisModuleCtx,
         key: &RedisString,
@@ -552,7 +552,7 @@ impl RedisKeyWritable {
     /// `ctx` must be a context Redis passed to the module, and this thread must
     /// hold the Redis lock, from this call until the key is dropped (closing
     /// the key uses the context). Prefer
-    /// [`Context::open_key`](crate::Context::open_key) and its siblings.
+    /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     /// `key` must be a live Redis string.
     pub unsafe fn open_with_redis_string(
         ctx: *mut raw::RedisModuleCtx,
@@ -569,7 +569,7 @@ impl RedisKeyWritable {
     /// The reference borrows the key mutably, so only one can be live at a time,
     /// and only while this handle is open. The borrow covers this handle only:
     /// another handle to the same key, or a command run through
-    /// [`Context::call`](crate::Context::call), can delete or replace the value,
+    /// [`RuntimeContext::call`](crate::RuntimeContext::call), can delete or replace the value,
     /// so do not use the reference after either.
     ///
     /// ```compile_fail,E0499
