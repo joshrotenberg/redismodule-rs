@@ -29,6 +29,9 @@ mod context;
 pub mod key;
 pub mod logging;
 mod macros;
+mod module_version;
+
+pub use crate::module_version::encode_module_version;
 
 pub use crate::args::ArgCursor;
 pub use crate::context::blocked::{BlockedClient, ReplyingBlockedClient};

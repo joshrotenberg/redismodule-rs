@@ -149,6 +149,22 @@ arity, detailed key specifications, summaries, and other rich metadata.
 See [examples/database.rs](examples/database.rs) for mixed syntax and
 [examples/command_builder.rs](examples/command_builder.rs) for more settings.
 
+### Module version from Cargo
+
+Use `version: redis_module::module_version!(),` in `redis_module!` to derive
+the integer shown by `MODULE LIST` from the module crate's `CARGO_PKG_VERSION`.
+For example, `1.23.45` becomes `12345` (`major * 10000 + minor * 100 + patch`).
+The macro always validates at compile time: minor and patch must be below
+100, the result must fit `i32`, and prereleases are rejected because this
+encoding cannot distinguish them from releases. Valid SemVer build metadata
+is ignored. `0.0.0` encodes as zero.
+
+`encode_module_version("1.23.45")` provides the same conversion as a `const fn`;
+invalid input panics, or fails to compile when used in a const expression.
+Existing explicit `version:` values remain supported. This optional convention
+does not change Redis server versions or native data-type encoding versions.
+See [examples/hello.rs](examples/hello.rs).
+
 ### Module initialization
 
 Use `RegistrationContext` in `init` hooks that register commands, native data

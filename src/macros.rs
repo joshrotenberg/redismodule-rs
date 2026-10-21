@@ -277,6 +277,9 @@ macro_rules! redis_event_handler {
 /// It registers the defined module, sets it up and initialises properly,
 /// registers all the commands and types.
 ///
+/// `version:` accepts an integer expression. Use [`module_version!`](crate::module_version!)
+/// to derive it from the calling crate's Cargo package version at compile time.
+///
 /// Custom `acl_categories` are shared across modules and remain registered
 /// after unload. Existing categories are reused; other registration errors
 /// fail the module load.
@@ -287,6 +290,7 @@ macro_rules! redis_event_handler {
 macro_rules! redis_module {
     (
         name: $module_name:expr,
+        // An explicit integer or `module_version!()` for the Cargo package version.
         version: $module_version:expr,
         // Global allocator for the redis module defined.
         // In most of the cases, the Redis allocator ([crate::alloc::RedisAlloc])
