@@ -13,51 +13,46 @@ jobs:
   test:
     # The default build, with the committed bindings, on the toolchain that
     # rust-toolchain.toml pins.
-    name: Build and test (floor ${{ matrix.redis-version[0] }}, Redis ${{ matrix.redis-version[1] }}, ${{ matrix.os }})
+    name: Build and test (floor ${{ matrix.floor }}, ${{ matrix.server }} ${{ matrix.version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      RUST_TEST_THREADS: "4"
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-        redis-version:
-          - [6-0, "7.2"]
-          - [6-2, "7.2"]
-          - [7-0, "7.2"]
-          - [7-2, "7.2"]
-          - [7-4, "7.4"]
-          - [8-0, "8.0"]
-        # macOS runs the lowest and highest floors; Linux runs them all.
-        exclude:
-          - os: macos-latest
-            redis-version: [6-2, "7.2"]
-          - os: macos-latest
-            redis-version: [7-0, "7.2"]
-          - os: macos-latest
-            redis-version: [7-2, "7.2"]
-          - os: macos-latest
-            redis-version: [7-4, "7.4"]
+        # Linux covers every API floor and newer server release lines. macOS
+        # covers the lowest floor and the newest Redis release.
+        include:
+          - {os: ubuntu-latest, server: redis, version: "7.2.16", floor: "6-0"}
+          - {os: ubuntu-latest, server: redis, version: "7.2.16", floor: "6-2"}
+          - {os: ubuntu-latest, server: redis, version: "7.2.16", floor: "7-0"}
+          - {os: ubuntu-latest, server: redis, version: "7.2.16", floor: "7-2"}
+          - {os: ubuntu-latest, server: redis, version: "7.4.11", floor: "7-4"}
+          - {os: ubuntu-latest, server: redis, version: "8.0.6", floor: "8-0"}
+          - {os: ubuntu-latest, server: redis, version: "8.2.10", floor: "8-0"}
+          - {os: ubuntu-latest, server: redis, version: "8.4.7", floor: "8-0"}
+          - {os: ubuntu-latest, server: redis, version: "8.6.7", floor: "8-0"}
+          - {os: ubuntu-latest, server: redis, version: "8.8.3", floor: "8-0"}
+          - {os: ubuntu-latest, server: redis, version: "8.10.2", floor: "8-0"}
+          - {os: macos-latest, server: redis, version: "7.2.16", floor: "6-0"}
+          - {os: macos-latest, server: redis, version: "8.10.2", floor: "8-0"}
+          - {os: ubuntu-latest, server: valkey, version: "8.1.10", floor: "6-0"}
+          - {os: ubuntu-latest, server: valkey, version: "9.1.2", floor: "6-0"}
 
     steps:
       - name: Checkout sources
         uses: actions/checkout@v5
 
-      - name: Checkout redis sources
-        uses: actions/checkout@v5
+      - name: Cache server binary
+        uses: actions/cache@v4
         with:
-          repository: redis/redis
-          ref: ${{ matrix.redis-version[1] }}
-          path: redis
+          path: ${{ runner.temp }}/sdk-server
+          key: sdk-server-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.os }}-${{ matrix.server }}-${{ matrix.version }}-${{ hashFiles('.github/servers.json', '.github/scripts/build-server.py') }}
 
-      - name: Install redis
+      - name: Build or verify server
         run: |
-          export HOMEBREW_NO_AUTO_UPDATE=1
-          cd redis
-          make -j
-          ./src/redis-server --version
-          make install PREFIX=/usr/local
-          redis-server --version
+          python3 .github/scripts/build-server.py "${{ matrix.server }}-${{ matrix.version }}" "$RUNNER_TEMP/sdk-server"
+          echo "TEST_REDIS_SERVER_BIN=$RUNNER_TEMP/sdk-server/${{ matrix.server }}-server" >> "$GITHUB_ENV"
 
       - name: Install toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -66,24 +61,35 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }} -- -D warnings
+        run: cargo clippy --workspace --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} -- -D warnings
 
       - name: Build debug
-        run: cargo build --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }}
+        run: cargo build --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
 
       - name: Build release
-        run: cargo build --release --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }}
+        run: cargo build --release --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
 
       - name: Test
-        run: cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }}
+        run: cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
 
       - name: Lint and test the system allocator fallback
         run: |
-          cargo clippy --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},system-allocator-fallback -- -D warnings
-          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.redis-version[0] }},system-allocator-fallback --test system_allocator_fallback
+          cargo clippy --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},system-allocator-fallback -- -D warnings
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},system-allocator-fallback --test system_allocator_fallback
 
       - name: Doc
-        run: cargo doc --no-default-features --features "all-features-but-xor min-redis-compatibility-version-${{ matrix.redis-version[0] }}"
+        run: cargo doc --no-default-features --features "all-features-but-xor min-redis-compatibility-version-${{ matrix.floor }}"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.os }}-${{ matrix.server }}-${{ matrix.version }}-${{ matrix.floor }}
+          path: |
+            target/**/integration-test/**
+            ${{ runner.temp }}/sdk-server-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   bindings:
     # Generates the bindings with bindgen and fails if they differ from the

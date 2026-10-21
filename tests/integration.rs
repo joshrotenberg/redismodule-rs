@@ -1916,7 +1916,25 @@ fn test_helper_version() -> Result<()> {
     let res2: Vec<i64> = redis::cmd("test_helper._version_rm_call")
         .query(&mut con)
         .with_context(|| "failed to run test_helper._version_rm_call")?;
-    assert_eq!(res, res2);
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let parse = |field: &str| -> Result<Vec<i64>> {
+        info.lines()
+            .find_map(|line| line.strip_prefix(field))
+            .with_context(|| format!("missing INFO field {field}"))?
+            .split('.')
+            .map(|part| part.parse().map_err(Into::into))
+            .collect()
+    };
+    // Valkey's native API reports its product version, while redis_version in
+    // INFO advertises its Redis compatibility version. Check both paths
+    // against their respective fields rather than requiring them to agree.
+    assert_eq!(res2, parse("redis_version:")?);
+    let native_field = if info.lines().any(|line| line.starts_with("valkey_version:")) {
+        "valkey_version:"
+    } else {
+        "redis_version:"
+    };
+    assert_eq!(res, parse(native_field)?);
 
     Ok(())
 }

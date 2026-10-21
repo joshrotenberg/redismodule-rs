@@ -137,7 +137,9 @@ fn nested_scopes(ctx: &RuntimeContext, reader: &RedisString) -> Result<Vec<i64>,
 
     // Redis 8.8+ exposes a borrowed prior override. Refresh it for each new
     // group of scopes, even if this Rust view has been used before.
-    let version = ctx.get_redis_version()?;
+    // INFO advertises the Redis compatibility version on Valkey; its native
+    // server version belongs to a separate version series.
+    let version = ctx.get_redis_version_rm_call()?;
     let get_context_user = unsafe { redis_module::raw::RedisModule_GetContextUser };
     // A missing API on a supporting server must fail rather than silently
     // skipping the native-baseline checks below.
