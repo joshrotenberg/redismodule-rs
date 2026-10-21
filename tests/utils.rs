@@ -523,10 +523,7 @@ mod connection_tests {
                 &log.replace("Address already in use", "Permission denied"),
                 1234
             ));
-            assert!(!tcp_address_in_use(
-                &log.lines().next().unwrap().to_owned(),
-                1234
-            ));
+            assert!(!tcp_address_in_use(log.lines().next().unwrap(), 1234));
         }
         assert!(!tcp_address_in_use(
             "Module load failed: bind: Address already in use\n\
