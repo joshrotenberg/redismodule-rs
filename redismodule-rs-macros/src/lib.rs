@@ -136,6 +136,51 @@ pub fn flush_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream
     )
 }
 
+/// Registers a flush callback receiving its phase and copied database details.
+/// The phase-only `flush_event_handler` can be used in the same module.
+/// Each handler has its own panic boundary; ordering within either list is
+/// unspecified. Requires the Redis server-event API (Redis 6.0+).
+///
+/// ```ignore
+/// use redis_module::EventContext;
+/// use redis_module_macros::flush_info_event_handler;
+/// use redis_module::server_events::{FlushInfo, FlushSubevent};
+/// #[flush_info_event_handler]
+/// fn on_flush(ctx: &EventContext, phase: FlushSubevent, info: FlushInfo) {
+///     if phase == FlushSubevent::Started && info.db == Some(2) {
+///         ctx.log_notice("database 2 is being flushed");
+///     }
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn flush_info_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::server_events::FLUSH_INFO_SERVER_EVENTS_LIST),
+    )
+}
+
+/// Registers a callback after a successful `SWAPDB`. The copied payload names
+/// both databases; use it rather than the event context's selected database.
+/// Requires the Redis server-event API (Redis 6.0+).
+///
+/// ```ignore
+/// use redis_module::EventContext;
+/// use redis_module_macros::swapdb_event_handler;
+/// use redis_module::server_events::SwapDbInfo;
+/// #[swapdb_event_handler]
+/// fn on_swap(ctx: &EventContext, info: SwapDbInfo) {
+///     ctx.log_notice(&format!("swapped {} and {}", info.first, info.second));
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn swapdb_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    registration::handler(
+        item,
+        syn::parse_quote!(::redis_module::server_events::SWAPDB_SERVER_EVENTS_LIST),
+    )
+}
+
 /// Proc macro which is set on a function that need to be called whenever a module is loaded or unloaded on the server.
 /// The function must accept a [EventContext] and [ModuleChangeSubevent].
 ///

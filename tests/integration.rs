@@ -2855,6 +2855,9 @@ fn test_server_event() -> Result<()> {
 
     assert_eq!(res, 2);
 
+    // The legacy and payload-aware handlers share one native subscription.
+    assert_eq!(redis::cmd("num_flush_details").query::<i64>(&mut con)?, 2);
+
     redis::cmd("config")
         .arg(&["set", "maxmemory", "1"])
         .query::<()>(&mut con)
@@ -2877,6 +2880,101 @@ fn test_server_event() -> Result<()> {
 
     assert!(res > 0);
 
+    Ok(())
+}
+
+#[test]
+fn test_server_event_flush_payloads() -> Result<()> {
+    // This module has only payload-aware flush handlers, so it also verifies
+    // registration when the legacy distributed slice is empty.
+    let mut con = TestConnection::new("server_event_payloads");
+    for mode in ["SYNC", "ASYNC"] {
+        redis::cmd("SELECT").arg(4).query::<()>(&mut con)?;
+        redis::cmd("MSET")
+            .arg(&["a", "1", "b", "2"])
+            .query::<()>(&mut con)?;
+        redis::cmd("FLUSHDB").arg(mode).query::<()>(&mut con)?;
+        let rows: Vec<Vec<i64>> = redis::cmd("event_payloads.drain")
+            .arg("flush")
+            .query(&mut con)?;
+        assert_eq!(rows, vec![vec![0, 4, 4, 2], vec![1, 4, 4, 0]]);
+
+        redis::cmd("SET")
+            .arg(&["another", "db"])
+            .query::<()>(&mut con)?;
+        redis::cmd("SELECT").arg(0).query::<()>(&mut con)?;
+        redis::cmd("SET")
+            .arg(&["main", "db"])
+            .query::<()>(&mut con)?;
+        redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
+        redis::cmd("FLUSHALL").arg(mode).query::<()>(&mut con)?;
+        let rows: Vec<Vec<i64>> = redis::cmd("event_payloads.drain")
+            .arg("flush")
+            .query(&mut con)?;
+        assert_eq!(rows, vec![vec![0, -1, 0, 1], vec![1, -1, 0, 0]]);
+    }
+    Ok(())
+}
+
+#[test]
+fn test_server_event_swapdb_payloads() -> Result<()> {
+    let mut con = TestConnection::new("server_event_payloads");
+    redis::cmd("SELECT").arg(2).query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["first", "2"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SELECT").arg(5).query::<()>(&mut con)?;
+    redis::cmd("MSET")
+        .arg(&["second", "5", "extra", "5"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SELECT").arg(1).query::<()>(&mut con)?;
+    redis::cmd("SWAPDB").arg(&[5, 2]).query::<()>(&mut con)?;
+    let rows: Vec<Vec<i64>> = redis::cmd("event_payloads.drain")
+        .arg("swap")
+        .query(&mut con)?;
+    // Command order is preserved, and the callback sees data after the swap.
+    assert_eq!(rows, vec![vec![5, 2, 1, 2]]);
+    assert!(
+        redis::cmd("SWAPDB")
+            .arg(&[5, -1])
+            .query::<()>(&mut con)
+            .is_err()
+    );
+    let rows: Vec<Vec<i64>> = redis::cmd("event_payloads.drain")
+        .arg("swap")
+        .query(&mut con)?;
+    assert!(rows.is_empty(), "failed swaps must not invoke the handler");
+    Ok(())
+}
+
+#[test]
+fn test_server_event_payload_panics_and_unload() -> Result<()> {
+    let mut con = TestConnection::new("server_event_payloads");
+    redis::cmd("event_payloads.panics")
+        .arg("yes")
+        .query::<()>(&mut con)?;
+    redis::cmd("SELECT").arg(2).query::<()>(&mut con)?;
+    redis::cmd("FLUSHDB").arg("SYNC").query::<()>(&mut con)?;
+    redis::cmd("SWAPDB").arg(&[2, 5]).query::<()>(&mut con)?;
+    // Both handlers panic after recording. All must run regardless of linkme
+    // ordering, which proves there is a separate panic boundary per handler.
+    let counts: Vec<i64> = redis::cmd("event_payloads.panic_counts").query(&mut con)?;
+    assert_eq!(counts, vec![2, 1]);
+    for (event, expected) in [("flush", 2), ("swap", 1)] {
+        let rows: Vec<Vec<i64>> = redis::cmd("event_payloads.drain")
+            .arg(event)
+            .query(&mut con)?;
+        assert_eq!(rows.len(), expected);
+    }
+    let log = con.server_log()?;
+    assert!(log.contains("flush info event handler panicked"));
+    assert!(log.contains("swapdb event handler panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "server_event_payloads"])
+        .query::<()>(&mut con)?;
+    redis::cmd("FLUSHALL").arg("SYNC").query::<()>(&mut con)?;
+    redis::cmd("SWAPDB").arg(&[2, 5]).query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
 
