@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `8969a12`, expanded server CI merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `69bc762`, stable cluster slot-key names merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `8969a12` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `69bc762` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -161,8 +161,13 @@ Expanded CI merged in `8969a12`: checksum-pinned server builds are cached per
 runner image and selected through `TEST_REDIS_SERVER_BIN`. Failure logs are
 retained for seven days. All six Linux API floors and both macOS floor checks
 remain covered; newer Redis and default-floor Valkey legs are required.
-No host adaptation needed. The next SDK survey item is a pure slot-to-key
-cluster helper.
+No host adaptation needed.
+
+Stable slot keys merged in `69bc762`: `cluster::key_for_slot` produces a tagged
+ASCII key for every valid slot without a server API. Exact names are stable
+across SDK and server versions, pinned by an exhaustive compatibility fixture.
+The harness also retries confirmed TCP listen-stage port collisions. No host
+adaptation needed. The next SDK survey item is a server-clock helper.
 
 Also open:
 
