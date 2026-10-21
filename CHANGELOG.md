@@ -13,6 +13,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- A [module upgrade guide](docs/UPGRADING-MODULES.md) covering unload/load
+  constraints, configuration replay, transient state, cleanup and failure
+  recovery, with a tested `lifecycle` example. API documentation links are
+  corrected and CI documentation builds now deny warnings.
+
 - `module_version!()` derives the integer module version from the calling
   crate's Cargo package version at compile time. `encode_module_version` is
   the underlying const conversion using `major * 10000 + minor * 100 + patch`.

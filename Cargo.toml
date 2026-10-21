@@ -25,6 +25,10 @@ keywords = ["redis", "plugin"]
 categories = ["database", "api-bindings"]
 
 [[example]]
+name = "lifecycle"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "parsed_configuration"
 crate-type = ["cdylib"]
 

@@ -143,6 +143,14 @@ these in October 2026.
 | [d100d13] | `Context::get_command_keys` (`RedisModule_GetCommandKeysWithFlags`), `cluster::key_slot`, which computes a key's hash slot without the server, and `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq` and `Hash` for `ContextFlags`. |
 | [dabad65] | `configuration::get_memory_default_config_value`. |
 
+The [module upgrade guide](docs/UPGRADING-MODULES.md) explains unload/load
+eligibility, configuration replay, explicit per-load state initialization,
+callback cleanup, platform loader behavior, and failure recovery. The
+[lifecycle example](examples/lifecycle.rs) and integration tests cover a failed
+load followed by recovery, immutable configuration, transient-state reset,
+and native-type unload refusal even without keys. Documentation builds deny
+warnings in CI after correcting existing API links.
+
 `module_version!()` derives the module version from the caller's Cargo package
 version at compile time, using `encode_module_version` and the optional
 `major * 10000 + minor * 100 + patch` convention. The encoder rejects

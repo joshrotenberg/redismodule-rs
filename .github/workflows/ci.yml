@@ -82,6 +82,8 @@ jobs:
           cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},system-allocator-fallback --test system_allocator_fallback
 
       - name: Doc
+        env:
+          RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --no-default-features --features "all-features-but-xor min-redis-compatibility-version-${{ matrix.floor }}"
 
       - name: Upload failure logs

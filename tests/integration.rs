@@ -1769,6 +1769,126 @@ fn test_argument_parser_allocations() -> Result<()> {
 }
 
 #[test]
+fn test_module_lifecycle_reload_and_failed_load_recovery() -> Result<()> {
+    let mut con = TestConnection::with_args("lifecycle", &["prefix", "live:", "limit", "6"]);
+    let module = utils::module_path("lifecycle")?;
+    let state = |con: &mut TestConnection| -> Result<(String, i64, i64)> {
+        Ok(redis::cmd("lifecycle.state").query(con)?)
+    };
+    assert_eq!(state(&mut con)?, ("live:".into(), 6, 0));
+    redis::cmd("SET")
+        .arg(&["lifecycle:kept", "value"])
+        .query::<()>(&mut con)?;
+    for expected in 1..=2 {
+        assert_eq!(
+            redis::cmd("lifecycle.visit").query::<i64>(&mut con)?,
+            expected
+        );
+    }
+    redis::cmd("CONFIG")
+        .arg(&["SET", "lifecycle.limit", "9"])
+        .query::<()>(&mut con)?;
+    assert!(
+        redis::cmd("CONFIG")
+            .arg(&["SET", "lifecycle.prefix", "changed:"])
+            .query::<()>(&mut con)
+            .is_err()
+    );
+    assert_eq!(state(&mut con)?, ("live:".into(), 9, 2));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "lifecycle"])
+        .query::<()>(&mut con)?;
+
+    let assert_absent = |con: &mut TestConnection| -> Result<()> {
+        let modules: Vec<HashMap<String, Value>> = redis::cmd("MODULE").arg("LIST").query(con)?;
+        for module in modules {
+            assert_ne!(
+                redis::from_redis_value::<String>(&module["name"])?,
+                "lifecycle"
+            );
+        }
+        let commands: Vec<Value> = redis::cmd("COMMAND")
+            .arg(&["INFO", "lifecycle.state"])
+            .query(con)?;
+        assert_eq!(commands, vec![Value::Nil]);
+        let configs: Vec<String> = redis::cmd("CONFIG")
+            .arg(&["GET", "lifecycle.*"])
+            .query(con)?;
+        assert!(configs.is_empty());
+        assert_eq!(
+            redis::cmd("GET")
+                .arg("lifecycle:kept")
+                .query::<String>(con)?,
+            "value"
+        );
+        Ok(())
+    };
+    assert_absent(&mut con)?;
+    assert!(
+        redis::cmd("MODULE")
+            .arg(&["LOAD", &module, "prefix", "live:", "limit", "0"])
+            .query::<()>(&mut con)
+            .is_err()
+    );
+    assert_absent(&mut con)?;
+
+    // Replay the saved values to recover service after the failed load.
+    redis::cmd("MODULE")
+        .arg(&["LOAD", &module, "prefix", "live:", "limit", "9"])
+        .query::<()>(&mut con)?;
+    assert_eq!(state(&mut con)?, ("live:".into(), 9, 0));
+    assert_eq!(redis::cmd("lifecycle.visit").query::<i64>(&mut con)?, 1);
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "lifecycle"])
+        .query::<()>(&mut con)?;
+
+    // Without replay, both configurations return to their registration defaults.
+    redis::cmd("MODULE")
+        .arg(&["LOAD", &module])
+        .query::<()>(&mut con)?;
+    assert_eq!(state(&mut con)?, ("items:".into(), 4, 0));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "lifecycle"])
+        .query::<()>(&mut con)?;
+    redis::cmd("MODULE")
+        .arg(&["LOAD", &module, "prefix", "next:", "limit", "7"])
+        .query::<()>(&mut con)?;
+    assert_eq!(state(&mut con)?, ("next:".into(), 7, 0));
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("lifecycle:kept")
+            .query::<String>(&mut con)?,
+        "value"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_module_with_native_type_refuses_unload_without_keys() -> Result<()> {
+    let mut con = TestConnection::new("data_type");
+    assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut con)?, 0);
+    let error = redis::cmd("MODULE")
+        .arg(&["UNLOAD", "alloc"])
+        .query::<()>(&mut con)
+        .expect_err("a registered native type must prevent unload even without keys");
+    assert!(error.to_string().contains("data types"), "{error}");
+    // A refused unload leaves the existing module available.
+    assert_eq!(
+        redis::cmd("alloc.set")
+            .arg(&["after-refusal", "3"])
+            .query::<i64>(&mut con)?,
+        3
+    );
+    assert_eq!(
+        redis::cmd("alloc.get")
+            .arg("after-refusal")
+            .query::<String>(&mut con)?,
+        "AAA"
+    );
+    Ok(())
+}
+
+#[test]
 fn test_module_version_from_cargo() -> Result<()> {
     let mut con = TestConnection::new("hello");
     let modules: Vec<HashMap<String, Value>> = redis::cmd("MODULE").arg("LIST").query(&mut con)?;
