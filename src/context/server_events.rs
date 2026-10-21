@@ -25,6 +25,47 @@ pub enum FlushSubevent {
     Ended,
 }
 
+/// Details copied from a flush server event. Available to
+/// `redis_module_macros::flush_info_event_handler` callbacks. For an
+/// asynchronous flush, `Ended` means the old keyspace was detached, not that
+/// background freeing has finished.
+///
+/// ```no_run
+/// use redis_module::{EventContext, server_events::{FlushInfo, FlushSubevent}};
+/// use redis_module_macros::flush_info_event_handler;
+/// #[flush_info_event_handler]
+/// fn on_flush(ctx: &EventContext, phase: FlushSubevent, info: FlushInfo) {
+///     if phase == FlushSubevent::Started && info.db == Some(2) {
+///         ctx.log_notice("database 2 is being flushed");
+///     }
+/// }
+/// ```
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub struct FlushInfo {
+    /// The affected database, or `None` for all databases (`FLUSHALL`).
+    pub db: Option<i32>,
+}
+
+/// Database identifiers copied from a successful `SWAPDB` event.
+/// Delivered after the swap, in the order supplied to the command. The event
+/// context's selected database does not identify either side of the swap.
+///
+/// ```no_run
+/// use redis_module::{EventContext, server_events::SwapDbInfo};
+/// use redis_module_macros::swapdb_event_handler;
+/// #[swapdb_event_handler]
+/// fn on_swap(ctx: &EventContext, info: SwapDbInfo) {
+///     ctx.log_notice(&format!("swapped {} and {}", info.first, info.second));
+/// }
+/// ```
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+pub struct SwapDbInfo {
+    /// The first database supplied to `SWAPDB`.
+    pub first: i32,
+    /// The second database supplied to `SWAPDB`.
+    pub second: i32,
+}
+
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub enum ModuleChangeSubevent {
     Loaded,
@@ -48,6 +89,12 @@ pub static LOADING_SERVER_EVENTS_LIST: [fn(&EventContext, LoadingSubevent)] = [.
 
 #[distributed_slice()]
 pub static FLUSH_SERVER_EVENTS_LIST: [fn(&EventContext, FlushSubevent)] = [..];
+
+#[distributed_slice()]
+pub static FLUSH_INFO_SERVER_EVENTS_LIST: [fn(&EventContext, FlushSubevent, FlushInfo)] = [..];
+
+#[distributed_slice()]
+pub static SWAPDB_SERVER_EVENTS_LIST: [fn(&EventContext, SwapDbInfo)] = [..];
 
 #[distributed_slice()]
 pub static MODULE_CHANGED_SERVER_EVENTS_LIST: [fn(&EventContext, ModuleChangeSubevent)] = [..];
@@ -127,12 +174,18 @@ extern "C" fn flush_event_callback(
     ctx: *mut raw::RedisModuleCtx,
     _eid: raw::RedisModuleEvent,
     subevent: u64,
-    _data: *mut ::std::os::raw::c_void,
+    data: *mut ::std::os::raw::c_void,
 ) {
-    let flush_sub_event = if subevent == raw::REDISMODULE_SUBEVENT_FLUSHDB_START {
-        FlushSubevent::Started
-    } else {
-        FlushSubevent::Ended
+    let flush_sub_event = match subevent {
+        raw::REDISMODULE_SUBEVENT_FLUSHDB_START => FlushSubevent::Started,
+        raw::REDISMODULE_SUBEVENT_FLUSHDB_END => FlushSubevent::Ended,
+        _ => return,
+    };
+    // SAFETY: the subscription requests dataver 1, whose flush events provide
+    // a RedisModuleFlushInfoV1. Copy before invoking any reentrant user code.
+    let data = unsafe { &*data.cast::<raw::RedisModuleFlushInfoV1>() };
+    let info = FlushInfo {
+        db: (data.dbnum != -1).then_some(data.dbnum),
     };
     let ctx = unsafe { EventContext::new(ctx) };
     FLUSH_SERVER_EVENTS_LIST.iter().for_each(|callback| {
@@ -141,6 +194,32 @@ extern "C" fn flush_event_callback(
             || callback(&ctx, flush_sub_event),
             || (),
         );
+    });
+    FLUSH_INFO_SERVER_EVENTS_LIST.iter().for_each(|callback| {
+        crate::panic::run_callback(
+            "flush info event handler",
+            || callback(&ctx, flush_sub_event, info),
+            || (),
+        );
+    });
+}
+
+extern "C" fn swapdb_event_callback(
+    ctx: *mut raw::RedisModuleCtx,
+    _eid: raw::RedisModuleEvent,
+    _subevent: u64,
+    data: *mut ::std::os::raw::c_void,
+) {
+    // SAFETY: Redis supplies a RedisModuleSwapDbInfoV1 for our dataver 1
+    // subscription. No references into the native payload reach handlers.
+    let data = unsafe { &*data.cast::<raw::RedisModuleSwapDbInfoV1>() };
+    let info = SwapDbInfo {
+        first: data.dbnum_first,
+        second: data.dbnum_second,
+    };
+    let ctx = unsafe { EventContext::new(ctx) };
+    SWAPDB_SERVER_EVENTS_LIST.iter().for_each(|callback| {
+        crate::panic::run_callback("swapdb event handler", || callback(&ctx, info), || ());
     });
 }
 
@@ -212,13 +291,13 @@ extern "C" fn config_change_event_callback(
         });
 }
 
-fn register_single_server_event_type<F>(
+fn register_single_server_event_type(
     ctx: &EventContext,
-    callbacks: &[F],
+    has_handlers: bool,
     server_event: u64,
     inner_callback: raw::RedisModuleEventCallback,
 ) -> Result<(), RedisError> {
-    if !callbacks.is_empty() {
+    if has_handlers {
         let res = unsafe {
             crate::__available_api!(RedisModule_SubscribeToServerEvent)(
                 ctx.ctx,
@@ -240,43 +319,51 @@ fn register_single_server_event_type<F>(
 pub fn register_server_events(ctx: &EventContext) -> Result<(), RedisError> {
     register_single_server_event_type(
         ctx,
-        &ROLE_CHANGED_SERVER_EVENTS_LIST,
+        !ROLE_CHANGED_SERVER_EVENTS_LIST.is_empty(),
         raw::REDISMODULE_EVENT_REPLICATION_ROLE_CHANGED,
         Some(role_changed_callback),
     )?;
     register_single_server_event_type(
         ctx,
-        &LOADING_SERVER_EVENTS_LIST,
+        !LOADING_SERVER_EVENTS_LIST.is_empty(),
         raw::REDISMODULE_EVENT_LOADING,
         Some(loading_event_callback),
     )?;
     register_single_server_event_type(
         ctx,
-        &FLUSH_SERVER_EVENTS_LIST,
+        // Redis keeps one subscription per module/event. Fan out through one
+        // adapter so registering either list never replaces the other.
+        !FLUSH_SERVER_EVENTS_LIST.is_empty() || !FLUSH_INFO_SERVER_EVENTS_LIST.is_empty(),
         raw::REDISMODULE_EVENT_FLUSHDB,
         Some(flush_event_callback),
     )?;
     register_single_server_event_type(
         ctx,
-        &MODULE_CHANGED_SERVER_EVENTS_LIST,
+        !SWAPDB_SERVER_EVENTS_LIST.is_empty(),
+        raw::REDISMODULE_EVENT_SWAPDB,
+        Some(swapdb_event_callback),
+    )?;
+    register_single_server_event_type(
+        ctx,
+        !MODULE_CHANGED_SERVER_EVENTS_LIST.is_empty(),
         raw::REDISMODULE_EVENT_MODULE_CHANGE,
         Some(module_change_event_callback),
     )?;
     register_single_server_event_type(
         ctx,
-        &CONFIG_CHANGED_SERVER_EVENTS_LIST,
+        !CONFIG_CHANGED_SERVER_EVENTS_LIST.is_empty(),
         raw::REDISMODULE_EVENT_CONFIG,
         Some(config_change_event_callback),
     )?;
     register_single_server_event_type(
         ctx,
-        &CRON_SERVER_EVENTS_LIST,
+        !CRON_SERVER_EVENTS_LIST.is_empty(),
         raw::REDISMODULE_EVENT_CRON_LOOP,
         Some(cron_callback),
     )?;
     register_single_server_event_type(
         ctx,
-        &SHUTDOWN_SERVER_EVENTS_LIST,
+        !SHUTDOWN_SERVER_EVENTS_LIST.is_empty(),
         raw::REDISMODULE_EVENT_SHUTDOWN,
         Some(shutdown_event_callback),
     )?;

@@ -13,6 +13,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `flush_info_event_handler` receives `FlushSubevent` and copied `FlushInfo`
+  with the affected database (or all databases).
+  `swapdb_event_handler` receives both database IDs in `SwapDbInfo` after a
+  successful swap. Both use `EventContext` and isolate panics per callback.
+  The phase-only `flush_event_handler` remains available alongside them.
+
 - `with_call_user` runs a closure with a user for ACL-checked calls while
   preserving runtime, client, event, worker, or registration capabilities.
 
