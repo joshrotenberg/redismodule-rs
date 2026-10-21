@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `55ec6f1`, validated parsed string configurations merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `d34713b`, Cargo module-version helper merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `55ec6f1` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `d34713b` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -176,7 +176,12 @@ No host adaptation needed.
 Validated string configurations merged in `55ec6f1`: `ParsedStringConfig<T>`
 validates raw text before publishing the raw and parsed values together.
 Existing registration, defaults, arguments and callbacks remain supported.
-No host adaptation needed. The next SDK item is the module-version helper.
+No host adaptation needed.
+
+Cargo module versions merged in `d34713b`: `module_version!()` derives the
+integer from the calling crate version with const validation. Existing explicit
+versions remain supported. No host adaptation needed. The next SDK item is
+the module unload/load upgrade guide.
 
 Also open:
 

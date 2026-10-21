@@ -220,6 +220,15 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-21: rebased onto SDK master `d34713b`, which adds the optional
+  Cargo package module-version encoder and macro. No host adaptation needed.
+  Rust 1.94.0 and Redis 8.10.2: workspace/guest formatting, workspace Clippy,
+  separate SDK 7.2 Clippy, example builds, and guest Clippy passed. With
+  `RUST_TEST_THREADS=4`, the full suite passed: 63 SDK unit tests, 118 SDK
+  integration tests, five standalone harness cases, seven host unit tests,
+  21 host integration tests with JavaScript, 72 SDK doctests, and four guest
+  helper tests.
+
 - 2026-10-21: rebased onto SDK master `55ec6f1`, which adds validated parsed
   string configurations. No host adaptation needed. Rust 1.94.0 and Redis
   8.10.2: workspace/guest formatting, workspace Clippy, separate SDK 7.2
