@@ -13,6 +13,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `configuration::ParsedStringConfig<T>` validates string configurations before
+  replacing their raw text and parsed value together. Read matching values
+  under a Redis lock proof without requiring `T: Clone`. Existing string
+  registration, defaults, module arguments and change callbacks are supported.
+
 - `redis_module::milliseconds()` exposes the server module API's fresh Unix
   wall-clock time without a context, including from module workers after API
   initialization. It is available at every compatibility floor.
