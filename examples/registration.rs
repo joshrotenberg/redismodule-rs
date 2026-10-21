@@ -28,7 +28,10 @@ fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
         let name = args
             .first()
             .map_or(b"registration.manual".as_slice(), RedisString::as_slice);
-        redis_command!(name, ping).read_only().fast().register(ctx)
+        let user = ctx.create_string("default");
+        ctx.with_call_user(&user, |ctx: &RegistrationContext<'_>| {
+            redis_command!(name, ping).read_only().fast().register(ctx)
+        })?
     })();
     match result {
         Ok(()) => Status::Ok,

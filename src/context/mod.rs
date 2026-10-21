@@ -25,6 +25,8 @@ use std::ffi::CStr;
 use self::call_reply::{CallResult, ErrorReply, PromiseCallReply, create_promise_call_reply};
 use self::thread_safe::RedisLockIndicator;
 
+mod call_user;
+pub use call_user::CallUserScope;
 mod registration;
 mod views;
 pub use views::{EventContext, RuntimeContext, WorkerContext};
@@ -295,6 +297,7 @@ unsafe impl RedisLockIndicator for DetachedContextGuard<'_> {}
 
 impl Drop for DetachedContextGuard<'_> {
     fn drop(&mut self) {
+        self.ctx.release_call_users();
         unsafe {
             crate::__required_api!(RedisModule_ThreadSafeContextUnlock)(self.ctx.ctx);
         };
@@ -404,40 +407,6 @@ impl Drop for SelectedDbGuard<'_> {
     }
 }
 
-/// A scoped user for ACL-checked calls through [`RuntimeContext::scoped_call_user`].
-/// Dropping it clears the context user before freeing its native handle.
-/// It borrows the runtime view, including the worker guard that provides it:
-///
-/// ```compile_fail,E0597
-/// fn escape(owner: &redis_module::ThreadSafeContext<redis_module::DetachedFromClient>) {
-///     let scope;
-///     {
-///         let guard = owner.lock();
-///         let username = guard.create_string("default");
-///         scope = guard.scoped_call_user(&username).unwrap();
-///     }
-///     drop(scope);
-/// }
-/// ```
-#[derive(Debug)]
-pub struct CallUserScope<'ctx> {
-    ctx: &'ctx RuntimeContext,
-    user: *mut raw::RedisModuleUser,
-}
-
-impl<'ctx> Drop for CallUserScope<'ctx> {
-    fn drop(&mut self) {
-        self.ctx.clear_call_user();
-        unsafe { crate::__required_api!(RedisModule_FreeModuleUser)(self.user) };
-    }
-}
-
-impl<'ctx> CallUserScope<'ctx> {
-    fn new(ctx: &'ctx RuntimeContext, user: *mut raw::RedisModuleUser) -> CallUserScope<'ctx> {
-        CallUserScope { ctx, user }
-    }
-}
-
 pub struct StrCallArgs<'a> {
     is_owner: bool,
     args: Vec<*mut raw::RedisModuleString>,
@@ -494,6 +463,16 @@ impl<'a> StrCallArgs<'a> {
 }
 
 impl Context {
+    /// Runs a call-user scope while preserving client capabilities.
+    /// See [`RuntimeContext::with_call_user`] for restoration and error behavior.
+    pub fn with_call_user<T>(
+        &self,
+        user_name: &RedisString,
+        f: impl FnOnce(&Context) -> T,
+    ) -> Result<T, RedisError> {
+        self.event.with_call_user(user_name, |_| f(self))
+    }
+
     /// Wraps a module command or blocked-client reply callback.
     ///
     /// # Safety
@@ -683,35 +662,6 @@ impl Context {
 }
 
 impl RuntimeContext {
-    /// Selects the user used by calls with [`CallOptionsBuilder::verify_acl`] enabled.
-    /// Keep the returned [`CallUserScope`] alive while making those calls.
-    /// This is a context-scoped identity, including on events and workers; it
-    /// does not authenticate or modify a client connection. The returned scope
-    /// clears that identity when dropped, including during unwind, and borrows
-    /// this view so it cannot outlive the invocation or worker lock guard.
-    /// Leaking the scope (for example with `mem::forget`) skips cleanup and leaves
-    /// the user attached, including across later locks of a reused detached context.
-    pub fn scoped_call_user(
-        &self,
-        user_name: &RedisString,
-    ) -> Result<CallUserScope<'_>, RedisError> {
-        // Look up every API first, so a missing one cannot leave `user` allocated.
-        let get_user = unsafe { crate::__available_api!(RedisModule_GetModuleUserFromUserName) };
-        let set_context_user = unsafe { crate::__available_api!(RedisModule_SetContextUser) };
-        let user = unsafe { get_user(user_name.as_ptr()) };
-        if user.is_null() {
-            return Err(RedisError::Str(
-                "ERR the user does not exist or is disabled",
-            ));
-        }
-        unsafe { set_context_user(self.ctx, user) };
-        Ok(CallUserScope::new(self, user))
-    }
-
-    fn clear_call_user(&self) {
-        unsafe { crate::__required_api!(RedisModule_SetContextUser)(self.ctx, ptr::null_mut()) };
-    }
-
     /// Logs `message` at `level` with the module name.
     /// Embedded NUL bytes are written as `\0`, which reads the same as a literal
     /// backslash and zero; other text is passed literally.

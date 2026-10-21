@@ -46,6 +46,38 @@ fn configure_context_acl_user(con: &mut TestConnection) -> Result<()> {
             "+get",
         ])
         .query::<()>(con)?;
+    redis::cmd("ACL")
+        .arg(&[
+            "SETUSER",
+            "context-other",
+            "on",
+            "nopass",
+            "~denied:*",
+            "+get",
+        ])
+        .query::<()>(con)?;
+    redis::cmd("MSET")
+        .arg(&["allowed:item", "1", "denied:item", "2"])
+        .query::<()>(con)?;
+    Ok(())
+}
+
+fn assert_context_user_flags(flags: &[i64]) {
+    assert!(flags.len() >= 35, "missing nested-scope checks: {flags:?}");
+    assert!(
+        flags[2..].iter().all(|flag| *flag == 1),
+        "scope checks failed: {flags:?}"
+    );
+}
+
+#[test]
+fn test_client_context_user_restores_nested_scopes() -> Result<()> {
+    let mut con = TestConnection::new("context_acl");
+    configure_context_acl_user(&mut con)?;
+    let flags: Vec<i64> = redis::cmd("context_acl.client")
+        .arg("context-reader")
+        .query(&mut con)?;
+    assert_context_user_flags(&flags);
     Ok(())
 }
 
@@ -58,7 +90,7 @@ fn test_worker_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Re
             .arg(&[mode, "context-reader"])
             .query(&mut con)?;
         let baseline = &flags[..2];
-        assert_eq!(&flags[2..], [1; 6], "{mode}");
+        assert_context_user_flags(&flags);
         utils::wait_until(Duration::from_secs(2), "ACL worker exit", || {
             Ok(redis::cmd("context_acl.finish").query::<i64>(&mut con)? == 1)
         })?;
@@ -72,7 +104,7 @@ fn test_worker_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Re
             baseline,
             "baseline changed on reused {mode}"
         );
-        assert_eq!(&repeated[2..], [1; 6], "reused {mode}");
+        assert_context_user_flags(&repeated);
         utils::wait_until(Duration::from_secs(2), "second ACL worker exit", || {
             Ok(redis::cmd("context_acl.finish").query::<i64>(&mut con)? == 1)
         })?;
@@ -92,7 +124,7 @@ fn test_event_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Res
         flags = redis::cmd("context_acl.result").query(&mut con)?;
         Ok(flags.is_some())
     })?;
-    assert_eq!(&flags.unwrap()[2..], [1; 6]);
+    assert_context_user_flags(&flags.unwrap());
     Ok(())
 }
 
