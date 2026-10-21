@@ -1,0 +1,42 @@
+{
+  "redis-7.2.16": {
+    "url": "https://download.redis.io/releases/redis-7.2.16.tar.gz",
+    "sha256": "960a8ec15e34ff40e57ff16837b26b33bd81f2da6d24497bb63de532a323a18e"
+  },
+  "redis-7.4.11": {
+    "url": "https://download.redis.io/releases/redis-7.4.11.tar.gz",
+    "sha256": "3c266ece0abd54ed3b1c912c6eb86b7508cf382cb690ee6649d3843f018f6357"
+  },
+  "redis-8.0.6": {
+    "url": "https://download.redis.io/releases/redis-8.0.6.tar.gz",
+    "sha256": "6d0a9913887a4972536f9da226f1575859c34d86354129163260a5f9c6bd4229"
+  },
+  "redis-8.2.10": {
+    "url": "https://download.redis.io/releases/redis-8.2.10.tar.gz",
+    "sha256": "d33935732f7fc15476295fe05f5ce740927bc14847798e47b3f67b4f27b8b478"
+  },
+  "redis-8.4.7": {
+    "url": "https://download.redis.io/releases/redis-8.4.7.tar.gz",
+    "sha256": "ed83df9fcb724176fc901147aaa63830166e35c1cff39835c4fc9a5860ed1310"
+  },
+  "redis-8.6.7": {
+    "url": "https://download.redis.io/releases/redis-8.6.7.tar.gz",
+    "sha256": "1632b042a60670d6f7c516d6f3ffaec7d2b3e032b2e34f80e8f2b28dfa76e2c9"
+  },
+  "redis-8.8.3": {
+    "url": "https://download.redis.io/releases/redis-8.8.3.tar.gz",
+    "sha256": "13dbcfc6107ab8b6ab2a4f4582678143d5b2fd03ba38611b810359564cfe8a3c"
+  },
+  "redis-8.10.2": {
+    "url": "https://download.redis.io/releases/redis-8.10.2.tar.gz",
+    "sha256": "b9ffee226b5eecdba98a679260dad764b2a4ebd90dce4ad5ac9e9f3eef9c02b3"
+  },
+  "valkey-8.1.10": {
+    "url": "https://github.com/valkey-io/valkey/archive/refs/tags/8.1.10.tar.gz",
+    "sha256": "c74e50cd83f6d398a3dc570e04ac2fe538249585d021f76ee2449bbf9ebd04ed"
+  },
+  "valkey-9.1.2": {
+    "url": "https://github.com/valkey-io/valkey/archive/refs/tags/9.1.2.tar.gz",
+    "sha256": "19c23908e7d57e8d91ef85b41f5646307582f10f4f0fb999bbf89ed24ec9c983"
+  }
+}

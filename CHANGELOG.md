@@ -13,6 +13,13 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- CI covers pinned Redis 7.2, 7.4 and 8.0 through 8.10 releases, plus Valkey
+  8.1 and 9.1 at the default API floor. Checksum-verified server builds are
+  cached, selected explicitly by path, and validated on cache hits. Failed
+  matrix jobs retain server build and integration logs for seven days.
+  Version tests distinguish Valkey product versions from Redis compatibility
+  versions without weakening Redis API-availability checks.
+
 - A [notification-write guide](docs/KEYSPACE-NOTIFICATIONS.md) and
   `keyspace_to_stream` example covering owned callback data, deferred writes,
   feedback prevention, database selection, replication, loading and unload.

@@ -39,7 +39,8 @@ what to change. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version.
   `src/redisraw/bindings.rs`. The `bindgen-runtime` and `bindgen-static`
   features generate them instead, for any target, and need libclang.
 - Redis 6.0 or later, depending on the feature floor below. CI builds every
-  floor and runs the tests against Redis 7.2, 7.4 and 8.0.
+  floor and runs the tests against pinned Redis 7.2, 7.4 and 8.0 through
+  8.10 releases, plus Valkey 8.1 and 9.1 at the default API floor.
 
 ## A first module
 
@@ -210,6 +211,26 @@ cargo test --no-default-features --features min-redis-compatibility-version-7-2
 
 `cargo test --test integration` alone does not rebuild the example modules it
 loads; run `cargo build --examples` first, or plain `cargo test`.
+
+CI uses the releases and SHA-256 checksums in [.github/servers.json](.github/servers.json).
+The [build helper](.github/scripts/build-server.py) verifies downloaded archives,
+builds with two compiler jobs and the system allocator, and checks the product
+and exact version of both fresh and cached binaries. The workflow passes that
+binary through `TEST_REDIS_SERVER_BIN`, without installing into `/usr/local`.
+To reproduce a server leg locally:
+
+```bash
+python3 .github/scripts/build-server.py redis-8.10.2 /tmp/sdk-server
+TEST_REDIS_SERVER_BIN=/tmp/sdk-server/redis-server cargo test
+```
+
+Use a separate destination for each server version. When updating a release,
+copy its SHA-256 from [redis/redis-hashes](https://github.com/redis/redis-hashes)
+or [valkey-io/valkey-hashes](https://github.com/valkey-io/valkey-hashes), update the
+matrix, and run the helper. Binary caches include the runner platform,
+architecture, concrete image version, release, manifest and build helper. Failed matrix jobs upload
+server build output and the integration instance directories for seven days;
+these contain the local test servers' logs and persistence files.
 
 API documentation: `cargo doc --open`. The pages on docs.rs are for the upstream
 crate's published 2.x versions.
