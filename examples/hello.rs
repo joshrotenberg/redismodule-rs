@@ -23,7 +23,7 @@ fn hello_mul(_: &Context, args: Vec<RedisString>) -> RedisResult {
 
 redis_module! {
     name: "hello",
-    version: 1,
+    version: redis_module::module_version!(),
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
     commands: [

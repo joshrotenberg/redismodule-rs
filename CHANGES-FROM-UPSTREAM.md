@@ -143,6 +143,13 @@ these in October 2026.
 | [d100d13] | `Context::get_command_keys` (`RedisModule_GetCommandKeysWithFlags`), `cluster::key_slot`, which computes a key's hash slot without the server, and `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq` and `Hash` for `ContextFlags`. |
 | [dabad65] | `configuration::get_memory_default_config_value`. |
 
+`module_version!()` derives the module version from the caller's Cargo package
+version at compile time, using `encode_module_version` and the optional
+`major * 10000 + minor * 100 + patch` convention. The encoder rejects
+prereleases, malformed strings, minor/patch values above 99, and `i32` overflow;
+valid build metadata is ignored. Explicit integer versions remain supported.
+The [hello example](examples/hello.rs) uses it in `redis_module!`.
+
 `configuration::ParsedStringConfig<T>` validates UTF-8 string values before
 publishing their raw text and parsed representation together. It integrates
 with existing string configuration registration and exposes matching reads

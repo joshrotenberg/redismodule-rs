@@ -13,6 +13,13 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `module_version!()` derives the integer module version from the calling
+  crate's Cargo package version at compile time. `encode_module_version` is
+  the underlying const conversion using `major * 10000 + minor * 100 + patch`.
+  Malformed versions, prereleases, minor/patch values above 99, and integer
+  overflow are rejected; valid build metadata is ignored. Explicit module
+  version values remain supported.
+
 - `configuration::ParsedStringConfig<T>` validates string configurations before
   replacing their raw text and parsed value together. Read matching values
   under a Redis lock proof without requiring `T: Clone`. Existing string

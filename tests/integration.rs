@@ -1769,6 +1769,23 @@ fn test_argument_parser_allocations() -> Result<()> {
 }
 
 #[test]
+fn test_module_version_from_cargo() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    let modules: Vec<HashMap<String, Value>> = redis::cmd("MODULE").arg("LIST").query(&mut con)?;
+    let hello = modules
+        .iter()
+        .find(|module| module.get("name") == Some(&Value::Data(b"hello".to_vec())))
+        .context("hello must appear in MODULE LIST")?;
+    let version: i32 = redis::from_redis_value(&hello["ver"])?;
+    assert_eq!(version, redis_module::module_version!());
+    assert_eq!(
+        version,
+        redis_module::encode_module_version(env!("CARGO_PKG_VERSION"))
+    );
+    Ok(())
+}
+
+#[test]
 fn test_hello() -> Result<()> {
     let mut con = TestConnection::new("hello");
 
