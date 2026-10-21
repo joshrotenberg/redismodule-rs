@@ -84,11 +84,14 @@ work even if `replica-read-only` is disabled; it receives the already generated
 stream commands instead of appending a second entry. RDB/AOF loading is skipped
 too, so loading saved data does not regenerate the projection.
 
-Propagation is also affected by the surrounding module call. Redis can suppress
-nested propagation when an outer module used a non-replicating call. Test the
-actual outer command path; `.replicate()` does not override all enclosing
-propagation decisions. The flags and this interaction are described in the
-[module call API](https://redis.io/docs/latest/develop/reference/modules/modules-api-ref/#redismodule_call).
+A deferred job uses the propagation state in effect when it runs, which can be
+after the notification-producing module call has returned. Its replicated
+`XADD` can therefore reach replicas and AOF even when that module did not
+propagate the source write. The stream and source keys can diverge. Modules
+that generate notifications through calls must define and test source and job
+propagation together; this example's normal path is ordinary client writes.
+See the [module call API](https://redis.io/docs/latest/develop/reference/modules/modules-api-ref/#redismodule_call)
+for the propagation flags.
 
 Selecting database 0 is a standalone design choice. It is not a cluster routing
 policy: cluster modules need a separate design for slots, local ownership and
