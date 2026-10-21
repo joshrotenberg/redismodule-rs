@@ -45,8 +45,9 @@ def main():
         with log.open("w") as output:
             try:
                 # Avoid platform-specific allocator dependencies and unbounded
-                # parallelism on shared CI runners.
-                subprocess.run(["make", "-C", str(source), "-j2", "MALLOC=libc", "BUILD_TLS=no"], stdout=output, stderr=subprocess.STDOUT, check=True)
+                # parallelism on shared CI runners. Build only the executable: newer
+                # Redis top-level targets also build unrelated test modules.
+                subprocess.run(["make", "-C", str(source / "src"), "-j2", "MALLOC=libc", "BUILD_TLS=no", f"{kind}-server"], stdout=output, stderr=subprocess.STDOUT, check=True)
             except subprocess.CalledProcessError:
                 print(log.read_text(), file=sys.stderr)
                 raise

@@ -43,11 +43,15 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
+      - name: Read runner image
+        id: runner-image
+        run: echo "image=${ImageOS:?}-${ImageVersion:?}" >> "$GITHUB_OUTPUT"
+
       - name: Cache server binary
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/sdk-server
-          key: sdk-server-v1-${{ runner.os }}-${{ runner.arch }}-${{ matrix.os }}-${{ matrix.server }}-${{ matrix.version }}-${{ hashFiles('.github/servers.json', '.github/scripts/build-server.py') }}
+          key: sdk-server-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-image.outputs.image }}-${{ matrix.server }}-${{ matrix.version }}-${{ hashFiles('.github/servers.json', '.github/scripts/build-server.py') }}
 
       - name: Build or verify server
         run: |

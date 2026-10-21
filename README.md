@@ -228,7 +228,7 @@ Use a separate destination for each server version. When updating a release,
 copy its SHA-256 from [redis/redis-hashes](https://github.com/redis/redis-hashes)
 or [valkey-io/valkey-hashes](https://github.com/valkey-io/valkey-hashes), update the
 matrix, and run the helper. Binary caches include the runner platform,
-architecture, release, manifest and build helper. Failed matrix jobs upload
+architecture, concrete image version, release, manifest and build helper. Failed matrix jobs upload
 server build output and the integration instance directories for seven days;
 these contain the local test servers' logs and persistence files.
 
