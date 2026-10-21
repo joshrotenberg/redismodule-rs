@@ -30,8 +30,8 @@ use anyhow::Context as _;
 
 use redis_module::configuration::ConfigurationFlags;
 use redis_module::{
-    ArgCursor, Context, ModuleOptions, RedisError, RedisResult, RedisString, RedisValue, Status,
-    redis_module,
+    ArgCursor, Context, ModuleOptions, RedisError, RedisResult, RedisString, RedisValue,
+    RegistrationContext, Status, redis_module,
 };
 use redis_module_macros::command;
 
@@ -493,7 +493,7 @@ fn wasm_kill(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 }
 
-fn init(ctx: &Context, _args: &[RedisString]) -> Status {
+fn init(ctx: &RegistrationContext<'_>, _args: &[RedisString]) -> Status {
     // Redis has applied the module's configuration by now. The data type the
     // RDB keeps libraries under is registered only with persistence on, since
     // Redis does not unload a module with a data type.
