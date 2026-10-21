@@ -34,6 +34,25 @@ fn test_helper_dbsize(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Integer(ctx.dbsize() as i64))
 }
 
+fn test_helper_milliseconds(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if args.len() != 1 {
+        return Err(RedisError::WrongArity);
+    }
+    Ok(redis_module::milliseconds().into())
+}
+
+fn test_helper_milliseconds_worker(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if args.len() != 1 {
+        return Err(RedisError::WrongArity);
+    }
+    // The clock needs no context or GIL. Join before returning so no worker
+    // remains active when the module can be unloaded.
+    let now = std::thread::spawn(redis_module::milliseconds)
+        .join()
+        .map_err(|_| RedisError::Str("clock worker panicked"))?;
+    Ok(now.into())
+}
+
 fn add_info(ctx: &InfoContext, _for_crash_report: bool) {
     if let Ok(section) = ctx
         .builder()
@@ -61,5 +80,7 @@ redis_module! {
         ["test_helper.name", test_helper_command_name, "", 0, 0, 0, ""],
         ["test_helper.err", test_helper_err, "", 0, 0, 0, ""],
         ["test_helper.dbsize", test_helper_dbsize, "readonly", 0, 0, 0, ""],
+        ["test_helper.milliseconds", test_helper_milliseconds, "readonly fast", 0, 0, 0, ""],
+        ["test_helper.milliseconds_worker", test_helper_milliseconds_worker, "readonly", 0, 0, 0, ""],
     ],
 }

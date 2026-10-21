@@ -194,6 +194,15 @@ changing the header, build with the `bindgen-runtime` feature and copy the
 generated `OUT_DIR/bindings.rs` over `src/redisraw/bindings.rs`; CI fails when
 the two differ.
 
+## Server clock
+
+`redis_module::milliseconds()` reads the current Unix time in milliseconds
+through Redis's module API. It needs no context or Redis lock and can run on a
+module worker after API initialization. This is fresh wall time; clock
+adjustments can move it backward. Use `std::time::Instant` for elapsed time.
+It is available at every SDK compatibility floor and panics with the native
+API name if used before initialization.
+
 ## Cluster key names
 
 `cluster::key_slot` computes a key's slot without calling Redis.

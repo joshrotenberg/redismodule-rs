@@ -13,6 +13,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `redis_module::milliseconds()` exposes the server module API's fresh Unix
+  wall-clock time without a context, including from module workers after API
+  initialization. It is available at every compatibility floor.
+
 - `cluster::key_for_slot` generates an ASCII key for any valid cluster slot
   without a server API. Exact key names are stable across SDK and server
   versions, with all 16,384 names pinned by a compatibility fixture. A prefix
