@@ -57,16 +57,22 @@ fn test_worker_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Re
         let flags: Vec<i64> = redis::cmd("context_acl.worker")
             .arg(&[mode, "context-reader"])
             .query(&mut con)?;
-        assert_eq!(flags, [1; 5], "{mode}");
+        let baseline = &flags[..2];
+        assert_eq!(&flags[2..], [1; 6], "{mode}");
         utils::wait_until(Duration::from_secs(2), "ACL worker exit", || {
             Ok(redis::cmd("context_acl.finish").query::<i64>(&mut con)? == 1)
         })?;
         // The detached context is reused. Its scoped identity must not leak
         // into a later lock invocation either.
-        let flags: Vec<i64> = redis::cmd("context_acl.worker")
+        let repeated: Vec<i64> = redis::cmd("context_acl.worker")
             .arg(&[mode, "context-reader"])
             .query(&mut con)?;
-        assert_eq!(flags, [1; 5], "reused {mode}");
+        assert_eq!(
+            &repeated[..2],
+            baseline,
+            "baseline changed on reused {mode}"
+        );
+        assert_eq!(&repeated[2..], [1; 6], "reused {mode}");
         utils::wait_until(Duration::from_secs(2), "second ACL worker exit", || {
             Ok(redis::cmd("context_acl.finish").query::<i64>(&mut con)? == 1)
         })?;
@@ -86,7 +92,7 @@ fn test_event_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Res
         flags = redis::cmd("context_acl.result").query(&mut con)?;
         Ok(flags.is_some())
     })?;
-    assert_eq!(flags.unwrap(), [1; 5]);
+    assert_eq!(&flags.unwrap()[2..], [1; 6]);
     Ok(())
 }
 

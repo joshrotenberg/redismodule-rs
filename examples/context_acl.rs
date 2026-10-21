@@ -24,15 +24,26 @@ fn exercise(ctx: &RuntimeContext, username: &str) -> Result<Vec<i64>, RedisError
     let after = before == [can_read("allowed:item"), can_read("denied:item")];
 
     // Check the same identity cleanup when work unwinds before returning.
+    let mut active_before_panic = false;
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _scope = ctx.authenticate_user(&username).unwrap();
+        active_before_panic = can_read("allowed:item") && !can_read("denied:item");
         panic!("scoped context user unwind");
     }))
     .is_err();
     let after_unwind = before == [can_read("allowed:item"), can_read("denied:item")];
-    Ok([allowed, denied, after, panicked, after_unwind]
-        .map(i64::from)
-        .to_vec())
+    Ok([
+        before[0],
+        before[1],
+        allowed,
+        denied,
+        after,
+        active_before_panic,
+        panicked,
+        after_unwind,
+    ]
+    .map(i64::from)
+    .to_vec())
 }
 
 fn worker(ctx: &Context, args: Vec<RedisString>) -> RedisResult {

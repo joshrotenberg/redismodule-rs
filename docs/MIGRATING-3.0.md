@@ -101,8 +101,10 @@ Event and worker views have no `reply*`, `block_client*`, key-position discovery
 to `Context` by safe code. Use explicit `replicate(command, args)` outside a
 command. `authenticate_user` remains on `RuntimeContext`: it sets the context
 user for ACL-checked calls, including on workers and events, and does not
-authenticate a client connection. Its scope clears that user before the context
-or worker guard can expire. Worker guards cannot create timers or subscribe to events. Configuration
+authenticate a client connection. Dropping its scope clears that user, including
+when work unwinds. Leaking the scope skips cleanup; on a reused detached context,
+the identity then remains attached across later lock invocations. Worker guards
+cannot create timers or subscribe to events. Configuration
 and command/type registration still require `RegistrationContext`.
 
 Both guard types borrow their owner and cannot outlive it. Their runtime views

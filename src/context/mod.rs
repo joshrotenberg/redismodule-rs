@@ -406,6 +406,19 @@ impl Drop for SelectedDbGuard<'_> {
 
 /// A scoped user for ACL-checked calls through [`RuntimeContext::authenticate_user`].
 /// Dropping it clears the context user before freeing its native handle.
+/// It borrows the runtime view, including the worker guard that provides it:
+///
+/// ```compile_fail,E0597
+/// fn escape(owner: &redis_module::ThreadSafeContext<redis_module::DetachedFromClient>) {
+///     let scope;
+///     {
+///         let guard = owner.lock();
+///         let username = guard.create_string("default");
+///         scope = guard.authenticate_user(&username).unwrap();
+///     }
+///     drop(scope);
+/// }
+/// ```
 #[derive(Debug)]
 pub struct ContextUserScope<'ctx> {
     ctx: &'ctx RuntimeContext,
@@ -675,6 +688,8 @@ impl RuntimeContext {
     /// does not authenticate or modify a client connection. The returned scope
     /// clears that identity when dropped, including during unwind, and borrows
     /// this view so it cannot outlive the invocation or worker lock guard.
+    /// Leaking the scope (for example with `mem::forget`) skips cleanup and leaves
+    /// the user attached, including across later locks of a reused detached context.
     pub fn authenticate_user(
         &self,
         user_name: &RedisString,
