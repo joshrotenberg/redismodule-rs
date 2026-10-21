@@ -194,6 +194,27 @@ changing the header, build with the `bindgen-runtime` feature and copy the
 generated `OUT_DIR/bindings.rs` over `src/redisraw/bindings.rs`; CI fails when
 the two differ.
 
+## Cluster key names
+
+`cluster::key_slot` computes a key's slot without calling Redis.
+`cluster::key_for_slot` goes the other way and returns an ASCII key with a
+nonempty hash tag, or `None` for a slot outside `0..cluster::SLOTS`:
+
+```rust
+use redis_module::cluster::{key_for_slot, key_slot};
+let key = key_for_slot(1234).unwrap();
+let events_key = format!("module:{key}:events");
+assert_eq!(key_slot(events_key.as_bytes()), 1234);
+```
+
+A prefix must not contain `{`; a suffix can contain any bytes. This chooses a
+name, without discovering slot ownership or routing commands. It works on all
+server versions and does not return Redis's native canonical slot name.
+Retain the returned name if it identifies stored data; its exact bytes are not
+a cross-version contract. The first valid call builds a shared 48 KiB lookup
+table; subsequent calls allocate only the returned key. The `keys_pos` example
+provides `key_for_slot <slot>` to try it from a client.
+
 ## Building and testing this repository
 
 ```bash

@@ -143,6 +143,9 @@ these in October 2026.
 | [d100d13] | `Context::get_command_keys` (`RedisModule_GetCommandKeysWithFlags`), `cluster::key_slot`, which computes a key's hash slot without the server, and `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq` and `Hash` for `ContextFlags`. |
 | [dabad65] | `configuration::get_memory_default_config_value`. |
 
+`cluster::key_for_slot` generates a tagged ASCII key for any valid hash slot,
+without a server or the native canonical-name API.
+
 ## Changes that break compatibility with upstream
 
 A module written against upstream needs changes for these; the

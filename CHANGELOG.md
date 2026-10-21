@@ -13,6 +13,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `cluster::key_for_slot` generates an ASCII key for any valid cluster slot
+  without a server API. A prefix without `{` and any suffix
+  preserve its slot.
+
 - CI covers pinned Redis 7.2, 7.4 and 8.0 through 8.10 releases, plus Valkey
   8.1 and 9.1 at the default API floor. Checksum-verified server builds are
   cached, selected explicitly by path, and validated on cache hits. Failed
