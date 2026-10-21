@@ -1,15 +1,15 @@
 # Handoff
 
 How to pick up work on this fork: the `redis-module` SDK on `master`, and the
-wasm host on the `experiment/wasm-host` branch. State as of 2026-10-20.
+wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 ## What is where
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `ffc7ac4`, scoped call user naming merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `d44a210`, nested call user scopes merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `ffc7ac4` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `d44a210` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -143,6 +143,9 @@ The wasm loading and unload callbacks now take `EventContext`.
 
 Scoped call user naming merged in `ffc7ac4`: `scoped_call_user` returns the
 root-exported `CallUserScope`, replacing the old authentication names.
+Nested call users merged in `d44a210`: `with_call_user` preserves each context
+view, and nested guards restore the latest active user on return or unwind.
+Forgotten guards are cleaned up before worker unlock. No host adaptation needed.
 
 The next survey items remain server-event payloads for flush and `SWAPDB`, a
 guide on writing to the keyspace from a notification, and a wider CI matrix.
