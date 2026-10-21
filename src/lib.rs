@@ -134,6 +134,31 @@ pub fn basic_info_command_handler(ctx: &InfoContext, for_crash_report: bool) {
         .for_each(|e| log::error!("Couldn't build info for the module's custom handler: {e}"));
 }
 
+/// Read the current Unix time in milliseconds through Redis's module API.
+///
+/// This is a fresh wall-clock reading, not a cached command timestamp or a
+/// monotonic counter. System clock adjustments can move it backward. Use
+/// [`std::time::Instant`] for measuring elapsed time.
+///
+/// No context or Redis lock is needed. It may be called from a module worker
+/// after the module API has been initialized. The native API has been
+/// available since Redis 4.0 and is supported at every SDK compatibility floor.
+///
+/// # Panics
+///
+/// Panics with the native API name if called before module API initialization
+/// or if the running server does not provide `RedisModule_Milliseconds`.
+///
+/// ```no_run
+/// let now_ms = redis_module::milliseconds();
+/// ```
+#[must_use]
+pub fn milliseconds() -> i64 {
+    // SAFETY: availability is checked before calling the no-argument native
+    // clock, which reads fresh wall time without a context or server state.
+    unsafe { crate::__required_api!(RedisModule_Milliseconds)() }
+}
+
 /// Initialize RedisModuleAPI without register as a module.
 pub fn init_api(ctx: &RuntimeContext) {
     unsafe { crate::raw::Export_RedisModule_InitAPI(ctx.ctx) };
@@ -143,5 +168,16 @@ pub(crate) unsafe fn deallocate_pointer<P>(p: *mut P) {
     unsafe {
         std::ptr::drop_in_place(p);
         std::alloc::dealloc(p as *mut u8, std::alloc::Layout::new::<P>());
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    #[test]
+    #[should_panic(expected = "RedisModule_Milliseconds is not available")]
+    fn milliseconds_requires_api_initialization() {
+        // No Redis server initializes module API pointers in this test binary.
+        // Do not change the shared native pointer to simulate initialization.
+        let _ = crate::milliseconds();
     }
 }

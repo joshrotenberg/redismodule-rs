@@ -1934,6 +1934,35 @@ fn test_dbsize() -> Result<()> {
 }
 
 #[test]
+fn test_helper_milliseconds() -> Result<()> {
+    let mut con = TestConnection::new("test_helper");
+    let server_time = |con: &mut TestConnection| -> Result<i64> {
+        let (seconds, microseconds): (i64, i64) = redis::cmd("TIME").query(con)?;
+        Ok(seconds * 1000 + microseconds / 1000)
+    };
+    for command in [
+        "test_helper.milliseconds",
+        "test_helper.milliseconds_worker",
+    ] {
+        let before = server_time(&mut con)?;
+        let now: i64 = redis::cmd(command).query(&mut con)?;
+        let after = server_time(&mut con)?;
+        assert!(
+            (before.min(after)..=before.max(after)).contains(&now),
+            "{command}: {now} must match the server's Unix milliseconds between {before} and {after}"
+        );
+        assert!(
+            redis::cmd(command)
+                .arg("extra")
+                .query::<i64>(&mut con)
+                .is_err()
+        );
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_helper_version() -> Result<()> {
     let mut con = TestConnection::new("test_helper");
 
