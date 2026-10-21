@@ -230,6 +230,17 @@ impl LaunchSpec {
     }
 }
 
+// A competing socket can win between port selection and either bind() or
+// listen(). Require the TCP socket diagnostic and fatal line for this port.
+fn tcp_address_in_use(log: &str, port: u16) -> bool {
+    let socket = format!("Could not create server TCP listening socket 127.0.0.1:{port}: ");
+    log.lines().any(|line| {
+        line.contains(&socket)
+            && (line.ends_with("bind: Address already in use")
+                || line.ends_with("listen: Address already in use"))
+    }) && log.contains(&format!("Failed listening on port {port} (tcp)"))
+}
+
 /// Owns a Redis server and a connection. Every server captures its startup log.
 pub struct TestConnection {
     server: ChildGuard,
@@ -271,9 +282,7 @@ impl TestConnection {
                     // Port-zero selection cannot reserve a socket for Redis.
                     // Retry only a confirmed TCP bind collision, after launch
                     // has dropped and reaped the child. Other errors propagate.
-                    if !log.contains("bind: Address already in use")
-                        || !log.contains(&format!("Failed listening on port {} (tcp)", spec.port))
-                    {
+                    if !tcp_address_in_use(&log, spec.port) {
                         return Err(error);
                     }
                     collisions.push(format!("{error:#}"));
@@ -501,6 +510,29 @@ mod connection_tests {
     use std::io::Read;
 
     #[test]
+    fn tcp_collisions_include_bind_and_listen_failures() {
+        for operation in ["bind", "listen"] {
+            let log = format!(
+                "Warning: Could not create server TCP listening socket 127.0.0.1:1234: \
+                 {operation}: Address already in use\n\
+                 Failed listening on port 1234 (tcp), aborting.\n"
+            );
+            assert!(tcp_address_in_use(&log, 1234));
+            assert!(!tcp_address_in_use(&log, 1235));
+            assert!(!tcp_address_in_use(
+                &log.replace("Address already in use", "Permission denied"),
+                1234
+            ));
+            assert!(!tcp_address_in_use(log.lines().next().unwrap(), 1234));
+        }
+        assert!(!tcp_address_in_use(
+            "Module load failed: bind: Address already in use\n\
+             Failed listening on port 1234 (tcp)",
+            1234
+        ));
+    }
+
+    #[test]
     fn test_harness_retries_a_confirmed_port_collision() -> Result<()> {
         let occupied = TcpListener::bind(("127.0.0.1", 0))?;
         let occupied_port = occupied.local_addr()?.port();
@@ -518,7 +550,7 @@ mod connection_tests {
         assert!((2..=PORT_ATTEMPTS).contains(&attempts));
         assert_ne!(con.port(), occupied_port);
         assert!(
-            fs::read_to_string(failed_log)?.contains("bind: Address already in use"),
+            tcp_address_in_use(&fs::read_to_string(failed_log)?, occupied_port),
             "the failed attempt's diagnostics were lost"
         );
         assert_eq!(

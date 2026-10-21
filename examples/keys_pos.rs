@@ -1,5 +1,6 @@
 use redis_module::{
-    Context, RedisError, RedisResult, RedisString, RedisValue, cluster, redis_module,
+    ArgCursor, CommandFlags, Context, RedisError, RedisResult, RedisString, RedisValue, cluster,
+    redis_command, redis_module,
 };
 
 fn keys_pos(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -40,6 +41,18 @@ fn key_slot(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ))))
 }
 
+/// `key_for_slot <slot>`: an ASCII key for a cluster slot, without a server API.
+fn key_for_slot(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = ArgCursor::new(&args[1..]);
+    let slot = args.next_u64()?;
+    args.done()?;
+    let key = u16::try_from(slot)
+        .ok()
+        .and_then(cluster::key_for_slot)
+        .ok_or(RedisError::Str("slot must be between 0 and 16383"))?;
+    Ok(key.into())
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -51,5 +64,6 @@ redis_module! {
         ["keys_pos", keys_pos, "getkeys-api", 1, 1, 1, ""],
         ["command_keys", command_keys, "", 0, 0, 0, ""],
         ["key_slot", key_slot, "", 0, 0, 0, ""],
+        redis_command!("key_for_slot", key_for_slot).flags(CommandFlags::READ_ONLY),
     ],
 }

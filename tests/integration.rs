@@ -1863,6 +1863,36 @@ fn test_command_keys_and_key_slot() -> Result<()> {
 }
 
 #[test]
+fn test_key_for_slot() -> Result<()> {
+    let mut con = TestConnection::new("keys_pos");
+    for slot in [0, 1, 1234, 8192, 16383] {
+        let key: String = redis::cmd("key_for_slot").arg(slot).query(&mut con)?;
+        assert_eq!(redis_module::cluster::key_slot(key.as_bytes()), slot as u16);
+        assert_eq!(
+            redis_module::cluster::key_slot(format!("module:{key}:events").as_bytes()),
+            slot as u16
+        );
+    }
+    for args in [
+        vec![],
+        vec!["-1"],
+        vec!["16384"],
+        vec!["65536"],
+        vec!["x"],
+        vec!["0", "1"],
+    ] {
+        assert!(
+            redis::cmd("key_for_slot")
+                .arg(args)
+                .query::<String>(&mut con)
+                .is_err()
+        );
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_keys_pos() -> Result<()> {
     let mut con = TestConnection::new("keys_pos");
 

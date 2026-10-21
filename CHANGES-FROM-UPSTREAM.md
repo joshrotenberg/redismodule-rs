@@ -143,6 +143,15 @@ these in October 2026.
 | [d100d13] | `Context::get_command_keys` (`RedisModule_GetCommandKeysWithFlags`), `cluster::key_slot`, which computes a key's hash slot without the server, and `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq` and `Hash` for `ContextFlags`. |
 | [dabad65] | `configuration::get_memory_default_config_value`. |
 
+`cluster::key_for_slot` generates a tagged ASCII key for any valid hash slot,
+without a server or the native canonical-name API. Its exact key names are
+stable across SDK and server versions; an exhaustive compatibility fixture
+pins the mapping for all 16,384 slots.
+
+The integration harness retries confirmed TCP address-in-use failures at
+`listen()` as well as `bind()`, requiring the matching socket and fatal port
+diagnostics. Other startup failures propagate immediately.
+
 ## Changes that break compatibility with upstream
 
 A module written against upstream needs changes for these; the
