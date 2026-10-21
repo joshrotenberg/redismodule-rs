@@ -220,6 +220,15 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-21: rebased onto SDK master `15389f7`, which exposes the fresh
+  server millisecond clock without a context. No host adaptation needed.
+  Rust 1.94.0 and Redis 8.10.2: workspace/guest formatting, workspace Clippy,
+  separate SDK 7.2 Clippy, example builds, and guest Clippy passed. With
+  `RUST_TEST_THREADS=4`, the full suite passed: 56 SDK unit tests,
+  114 SDK integration tests, five standalone harness cases, seven host unit
+  tests, 21 host integration tests with JavaScript, 64 SDK doctests, and
+  four guest helper tests.
+
 - 2026-10-21: rebased onto SDK master `69bc762`, which adds stable generated
   cluster slot-key names and retries confirmed TCP listen-stage collisions.
   No host adaptation needed. Rust 1.94.0 and Redis 8.10.2: workspace/guest
