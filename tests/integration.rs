@@ -11,6 +11,211 @@ use redis_module::RedisValue;
 
 mod utils;
 
+#[cfg(feature = "redis-7-2-examples")]
+#[test]
+fn test_notification_job_rejection_releases_captures() -> Result<()> {
+    let mut primary = TestConnection::new("keyspace_to_stream");
+    let accepted: Vec<i64> = redis::cmd("notify_stream.job_probe").query(&mut primary)?;
+    assert_eq!(accepted, [1, 0]);
+    let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut primary)?;
+    assert_eq!(counts, [1, 1]);
+
+    let mut replica = primary.replica()?;
+    let rejected: Vec<i64> = redis::cmd("notify_stream.job_probe").query(&mut replica)?;
+    assert_eq!(
+        rejected,
+        [0, 1],
+        "rejected jobs must drop captured data immediately"
+    );
+    let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut replica)?;
+    assert_eq!(counts, [1, 0], "rejected jobs must never run");
+    Ok(())
+}
+
+#[cfg(feature = "redis-7-2-examples")]
+mod notification_write_tests {
+    use super::*;
+    type Entries = Vec<(String, Vec<Vec<u8>>)>;
+
+    fn entries(con: &mut TestConnection) -> Result<Entries> {
+        redis::cmd("SELECT").arg(0).query::<()>(con)?;
+        let reply: Value = redis::cmd("XRANGE")
+            .arg(&["watched:events", "-", "+"])
+            .query(con)?;
+        let Value::Bulk(rows) = reply else {
+            anyhow::bail!("XRANGE must return an array");
+        };
+        rows.into_iter()
+            .map(|row| {
+                let Value::Bulk(parts) = row else {
+                    anyhow::bail!("stream entry must be an array");
+                };
+                anyhow::ensure!(parts.len() == 2, "stream entry has ID and fields");
+                Ok((
+                    redis::from_redis_value(&parts[0])?,
+                    redis::from_redis_value(&parts[1])?,
+                ))
+            })
+            .collect()
+    }
+
+    fn stats(con: &mut TestConnection) -> Result<Vec<i64>> {
+        Ok(redis::cmd("notify_stream.stats").query(con)?)
+    }
+
+    #[test]
+    fn test_notification_writes_keep_binary_keys_database_and_feedback_guard() -> Result<()> {
+        let mut con = TestConnection::new("keyspace_to_stream");
+        let config: Vec<String> = redis::cmd("CONFIG")
+            .arg(&["GET", "notify-keyspace-events"])
+            .query(&mut con)?;
+        assert_eq!(
+            config[1], "",
+            "module events do not need Pub/Sub notifications"
+        );
+        redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
+        let key = b"watched:binary\xff\0key";
+        redis::cmd("SET")
+            .arg(key.as_slice())
+            .arg("value")
+            .query::<()>(&mut con)?;
+        assert_eq!(
+            redis::cmd("GET")
+                .arg(key.as_slice())
+                .query::<String>(&mut con)?,
+            "value"
+        );
+        assert_eq!(
+            redis::cmd("EXISTS")
+                .arg("watched:events")
+                .query::<i64>(&mut con)?,
+            0
+        );
+        let rows = entries(&mut con)?;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].1,
+            vec![
+                b"db".to_vec(),
+                b"3".to_vec(),
+                b"event".to_vec(),
+                b"set".to_vec(),
+                b"key".to_vec(),
+                key.to_vec()
+            ]
+        );
+        assert_eq!(&stats(&mut con)?[..3], [1, 1, 0]);
+        // Even a client write to the reserved output key cannot feed back.
+        redis::cmd("XADD")
+            .arg(&["watched:events", "*", "external", "entry"])
+            .query::<String>(&mut con)?;
+        assert_eq!(&stats(&mut con)?[..3], [1, 1, 0]);
+        assert_eq!(entries(&mut con)?.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_notification_writes_replicate_once_and_skip_writable_replicas() -> Result<()> {
+        let mut primary = TestConnection::new("keyspace_to_stream");
+        redis::cmd("SELECT").arg(3).query::<()>(&mut primary)?;
+        redis::cmd("SET")
+            .arg(&["watched:before", "one"])
+            .query::<()>(&mut primary)?;
+        let mut replica = primary.replica()?;
+        let first = entries(&mut primary)?;
+        assert_eq!(entries(&mut replica)?, first);
+        redis::cmd("SELECT").arg(3).query::<()>(&mut primary)?;
+        redis::cmd("SET")
+            .arg(&["watched:after", "two"])
+            .query::<()>(&mut primary)?;
+        let expected = entries(&mut primary)?;
+        assert_eq!(expected.len(), 2);
+        utils::wait_until(
+            Duration::from_secs(3),
+            "replicated notification stream",
+            || Ok(entries(&mut replica)? == expected),
+        )?;
+        assert_eq!(&stats(&mut replica)?[..3], [0, 0, 0]);
+        // The primary-only policy also applies to explicitly writable replicas.
+        redis::cmd("CONFIG")
+            .arg(&["SET", "replica-read-only", "no"])
+            .query::<()>(&mut replica)?;
+        redis::cmd("SELECT").arg(3).query::<()>(&mut replica)?;
+        redis::cmd("SET")
+            .arg(&["watched:local", "replica"])
+            .query::<()>(&mut replica)?;
+        assert_eq!(entries(&mut replica)?, expected);
+        let counts = stats(&mut replica)?;
+        assert_eq!(&counts[..3], [0, 0, 0]);
+        assert!(counts[3] > 0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_notification_writes_skip_rdb_loading() -> Result<()> {
+        let mut con = TestConnection::new("keyspace_to_stream");
+        redis::cmd("SELECT").arg(2).query::<()>(&mut con)?;
+        redis::cmd("SET")
+            .arg(&["watched:saved", "value"])
+            .query::<()>(&mut con)?;
+        let saved = entries(&mut con)?;
+        con = con.restart()?;
+        assert_eq!(entries(&mut con)?, saved);
+        let counts = stats(&mut con)?;
+        assert_eq!(&counts[..3], [0, 0, 0]);
+        assert!(
+            counts[3] > 0,
+            "LOADED callbacks should be observed and skipped"
+        );
+        redis::cmd("SET")
+            .arg(&["watched:new", "value"])
+            .query::<()>(&mut con)?;
+        assert_eq!(entries(&mut con)?.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_notification_write_errors_and_unload() -> Result<()> {
+        let mut con = TestConnection::new("keyspace_to_stream");
+        redis::cmd("SET")
+            .arg(&["watched:events", "wrong-type"])
+            .query::<()>(&mut con)?;
+        // The source write succeeds even when the derived stream write fails.
+        redis::cmd("SET")
+            .arg(&["watched:first", "value"])
+            .query::<()>(&mut con)?;
+        assert_eq!(&stats(&mut con)?[..3], [1, 0, 1]);
+        assert!(
+            con.server_log()?
+                .contains("notification stream append failed")
+        );
+        redis::cmd("DEL")
+            .arg("watched:events")
+            .query::<()>(&mut con)?;
+        redis::cmd("SET")
+            .arg(&["watched:second", "value"])
+            .query::<()>(&mut con)?;
+        assert_eq!(entries(&mut con)?.len(), 1);
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "keyspace_to_stream"])
+            .query::<()>(&mut con)?;
+        redis::cmd("SET")
+            .arg(&["watched:unloaded", "value"])
+            .query::<()>(&mut con)?;
+        assert_eq!(entries(&mut con)?.len(), 1);
+        let path = utils::module_path("keyspace_to_stream")?;
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(path)
+            .query::<()>(&mut con)?;
+        redis::cmd("SET")
+            .arg(&["watched:reloaded", "value"])
+            .query::<()>(&mut con)?;
+        assert_eq!(entries(&mut con)?.len(), 2);
+        Ok(())
+    }
+}
+
 #[test]
 fn test_registration_context_registers_load_time_and_declarative_commands() -> Result<()> {
     for name in [None, Some("registration.from_args")] {

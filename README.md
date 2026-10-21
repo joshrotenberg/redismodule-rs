@@ -94,6 +94,11 @@ and INFO sections. The API follows the module API's concepts, so the
 [module API reference](https://redis.io/docs/latest/develop/reference/modules/modules-api-ref/)
 applies to it.
 
+For writes triggered by keyspace notifications, see
+[Writing from keyspace notifications](docs/KEYSPACE-NOTIFICATIONS.md) and the
+[notification-to-stream example](examples/keyspace_to_stream.rs). It uses
+Redis 7.2+ post-notification jobs, explicit replication, and role/loading gates.
+
 ## Features
 
 ### Optional command builders
