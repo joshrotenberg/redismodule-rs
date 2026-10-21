@@ -143,6 +143,11 @@ these in October 2026.
 | [d100d13] | `Context::get_command_keys` (`RedisModule_GetCommandKeysWithFlags`), `cluster::key_slot`, which computes a key's hash slot without the server, and `Debug`, `Clone`, `Copy`, `PartialEq`, `Eq` and `Hash` for `ContextFlags`. |
 | [dabad65] | `configuration::get_memory_default_config_value`. |
 
+`configuration::ParsedStringConfig<T>` validates UTF-8 string values before
+publishing their raw text and parsed representation together. It integrates
+with existing string configuration registration and exposes matching reads
+under a Redis lock proof without cloning the parsed value.
+
 `redis_module::milliseconds()` reads fresh Unix milliseconds through the
 server module API without a context or Redis lock. It supports module workers
 after API initialization at every SDK compatibility floor.

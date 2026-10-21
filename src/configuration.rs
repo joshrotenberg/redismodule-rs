@@ -9,6 +9,9 @@ use std::os::raw::{c_char, c_int, c_longlong, c_void};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
+mod parsed_string;
+pub use parsed_string::ParsedStringConfig;
+
 mod registration;
 use registration::PendingRegistration;
 

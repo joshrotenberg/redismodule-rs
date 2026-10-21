@@ -194,6 +194,42 @@ changing the header, build with the `bindgen-runtime` feature and copy the
 generated `OUT_DIR/bindings.rs` over `src/redisraw/bindings.rs`; CI fails when
 the two differ.
 
+## Validated string configurations
+
+`configuration::ParsedStringConfig<T>` stores accepted UTF-8 text together
+with a parsed value. The parser can reject a load value or `CONFIG SET` before
+either value changes. `CONFIG GET` preserves the accepted text exactly.
+
+```rust
+use std::sync::LazyLock;
+use redis_module::{RedisError, configuration::ParsedStringConfig};
+
+fn parse_limit(raw: &str) -> Result<u16, RedisError> {
+    raw.parse().map_err(|_| RedisError::Str("expected a u16"))
+}
+static LIMIT: LazyLock<ParsedStringConfig<u16>> =
+    LazyLock::new(|| ParsedStringConfig::new("8", parse_limit).unwrap());
+```
+
+Register `&*LIMIT` in the existing `string` configuration group with a default
+and flags. Registration still uses the Redis 7.0+ module configuration API.
+The constructor validates its initial text; Redis then validates and applies
+the registration default or configured load value. The existing
+`module_args_as_configuration: true` option validates module arguments too.
+
+Read under a context or locked worker with
+`LIMIT.with_value(ctx, |raw, parsed| (raw.to_owned(), *parsed))`.
+The closure receives a matching pair and cannot return borrowed references.
+Do not reenter the same configuration while the closure borrows it. `T` must
+be `Send`, but need not be `Clone` or `Sync`. For validation without a parsed
+value, return `Result<(), RedisError>` from the parser.
+
+Parsers should have no side effects: loading and rollback can call them more
+than once. Use the existing `on_changed` callback to observe accepted values;
+it cannot veto storage. See [parsed_configuration.rs](examples/parsed_configuration.rs)
+for registration, typed reads and observer usage. Cross-field validation and
+transactional side effects require a custom configuration implementation.
+
 ## Server clock
 
 `redis_module::milliseconds()` reads the current Unix time in milliseconds

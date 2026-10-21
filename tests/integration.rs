@@ -3593,6 +3593,135 @@ fn test_configuration_registration_errors_fail_the_load() -> Result<()> {
     Ok(())
 }
 
+mod parsed_configuration_tests {
+    use super::*;
+
+    fn value(con: &mut TestConnection) -> Result<(String, i64)> {
+        Ok(redis::cmd("parsed_config.value").query(con)?)
+    }
+
+    fn config(con: &mut TestConnection, name: &str) -> Result<String> {
+        let values: HashMap<String, String> = redis::cmd("CONFIG")
+            .arg(&["GET", &format!("parsed_configuration.{name}")])
+            .query(con)?;
+        Ok(values[&format!("parsed_configuration.{name}")].clone())
+    }
+
+    #[test]
+    fn test_parsed_configuration_updates_keep_raw_parsed_and_observers_consistent() -> Result<()> {
+        let mut con = TestConnection::new("parsed_configuration");
+        assert_eq!(value(&mut con)?, ("4".into(), 4));
+        assert_eq!(config(&mut con, "workers")?, "4");
+        assert_eq!(
+            redis::cmd("parsed_config.prefix").query::<String>(&mut con)?,
+            "items:"
+        );
+        redis::cmd("CONFIG")
+            .arg(&["SET", "parsed_configuration.workers", " 008 "])
+            .query::<()>(&mut con)?;
+        assert_eq!(value(&mut con)?, (" 008 ".into(), 8));
+        assert_eq!(config(&mut con, "workers")?, " 008 ");
+        for bad in ["", "0", "65", "65536", "bad"] {
+            let error = redis::cmd("CONFIG")
+                .arg(&["SET", "parsed_configuration.workers", bad])
+                .query::<()>(&mut con)
+                .unwrap_err();
+            assert!(
+                error.to_string().contains("workers must be 1..=64"),
+                "{error}"
+            );
+            assert_eq!(value(&mut con)?, (" 008 ".into(), 8));
+            assert_eq!(config(&mut con, "workers")?, " 008 ");
+        }
+        assert!(
+            redis::cmd("CONFIG")
+                .arg(&["SET", "parsed_configuration.workers"])
+                .arg(&b"\xff"[..])
+                .query::<()>(&mut con)
+                .is_err()
+        );
+        assert_eq!(value(&mut con)?, (" 008 ".into(), 8));
+        let observed: Vec<Value> = redis::cmd("parsed_config.observed").query(&mut con)?;
+        assert!(!observed.is_empty());
+        for pair in observed {
+            let pair: (String, i64) = redis::from_redis_value(&pair)?;
+            assert_eq!(pair, (" 008 ".into(), 8));
+        }
+        redis::cmd("CONFIG")
+            .arg(&["SET", "parsed_configuration.prefix", "café:"])
+            .query::<()>(&mut con)?;
+        assert_eq!(config(&mut con, "prefix")?, "café:");
+        assert_eq!(
+            redis::cmd("parsed_config.prefix").query::<String>(&mut con)?,
+            "café:"
+        );
+        for bad in ["", "missing-colon", "nul\0:"] {
+            assert!(
+                redis::cmd("CONFIG")
+                    .arg(&["SET", "parsed_configuration.prefix", bad])
+                    .query::<()>(&mut con)
+                    .is_err()
+            );
+            assert_eq!(config(&mut con, "prefix")?, "café:");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_parsed_configuration_module_arguments_are_validated_before_init() -> Result<()> {
+        let mut con = TestConnection::with_args(
+            "parsed_configuration",
+            &["workers", " 012 ", "prefix", "custom:"],
+        );
+        assert_eq!(value(&mut con)?, (" 012 ".into(), 12));
+        assert_eq!(config(&mut con, "workers")?, " 012 ");
+        assert_eq!(config(&mut con, "prefix")?, "custom:");
+        for args in [["workers", "0"], ["prefix", "bad"]] {
+            let error = match TestConnection::try_with_args("parsed_configuration", &args) {
+                Ok(_) => anyhow::bail!("invalid module argument loaded: {args:?}"),
+                Err(error) => format!("{error:#}"),
+            };
+            assert!(
+                error.contains("Redis rejected a module configuration value"),
+                "{error}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_parsed_configuration_failed_load_and_in_place_reload() -> Result<()> {
+        let mut con = TestConnection::new("parsed_configuration");
+        let module = utils::module_path("parsed_configuration")?;
+        redis::cmd("CONFIG")
+            .arg(&["SET", "parsed_configuration.workers", "9"])
+            .query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "parsed_configuration"])
+            .query::<()>(&mut con)?;
+        assert!(
+            redis::cmd("MODULE")
+                .arg(&["LOAD", &module, "workers", "0"])
+                .query::<()>(&mut con)
+                .is_err()
+        );
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        redis::cmd("MODULE")
+            .arg(&["LOAD", &module])
+            .query::<()>(&mut con)?;
+        assert_eq!(value(&mut con)?, ("4".into(), 4));
+        assert_eq!(config(&mut con, "prefix")?, "items:");
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "parsed_configuration"])
+            .query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg(&["LOAD", &module, "workers", "6"])
+            .query::<()>(&mut con)?;
+        assert_eq!(value(&mut con)?, ("6".into(), 6));
+        Ok(())
+    }
+}
+
 #[test]
 fn test_configuration_load_errors_fail_the_load() -> Result<()> {
     let mut con = TestConnection::with_log_file("hello");
