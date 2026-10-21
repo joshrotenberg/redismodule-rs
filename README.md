@@ -210,9 +210,11 @@ assert_eq!(key_slot(events_key.as_bytes()), 1234);
 A prefix must not contain `{`; a suffix can contain any bytes. This chooses a
 name, without discovering slot ownership or routing commands. It works on all
 server versions and does not return Redis's native canonical slot name.
-Retain the returned name if it identifies stored data; its exact bytes are not
-a cross-version contract. The first valid call builds a shared 48 KiB lookup
-table; subsequent calls allocate only the returned key. The `keys_pos` example
+For each valid slot, the exact returned key bytes are stable across SDK
+versions and server versions. Modules can recompute stored key names after an
+SDK upgrade. An exhaustive compatibility fixture pins all 16,384 names.
+The first valid call builds a shared 48 KiB lookup table; subsequent calls
+allocate only the returned key. The `keys_pos` example
 provides `key_for_slot <slot>` to try it from a client.
 
 ## Building and testing this repository

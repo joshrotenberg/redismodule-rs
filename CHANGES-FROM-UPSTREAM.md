@@ -144,7 +144,9 @@ these in October 2026.
 | [dabad65] | `configuration::get_memory_default_config_value`. |
 
 `cluster::key_for_slot` generates a tagged ASCII key for any valid hash slot,
-without a server or the native canonical-name API.
+without a server or the native canonical-name API. Its exact key names are
+stable across SDK and server versions; an exhaustive compatibility fixture
+pins the mapping for all 16,384 slots.
 
 The integration harness retries confirmed TCP address-in-use failures at
 `listen()` as well as `bind()`, requiring the matching socket and fatal port

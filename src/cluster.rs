@@ -29,9 +29,10 @@ pub fn key_slot(key: &[u8]) -> u16 {
 /// and any suffix can be added without changing its slot.
 ///
 /// This only chooses a name. It does not discover the slot's owner or grant
-/// permission to access it. The name is not Redis's canonical slot name, and
-/// its exact bytes are not a cross-version contract; retain the returned name
-/// when it identifies stored data.
+/// permission to access it. The name is not Redis's canonical slot name.
+/// For each valid slot, the exact returned key bytes are stable across SDK
+/// versions and server versions, so stored key names can be recomputed after
+/// an SDK upgrade.
 ///
 /// The first valid call builds a shared 48 KiB tag table by a bounded search;
 /// later calls only look up the tag and allocate the returned five-byte key.
@@ -64,6 +65,9 @@ fn slot_tags() -> &'static [[u8; 3]; SLOTS as usize] {
         // None of these bytes can delimit a hash tag. Exhaustive tests prove
         // that three-byte combinations cover every slot. Stop once all slots
         // are filled; the search is bounded by 64^3 candidates.
+        // Alphabet order, traversal order and first-match selection define
+        // the stable key names. Any optimization must preserve the full v1
+        // mapping pinned by the compatibility fixture below.
         const ALPHABET: &[u8; 64] =
             b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
         let mut tags = [[0; 3]; SLOTS as usize];
@@ -103,6 +107,23 @@ fn crc16(bytes: &[u8]) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_key_names_are_stable() {
+        // Captured from the original implementation before the stability
+        // guarantee. Each line is the exact key for that zero-based slot.
+        // This is a compatibility baseline, not a snapshot to regenerate
+        // when the implementation changes.
+        let mut expected = include_str!("cluster/key_for_slot_v1.txt").lines();
+        for slot in 0..SLOTS {
+            assert_eq!(
+                key_for_slot(slot).as_deref(),
+                expected.next(),
+                "slot {slot} must retain its existing key name"
+            );
+        }
+        assert!(expected.next().is_none(), "one fixture entry per slot");
+    }
 
     #[test]
     fn generated_keys_cover_every_slot() {
