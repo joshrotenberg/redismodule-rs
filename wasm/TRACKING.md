@@ -220,6 +220,15 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-21: rebased onto SDK master `8969a12`, which expands required CI
+  coverage, caches checksum-pinned server builds and retains failure logs.
+  No host adaptation needed. Rust 1.94.0 and Redis 8.10.2: workspace/guest
+  formatting, workspace Clippy, separate SDK 7.2 Clippy, example builds, and
+  guest Clippy passed. With `RUST_TEST_THREADS=4`, the full suite passed:
+  53 SDK unit tests, 111 SDK integration tests, four standalone harness cases,
+  seven host unit tests, 21 host integration tests with JavaScript,
+  62 SDK doctests, and four guest helper tests.
+
 - 2026-10-21: rebased onto SDK master `9e86313`, which releases captured data
   when Redis rejects a post-notification job and adds a notification-write
   guide/example. No host adaptation needed. Rust 1.94.0 and Redis 8.10.2:

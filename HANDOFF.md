@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `9e86313`, rejected notification-job cleanup and write guide merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `8969a12`, expanded server CI merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `9e86313` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `8969a12` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -40,7 +40,8 @@ git fetch fork && git fetch origin
   `rustc` (for example Homebrew's) comes first on the `PATH`, run cargo with
   `PATH=$HOME/.cargo/bin:$PATH` so rustup's pinned toolchain is used.
 - Redis: the integration tests start `redis-server` from the `PATH` (run
-  locally with 8.10.2). CI builds Redis 7.2, 7.4 and 8.0 from source. For other
+  locally with 8.10.2). CI builds pinned Redis 7.2, 7.4 and 8.0 through 8.10 releases, plus Valkey
+  8.1 and 9.1 at the default SDK floor. For other
   versions, the `redis:<version>` Docker images work; with colima on macOS only
   `$HOME` is mounted, so copy a built module into a container with `docker cp`.
 - wasm branch only: `rustup target add wasm32-unknown-unknown`. The JavaScript
@@ -154,7 +155,14 @@ Existing phase-only flush handlers remain supported. No host adaptation needed.
 Notification writes merged in `9e86313`: rejected post-notification jobs now
 release their captured data. The guide and `keyspace_to_stream` example cover
 owned callback data, loop prevention, replication and teardown. No host
-adaptation needed. The next survey item is a wider CI matrix.
+adaptation needed.
+
+Expanded CI merged in `8969a12`: checksum-pinned server builds are cached per
+runner image and selected through `TEST_REDIS_SERVER_BIN`. Failure logs are
+retained for seven days. All six Linux API floors and both macOS floor checks
+remain covered; newer Redis and default-floor Valkey legs are required.
+No host adaptation needed. The next SDK survey item is a pure slot-to-key
+cluster helper.
 
 Also open:
 
