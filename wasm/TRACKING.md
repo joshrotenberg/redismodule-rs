@@ -60,10 +60,10 @@ Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 `wit-bindgen` 0.44.
 
-### Current handoff checkpoint
+### Current checkpoint
 
-The shared [development handoff](../HANDOFF.md) records completed SDK work,
-all open issues and the account-independent review/merge workflow. SDK functional
+The repository's [contributing rules](../CONTRIBUTING.md) record the review,
+merge and sync workflow, and the issue backlog is the work list. SDK functional
 changes through `41f4f1a` are integrated. PR 79 is merged as `b787fef`;
 its [PR CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39809579615)
 and actual [experiment push CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39811561168)
@@ -84,16 +84,23 @@ existing benchmark results below are historical, not fresh measurements. Issue 8
 is the first wasm item and gates the allocator policy (68), external-runtime
 access (54) and streaming replies (55).
 
-The account handoff documentation from SDK master `53ab335` is also integrated
-([PR 87](https://github.com/joshrotenberg/redismodule-rs/pull/87), independently
-reviewed at `bbbc3a0`; all 20 exact-head checks passed). This sync replaces the
-old root handoff with the shared document; its earlier long-form narrative
-remains linked in Git history. No runtime source or dependency graph changed.
+SDK master `e99779e` ([PR 94](https://github.com/joshrotenberg/redismodule-rs/pull/94))
+replaced the shared handoff from PR 87 with those contributing rules; both
+handoff versions remain in Git history. No runtime source or dependency graph
+changed.
 
 ### Historical SDK sync checkpoints
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-10-22: merged SDK master `e99779e` into the branch as `e7f9e9a`. It
+  removes `HANDOFF.md` and adds `CONTRIBUTING.md`, which keeps the durable
+  working rules; the README points at it. SDK PR 94 passed two rounds of
+  independent review and all 20 exact-head CI checks at `81a204e`, and the
+  squash tree equals that head. Only documentation changed relative to the
+  validated `991c541`: no host/guest source, dependency graph or lock snapshot
+  changed, so the experiment push CI is the validation for this sync.
 
 - 2026-10-22: merged SDK master `41f4f1a` into the branch as `3c1489d`. The
   SDK change requires owned `Send` blocking-call unblock handlers and releases
