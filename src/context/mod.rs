@@ -1409,6 +1409,11 @@ impl RuntimeContext {
 
 impl EventContext {
     /// Like [`RuntimeContext::call_ext`], allowing blocking commands such as BLPOP.
+    ///
+    /// Under `redis_module!` it fails while the module loads or unloads: Redis
+    /// can free a load that fails, or force an unload that must succeed, while
+    /// the call's unblock handler is pending. Start blocking calls from
+    /// commands or events after loading finishes.
     #[cfg(any(
         feature = "min-redis-compatibility-version-8-0",
         feature = "min-redis-compatibility-version-7-4",
@@ -1425,6 +1430,11 @@ impl EventContext {
         options: &BlockingCallOptions,
         args: T,
     ) -> R {
+        if let Some(refusal) = call_reply::blocking_call_refusal() {
+            return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                refusal.into(),
+            ))));
+        }
         self.call_internal(command, options.options.as_ptr() as *const c_char, args)
     }
 
