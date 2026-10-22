@@ -275,7 +275,9 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 - **Breaking:** `RuntimeContext::auto_memory` is `unsafe`. AutoMemory also
   frees the promise reply of each blocking call, so the caller must dispose or
-  abort every `FutureHandler` from such a call before the callback returns.
+  abort every `FutureHandler` from such a call before the callback returns, and
+  drop call replies on the thread that holds the context. AutoMemory stays
+  enabled for the rest of the native context's life.
   See the [AutoMemory migration notes](docs/MIGRATING-3.0.md#auto_memory-is-unsafe).
 
 - **Breaking:** blocking-call unblock handlers require `Send + 'static`. Redis

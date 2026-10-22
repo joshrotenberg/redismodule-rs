@@ -231,10 +231,14 @@ without a context.
 handles without AutoMemory, but AutoMemory also frees the promise reply of each
 blocking call made through the context. Dispose or abort every `FutureHandler`
 from such a call before the callback returns or the thread-safe context is
-freed, then wrap the call with a safety comment:
+freed. AutoMemory stays enabled for the rest of the native context's life, so
+this covers blocking calls made later through any view of the same context.
+Drop call replies on the thread that holds the context. Then wrap the call with
+a safety comment:
 
 ```rust,ignore
-// SAFETY: this callback disposes every FutureHandler it creates before it returns.
+// SAFETY: every FutureHandler from this context is disposed before the
+// callback returns, and its call replies are dropped on this thread.
 unsafe { ctx.auto_memory() };
 ```
 
