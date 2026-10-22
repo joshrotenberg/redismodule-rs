@@ -269,6 +269,18 @@ starting work, send the reply through the blocked client's `ThreadSafeContext`,
 and return `RedisValue::NoReply`. Scripts, transactions and other denied
 invocations fail before native blocking. See [block.rs](examples/block.rs).
 
+## Timers
+
+`ctx.create_timer(delay, callback, data)?` returns a typed `TimerHandle<T>`.
+Callbacks and payloads require `Send + 'static`. Keep the handle to call
+`ctx.cancel_timer(&handle)?` or query `ctx.timer_remaining(&handle)?`;
+cancellation returns the payload at most once and queries expose only metadata.
+Dropping a handle leaves the timer running. Creation requires an active module
+bound through `redis_module!` and fails during initialization or unload. The
+SDK protects pending and firing timers during unload. See
+[timer.rs](examples/timer.rs) and the
+[timer migration notes](docs/MIGRATING-3.0.md#timers-use-typed-handles).
+
 ## Server clock
 
 `redis_module::milliseconds()` reads the current Unix time in milliseconds

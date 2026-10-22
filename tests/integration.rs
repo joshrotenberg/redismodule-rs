@@ -394,6 +394,375 @@ fn test_timer_event_context_uses_its_selected_database() -> Result<()> {
     Ok(())
 }
 
+fn timer_probe_counts(con: &mut TestConnection) -> Result<Vec<i64>> {
+    Ok(redis::cmd("timer.probe_counts").query(con)?)
+}
+
+#[test]
+fn test_typed_timer_cancellation_recovers_data_and_drops_captures_once() -> Result<()> {
+    let mut con = TestConnection::new("timer");
+    let id: String = redis::cmd("timer.create")
+        .arg(&["60000", "payload"])
+        .query(&mut con)?;
+    let remaining: Option<i64> = redis::cmd("timer.info").arg(&id).query(&mut con)?;
+    assert!(remaining.is_some_and(|ms| (1..=60000).contains(&ms)));
+    assert_eq!(
+        redis::cmd("timer.stop")
+            .arg(&id)
+            .query::<Option<String>>(&mut con)?,
+        Some("payload".to_owned())
+    );
+    assert_eq!(
+        redis::cmd("timer.stop")
+            .arg(&id)
+            .query::<Option<String>>(&mut con)?,
+        None
+    );
+    assert_eq!(
+        redis::cmd("timer.info")
+            .arg(&id)
+            .query::<Option<i64>>(&mut con)?,
+        None
+    );
+
+    let id: String = redis::cmd("timer.probe")
+        .arg(&["fire", "60000"])
+        .query(&mut con)?;
+    assert!(
+        redis::cmd("timer.probe_info")
+            .arg(&id)
+            .query::<Option<i64>>(&mut con)?
+            .is_some()
+    );
+    assert_eq!(
+        redis::cmd("timer.probe_stop")
+            .arg(&id)
+            .query::<Option<i64>>(&mut con)?,
+        Some(7)
+    );
+    assert_eq!(timer_probe_counts(&mut con)?, [0, 1, 1, 0, 0]);
+    assert_eq!(
+        redis::cmd("timer.probe_stop")
+            .arg(&id)
+            .query::<Option<i64>>(&mut con)?,
+        None
+    );
+    assert_eq!(
+        redis::cmd("timer.probe_info")
+            .arg(&id)
+            .query::<Option<i64>>(&mut con)?,
+        None
+    );
+    assert_eq!(timer_probe_counts(&mut con)?, [0, 1, 1, 0, 0]);
+
+    redis::cmd("timer.invalid_delay")
+        .query::<Value>(&mut con)
+        .expect_err("an excessive timer delay was accepted");
+    assert_eq!(
+        timer_probe_counts(&mut con)?,
+        [0, 2, 2, 0, 0],
+        "rejected creation must release both arguments"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_typed_timer_cancellation_destructor_panic_finishes_ownership() -> Result<()> {
+    let mut con = TestConnection::new("timer");
+    let id: String = redis::cmd("timer.probe")
+        .arg(&["cancel-panic", "60000"])
+        .query(&mut con)?;
+    let error = redis::cmd("timer.probe_stop")
+        .arg(&id)
+        .query::<Option<i64>>(&mut con)
+        .expect_err("a panicking timer capture destructor was not reported");
+    assert!(
+        error
+            .to_string()
+            .contains("command panicked: timer capture drop panic")
+    );
+    assert_eq!(timer_probe_counts(&mut con)?, [0, 1, 1, 0, 0]);
+    assert_eq!(
+        redis::cmd("timer.probe_stop")
+            .arg(&id)
+            .query::<Option<i64>>(&mut con)?,
+        None
+    );
+    assert_eq!(
+        redis::cmd("timer.probe_info")
+            .arg(&id)
+            .query::<Option<i64>>(&mut con)?,
+        None
+    );
+    assert_eq!(timer_probe_counts(&mut con)?, [0, 1, 1, 0, 0]);
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "timer"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_typed_timer_firing_passive_drop_panic_and_reentry() -> Result<()> {
+    let mut con = TestConnection::new("timer");
+    for (index, mode) in ["fire", "passive", "panic", "reenter"]
+        .into_iter()
+        .enumerate()
+    {
+        let id: String = redis::cmd("timer.probe")
+            .arg(&[mode, "0"])
+            .query(&mut con)?;
+        let expected = i64::try_from(index + 1)?;
+        utils::wait_until(
+            Duration::from_secs(5),
+            "timer callback and owned-value cleanup",
+            || {
+                let counts = timer_probe_counts(&mut con)?;
+                Ok(counts[..3] == [expected, expected, expected])
+            },
+        )?;
+        if mode != "passive" {
+            assert_eq!(
+                redis::cmd("timer.probe_stop")
+                    .arg(&id)
+                    .query::<Option<i64>>(&mut con)?,
+                None
+            );
+            assert_eq!(
+                redis::cmd("timer.probe_info")
+                    .arg(&id)
+                    .query::<Option<i64>>(&mut con)?,
+                None
+            );
+        }
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    assert_eq!(timer_probe_counts(&mut con)?, [4, 4, 4, 1, 0]);
+    assert!(con.server_log()?.contains("timer probe callback panic"));
+    Ok(())
+}
+
+#[test]
+fn test_typed_timer_pending_unload_refusal_and_reload() -> Result<()> {
+    let mut con = TestConnection::new("timer");
+    let path = utils::module_path("timer")?;
+    for _ in 0..2 {
+        let id: String = redis::cmd("timer.probe")
+            .arg(&["fire", "60000"])
+            .query(&mut con)?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "timer"])
+            .query::<()>(&mut con)
+            .expect_err("pending timer allowed module unload");
+        assert!(
+            redis::cmd("timer.probe_info")
+                .arg(&id)
+                .query::<Option<i64>>(&mut con)?
+                .is_some()
+        );
+        assert_eq!(
+            redis::cmd("timer.probe_stop")
+                .arg(&id)
+                .query::<Option<i64>>(&mut con)?,
+            Some(7)
+        );
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "timer"])
+            .query::<()>(&mut con)?;
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(&path)
+            .query::<()>(&mut con)?;
+        assert_eq!(timer_probe_counts(&mut con)?, [0, 0, 0, 0, 0]);
+    }
+    Ok(())
+}
+
+#[test]
+fn test_typed_timer_init_rejects_creation_and_releases_owned_values() -> Result<()> {
+    let mut con = TestConnection::new("timer");
+    let path = utils::module_path("timer")?;
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "timer"])
+        .query::<()>(&mut con)?;
+    for mode in ["init-denied", "init-error", "init-panic"] {
+        let record = std::env::temp_dir().join(format!(
+            "sdk-timer-rollback-{}-{}-{mode}",
+            std::process::id(),
+            con.port()
+        ));
+        let _ = std::fs::remove_file(&record);
+        let result = redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(&path)
+            .arg(mode)
+            .arg(record.to_string_lossy().as_ref())
+            .query::<()>(&mut con);
+        if mode == "init-denied" {
+            result?;
+            redis::cmd("MODULE")
+                .arg(&["UNLOAD", "timer"])
+                .query::<()>(&mut con)?;
+        } else {
+            result.expect_err("timer init failure was accepted");
+        }
+        let bytes = std::fs::read(&record)
+            .context("timer init did not record rejected creation and owned-value cleanup")?;
+        let mut sorted = bytes;
+        sorted.sort_unstable();
+        assert_eq!(
+            sorted, b"CDE",
+            "creation must fail and callback and payload must each drop once"
+        );
+        std::fs::remove_file(&record)?;
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(&path)
+            .query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "timer"])
+            .query::<()>(&mut con)?;
+    }
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(&path)
+        .query::<()>(&mut con)?;
+    Ok(())
+}
+
+#[test]
+fn test_typed_timer_native_post_load_rejection_allows_reload() -> Result<()> {
+    let mut con = TestConnection::new("timer");
+    let path = utils::module_path("timer")?;
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "timer"])
+        .query::<()>(&mut con)?;
+    let record = std::env::temp_dir().join(format!(
+        "sdk-timer-post-load-{}-{}",
+        std::process::id(),
+        con.port()
+    ));
+    let _ = std::fs::remove_file(&record);
+    // LOADEX rejects its unconsumed configuration after OnLoad returned success.
+    // The SDK must survive Redis's subsequent cleanup and bind a fresh lifecycle.
+    redis::cmd("MODULE")
+        .arg("LOADEX")
+        .arg(&path)
+        .arg(&["CONFIG", "timer.unknown", "1", "ARGS", "init-denied"])
+        .arg(record.to_string_lossy().as_ref())
+        .query::<()>(&mut con)
+        .expect_err("an unconsumed LOADEX configuration was accepted");
+    let mut markers = std::fs::read(&record)
+        .context("successful SDK initialization did not record rejected timer creation")?;
+    markers.sort_unstable();
+    assert_eq!(
+        markers, b"CDE",
+        "init must reject creation and release both owned values"
+    );
+    std::fs::remove_file(&record)?;
+    let log = con.server_log()?;
+    assert!(
+        log.contains("Loadex configurations were not applied"),
+        "{log}"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(&path)
+        .query::<()>(&mut con)?;
+    let id: String = redis::cmd("timer.create")
+        .arg(&["60000", "after-native-rejection"])
+        .query(&mut con)?;
+    assert_eq!(
+        redis::cmd("timer.stop")
+            .arg(&id)
+            .query::<Option<String>>(&mut con)?,
+        Some("after-native-rejection".to_owned())
+    );
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "timer"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_typed_timer_unload_phase_rejects_creation_and_restores_after_refusal() -> Result<()> {
+    let mut con = TestConnection::new("timer");
+    let path = utils::module_path("timer")?;
+    for mode in ["deinit-reject", "deinit-panic", "deinit-create"] {
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "timer"])
+            .query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(&path)
+            .arg(mode)
+            .query::<()>(&mut con)?;
+        if mode == "deinit-create" {
+            redis::cmd("MODULE")
+                .arg(&["UNLOAD", "timer"])
+                .query::<()>(&mut con)?;
+            assert_eq!(
+                redis::cmd("GET")
+                    .arg("timer:deinit-create-denied")
+                    .query::<Option<String>>(&mut con)?,
+                Some("1".to_owned())
+            );
+        } else {
+            redis::cmd("MODULE")
+                .arg(&["UNLOAD", "timer"])
+                .query::<()>(&mut con)
+                .expect_err("deinit refusal was ignored");
+            let id: String = redis::cmd("timer.create")
+                .arg(&["60000", "after-refusal"])
+                .query(&mut con)?;
+            assert_eq!(
+                redis::cmd("timer.stop")
+                    .arg(&id)
+                    .query::<Option<String>>(&mut con)?,
+                Some("after-refusal".to_owned())
+            );
+            redis::cmd("MODULE")
+                .arg(&["UNLOAD", "timer"])
+                .query::<()>(&mut con)?;
+        }
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(&path)
+            .query::<()>(&mut con)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_typed_timer_can_be_created_by_a_worker_notification() -> Result<()> {
+    let mut con = TestConnection::with_args("timer", &["worker"]);
+    for _ in 0..2 {
+        redis::cmd("timer.worker").query::<()>(&mut con)?;
+        utils::wait_until(Duration::from_secs(5), "timer worker join", || {
+            Ok(redis::cmd("timer.finish").query::<i64>(&mut con)? == 1)
+        })?;
+        utils::wait_until(
+            Duration::from_secs(5),
+            "worker-origin timer firing and cleanup",
+            || Ok(timer_probe_counts(&mut con)? == [1, 1, 1, 0, 1]),
+        )?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "timer"])
+            .query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(utils::module_path("timer")?)
+            .arg("worker")
+            .query::<()>(&mut con)?;
+    }
+    Ok(())
+}
+
 #[test]
 fn test_event_context_post_notification_writes_in_selected_database() -> Result<()> {
     let mut con = TestConnection::new("events");

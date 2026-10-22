@@ -30,7 +30,7 @@ pub use call_user::CallUserScope;
 mod registration;
 mod views;
 pub use views::{EventContext, RuntimeContext, WorkerContext};
-mod timer;
+pub(crate) mod timer;
 pub use registration::RegistrationContext;
 
 pub mod blocked;

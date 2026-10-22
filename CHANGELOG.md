@@ -119,6 +119,15 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- **Breaking:** timers return `Result<TimerHandle<T>, RedisError>` and require
+  `Send + 'static` callbacks and payloads. `cancel_timer(&handle)` replaces
+  untyped `stop_timer<T>` and recovers the payload at most once;
+  `timer_remaining(&handle)` replaces payload-borrowing `get_timer_info<T>`.
+  Dropping a handle leaves its timer running. Creation requires an active module
+  bound through `redis_module!`; initialization and unload reject new timers.
+  SDK lifecycle hooks protect pending and firing timers during unload. See the
+  [timer migration notes](docs/MIGRATING-3.0.md#timers-use-typed-handles).
+
 - **Breaking:** `Context::block_client` returns `Result<BlockedClient,
   RedisError>`. It rejects denied invocations before native blocking, including
   scripts, transactions, module calls without blocking permission, and
@@ -215,6 +224,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - The dependencies `nix`, `strum_macros`, `regex`, `backtrace`, `enum-primitive-derive` and `num-traits`.
 
 ### Fixed
+
+- Timer cancellation now releases the complete callback allocation, including
+  captured closure state. Typed handles prevent caller-selected payload casts,
+  and timer queries no longer expose references that cancellation can invalidate.
+  Creation validates API availability and delay before retaining timer state.
 
 - Repeated `CallOptionsBuilder::resp` selections now replace the previous
   protocol, including switching back to RESP2 or Auto after RESP3. Other call

@@ -36,7 +36,7 @@ fn panic_timer(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
         Duration::from_millis(1),
         |_: &redis_module::EventContext, _: ()| panic!("timer callback panicked"),
         (),
-    );
+    )?;
     Ok("timer created".into())
 }
 

@@ -477,6 +477,14 @@ macro_rules! redis_module {
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
                     let runtime_context = unsafe { $crate::EventContext::new(ctx) };
+                    // SAFETY: Init succeeded; this is the module's single OnLoad.
+                    let timer_load = match unsafe { $crate::__private::TimerLoadGuard::begin(&runtime_context) } {
+                        Ok(guard) => guard,
+                        Err(error) => {
+                            runtime_context.log_warning(&format!("{error}"));
+                            return raw::Status::Err as c_int;
+                        }
+                    };
                     // SAFETY: Init succeeded and this scope is inside OnLoad.
                     let context = unsafe { $crate::RegistrationContext::from_context(&runtime_context) };
                     unsafe {
@@ -659,6 +667,7 @@ macro_rules! redis_module {
                         }
                     )*
 
+                    timer_load.commit();
                     raw::Status::Ok as c_int
                 },
                 || raw::Status::Err as c_int,
@@ -677,12 +686,21 @@ macro_rules! redis_module {
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
                     let context = unsafe { $crate::EventContext::new(ctx) };
+                    // SAFETY: This is the module's native OnUnload callback.
+                    let timer_unload = match unsafe { $crate::__private::TimerUnloadGuard::begin(&context) } {
+                        Ok(guard) => guard,
+                        Err(error) => {
+                            context.log_warning(&format!("{error}"));
+                            return $crate::Status::Err as c_int;
+                        }
+                    };
                     $(
                         if $deinit_func(&context) == $crate::Status::Err {
                             return $crate::Status::Err as c_int;
                         }
                     )*
 
+                    timer_unload.commit();
                     $crate::raw::Status::Ok as c_int
                 },
                 || $crate::raw::Status::Err as c_int,

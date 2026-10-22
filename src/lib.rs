@@ -4,6 +4,7 @@ pub use crate::context::InfoContext;
 // SDK's registration implementation dependencies themselves.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::context::timer::{TimerLoadGuard, TimerUnloadGuard};
     pub use ::libc::EBUSY;
     pub use ::linkme;
     pub use ::redis_module_macros_internals::__register_command_list;
@@ -38,6 +39,7 @@ pub use crate::context::blocked::{BlockedClient, ReplyingBlockedClient};
 pub use crate::context::thread_safe::{
     ContextGuard, DetachedFromClient, RedisGILGuard, RedisLockIndicator, ThreadSafeContext,
 };
+pub use crate::context::timer::TimerHandle;
 pub use crate::io::RedisModuleIO;
 // The raw types that the safe API uses; the rest of the raw bindings are
 // under `raw`.

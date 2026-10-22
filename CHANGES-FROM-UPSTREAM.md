@@ -110,6 +110,19 @@ these in October 2026.
 
 ## Additions
 
+Timers use opaque `TimerHandle<T>` values with explicit cancellation and
+metadata-only queries. **Breaking:** creation returns a result and requires
+`Send + 'static` callbacks and payloads; untyped `stop_timer<T>` and
+payload-borrowing `get_timer_info<T>` are replaced by `cancel_timer(&handle)`
+and `timer_remaining(&handle)`. Cancellation recovers the payload at most once
+and releases captured callback state. Dropping a handle leaves the timer
+scheduled. Creation requires an active module bound through `redis_module!`
+and fails during initialization or unload. SDK lifecycle hooks guard unload
+against pending, firing or newly registered timers. See the
+[migration guide](docs/MIGRATING-3.0.md#timers-use-typed-handles) and
+[timer example](examples/timer.rs). Cancellation-on-drop and payload inspection
+are separate work.
+
 Repeated `CallOptionsBuilder::resp` selections now use the last requested
 protocol. Previously, RESP2 did not clear earlier selections and a stale RESP3
 flag overrode Auto. Other call flags and API signatures remain unchanged; the

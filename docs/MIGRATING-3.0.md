@@ -31,6 +31,67 @@ without a `From` conversion.
 
 ## Changes the compiler reports
 
+### Timers use typed handles
+
+`EventContext::create_timer` now returns
+`Result<TimerHandle<T>, RedisError>`. Command contexts reach it through the
+event view. Creation is supported only while the module is active: move timer
+setup out of `init` and into a runtime command or event after loading finishes.
+Check the result and retain the typed handle when the module needs to cancel
+or query the timer:
+
+```rust,ignore
+let timer: TimerHandle<String> = ctx.create_timer(
+    Duration::from_secs(1),
+    |ctx, value| ctx.log_notice(&value),
+    String::from("ready"),
+)?;
+let remaining: Option<Duration> = ctx.timer_remaining(&timer)?;
+let recovered: Option<String> = ctx.cancel_timer(&timer)?;
+```
+
+`cancel_timer(&handle)` replaces `stop_timer<T>(raw_id)`. It returns
+`Some(data)` once after successful cancellation, `None` when the timer is
+already firing, fired or cancelled, and an error for an API or lifecycle
+failure. An error leaves the handle available for another query or attempt.
+The SDK releases captured callback state and recovers the original payload
+without casting an arbitrary native pointer to the caller's chosen type.
+
+`timer_remaining(&handle)` replaces `get_timer_info<T>(raw_id)`. It returns
+remaining time for a pending timer and `None` after firing begins or after
+cancellation. It does not borrow the payload. If commands expose timer IDs,
+keep an application-owned mapping from those display IDs to typed handles;
+an integer is not sufficient to reconstruct a `TimerHandle<T>`.
+
+Dropping a handle leaves its timer scheduled. This preserves fire-and-forget
+usage: `ctx.create_timer(delay, callback, data)?;` checks creation without
+requiring the handle to be retained. Explicit cancellation requires a live
+module-owned event context and the Redis lock. A clone refers to the same
+timer, so cancelling through one handle makes cancellation through another
+return `None`.
+
+Both callback captures and payloads must be `Send + 'static`; `Sync` is not
+required. A timer may be registered from an event delivered on a locked worker
+and later run on Redis's main thread. Copy borrowed arguments into owned
+values and replace shared `Rc` captures with transferable ownership or suitable
+thread-safe state. `RedisString` remains non-`Send`; retain owned `String` or
+`Vec<u8>` data instead of a native string owner.
+
+Creation validates the delay and required APIs before retaining state. Zero
+delay schedules the next event-loop opportunity, positive submillisecond
+delays round up to one millisecond, and durations that overflow the native
+timer calculation return an error.
+
+`redis_module!` provides the timer lifecycle binding. Creation returns an error
+during module loading or initialization, during unload, or without this binding.
+Redis can reject a load after the SDK's initialization hook succeeds, so timers
+cannot safely retain native callbacks during initialization. Pending or firing
+timers prevent unload, and a refused unload restores the active lifecycle.
+Custom native loaders without this binding cannot create SDK timers; the
+macro's hidden lifecycle hooks are not a stable custom-loader API. See the
+[upgrade guide](UPGRADING-MODULES.md#sdk-timers-and-unload) for shutdown order.
+Cancellation-on-drop and payload-inspection helpers are not part of this API.
+
 ### Direct client blocking returns a result
 
 `Context::block_client()` now returns `Result<BlockedClient, RedisError>`.

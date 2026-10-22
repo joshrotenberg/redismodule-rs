@@ -274,7 +274,7 @@ fn timer(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         return Err(RedisError::WrongArity);
     }
     let username = args[1].try_as_str()?.to_owned();
-    ctx.create_timer(Duration::from_millis(1), on_timer, username);
+    ctx.create_timer(Duration::from_millis(1), on_timer, username)?;
     Ok("OK".into())
 }
 
