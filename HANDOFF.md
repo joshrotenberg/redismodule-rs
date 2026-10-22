@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `6c1f3a1`, public macro Syn 2 migration merged after independent review and all 20 PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `3b2b845`, early compatibility-floor validation and workspace guide merged after independent review and all 20 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `6c1f3a1` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `3b2b845` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -287,6 +287,15 @@ explicit SDK test fallback and refusal without fallback. The normal SDK graph,
 production allocator guards and host source are unchanged. Check the fixture
 separately; its manifests declare independent workspaces.
 
+The [compatibility-floor workspace guide](docs/COMPATIBILITY-FLOORS.md) merged
+in `3b2b845`. Its multi-consumer controls exposed a missing early guard: mixed
+floors could select lower-version API signatures. The SDK build script now
+rejects zero or multiple floors before C compilation or wrapper expansion.
+Valid single-floor builds and runtime API availability are unchanged. Separate
+package builds can use different floors; a combined build must agree on one.
+Issue 59 stays open for the parked feature-design decision. No host adaptation
+needed; the existing alternate-floor host exclusion remains required.
+
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).
 The [priority 2 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A2+sort%3Acreated-asc)
@@ -346,6 +355,16 @@ cargo clippy --manifest-path examples/module-testing/Cargo.toml --all-targets --
 cargo test --manifest-path examples/module-testing/Cargo.toml
 ```
 
+The compatibility-floor fixture is also an independent workspace:
+
+```bash
+cargo fmt --manifest-path examples/compatibility-floors/Cargo.toml --all -- --check
+python3 examples/compatibility-floors/check.py
+# With the minimum toolchain installed:
+python3 examples/compatibility-floors/check.py --toolchain 1.87.0
+```
+
+Its negative controls must fail with the SDK's floor-selection diagnostic.
 The [testing guide](docs/TESTING-MODULES.md) has the native companion and pinned
 fuzz/allocator controls. Run those when changing the fixture or its SDK integration.
 

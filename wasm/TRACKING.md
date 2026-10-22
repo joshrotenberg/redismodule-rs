@@ -190,7 +190,7 @@ can be an ordinary PR. A done item names its commit on master.
 | S2 | done, a5eb60d | `RedisValueKey` had no simple string, so a map key sent as a simple string went out as a bulk string. `RedisValueKey::SimpleString` keeps it. |
 | S3 | todo ([issue 54](https://github.com/joshrotenberg/redismodule-rs/issues/54)) | No lifetime-safe way to hand a `Context` to code that needs `'static` data, such as a runtime's store. |
 | S4 | todo ([issue 55](https://github.com/joshrotenberg/redismodule-rs/issues/55)) | Replies can only be built as a `RedisValue` tree; the low-level reply functions are crate-private since 3.0, so nothing streams a reply. |
-| S5 | todo ([issue 59](https://github.com/joshrotenberg/redismodule-rs/issues/59)) | The `min-redis-compatibility-*` floors are mutually exclusive, and Cargo unifies features across a workspace, so a second module crate in the workspace must use the root's floor. The full-workspace 7.2 Clippy check combines that floor with the host's default 6.0 floor and fails. Run alternate-floor SDK checks with `--exclude redis-module-wasm`; check the host in the default-floor workspace build. |
+| S5 | current contract documented; design open ([issue 59](https://github.com/joshrotenberg/redismodule-rs/issues/59)) | All consumers selected in one Cargo build must agree on one `min-redis-compatibility-*` floor. Separate package builds can choose independently; the [workspace guide](../docs/COMPATIBILITY-FLOORS.md) and compile controls cover both. The SDK build script now diagnoses zero/multiple floors early. Full-workspace 7.2 validation combines that floor with the host's default 6.0: exclude `redis-module-wasm` for alternate-floor SDK checks, and check the host in the default-floor workspace build. Floor redesign remains parked. |
 | S6 | worked around ([issue 70](https://github.com/joshrotenberg/redismodule-rs/issues/70)) | On macOS a stripped release build of the host fails to load ("mis-aligned LINKEDIT string pool"); the workspace sets `strip = "none"` for it. Check with a newer toolchain. |
 | S7 | done, 9ea85f4 | `ServerInfo::field` panicked on a field name with a NUL byte; upstream returns `None`, and so does it now. |
 | S8 | done, 6d21760 | `Cargo.toml`'s `repository` field named upstream. |
@@ -221,6 +221,24 @@ evidence as the host meets them.
 | Q1 | Where the crate lives so others can use it. Answered: the fork's `experiment/wasm-host` branch, kept rebased on master. |
 
 ## Log
+
+- 2026-10-22: rebased onto SDK master `3b2b845`, which adds early validation of
+  the documented exactly-one API-floor contract and a multi-consumer workspace
+  guide. SDK PR 78 received independent native review and all 20 exact-head CI
+  checks passed before merge; the merge tree equals the reviewed head. All 61
+  prior wasm patches are unchanged and no host source adaptation is needed.
+  Issue 59 stays open for feature redesign, which remains parked; the current
+  separate-package and aligned-floor recipes are documented and tested.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy, strict default workspace and host-excluded 7.2 docs pass.
+  Guest formatting/wasm32 linting pass. Tests pass: 69 SDK units, 154 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 9 macro parser tests,
+  7 host units, 21 host integrations including JavaScript, 84 SDK doctests and
+  4 guest helper tests. The isolated author parser fixture passes format/lint/unit.
+  The eleven compatibility-floor controls pass under optimized Python on Rust
+  1.94 and 1.87. A deliberate full-workspace 7.2 build, including the host's
+  default 6.0 edge, fails with the specific new SDK floor diagnostic; excluding
+  the host passes. Native review cleared the branch integration and sync notes.
 
 - 2026-10-22: rebased onto SDK master `6c1f3a1`, which completes the public
   macro Syn 2 migration and closes issue 57. SDK PR 77 received independent
