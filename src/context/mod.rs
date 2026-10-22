@@ -72,8 +72,8 @@ pub struct BlockingCallOptions {
     options: CString,
 }
 
-#[derive(Copy, Clone)]
 /// The reply protocol selected by [`CallOptionsBuilder::resp`].
+#[derive(Copy, Clone)]
 pub enum CallOptionResp {
     /// RESP2 replies, the default for module calls.
     Resp2,
