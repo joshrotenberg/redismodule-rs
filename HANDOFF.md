@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `0f6e76b`, internal macro Syn 2 migration merged after independent review and all 20 PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `ef5b2c9`, SDK development client refresh merged after independent review and all 20 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `0f6e76b` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `ef5b2c9` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -253,6 +253,13 @@ command declarations retain their existing syntax and generated code. The public
 metadata macros retain Syn 1 and `serde_syn`; their JSONY grammar needs a separate
 compatibility decision before migration. Issue 57 remains open for that stage.
 No host source adaptation needed.
+
+The SDK test client moved to pinned Redis 1.2.2 in `ef5b2c9`, preserving the
+Rust 1.87 minimum, bounded sockets, binary distinctions and pipeline alignment.
+Direct RESP3 parsing replaces handshake reply suppression. Native Redis 6.0 CI
+covers supported client and transport controls; the full matrix retains cases
+that require newer APIs. No SDK runtime dependency or host source changes.
+The wasm host keeps its independent development client for this sync.
 
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).

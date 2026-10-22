@@ -222,6 +222,17 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-22: rebased onto SDK master `ef5b2c9`, which refreshes the SDK test
+  client to pinned Redis 1.2.2 while retaining Rust 1.87. Bounded transport,
+  binary/protocol assertions and pipeline error alignment are preserved. All 56
+  existing wasm patches are unchanged. No host source adaptation is needed;
+  the host's independent development client is unchanged. SDK PR 73 received
+  independent native review and all 20 exact-head CI checks passed before merge.
+  On Rust 1.94 and Redis 8.10.2: example builds, workspace formatting/Clippy,
+  exclusive 7.2 SDK Clippy and strict SDK/host docs pass. Tests pass: 69 SDK
+  units, 154 SDK integrations, 1 allocator fallback, 6 harness helpers, 7 host
+  units, 21 host integrations including JavaScript, 84 SDK doctests and 4 guest
+  helper tests. Guest formatting and wasm32 linting pass.
 - 2026-10-22: rebased onto SDK master `0f6e76b`, which migrates the internal
   API-wrapper and mixed command-list parsers to Syn 2. The public metadata parser
   remains separate under issue 57. All 55 existing wasm patches are unchanged;
