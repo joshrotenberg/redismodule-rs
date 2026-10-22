@@ -220,6 +220,16 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-21: rebased onto SDK master `f1cdbd2`, which makes repeated
+  call-protocol selections replace earlier ones. No host adaptation needed.
+  Rust 1.94.0 and Redis 8.10.2: workspace/guest formatting, workspace Clippy,
+  separate SDK 7.2 Clippy, example builds, guest Clippy and strict SDK
+  documentation passed. With `RUST_TEST_THREADS=4`, the full suite passed:
+  65 SDK unit tests, 132 SDK integration tests, five standalone harness cases,
+  seven host unit tests, 21 host integration tests with JavaScript,
+  81 SDK doctests, and four guest helper tests. Timer API design remains
+  separate from this sync.
+
 - 2026-10-21: rebased onto SDK master `e94c0ff`, which makes direct client
   blocking fallible and validates both blocking helpers before native calls.
   No host adaptation needed. Rust 1.94.0 and Redis 8.10.2: workspace/guest

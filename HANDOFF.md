@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `e94c0ff`, checked client blocking merged after all 19 PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `f1cdbd2`, call protocol selection merged after all 19 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `e94c0ff` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `f1cdbd2` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -209,8 +209,13 @@ No host adaptation needed. General native-handle storage remains separate.
 Checked client blocking merged in `e94c0ff`: `block_client()` returns a result,
 both blocking helpers reject denied invocation contexts before native blocking,
 and direct handles are non-null. A focused Redis 6.0 CI regression covers its
-older context flags. No host adaptation needed. Core SDK work continues with
-call-option protocol selection.
+older context flags. No host adaptation needed.
+
+Call protocol selection merged in `f1cdbd2`: repeated `CallOptionsBuilder::resp`
+calls replace the prior selection, including a reset to RESP2. Native tests
+cover RESP2 and RESP3 clients and a Redis 6.0 reset to RESP2. No host adaptation
+needed. Timer ownership and cancellation safety are the next SDK design topic;
+implementation has not started.
 
 Also open:
 
