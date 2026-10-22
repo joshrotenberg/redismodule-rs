@@ -64,7 +64,7 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 The repository's [contributing rules](../CONTRIBUTING.md) record the review,
 merge and sync workflow, and the issue backlog is the work list. SDK functional
-changes through `a751b2c` are integrated. PR 79 is merged as `b787fef`;
+changes through `48fafa4` are integrated. PR 79 is merged as `b787fef`;
 its [PR CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39809579615)
 and actual [experiment push CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39811561168)
 passed. H14 / issue 69 is complete. S6 / issue 70 was rechecked on the pinned
@@ -74,8 +74,14 @@ The blocking-call callback audit ([issue 85](https://github.com/joshrotenberg/re
 is complete: [PR 91](https://github.com/joshrotenberg/redismodule-rs/pull/91),
 merged as `41f4f1a`, requires `Send + 'static` unblock handlers and fixes
 the zero-sized handler free on abort. The host makes no blocking calls.
-Module unload with a pending blocking call is an open SDK audit
-([issue 92](https://github.com/joshrotenberg/redismodule-rs/issues/92)).
+The unload audit ([issue 92](https://github.com/joshrotenberg/redismodule-rs/issues/92))
+is complete: [PR 97](https://github.com/joshrotenberg/redismodule-rs/pull/97),
+merged as `48fafa4`, refuses `MODULE UNLOAD` while an unblock handler is
+pending and refuses blocking calls while the module loads or unloads. The host
+installs no handlers, so its unload with `wasm.persist no` is unaffected. The
+stale `MODULE_CONTEXT` after a reload found while validating it is
+[issue 98](https://github.com/joshrotenberg/redismodule-rs/issues/98); the host
+uses `MODULE_CONTEXT` neither directly nor through the SDK logger.
 
 The call reply audit ([issue 93](https://github.com/joshrotenberg/redismodule-rs/issues/93))
 is complete: [PR 95](https://github.com/joshrotenberg/redismodule-rs/pull/95),
@@ -99,6 +105,18 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-10-22: merged SDK master `48fafa4` into the branch as `7400448`. The SDK
+  change refuses `MODULE UNLOAD` while a blocking call's unblock handler is
+  pending and refuses blocking calls while `redis_module!` loads or unloads the
+  module; the host installs no handlers and needed no adaptation. SDK PR 97
+  passed two rounds of independent review and all 20 exact-head CI checks at
+  `17489c3`, and the squash tree equals that head. No host or guest source,
+  dependency graph or lock snapshot changed. With `wasm/ci/check.sh` on Rust
+  1.94.0, Redis 8.10.2 and Node 26.10.0 (CI pins 24.22.1), ARM64 macOS: every
+  stage passes, 382 workspace tests including the required JavaScript guest
+  and the host's unload and reload, 1 allocator fallback and 4 guest SDK tests;
+  all four lockfiles stayed identical to their snapshots.
 
 - 2026-10-22: merged SDK master `a751b2c` into the branch as `3117f8e`, with
   the one adaptation it requires: `run_command` returns `CallResult<'_>`
