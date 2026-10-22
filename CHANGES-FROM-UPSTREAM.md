@@ -13,14 +13,17 @@ For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
 ## Call reply context lifetimes
 
-`call_ext`, immediately resolved `call_blocking` replies and values returned
-from `with_call_user` and `with_db` closures now borrow their context.
-Previously they were `CallResult<'static>`. Redis 6.0 to 7.0 store the calling
-context in every reply and read it in `RM_FreeCallReply`; with AddressSanitizer
-on Redis 7.0.15, a reply kept past a command was a stack-use-after-return and
-one kept past a worker guard a heap-use-after-free. Redis 7.2 and later attach
-the context only under AutoMemory, which frees the reply when the callback
-returns: a kept reply then crashed Redis 7.0.15 and 8.10.2 when dropped.
+`call_ext` and immediately resolved `call_blocking` replies now borrow their
+context; previously they were `CallResult<'static>`. Values returned from
+`with_call_user` and `with_db` closures may borrow the view, which only widens
+what compiles. Redis 6.0 to 7.0 store the calling context in every reply and
+read it in `RM_FreeCallReply`; 7.2 and later store it in error replies created
+before the command runs and, under AutoMemory, in every reply, which AutoMemory
+also frees when the callback returns. With AddressSanitizer, a reply kept past
+a command was a stack-use-after-return on 7.0.15, as was a kept pre-execution
+error reply on 8.10.2, and a reply kept past a worker guard on 7.0.15 was a
+heap-use-after-free. With AutoMemory, a kept reply crashed release builds of
+7.0.15 and 8.10.2 when dropped.
 `RuntimeContext::auto_memory` is now `unsafe`, because AutoMemory also frees a
 blocking call's promise reply and a `FutureHandler` kept past its callback
 crashed Redis 8.10.2 in `abort_and_dispose`. Compile-fail controls reject the

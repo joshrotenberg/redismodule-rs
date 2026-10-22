@@ -1053,8 +1053,9 @@ pub enum PromiseCallReply<'root, 'ctx> {
 }
 
 /// Wraps a reply from `RedisModule_Call` made through `ctx`. Redis 6.0 to 7.0
-/// store that context in every reply, and later releases record AutoMemory
-/// ones in it, so freeing the reply reads the context: the reply borrows it.
+/// store that context in every reply; later releases store it in error replies
+/// created before the command runs and in every reply under AutoMemory. Freeing
+/// the reply reads the context, so the reply borrows it.
 pub(crate) fn create_promise_call_reply<'ctx>(
     ctx: &'ctx RuntimeContext,
     reply: Option<NonNull<RedisModuleCallReply>>,

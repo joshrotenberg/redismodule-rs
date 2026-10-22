@@ -712,20 +712,25 @@ impl RuntimeContext {
     }
 
     /// Enables Redis's automatic memory management for this context: Redis
-    /// frees the keys, strings and call replies created through it when the
-    /// callback returns or the thread-safe context is freed. SDK handles do
-    /// not need it. Keys, server INFO snapshots and call replies borrow their
-    /// context and are released before it ends, and strings are detached
-    /// from it when the SDK takes them.
+    /// frees the keys, strings, call replies, server INFO snapshots and other
+    /// native objects created through it when the callback returns or the
+    /// thread-safe context is freed. It stays enabled for the rest of the
+    /// native context's life, including calls made later through other views
+    /// of it. SDK handles do not need it: keys, server INFO snapshots and call
+    /// replies borrow their context and are released before it ends, and
+    /// strings are detached from it when the SDK takes them.
     ///
     /// # Safety
     ///
     /// Redis also frees the promise reply of every blocking call made through
-    /// this context. Dispose or abort each [`FutureHandler`](crate::FutureHandler)
-    /// from such a call before the callback returns or the thread-safe
-    /// context is freed; a handle used afterwards passes freed memory to
-    /// Redis. The same applies to raw native objects created through this
-    /// context and released later.
+    /// this native context. Dispose or abort each
+    /// [`FutureHandler`](crate::FutureHandler) from such a call before the
+    /// callback returns or the thread-safe context is freed; a handle used
+    /// afterwards passes freed memory to Redis. Drop call replies from this
+    /// context on the thread that holds it: freeing one updates the context's
+    /// memory queue, which a call on the owning thread can reallocate. The
+    /// same applies to raw native objects created through this context and
+    /// released later.
     ///
     /// ```compile_fail,E0133
     /// fn enable(ctx: &redis_module::RuntimeContext) {
@@ -791,10 +796,11 @@ impl RuntimeContext {
     /// of the command invocation.
     ///
     /// The reply borrows this context. Redis 6.0 to 7.0 store the context in
-    /// every reply, and later releases do when AutoMemory is enabled, so
-    /// freeing a reply reads the context; AutoMemory also frees the reply
-    /// itself when the callback returns. Copy what is needed into Rust storage
-    /// before the callback returns or a worker guard unlocks:
+    /// every reply; later releases store it in error replies created before
+    /// the command runs and, under AutoMemory, in every reply. Freeing a reply
+    /// reads the context, and AutoMemory also frees the reply itself when the
+    /// callback returns. Copy what is needed into Rust storage before the
+    /// callback returns or a worker guard unlocks:
     ///
     /// ```no_run
     /// use redis_module::{CallOptionsBuilder, CallReply, DetachedFromClient, ThreadSafeContext};
@@ -1145,8 +1151,10 @@ impl RuntimeContext {
     /// without running `f` or changing the current selection.
     ///
     /// The closure's value is returned unchanged, including a `Result` value.
-    /// Selection covers only the synchronous execution of `f`. Drop any
-    /// database-bound resources opened inside the closure before it returns.
+    /// Selection covers only the synchronous execution of `f`. The closure may
+    /// return values that borrow the context, such as a call reply or an open
+    /// key; a key keeps the database it was opened in after the selection is
+    /// restored.
     ///
     /// ```no_run
     /// use redis_module::{Context, RedisResult};

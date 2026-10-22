@@ -200,15 +200,18 @@ as in the `call` example, compiles unchanged.
 
 `RuntimeContext::call_ext` and the replies `call_blocking` resolves at once now
 return `CallResult<'ctx>`, borrowing the context they were called through,
-instead of `CallResult<'static>`. Redis 6.0 to 7.0 read that context when a
-reply is freed, and with AutoMemory any release frees the reply itself when
-the callback returns. Drop replies before returning from a callback or
-releasing a worker lock guard, and copy what is needed into Rust storage:
+instead of `CallResult<'static>`. Redis reads that context when a reply is
+freed: on 6.0 to 7.0 for every reply, and on 7.2 and later for error replies
+created before the command runs and for every reply under AutoMemory, which
+also frees the reply itself when the callback returns. Drop replies before
+returning from a callback or releasing a worker lock guard, and copy what is
+needed into Rust storage:
 
 ```rust,ignore
 let bytes = {
     let guard = owner.lock();
-    match guard.call_ext("GET", &CallOptionsBuilder::new().build(), &["key"]) {
+    let reply = guard.call_ext("GET", &CallOptionsBuilder::new().build(), &["key"]);
+    match reply {
         Ok(CallReply::String(value)) => Some(value.as_bytes().to_vec()),
         _ => None,
     }
@@ -403,9 +406,10 @@ requires only a live context and the Redis lock. All require valid invocation an
 lock scope throughout use. Replace `Context::dummy` with `RuntimeContext::dummy`
 for APIs that explicitly accept a null context, such as logging.
 
-This split limits capabilities. It does not yet tie every key, server-info,
-call-reply, or other native resource to its invocation or lock lifetime. Close
-those resources before the callback returns or the worker guard is dropped.
+This split limits capabilities. Keys, server INFO snapshots and call replies
+also borrow the context they came from, as the sections above describe. Release
+other native resources obtained through raw APIs before the callback returns
+or the worker guard is dropped.
 
 ### Scoped call users
 

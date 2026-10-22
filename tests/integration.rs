@@ -5437,8 +5437,9 @@ fn test_call_blocking_with_auto_memory_disposes_before_return() -> Result<()> {
         .query(&mut con)?;
     assert_eq!(res, "OK");
 
-    // AutoMemory freed only the reply's already disposed reference: the
-    // handler still runs when the push unblocks the call.
+    // Disposing removed the promise reply from AutoMemory, so collection freed
+    // nothing; the blocked client's reference keeps the promise, and the
+    // handler runs when the push unblocks the call.
     let _: i64 = redis::cmd("RPUSH")
         .arg("auto:memory")
         .arg("value")

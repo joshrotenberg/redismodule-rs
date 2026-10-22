@@ -265,11 +265,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 - **Breaking:** call replies borrow the context that made them: `call_ext`
   and immediately resolved `call_blocking` replies are tied to the context
-  borrow, as keys and server INFO snapshots are. Redis 6.0 to 7.0 read the
-  reply's context when it is freed, and with AutoMemory every release frees
-  the reply when the callback returns, so a reply kept past its context read
-  freed memory or was freed twice. `with_call_user` and `with_db` closures can
-  return values that borrow their view. See the
+  borrow, as keys and server INFO snapshots are. Redis reads a reply's context
+  when it is freed: on 6.0 to 7.0 for every reply, and on 7.2 and later for
+  error replies created before the command runs and under AutoMemory, which
+  also frees the reply when the callback returns. A reply kept past its
+  context read freed memory or was freed twice. `with_call_user` and `with_db`
+  closures can return values that borrow their view. See the
   [call reply migration notes](docs/MIGRATING-3.0.md#call-replies-stay-inside-their-context-scope).
 
 - **Breaking:** `RuntimeContext::auto_memory` is `unsafe`. AutoMemory also
