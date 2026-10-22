@@ -340,6 +340,13 @@ python3 .github/scripts/build-server.py redis-8.10.2 /tmp/sdk-server
 TEST_REDIS_SERVER_BIN=/tmp/sdk-server/redis-server cargo test
 ```
 
+CI also runs a focused direct-blocking regression on Redis 6.0.20, which lacks
+the newer context flag for denied blocking. This job sets
+`TEST_REDIS_SERVER_LEGACY_OPTIONS=1` to omit command-policy settings that old
+servers do not recognize. It runs only
+`test_direct_client_blocking_rejects_denied_invocations`; it does not establish
+that the full integration suite works with Redis 6.0.
+
 Use a separate destination for each server version. When updating a release,
 copy its SHA-256 from [redis/redis-hashes](https://github.com/redis/redis-hashes)
 or [valkey-io/valkey-hashes](https://github.com/valkey-io/valkey-hashes), update the

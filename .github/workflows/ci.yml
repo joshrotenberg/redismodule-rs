@@ -97,6 +97,51 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  legacy-blocking:
+    # The full integration suite needs newer APIs. This focused regression
+    # exercises direct blocking where GetContextFlags lacks DENY_BLOCKING.
+    name: Checked client blocking (Redis 6.0.20)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Read runner image
+        id: runner-image
+        run: echo "image=${ImageOS:?}-${ImageVersion:?}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache server binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sdk-server
+          key: sdk-server-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-image.outputs.image }}-redis-6.0.20-${{ hashFiles('.github/servers.json', '.github/scripts/build-server.py') }}
+
+      - name: Build or verify server
+        run: |
+          python3 .github/scripts/build-server.py redis-6.0.20 "$RUNNER_TEMP/sdk-server"
+          echo "TEST_REDIS_SERVER_BIN=$RUNNER_TEMP/sdk-server/redis-server" >> "$GITHUB_ENV"
+
+      - name: Install toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Test direct client blocking
+        env:
+          TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
+        run: |
+          cargo build --example block --no-default-features --features min-redis-compatibility-version-6-0
+          cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration test_direct_client_blocking_rejects_denied_invocations -- --exact
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-legacy-blocking
+          path: |
+            target/**/integration-test/**
+            ${{ runner.temp }}/sdk-server-build.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   bindings:
     # Generates the bindings with bindgen and fails if they differ from the
     # committed ones. One runner, so the result does not depend on each

@@ -2643,13 +2643,9 @@ fn test_block_client_on_reply() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_client_blocking_rejects_denied_invocations_without_touching_client_state() -> Result<()> {
+fn check_client_blocking_rejections(commands: &[(&str, &[&str])], calls: &[&str]) -> Result<()> {
     let mut con = TestConnection::new("block");
-    for (command, args) in [
-        ("block.direct", &[][..]),
-        ("block.reply", &["0", "ignored"][..]),
-    ] {
+    for &(command, args) in commands {
         let error = redis::cmd("EVAL")
             .arg("return redis.pcall(ARGV[1], unpack(ARGV, 2))")
             .arg(0)
@@ -2673,7 +2669,7 @@ fn test_client_blocking_rejects_denied_invocations_without_touching_client_state
             "aligned"
         );
     }
-    for command in ["block.call_direct", "block.call_reply"] {
+    for command in calls {
         let error = redis::cmd(command)
             .query::<Value>(&mut con)
             .expect_err("nested call blocked without permission");
@@ -2689,6 +2685,17 @@ fn test_client_blocking_rejects_denied_invocations_without_touching_client_state
     assert_eq!(redis::cmd("block.direct_blocks").query::<i64>(&mut con)?, 1);
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
+}
+
+// This also runs against Redis 6.0 in CI to exercise its older context flags.
+#[test]
+fn test_direct_client_blocking_rejects_denied_invocations() -> Result<()> {
+    check_client_blocking_rejections(&[("block.direct", &[])], &["block.call_direct"])
+}
+
+#[test]
+fn test_callback_client_blocking_rejects_denied_invocations() -> Result<()> {
+    check_client_blocking_rejections(&[("block.reply", &["0", "ignored"])], &["block.call_reply"])
 }
 
 #[test]
