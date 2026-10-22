@@ -1,9 +1,12 @@
 use redis_module::{
     BlockedClient, CallOptionResp, CallOptionsBuilder, CallReply, CallResult, Context,
-    FutureCallReply, PromiseCallReply, RedisError, RedisResult, RedisString, RedisValue,
+    FutureCallReply, PromiseCallReply, RedisError, RedisResult, RedisString, RedisValue, Status,
     ThreadSafeContext, raw, redis_module,
 };
 
+use std::cell::RefCell;
+use std::mem::ManuallyDrop;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::thread;
 
 fn call_test(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
@@ -164,6 +167,112 @@ fn call_blocking_from_detach_ctx(ctx: &Context, _: Vec<RedisString>) -> RedisRes
     Ok(RedisValue::NoReply)
 }
 
+// Unblock handlers that ran after an abort, and handler captures dropped.
+static ABORTED_HANDLER_CALLS: AtomicI64 = AtomicI64::new(0);
+static ABORTED_CAPTURE_DROPS: AtomicI64 = AtomicI64::new(0);
+
+struct DropCounter(String);
+
+impl Drop for DropCounter {
+    fn drop(&mut self) {
+        ABORTED_CAPTURE_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// `call.blocking_abort <key> empty|capture` starts `BLPOP <key> 0`, installs an
+/// unblock handler and aborts the pending call. An `empty` handler captures
+/// nothing, so it is zero-sized; a `capture` handler owns a [DropCounter].
+fn call_blocking_abort(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let [_, key, kind] = args.as_slice() else {
+        return Err(RedisError::WrongArity);
+    };
+    let options = CallOptionsBuilder::new().build_blocking();
+    let future = match ctx.call_blocking("blpop", &options, &[key.try_as_str()?, "0"]) {
+        PromiseCallReply::Future(future) => future,
+        PromiseCallReply::Resolved(_) => return Err(RedisError::Str("ERR the call did not block")),
+    };
+    let status = match kind.try_as_str()? {
+        "empty" => future
+            .set_unblock_handler(|_ctx, _reply| {
+                ABORTED_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
+            })
+            .abort_and_dispose(ctx),
+        "capture" => {
+            let capture = DropCounter(key.to_string());
+            future
+                .set_unblock_handler(move |_ctx, _reply| {
+                    let _owned = &capture.0;
+                    ABORTED_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
+                })
+                .abort_and_dispose(ctx)
+        }
+        _ => return Err(RedisError::Str("ERR expected empty or capture")),
+    };
+    Ok(match status {
+        Status::Ok => RedisValue::SimpleStringStatic("aborted"),
+        Status::Err => RedisValue::SimpleStringStatic("not aborted"),
+    })
+}
+
+// Aborts a kept handle; boxed because its handler type is a closure.
+type KeptAbort = Box<dyn FnOnce(&Context) -> Status>;
+
+static KEPT_HANDLER_CALLS: AtomicI64 = AtomicI64::new(0);
+
+thread_local! {
+    // Commands run on the main thread, where the handle must stay. A
+    // thread-local with a destructor can keep MODULE UNLOAD from unloading
+    // the module on glibc; ManuallyDrop leaves this one without one.
+    static KEPT_ABORT: ManuallyDrop<RefCell<Option<KeptAbort>>> =
+        const { ManuallyDrop::new(RefCell::new(None)) };
+}
+
+/// `call.blocking_keep <key>` starts `BLPOP <key> 0`, installs a handler that
+/// owns a [DropCounter], and keeps its handle after the command returns, for
+/// `call.blocking_abort_kept`.
+fn call_blocking_keep(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let [_, key] = args.as_slice() else {
+        return Err(RedisError::WrongArity);
+    };
+    let options = CallOptionsBuilder::new().build_blocking();
+    let future = match ctx.call_blocking("blpop", &options, &[key.try_as_str()?, "0"]) {
+        PromiseCallReply::Future(future) => future,
+        PromiseCallReply::Resolved(_) => return Err(RedisError::Str("ERR the call did not block")),
+    };
+    let capture = DropCounter(key.to_string());
+    let handle = future.set_unblock_handler(move |_ctx, _reply| {
+        let _owned = &capture.0;
+        KEPT_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
+    });
+    let abort: KeptAbort = Box::new(move |ctx| handle.abort_and_dispose(ctx));
+    if let Some(previous) = KEPT_ABORT.with(|kept| kept.replace(Some(abort))) {
+        previous(ctx);
+    }
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
+/// Aborts the handle `call.blocking_keep` kept, which fails once the call
+/// has unblocked and its handler has run.
+fn call_blocking_abort_kept(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let abort = KEPT_ABORT
+        .with(|kept| kept.take())
+        .ok_or(RedisError::Str("ERR no kept handle"))?;
+    Ok(match abort(ctx) {
+        Status::Ok => RedisValue::SimpleStringStatic("aborted"),
+        Status::Err => RedisValue::SimpleStringStatic("not aborted"),
+    })
+}
+
+/// Replies with the aborted handler calls, capture drops and kept handler
+/// calls since the module loaded.
+fn call_blocking_abort_stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::Array(vec![
+        ABORTED_HANDLER_CALLS.load(Ordering::SeqCst).into(),
+        ABORTED_CAPTURE_DROPS.load(Ordering::SeqCst).into(),
+        KEPT_HANDLER_CALLS.load(Ordering::SeqCst).into(),
+    ]))
+}
+
 fn call_dump_test(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     // Serialized bytes need not share the input's UTF-8 classification.
     for input in [b"test_value".as_slice(), &[0xff, 0xfe, 0x80, 0x81]] {
@@ -301,6 +410,10 @@ redis_module! {
         ["call.test", call_test, "", 0, 0, 0, ""],
         ["call.blocking", call_blocking, "", 0, 0, 0, ""],
         ["call.blocking_from_detached_ctx", call_blocking_from_detach_ctx, "", 0, 0, 0, ""],
+        ["call.blocking_abort", call_blocking_abort, "", 0, 0, 0, ""],
+        ["call.blocking_keep", call_blocking_keep, "", 0, 0, 0, ""],
+        ["call.blocking_abort_kept", call_blocking_abort_kept, "", 0, 0, 0, ""],
+        ["call.blocking_abort_stats", call_blocking_abort_stats, "", 0, 0, 0, ""],
         ["call.dump_test", call_dump_test, "", 0, 0, 0, ""],
         ["call.binary_data_test", call_binary_data_test, "", 0, 0, 0, ""],
         ["call.verbatim", call_verbatim, "", 0, 0, 0, ""],

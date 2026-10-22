@@ -11,6 +11,24 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Blocking-call unblock handlers
+
+`FutureCallReply::set_unblock_handler` requires `Send + 'static` handlers.
+Redis keeps the boxed handler on the promise until the command unblocks or is
+aborted, and `FutureHandler::dispose` releases only the promise reply's
+reference, so a handler borrowing locals could run after their scope ended.
+A handler installed from a module-owned worker ran on the main thread without
+a `Send` bound. `abort_and_dispose` released an aborted handler with
+`std::alloc::dealloc`, which for a zero-sized handler freed a dangling pointer
+and aborted the server; it now uses `Box::from_raw`. Compile-fail controls
+cover dispose, abort, `mem::forget` and a non-`Send` capture. Native
+regressions abort empty and capturing handlers, checking that neither runs and
+each capture drops once, and abort a kept handle after its handler ran.
+`FutureHandler` is now exported, so a kept handle can be named. Upstream has
+the same code, from upstream PR 333; no upstream issue or pull request reports
+it. Unloading a module with a pending blocking call and replies kept past
+AutoMemory collection are separate.
+
 ## Stream trim results
 
 `RedisKeyWritable::trim_stream_by_id` accepts zero as a successful deletion
