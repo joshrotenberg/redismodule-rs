@@ -216,6 +216,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- Repeated `CallOptionsBuilder::resp` selections now replace the previous
+  protocol, including switching back to RESP2 or Auto after RESP3. Other call
+  options remain intact, and blocking call options use the same selection.
+
 - Module initialization no longer copies an unchecked name into a 64-byte
   buffer. Names of 64 bytes lacked a terminator and longer names could overrun
   that buffer. Embedded NUL names now fail compilation instead of truncating.

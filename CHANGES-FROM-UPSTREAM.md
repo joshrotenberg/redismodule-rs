@@ -110,6 +110,12 @@ these in October 2026.
 
 ## Additions
 
+Repeated `CallOptionsBuilder::resp` selections now use the last requested
+protocol. Previously, RESP2 did not clear earlier selections and a stale RESP3
+flag overrode Auto. Other call flags and API signatures remain unchanged; the
+same behavior applies when building blocking options. Native regression tests
+check array/map reply kinds under both RESP2 and RESP3 clients.
+
 Direct client blocking now validates the invocation before calling Redis.
 Scripts, transactions, denied module calls and reply/timeout callback reentry
 return an error rather than exposing an unusable handle or reaching native
