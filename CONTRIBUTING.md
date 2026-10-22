@@ -95,9 +95,10 @@ Adapt `wasm/` only where the SDK change requires it. Run `wasm/ci/check.sh`
 with the four snapshot lockfiles from `wasm/ci/locks/` in place, in a fresh
 checkout or worktree as the
 [CI guide](https://github.com/joshrotenberg/redismodule-rs/blob/experiment/wasm-host/wasm/CI.md)
-describes, rather than replacing a developer's own lockfiles. When a sync
-changes dependencies, regenerate the affected lockfile with the pinned
-toolchain, review its diff and update its snapshot. Record the sync in
+describes, rather than replacing a developer's own lockfiles. If a `--locked`
+step fails because the sync changed dependencies, regenerate the affected
+lockfile with the pinned toolchain, review its diff, update its snapshot and
+rerun `check.sh`. Record the sync in
 `wasm/TRACKING.md`, push, and confirm the experiment push CI passes.
 
 ## Validation
@@ -128,8 +129,9 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --features all-featur
 - Stable rustdoc does not check `compile_fail` error codes;
   `RUSTC_BOOTSTRAP=1 cargo test --doc` does.
 - The [CI workflow](.github/workflows/ci.yml) is the authority for the server,
-  floor and MSRV matrix. Its Actions allowlist permits only GitHub-owned
-  actions, `actions-rust-lang/setup-rust-toolchain` and `swatinem/rust-cache`.
+  floor and MSRV matrix. The repository's Actions allowlist permits only
+  GitHub-owned actions, `actions-rust-lang/setup-rust-toolchain` and
+  `swatinem/rust-cache`.
 - `examples/module-testing` and `examples/compatibility-floors` are separate
   workspaces; [docs/TESTING-MODULES.md](docs/TESTING-MODULES.md) and
   [docs/COMPATIBILITY-FLOORS.md](docs/COMPATIBILITY-FLOORS.md) describe their
