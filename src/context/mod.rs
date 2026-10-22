@@ -483,10 +483,10 @@ impl<'a> StrCallArgs<'a> {
 impl Context {
     /// Runs a call-user scope while preserving client capabilities.
     /// See [`RuntimeContext::with_call_user`] for restoration and error behavior.
-    pub fn with_call_user<T>(
-        &self,
+    pub fn with_call_user<'s, T>(
+        &'s self,
         user_name: &RedisString,
-        f: impl FnOnce(&Context) -> T,
+        f: impl FnOnce(&'s Context) -> T,
     ) -> Result<T, RedisError> {
         self.event.with_call_user(user_name, |_| f(self))
     }
@@ -522,7 +522,11 @@ impl Context {
     }
 
     /// Runs a database scope while preserving client command capabilities.
-    pub fn with_db<T>(&self, db: i32, f: impl FnOnce(&Context) -> T) -> Result<T, RedisError> {
+    pub fn with_db<'s, T>(
+        &'s self,
+        db: i32,
+        f: impl FnOnce(&'s Context) -> T,
+    ) -> Result<T, RedisError> {
         self.event.with_db(db, |_| f(self))
     }
 
@@ -707,21 +711,43 @@ impl RuntimeContext {
         self.log(RedisLogLevel::Warning, message);
     }
 
+    /// Enables Redis's automatic memory management for this context: Redis
+    /// frees the keys, strings, call replies, server INFO snapshots and other
+    /// native objects created through it when the callback returns or the
+    /// thread-safe context is freed. It stays enabled for the rest of the
+    /// native context's life, including calls made later through other views
+    /// of it. SDK handles do not need it: keys, server INFO snapshots and call
+    /// replies borrow their context and are released before it ends, and
+    /// strings are detached from it when the SDK takes them.
+    ///
+    /// # Safety
+    ///
+    /// Redis also frees the promise reply of every blocking call made through
+    /// this native context. Dispose or abort each
+    /// [`FutureHandler`](crate::FutureHandler) from such a call before the
+    /// callback returns or the thread-safe context is freed; a handle used
+    /// afterwards passes freed memory to Redis. Drop call replies from this
+    /// context on the thread that holds it: freeing one updates the context's
+    /// memory queue, which a call on the owning thread can reallocate. The
+    /// same applies to raw native objects created through this context and
+    /// released later.
+    ///
+    /// ```compile_fail,E0133
+    /// fn enable(ctx: &redis_module::RuntimeContext) {
+    ///     ctx.auto_memory();
+    /// }
+    /// ```
+    ///
     /// # Panics
     ///
     /// Will panic if `RedisModule_AutoMemory` is missing in redismodule.h
-    pub fn auto_memory(&self) {
+    pub unsafe fn auto_memory(&self) {
         unsafe {
             crate::__required_api!(RedisModule_AutoMemory)(self.ctx);
         }
     }
 
-    fn call_internal<
-        'ctx,
-        'a,
-        T: Into<StrCallArgs<'a>>,
-        R: From<PromiseCallReply<'static, 'ctx>>,
-    >(
+    fn call_internal<'ctx, 'a, T: Into<StrCallArgs<'a>>, R: From<PromiseCallReply<'ctx, 'ctx>>>(
         &'ctx self,
         command: &str,
         fmt: *const c_char,
@@ -768,13 +794,73 @@ impl RuntimeContext {
     /// Invoke a command on Redis and return the result
     /// Unlike 'call' this API also allow to pass a CallOption to control different aspects
     /// of the command invocation.
-    pub fn call_ext<'a, T: Into<StrCallArgs<'a>>, R: From<CallResult<'static>>>(
-        &self,
+    ///
+    /// The reply borrows this context. Redis 6.0 to 7.0 store the context in
+    /// every reply; later releases store it in error replies created before
+    /// the command runs and, under AutoMemory, in every reply. Freeing a reply
+    /// reads the context, and AutoMemory also frees the reply itself when the
+    /// callback returns. Copy what is needed into Rust storage before the
+    /// callback returns or a worker guard unlocks:
+    ///
+    /// ```no_run
+    /// use redis_module::{CallOptionsBuilder, CallReply, DetachedFromClient, ThreadSafeContext};
+    ///
+    /// fn copy(owner: &ThreadSafeContext<DetachedFromClient>) -> Option<Vec<u8>> {
+    ///     let guard = owner.lock();
+    ///     let reply = guard.call_ext("GET", &CallOptionsBuilder::new().build(), &["key"]);
+    ///     match reply {
+    ///         Ok(CallReply::String(value)) => Some(value.as_bytes().to_vec()),
+    ///         _ => None,
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// A reply cannot be kept past its context:
+    ///
+    /// ```compile_fail,E0521
+    /// use std::cell::RefCell;
+    /// use redis_module::{CallOptionsBuilder, CallResult, RuntimeContext};
+    ///
+    /// thread_local! {
+    ///     static KEPT: RefCell<Option<CallResult<'static>>> = const { RefCell::new(None) };
+    /// }
+    ///
+    /// fn keep(ctx: &RuntimeContext) {
+    ///     let reply = ctx.call_ext("PING", &CallOptionsBuilder::new().build(), &[] as &[&str]);
+    ///     KEPT.with(|kept| *kept.borrow_mut() = Some(reply));
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0505
+    /// use redis_module::{CallOptionsBuilder, CallResult, DetachedFromClient, ThreadSafeContext};
+    ///
+    /// fn unlock_first(owner: &ThreadSafeContext<DetachedFromClient>) {
+    ///     let guard = owner.lock();
+    ///     let reply: CallResult =
+    ///         guard.call_ext("PING", &CallOptionsBuilder::new().build(), &[] as &[&str]);
+    ///     drop(guard);
+    ///     drop(reply);
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0597
+    /// use redis_module::{CallOptionsBuilder, CallResult, DetachedFromClient, ThreadSafeContext};
+    ///
+    /// fn outlive(owner: &ThreadSafeContext<DetachedFromClient>) {
+    ///     let reply: CallResult = {
+    ///         let guard = owner.lock();
+    ///         guard.call_ext("PING", &CallOptionsBuilder::new().build(), &[] as &[&str])
+    ///     };
+    ///     drop(reply);
+    /// }
+    /// ```
+    pub fn call_ext<'ctx, 'a, T: Into<StrCallArgs<'a>>, R: From<CallResult<'ctx>>>(
+        &'ctx self,
         command: &str,
         options: &CallOptions,
         args: T,
     ) -> R {
-        let res: CallResult<'static> =
+        let res: CallResult<'ctx> =
             self.call_internal(command, options.options.as_ptr() as *const c_char, args);
         R::from(res)
     }
@@ -1065,8 +1151,10 @@ impl RuntimeContext {
     /// without running `f` or changing the current selection.
     ///
     /// The closure's value is returned unchanged, including a `Result` value.
-    /// Selection covers only the synchronous execution of `f`. Drop any
-    /// database-bound resources opened inside the closure before it returns.
+    /// Selection covers only the synchronous execution of `f`. The closure may
+    /// return values that borrow the context, such as a call reply or an open
+    /// key; a key keeps the database it was opened in after the selection is
+    /// restored.
     ///
     /// ```no_run
     /// use redis_module::{Context, RedisResult};
@@ -1074,10 +1162,10 @@ impl RuntimeContext {
     ///     ctx.with_db(db, |ctx| ctx.call("GET", &[key]))?
     /// }
     /// ```
-    pub fn with_db<T>(
-        &self,
+    pub fn with_db<'s, T>(
+        &'s self,
         db: i32,
-        f: impl FnOnce(&RuntimeContext) -> T,
+        f: impl FnOnce(&'s RuntimeContext) -> T,
     ) -> Result<T, RedisError> {
         let previous = self.get_selected_db();
         self.select_db(db)?;
@@ -1330,7 +1418,7 @@ impl EventContext {
         'ctx,
         'a,
         T: Into<StrCallArgs<'a>>,
-        R: From<PromiseCallReply<'static, 'ctx>>,
+        R: From<PromiseCallReply<'ctx, 'ctx>>,
     >(
         &'ctx self,
         command: &str,

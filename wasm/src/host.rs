@@ -111,12 +111,9 @@ impl CallState {
     }
 
     /// Runs a command for `call`, `pcall` and their flat forms: its result,
-    /// or the error the host refused it with.
-    fn run_command(
-        &mut self,
-        command: &str,
-        args: &[Vec<u8>],
-    ) -> Result<CallResult<'static>, String> {
+    /// or the error the host refused it with. The reply borrows the call's
+    /// context, so callers convert it before the guest call returns.
+    fn run_command(&mut self, command: &str, args: &[Vec<u8>]) -> Result<CallResult<'_>, String> {
         if self.mode.loading {
             return Err("ERR a library may not call Redis while it loads".into());
         }

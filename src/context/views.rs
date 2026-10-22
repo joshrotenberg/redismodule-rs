@@ -90,16 +90,20 @@ pub struct EventContext {
 impl EventContext {
     /// Runs a call-user scope while preserving this view's capabilities.
     /// See [`RuntimeContext::with_call_user`] for restoration and error behavior.
-    pub fn with_call_user<T>(
-        &self,
+    pub fn with_call_user<'s, T>(
+        &'s self,
         user_name: &RedisString,
-        f: impl FnOnce(&EventContext) -> T,
+        f: impl FnOnce(&'s EventContext) -> T,
     ) -> Result<T, RedisError> {
         self.runtime.with_call_user(user_name, |_| f(self))
     }
 
     /// Runs a database scope while preserving event capabilities.
-    pub fn with_db<T>(&self, db: i32, f: impl FnOnce(&EventContext) -> T) -> Result<T, RedisError> {
+    pub fn with_db<'s, T>(
+        &'s self,
+        db: i32,
+        f: impl FnOnce(&'s EventContext) -> T,
+    ) -> Result<T, RedisError> {
         self.runtime.with_db(db, |_| f(self))
     }
 
@@ -172,19 +176,19 @@ impl WorkerContext {
 
     /// Runs a call-user scope while preserving this view's capabilities.
     /// See [`RuntimeContext::with_call_user`] for restoration and error behavior.
-    pub fn with_call_user<T>(
-        &self,
+    pub fn with_call_user<'s, T>(
+        &'s self,
         user_name: &RedisString,
-        f: impl FnOnce(&WorkerContext) -> T,
+        f: impl FnOnce(&'s WorkerContext) -> T,
     ) -> Result<T, RedisError> {
         self.runtime.with_call_user(user_name, |_| f(self))
     }
 
     /// Runs a database scope while preserving the worker view.
-    pub fn with_db<T>(
-        &self,
+    pub fn with_db<'s, T>(
+        &'s self,
         db: i32,
-        f: impl FnOnce(&WorkerContext) -> T,
+        f: impl FnOnce(&'s WorkerContext) -> T,
     ) -> Result<T, RedisError> {
         self.runtime.with_db(db, |_| f(self))
     }
@@ -216,7 +220,7 @@ impl WorkerContext {
         'ctx,
         'a,
         T: Into<StrCallArgs<'a>>,
-        R: From<PromiseCallReply<'static, 'ctx>>,
+        R: From<PromiseCallReply<'ctx, 'ctx>>,
     >(
         &'ctx self,
         command: &str,
