@@ -138,6 +138,10 @@ storage. It returns no result and cannot veto an update. It is also distinct
 from Redis's native `applyfn` for grouped changes; the SDK registration helpers
 do not expose that grouped apply callback.
 
+The observer receives the native setter's name unchanged. Redis 8.0 includes
+the module prefix for enum setters; other tested release lines pass the
+registration name. Do not rely on that spelling to identify captured state.
+
 Observers run on the thread executing the setter. A worker can hold the Redis
 lock and call `CONFIG SET`, which invokes observers on that worker. Redis
 serializes these invocations, but serialization alone does not make `Rc` or

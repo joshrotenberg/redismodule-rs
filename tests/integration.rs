@@ -3873,8 +3873,17 @@ fn test_configuration_observers_follow_client_and_worker_setter_threads() -> Res
         rows.iter()
             .map(|row| {
                 anyhow::ensure!(row.len() == 3, "observer name, count and thread flag");
+                let name: String = redis::from_redis_value(&row[0])?;
+                // Redis 8.0 passes the module-prefixed name to enum setters.
+                // This test identifies the setting; it does not constrain the
+                // native callback's naming convention.
+                let name = if name == "configuration_observers.choice" {
+                    "choice".to_owned()
+                } else {
+                    name
+                };
                 Ok((
-                    redis::from_redis_value(&row[0])?,
+                    name,
                     redis::from_redis_value(&row[1])?,
                     redis::from_redis_value::<i64>(&row[2])? != 0,
                 ))
