@@ -13,8 +13,8 @@ makes the breaking changes those needed, as version 3.0.0.
 upstream issues and pull requests it relates to. The upstream README is kept,
 unchanged, as [README.upstream.md](README.upstream.md).
 
-For current development state, branch ownership, remaining decisions and
-validation, start with [the development handoff](HANDOFF.md).
+For branches, the review and merge workflow and validation, see
+[CONTRIBUTING.md](CONTRIBUTING.md). The open issues are the work list.
 
 ## Using it
 
