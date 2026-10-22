@@ -66,13 +66,22 @@ unblock handler is pending. Redis does not count the call's temporary client as
 a blocked client of the module, and when the call unblocks it reads the
 module's state and calls the handler. The `redis_module!` lifecycle therefore
 refuses unload until every installed handler has run or `abort_and_dispose`
-has cancelled it, and checks again after the deinit hook in case it started a
-call. Disposing a handle does not release its handler.
+has cancelled it.
 
-Abort pending calls through the module's normal controls, or let them unblock,
-before `MODULE UNLOAD`. A call started without a handler does not block unload,
-but its command still runs after the module is gone; a pending `BLPOP`, for
-example, still consumes a later push.
+To cancel a pending call, keep its `FutureHandler` and abort it through the
+module's normal controls before `MODULE UNLOAD`. A disposed handler can no
+longer be cancelled: it holds unload until its command unblocks, which for a
+`BLPOP <key> 0` on an idle key may be never. A call started without a handler
+does not block unload, but its command still runs after the module is gone; a
+pending `BLPOP`, for example, still consumes a later push.
+
+Blocking calls fail while the module loads or unloads. Redis frees a load whose
+initialization fails without calling the unload hook, and after a rejected
+`MODULE LOADEX` configuration it forces an unload that must succeed; a handler
+left pending by `init` would outlive the first and make the second fail an
+assertion. Start blocking calls from commands or events once loading finishes,
+as for SDK timers. Modules with their own `OnLoad` and `OnUnload` get none of
+these checks.
 
 ## Record configuration and pause module traffic
 

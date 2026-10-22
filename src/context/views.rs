@@ -232,6 +232,11 @@ impl WorkerContext {
                 "ERR blocking calls require a module-owned worker context".into(),
             ))));
         }
+        if let Some(refusal) = super::call_reply::blocking_call_refusal() {
+            return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                refusal.into(),
+            ))));
+        }
         self.call_internal(command, options.options.as_ptr(), args)
     }
 }

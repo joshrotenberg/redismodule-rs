@@ -5,7 +5,7 @@ use std::{
     fmt::{Debug, Display, Formatter},
     marker::PhantomData,
     ptr::NonNull,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
 };
 
 use libc::c_void;
@@ -877,15 +877,67 @@ impl Drop for PendingUnblockHandler {
     }
 }
 
-/// Internal binding for `redis_module!`: refuses `MODULE UNLOAD` while an
-/// unblock handler from this module is pending.
+// Where `redis_module!` is in the module's lifecycle. Blocking calls cannot
+// start while it loads, since Redis can free a load that fails without calling
+// OnUnload, or force an unload that must succeed, nor while it unloads.
+const LIFECYCLE_RUNNING: u8 = 0;
+const LIFECYCLE_LOADING: u8 = 1;
+const LIFECYCLE_UNLOADING: u8 = 2;
+static LIFECYCLE: AtomicU8 = AtomicU8::new(LIFECYCLE_RUNNING);
+
+/// Why a blocking call cannot start now, if it cannot.
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+pub(crate) fn blocking_call_refusal() -> Option<&'static str> {
+    match LIFECYCLE.load(Ordering::SeqCst) {
+        LIFECYCLE_LOADING => Some("ERR blocking calls cannot start while the module loads"),
+        LIFECYCLE_UNLOADING => Some("ERR blocking calls cannot start while the module unloads"),
+        _ => None,
+    }
+}
+
+/// Internal binding for `redis_module!`; not a custom-loader lifecycle API.
+/// Refuses blocking calls until the module has loaded.
 #[doc(hidden)]
-pub fn __check_unload_pending_unblock_handlers() -> Result<(), RedisError> {
-    match PENDING_UNBLOCK_HANDLERS.load(Ordering::SeqCst) {
-        0 => Ok(()),
-        _ => Err(RedisError::Str(
-            "ERR module has blocking calls with pending unblock handlers",
-        )),
+pub struct BlockingCallLoadGuard(());
+
+impl BlockingCallLoadGuard {
+    pub fn begin() -> Self {
+        LIFECYCLE.store(LIFECYCLE_LOADING, Ordering::SeqCst);
+        Self(())
+    }
+}
+
+impl Drop for BlockingCallLoadGuard {
+    fn drop(&mut self) {
+        LIFECYCLE.store(LIFECYCLE_RUNNING, Ordering::SeqCst);
+    }
+}
+
+/// Internal binding for `redis_module!`; not a custom-loader lifecycle API.
+/// Refuses `MODULE UNLOAD` while an unblock handler from this module is
+/// pending, and blocking calls while the unload runs.
+#[doc(hidden)]
+pub struct BlockingCallUnloadGuard(());
+
+impl BlockingCallUnloadGuard {
+    pub fn begin() -> Result<Self, RedisError> {
+        if PENDING_UNBLOCK_HANDLERS.load(Ordering::SeqCst) != 0 {
+            return Err(RedisError::Str(
+                "ERR module has blocking calls with pending unblock handlers",
+            ));
+        }
+        LIFECYCLE.store(LIFECYCLE_UNLOADING, Ordering::SeqCst);
+        Ok(Self(()))
+    }
+}
+
+impl Drop for BlockingCallUnloadGuard {
+    fn drop(&mut self) {
+        LIFECYCLE.store(LIFECYCLE_RUNNING, Ordering::SeqCst);
     }
 }
 
@@ -910,6 +962,8 @@ where
     ///
     /// Disposing releases this handle only: the unblock handler still runs
     /// when the command unblocks. Use [Self::abort_and_dispose] to cancel it.
+    /// A disposed handler can no longer be cancelled, so it also holds
+    /// `MODULE UNLOAD` until its command unblocks; keep the handle to cancel it.
     pub fn dispose<LockIndicator: RedisLockIndicator>(mut self, _lock_indicator: &LockIndicator) {
         free_call_reply(self.reply.as_ptr());
         self.reply_freed = true;
@@ -1016,8 +1070,9 @@ impl<'ctx> FutureCallReply<'ctx> {
     ///
     /// The handler runs with the Redis lock held, so it must not lock a
     /// thread-safe context or the module context itself. A pending handler
-    /// also keeps the module loaded: `MODULE UNLOAD` is refused until it runs
-    /// or [`FutureHandler::abort_and_dispose`] cancels it.
+    /// also keeps the module loaded: the `redis_module!` unload hook refuses
+    /// `MODULE UNLOAD` until it runs or [`FutureHandler::abort_and_dispose`]
+    /// cancels it. Modules with their own `OnUnload` must do the same.
     ///
     /// A borrowed capture is rejected, whether the handle is disposed, aborted
     /// or forgotten:
@@ -1059,12 +1114,13 @@ impl<'ctx> FutureCallReply<'ctx> {
         unblock_handler: C,
     ) -> FutureHandler<C> {
         let reply = self.reply.take().expect("Got a NULL future reply");
-        PENDING_UNBLOCK_HANDLERS.fetch_add(1, Ordering::SeqCst);
         unsafe {
             RedisModule_CallReplyPromiseSetUnblockHandler
                 .expect("RedisModule_CallReplyPromiseSetUnblockHandler is expected to be available if we got a promise call reply")
                 (reply.as_ptr(), Some(on_unblock::<C>), Box::into_raw(Box::new(unblock_handler)) as *mut c_void)
         }
+        // Redis holds the handler now. The lock is held, so it cannot run yet.
+        PENDING_UNBLOCK_HANDLERS.fetch_add(1, Ordering::SeqCst);
         FutureHandler {
             reply,
             _dummy: PhantomData,

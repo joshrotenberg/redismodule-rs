@@ -5418,6 +5418,11 @@ fn test_call_blocking_abort_after_unblock_keeps_handler_result() -> Result<()> {
     let stats: Vec<i64> = redis::cmd("call.blocking_abort_stats").query(&mut con)?;
     assert_eq!(stats, vec![0, 1, 1], "after the failed abort");
 
+    // The handler was released once: a second release would refuse unload.
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "call"])
+        .query::<()>(&mut con)?;
+
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
 
     Ok(())
@@ -5490,6 +5495,32 @@ fn test_module_unload_waits_for_pending_unblock_handlers() -> Result<()> {
         .query::<()>(&mut con)?;
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
 
+    // A reloaded module starts with no pending handlers and guards again.
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("call")?)
+        .query::<()>(&mut con)?;
+    let res: String = redis::cmd("call.blocking_fire")
+        .arg("unload:reloaded")
+        .arg("handler")
+        .query(&mut con)?;
+    assert_eq!(res, "pending");
+    let refused = redis::cmd("MODULE")
+        .arg(&["UNLOAD", "call"])
+        .query::<()>(&mut con);
+    assert!(
+        refused.is_err(),
+        "reloaded unload with a pending handler: {refused:?}"
+    );
+    let _: i64 = redis::cmd("RPUSH")
+        .arg("unload:reloaded")
+        .arg("value")
+        .query(&mut con)?;
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "call"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
     Ok(())
 }
 
@@ -5513,6 +5544,113 @@ fn test_module_unload_allows_blocking_calls_without_pending_handlers() -> Result
             .with_context(|| format!("unload after {mode}"))?;
         assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     }
+
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_module_unload_after_aborting_a_kept_handle() -> Result<()> {
+    let mut con = TestConnection::new("call");
+
+    let res: String = redis::cmd("call.blocking_keep")
+        .arg("unload:kept")
+        .query(&mut con)?;
+    assert_eq!(res, "OK");
+    let refused = redis::cmd("MODULE")
+        .arg(&["UNLOAD", "call"])
+        .query::<()>(&mut con);
+    assert!(refused.is_err(), "unload with a kept handle: {refused:?}");
+
+    // Keeping the handle is what makes the pending call cancellable.
+    let status: String = redis::cmd("call.blocking_abort_kept").query(&mut con)?;
+    assert_eq!(status, "aborted");
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "call"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_module_unload_after_panicking_and_worker_handlers_run() -> Result<()> {
+    for mode in ["panic", "worker"] {
+        let mut con = TestConnection::new("call");
+        let key = format!("unload:{mode}");
+        let _: String = redis::cmd("call.blocking_fire")
+            .arg(&key)
+            .arg(mode)
+            .query(&mut con)?;
+        if mode == "worker" {
+            utils::wait_until(
+                Duration::from_secs(5),
+                "worker installs its handler",
+                || Ok(redis::cmd("call.blocking_worker_installed").query::<i64>(&mut con)? == 1),
+            )?;
+        }
+        let refused = redis::cmd("MODULE")
+            .arg(&["UNLOAD", "call"])
+            .query::<()>(&mut con);
+        assert!(
+            refused.is_err(),
+            "{mode} unload with a pending handler: {refused:?}"
+        );
+
+        let _: i64 = redis::cmd("RPUSH").arg(&key).arg("value").query(&mut con)?;
+        let calls: i64 = redis::cmd("call.blocking_fire_calls").query(&mut con)?;
+        assert_eq!(calls, 1, "{mode}");
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "call"])
+            .query::<()>(&mut con)
+            .with_context(|| format!("unload after the {mode} handler ran"))?;
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_blocking_calls_fail_while_the_module_loads_or_unloads() -> Result<()> {
+    let mut con = TestConnection::new("call");
+
+    // init's blocking call was refused, so it left no handler pending.
+    let started: i64 = redis::cmd("call.init_blocking").query(&mut con)?;
+    assert_eq!(started, 0);
+    let path = utils::module_path("call")?;
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "call"])
+        .query::<()>(&mut con)?;
+    let log = con.server_log()?;
+    assert!(
+        log.contains("call deinit: blocking call refused"),
+        "deinit's blocking call was not refused"
+    );
+
+    // LOADEX rejects an unconsumed configuration after OnLoad succeeded, and
+    // Redis then forces an unload that must succeed. A handler that init left
+    // pending would make it refuse, which Redis asserts against.
+    redis::cmd("MODULE")
+        .arg("LOADEX")
+        .arg(&path)
+        .arg(&["CONFIG", "call.unknown", "1"])
+        .query::<()>(&mut con)
+        .expect_err("an unconsumed LOADEX configuration was accepted");
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
 
     Ok(())
 }

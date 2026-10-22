@@ -636,8 +636,11 @@ text.
 - **Unload with pending blocking calls.** `MODULE UNLOAD` now fails while an
   unblock handler installed with `set_unblock_handler` has neither run nor been
   aborted. Previously the unload succeeded and Redis later called the handler
-  through freed module state. Abort such calls, or let them unblock, before
-  unloading; see the [upgrade guide](UPGRADING-MODULES.md#blocking-calls-and-unload).
+  through freed module state. Keep a handle to abort such calls, or let them
+  unblock, before unloading. `call_blocking` also returns an error while the
+  module loads or unloads, so start blocking calls from commands or events
+  rather than `init` or deinit; see the
+  [upgrade guide](UPGRADING-MODULES.md#blocking-calls-and-unload).
 - **Repeated call protocol selections.** `CallOptionsBuilder::resp` now replaces
   its previous protocol selection. For example, `.resp(Resp3).resp(Resp2)`
   produces RESP2 call replies, and `.resp(Resp3).resp(Auto)` follows the client's
