@@ -82,6 +82,12 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::sync::Mutex;
+
+    // Pure guard probes share the unbound registry but have no native Redis
+    // lock. Serialize them so its GIL-confined Cell/Vec are never accessed by
+    // concurrent test threads. Native lifecycle coverage uses isolated servers.
+    static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     struct Probe(Rc<Cell<usize>>);
     impl Drop for Probe {
@@ -99,6 +105,7 @@ mod tests {
 
     #[test]
     fn unavailable_api_drops_captured_callback_once() {
+        let _serial = REGISTRY_TEST_LOCK.lock().unwrap();
         let drops = Rc::new(Cell::new(0));
         let result = PendingRegistration::prepare::<()>(None, captured_callback(&drops), "Numeric");
         assert!(
@@ -109,6 +116,7 @@ mod tests {
 
     #[test]
     fn rejected_registration_drops_captured_callback_once() {
+        let _serial = REGISTRY_TEST_LOCK.lock().unwrap();
         let drops = Rc::new(Cell::new(0));
         let (_, pending) =
             PendingRegistration::prepare(Some(()), captured_callback(&drops), "Boolean").unwrap();
@@ -124,6 +132,7 @@ mod tests {
 
     #[test]
     fn unsubmitted_registration_drops_captured_callback_once() {
+        let _serial = REGISTRY_TEST_LOCK.lock().unwrap();
         let drops = Rc::new(Cell::new(0));
         let (_, pending) =
             PendingRegistration::prepare(Some(()), captured_callback(&drops), "Enum").unwrap();
@@ -133,6 +142,7 @@ mod tests {
 
     #[test]
     fn accepted_data_keeps_its_stable_pointer_and_owner() {
+        let _serial = REGISTRY_TEST_LOCK.lock().unwrap();
         let drops = Rc::new(Cell::new(0));
         let (_, pending) =
             PendingRegistration::prepare(Some(()), captured_callback(&drops), "Enum").unwrap();
