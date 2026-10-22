@@ -222,6 +222,17 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-22: rebased onto SDK master `00cb5d2`, which adds the native module
+  shipping guide with a pinned hello release/archive/checksum/load recipe.
+  The recipe and failure controls were validated on ARM64 macOS, including
+  Python optimization. SDK PR 75 received independent native review and all 20
+  exact-head CI checks passed before merge. All 58 existing wasm patches are
+  unchanged; no host source adaptation or new wasm feature is needed.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy, strict full-workspace docs and host-excluded 7.2 SDK docs pass.
+  Guest formatting/wasm32 linting pass. Tests pass: 69 SDK units, 154 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 7 host units, 21 host
+  integrations including JavaScript, 84 SDK doctests and 4 guest helper tests.
 - 2026-10-22: rebased onto SDK master `85791c4`, which fixes public macro
   documentation and checks all SDK workspace packages strictly in CI. All 57
   existing wasm patches are unchanged; no host source adaptation is needed.

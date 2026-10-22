@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `85791c4`, strict macro documentation cleanup merged after independent review and all 20 PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `00cb5d2`, native module shipping guide merged after independent review and all 20 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `85791c4` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `00cb5d2` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -268,6 +268,12 @@ text and public links replace inaccessible references, and the derive docs name
 `RedisValue::OrderedMap` correctly. CI documents every SDK workspace package with
 warnings denied at each API floor. Generated code is unchanged; the wasm branch
 can now run full strict workspace docs instead of selecting only SDK/host packages.
+
+The [native module shipping guide](docs/SHIPPING-MODULES.md) merged in
+`00cb5d2`. It records platform/build inputs, packages checksums and verifies an
+extracted `hello` release artifact in a bounded native Redis process. Its pinned
+recipe and corruption/load-failure controls were validated on ARM64 macOS,
+including Python optimization. SDK runtime and host source are unchanged.
 
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).
