@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `43fff6b`, configuration observer thread bounds merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `c2566c9`, guard bounds and binary configuration storage merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `43fff6b` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `c2566c9` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -200,8 +200,13 @@ Configuration observer thread bounds merged in `43fff6b`: all four configuration
 registration helpers require `Send` captures, including macro declarations.
 Callbacks still need no `Sync` bound because Redis serializes invocation.
 A tested example covers client and worker updates and safe worker teardown.
-No host adaptation needed. General guard bounds and native-string storage are
-under discussion; no further SDK API change is included here.
+No host adaptation needed.
+
+Guard thread bounds and binary storage merged in `c2566c9`: shared guards
+require `Send` values, binary configurations use owned `Vec<u8>` storage, and
+private call-user bookkeeping is thread-local. Native strings remain non-`Send`.
+No host adaptation needed. General native-handle storage remains separate.
+Core SDK work continues with blocked-client validation.
 
 Also open:
 
