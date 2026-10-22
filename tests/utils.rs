@@ -16,8 +16,9 @@ const PORT_ATTEMPTS: usize = 5;
 static INSTANCE_ID: AtomicUsize = AtomicUsize::new(0);
 
 /// A test-local RESP connection with timeouts installed before any commands.
-/// redis 0.23's connection constructor performs an unbounded CLIENT SETINFO
-/// handshake before exposing its socket timeout setters.
+/// The harness owns the socket so connect, reads and writes are bounded before
+/// any handshake. Commands can explicitly select RESP2 or RESP3 without the
+/// client constructor adding setup commands.
 pub struct Connection {
     socket: TcpStream,
     parser: redis::Parser,
@@ -56,12 +57,15 @@ impl Connection {
 
     fn receive(&mut self) -> RedisResult<Value> {
         let reply = self.parser.parse_value(&mut self.socket);
-        if reply.as_ref().is_err_and(|error| error.is_io_error()) {
-            // Partial or late replies cannot be reused after a timeout.
+        if reply.is_err() {
+            // Partial, malformed or late replies cannot be reused after a
+            // transport/parser failure. Server errors are complete replies.
             self.open = false;
             let _ = self.socket.shutdown(Shutdown::Both);
         }
-        reply
+        // The current parser represents server errors as values, including
+        // errors nested in arrays. Check them before pipeline offset filtering.
+        reply.and_then(Value::extract_error)
     }
 }
 
@@ -609,6 +613,39 @@ mod connection_tests {
         let result = probe_connection(port, Some(u32::MAX));
         peer.join().expect("fake listener thread panicked")?;
         assert!(result?.is_none(), "a different process passed readiness");
+        Ok(())
+    }
+
+    #[test]
+    fn test_harness_partial_and_malformed_replies_close_connection() -> Result<()> {
+        for response in [b"$4\r\nab".as_slice(), b"?invalid\r\n".as_slice()] {
+            let listener = TcpListener::bind(("127.0.0.1", 0))?;
+            let port = listener.local_addr()?.port();
+            let peer = std::thread::spawn(move || -> Result<()> {
+                let (mut socket, _) = listener.accept()?;
+                socket.set_read_timeout(Some(Duration::from_secs(3)))?;
+                socket.set_write_timeout(Some(Duration::from_secs(3)))?;
+                redis::Parser::new().parse_value(&mut socket)?;
+                socket.write_all(response)?;
+                let mut byte = [0];
+                // A parser failure must close the peer, not leave a late or
+                // partial response available for the next command.
+                assert_eq!(socket.read(&mut byte)?, 0);
+                Ok(())
+            });
+            let mut con = Connection::connect(port)?;
+            let start = Instant::now();
+            let result = redis::cmd("PING").query::<Value>(&mut con);
+            let elapsed = start.elapsed();
+            let closed = !con.is_open();
+            let reusable = redis::cmd("PING").query::<Value>(&mut con).is_ok();
+            drop(con);
+            peer.join().expect("fake listener thread panicked")?;
+            assert!(result.is_err(), "an incomplete/invalid response succeeded");
+            assert!(closed, "a failed parser left the connection open");
+            assert!(!reusable, "a failed connection accepted another command");
+            assert!(elapsed < Duration::from_secs(2), "read waited {elapsed:?}");
+        }
         Ok(())
     }
 

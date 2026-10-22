@@ -119,6 +119,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- Integration tests use the Redis 1.2.2 development client, pinned to preserve
+  Rust 1.87 builds. The bounded harness retains binary reply distinctions,
+  server-error propagation and pipeline alignment, and directly checks RESP3
+  replies. Focused client regressions also run on Redis 6.0 in CI. SDK runtime
+  dependencies and supported server versions are unchanged.
+
 - Internal API wrappers and mixed command-list registration macros now parse
   Rust syntax with Syn 2. Command syntax and API-floor-dependent signatures are
   unchanged. The public macro crate retains its existing metadata parser.
