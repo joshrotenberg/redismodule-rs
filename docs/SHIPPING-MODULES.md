@@ -131,14 +131,16 @@ def digest(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 expected = archive.with_name(archive.name + ".sha256").read_text().split()[0]
-assert digest(archive) == expected, "archive checksum mismatch"
+if digest(archive) != expected:
+    raise ValueError("archive checksum mismatch")
 extracted = archive.parent / "extracted"
 with tarfile.open(archive) as bundle:
     bundle.extractall(extracted, filter="data")
 package = extracted / archive.name.removesuffix(".tar.gz")
 for line in (package / "SHA256SUMS").read_text().splitlines():
     expected, name = line.split("  ", 1)
-    assert digest(package / name) == expected, name
+    if digest(package / name) != expected:
+        raise ValueError(f"content checksum mismatch: {name}")
 print(f"Verified {archive}")
 PY
 ```
@@ -192,8 +194,11 @@ with log.open("w") as output:
                 raise TimeoutError("Redis did not become ready")
             time.sleep(0.05)
         modules = query("MODULE", "LIST")
-        assert any(m["name"] == "hello" and m["ver"] == 30000 for m in modules), modules
-        assert query("hello.mul", "31", "11") == [31, 11, 341]
+        if not any(m["name"] == "hello" and m["ver"] == 30000 for m in modules):
+            raise RuntimeError(f"unexpected MODULE LIST: {modules!r}")
+        actual = query("hello.mul", "31", "11")
+        if actual != [31, 11, 341]:
+            raise RuntimeError(f"unexpected hello.mul reply: {actual!r}")
         failed = False
         print(f"Native artifact smoke passed; log: {log}")
     finally:
