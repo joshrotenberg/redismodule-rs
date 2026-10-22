@@ -259,6 +259,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- `RedisKeyWritable::trim_stream_by_id` returns `Ok(0)` when a successful
+  exact or approximate trim removes no entries, including an empty stream.
+  Missing keys, wrong types and unavailable native APIs still return errors.
+
 - **Breaking:** read/write key handles and owning key scan cursors borrow their
   opening runtime context. Safe code can no longer close or use them after a
   callback ends or a worker guard unlocks. DMA and stream views retain that

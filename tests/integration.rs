@@ -3522,6 +3522,94 @@ fn test_stream_reader() -> Result<()> {
 }
 
 #[test]
+fn test_stream_trim_by_id_accepts_zero_and_matches_native_counts() -> Result<()> {
+    let mut con = TestConnection::new("stream");
+    for mode in ["exact", "approx"] {
+        redis::cmd("DEL")
+            .arg(&["module", "native", "empty"])
+            .query::<()>(&mut con)?;
+        for key in ["module", "native"] {
+            for id in ["10-1", "10-2", "20-0"] {
+                redis::cmd("XADD")
+                    .arg(&[key, id, "field", "value"])
+                    .query::<String>(&mut con)?;
+            }
+        }
+        for (id, exact_count) in [
+            ("0-0", 0),
+            ("10-1", 0),
+            ("10-2", 1),
+            ("20-0", 1),
+            ("18446744073709551615-18446744073709551615", 1),
+            ("18446744073709551615-18446744073709551615", 0),
+        ] {
+            let removed: i64 = redis::cmd("STREAM_TRIM_BEFORE")
+                .arg(&["module", id, mode])
+                .query(&mut con)?;
+            let native: i64 = redis::cmd("XTRIM")
+                .arg(&[
+                    "native",
+                    "MINID",
+                    if mode == "exact" { "=" } else { "~" },
+                    id,
+                ])
+                .query(&mut con)?;
+            assert_eq!(removed, native, "{mode} trim before {id}");
+            if mode == "exact" {
+                assert_eq!(removed, exact_count, "exact trim before {id}");
+            }
+            let module_entries: redis::Value = redis::cmd("XRANGE")
+                .arg(&["module", "-", "+"])
+                .query(&mut con)?;
+            let native_entries: redis::Value = redis::cmd("XRANGE")
+                .arg(&["native", "-", "+"])
+                .query(&mut con)?;
+            assert_eq!(
+                module_entries, native_entries,
+                "entries after {mode} trim before {id}"
+            );
+        }
+        // A stream with no entries still exists and has a successful zero trim.
+        redis::cmd("XADD")
+            .arg(&["empty", "1-0", "field", "value"])
+            .query::<String>(&mut con)?;
+        redis::cmd("XDEL")
+            .arg(&["empty", "1-0"])
+            .query::<i64>(&mut con)?;
+        assert_eq!(
+            redis::cmd("STREAM_TRIM_BEFORE")
+                .arg(&["empty", "10-0", mode])
+                .query::<i64>(&mut con)?,
+            0
+        );
+        assert_eq!(redis::cmd("EXISTS").arg("empty").query::<i64>(&mut con)?, 1);
+
+        // The module API rejects missing/wrong-type keys; these are not no-op successes.
+        redis::cmd("SET")
+            .arg(&["wrong-type", "unchanged"])
+            .query::<()>(&mut con)?;
+        for key in ["missing", "wrong-type"] {
+            let error = redis::cmd("STREAM_TRIM_BEFORE")
+                .arg(&[key, "10-0", mode])
+                .query::<i64>(&mut con)
+                .unwrap_err();
+            assert_eq!(error.detail(), Some("trimming the stream"));
+        }
+        assert_eq!(
+            redis::cmd("EXISTS").arg("missing").query::<i64>(&mut con)?,
+            0
+        );
+        assert_eq!(
+            redis::cmd("GET")
+                .arg("wrong-type")
+                .query::<String>(&mut con)?,
+            "unchanged"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn test_stream_iterator_stops_on_drop() -> Result<()> {
     let mut con = TestConnection::new("stream");
 
