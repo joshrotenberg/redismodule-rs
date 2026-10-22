@@ -25,10 +25,11 @@ pub struct StreamRecord {
 }
 
 /// Iterates the entries of a stream key. Dropping it stops the iterator, after
-/// which the key can start another one.
+/// which the key can start another one. The key borrow also keeps its opening
+/// runtime context alive and locked.
 #[derive(Debug)]
 pub struct StreamIterator<'key> {
-    key: &'key RedisKey,
+    key: &'key RedisKey<'key>,
     stop: StopFn,
     next_id: NextIdFn,
     next_field: NextFieldFn,
@@ -36,7 +37,7 @@ pub struct StreamIterator<'key> {
 
 impl<'key> StreamIterator<'key> {
     pub(crate) fn new(
-        key: &'key RedisKey,
+        key: &'key RedisKey<'key>,
         mut from: Option<raw::RedisModuleStreamID>,
         mut to: Option<raw::RedisModuleStreamID>,
         exclusive: bool,

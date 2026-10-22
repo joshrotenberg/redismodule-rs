@@ -259,6 +259,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- **Breaking:** read/write key handles and owning key scan cursors borrow their
+  opening runtime context. Safe code can no longer close or use them after a
+  callback ends or a worker guard unlocks. DMA and stream views retain that
+  context through their key borrow; copy results into Rust-owned data first.
+
 - **Breaking:** server INFO snapshots borrow their producing runtime context,
   preventing cleanup after a worker guard frees that native context or a
   callback's AutoMemory reclaims the snapshot. Copy fields into Rust-owned

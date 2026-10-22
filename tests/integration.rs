@@ -987,6 +987,30 @@ fn test_worker_server_info_is_scoped_and_returns_owned_rust_data() -> Result<()>
 }
 
 #[test]
+fn test_worker_keys_close_before_unlock_and_return_owned_rust_data() -> Result<()> {
+    let mut con = TestConnection::new("runtime_events");
+    for mode in ["manual", "auto"] {
+        let (bytes, flagged_bytes, entries): (Vec<u8>, Vec<u8>, Vec<String>) =
+            redis::cmd("runtime.worker_keys")
+                .arg(mode)
+                .query(&mut con)?;
+        assert_eq!(bytes, b"\0\xffvalue!");
+        assert_eq!(flagged_bytes, bytes);
+        assert_eq!(entries, ["field", "value"]);
+        utils::wait_until(Duration::from_secs(2), "key worker exit", || {
+            Ok(redis::cmd("runtime.finish_worker").query::<i64>(&mut con)? == 1)
+        })?;
+        let stored: Vec<u8> = redis::cmd("GET").arg("worker:scoped:key").query(&mut con)?;
+        assert_eq!(stored, bytes);
+    }
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "runtime_events"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_command_builders_mix_with_legacy_and_preserve_metadata() -> Result<()> {
     let mut con = TestConnection::new("command_builder");
     for command in [
