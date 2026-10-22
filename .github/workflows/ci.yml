@@ -124,6 +124,26 @@ jobs:
       - name: Install toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
+      - name: Test client decoding at the oldest runtime
+        env:
+          TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
+          RUST_TEST_THREADS: "4"
+        run: |
+          cargo build --example hello --example call_reply --no-default-features --features min-redis-compatibility-version-6-0
+          cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test utils
+          for test_name in \
+            test_harness_pipeline_error_drains_remaining_replies \
+            test_harness_nested_error_preserves_reply_alignment \
+            test_harness_resp2_and_resp3_decoding \
+            test_call_reply_strings_are_bulk \
+            test_call_reply_status_and_collections \
+            test_call_protocol_resets_to_resp2_without_newer_format_flags
+          do
+            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-client-tests.txt"
+            grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-client-tests.txt"
+            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact
+          done
+
       - name: Test direct client blocking
         env:
           TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"

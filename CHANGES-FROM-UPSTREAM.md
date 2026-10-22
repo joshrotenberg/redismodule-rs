@@ -299,6 +299,14 @@ These compile unchanged but behave differently:
 
 ## Build, tooling and documentation
 
+- The integration harness uses Redis client 1.2.2 as a development dependency,
+  with optional features disabled. An exact pin preserves the Rust 1.87 minimum:
+  client releases from 1.2.3 require Rust 1.88. Response checks preserve binary
+  versus simple strings, nested server errors and pipeline alignment; partial or
+  malformed replies close their connection. RESP2/RESP3 and oldest-runtime
+  controls run against native Redis 6.0 alongside the existing server matrix.
+  SDK runtime dependencies and public APIs are unchanged.
+
 - Internal API-wrapper and mixed command-list parsers use Syn 2, preserving
   existing declarations, generated registration paths and compatibility-floor
   signatures. The public macro crate still uses `serde_syn` with Syn 1 until a

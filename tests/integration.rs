@@ -43,18 +43,18 @@ mod notification_write_tests {
         let reply: Value = redis::cmd("XRANGE")
             .arg(&["watched:events", "-", "+"])
             .query(con)?;
-        let Value::Bulk(rows) = reply else {
+        let Value::Array(rows) = reply else {
             anyhow::bail!("XRANGE must return an array");
         };
         rows.into_iter()
             .map(|row| {
-                let Value::Bulk(parts) = row else {
+                let Value::Array(parts) = row else {
                     anyhow::bail!("stream entry must be an array");
                 };
                 anyhow::ensure!(parts.len() == 2, "stream entry has ID and fields");
                 Ok((
-                    redis::from_redis_value(&parts[0])?,
-                    redis::from_redis_value(&parts[1])?,
+                    redis::from_redis_value_ref(&parts[0])?,
+                    redis::from_redis_value_ref(&parts[1])?,
                 ))
             })
             .collect()
@@ -995,20 +995,20 @@ fn test_command_builders_mix_with_legacy_and_preserve_metadata() -> Result<()> {
     let metadata: Vec<Vec<Value>> = redis::cmd("COMMAND")
         .arg(&["INFO", "builder.get", "builder.ping", "builder.legacy"])
         .query(&mut con)?;
-    let flags: Vec<String> = redis::from_redis_value(&metadata[0][2])?;
+    let flags: Vec<String> = redis::from_redis_value_ref(&metadata[0][2])?;
     for flag in ["readonly", "fast", "noscript"] {
         assert!(flags.iter().any(|value| value == flag), "{flags:?}");
     }
     let positions: Vec<i64> = metadata[0][3..6]
         .iter()
-        .map(redis::from_redis_value)
-        .collect::<RedisResult<_>>()?;
+        .map(redis::from_redis_value_ref)
+        .collect::<Result<_, _>>()?;
     assert_eq!(positions, [1, 1, 1]);
     for command in &metadata[1..] {
         let positions: Vec<i64> = command[3..6]
             .iter()
-            .map(redis::from_redis_value)
-            .collect::<RedisResult<_>>()?;
+            .map(redis::from_redis_value_ref)
+            .collect::<Result<_, _>>()?;
         assert_eq!(positions, [0, 0, 0]);
     }
     Ok(())
@@ -1135,8 +1135,6 @@ fn test_call_protocol_resets_to_resp2_without_newer_format_flags() -> Result<()>
 
 #[test]
 fn test_call_protocol_selection_uses_the_last_setting() -> Result<()> {
-    use redis::ConnectionLike;
-
     let mut con = TestConnection::new("call_reply");
     con.set_read_timeout(Some(Duration::from_secs(5)))?;
     con.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -1146,17 +1144,8 @@ fn test_call_protocol_selection_uses_the_last_setting() -> Result<()> {
 
     for client_resp3 in [false, true] {
         if client_resp3 {
-            // redis-rs 0.23 cannot parse HELLO's RESP3 map. Suppress only the
-            // handshake replies; CLIENT REPLY ON returns the one +OK below.
-            let mut switch = Vec::new();
-            for args in [
-                &["CLIENT", "REPLY", "OFF"][..],
-                &["HELLO", "3"],
-                &["CLIENT", "REPLY", "ON"],
-            ] {
-                switch.extend(redis::cmd(args[0]).arg(&args[1..]).get_packed_command());
-            }
-            assert_eq!(con.req_packed_commands(&switch, 0, 1)?, [Value::Okay]);
+            let hello: Value = redis::cmd("HELLO").arg(3).query(&mut con)?;
+            assert!(matches!(hello, Value::Map(_)), "{hello:?}");
         }
         let default: String = redis::cmd("call_reply.protocol")
             .arg("protocol:hash")
@@ -1600,6 +1589,15 @@ fn test_harness_pipeline_error_drains_remaining_replies() -> Result<()> {
         .query::<Vec<Value>>(&mut *con)
         .expect_err("LPUSH accepted a string key");
     assert_eq!(error.code(), Some("WRONGTYPE"), "{error}");
+    // Errors in offset replies (for example transaction setup) must not be
+    // discarded before the harness drains the remaining requested responses.
+    let mut commands = redis::cmd("LPUSH")
+        .arg(&["pipeline-string", "item"])
+        .get_packed_command();
+    commands.extend(redis::cmd("PING").get_packed_command());
+    let error = redis::ConnectionLike::req_packed_commands(&mut *con, &commands, 1, 1)
+        .expect_err("an error in a skipped pipeline reply was ignored");
+    assert_eq!(error.code(), Some("WRONGTYPE"), "{error}");
     assert_eq!(
         redis::cmd("ECHO")
             .arg("after the pipeline")
@@ -1607,6 +1605,71 @@ fn test_harness_pipeline_error_drains_remaining_replies() -> Result<()> {
         "after the pipeline",
         "the failed pipeline left a PING reply on the connection"
     );
+    Ok(())
+}
+
+#[test]
+fn test_harness_nested_error_preserves_reply_alignment() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    let command = redis::cmd("EVAL")
+        .arg("return {'before', redis.error_reply('PROBE nested failure'), 'after'}")
+        .arg(0)
+        .get_packed_command();
+    let error = redis::ConnectionLike::req_packed_command(&mut *con, &command)
+        .expect_err("a nested server error was treated as a successful reply");
+    assert_eq!(error.code(), Some("PROBE"));
+    assert_eq!(error.detail(), Some("nested failure"));
+    assert_eq!(
+        redis::cmd("ECHO")
+            .arg("aligned")
+            .query::<String>(&mut con)?,
+        "aligned"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_harness_resp2_and_resp3_decoding() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    for protocol in [2, 3, 2] {
+        let hello: Value = redis::cmd("HELLO").arg(protocol).query(&mut con)?;
+        let resp3 = protocol == 3;
+        assert_eq!(matches!(hello, Value::Map(_)), resp3, "{hello:?}");
+        assert_eq!(matches!(hello, Value::Array(_)), !resp3, "{hello:?}");
+        let info: HashMap<String, Value> = redis::from_redis_value(hello)?;
+        assert_eq!(info["proto"], Value::Int(protocol));
+        let bytes = b"a\0\xff\r\n";
+        let echoed: Value = redis::cmd("ECHO").arg(bytes.as_slice()).query(&mut con)?;
+        assert_eq!(echoed, Value::BulkString(bytes.to_vec()));
+        redis::cmd("HSET")
+            .arg(&["resp:hash", "field", "value"])
+            .query::<()>(&mut con)?;
+        let hash: Value = redis::cmd("HGETALL").arg("resp:hash").query(&mut con)?;
+        let pair = (
+            Value::BulkString(b"field".to_vec()),
+            Value::BulkString(b"value".to_vec()),
+        );
+        assert_eq!(
+            hash,
+            if resp3 {
+                Value::Map(vec![pair])
+            } else {
+                Value::Array(vec![pair.0, pair.1])
+            }
+        );
+        assert_eq!(
+            redis::cmd("GET")
+                .arg("resp:missing")
+                .query::<Value>(&mut con)?,
+            Value::Nil
+        );
+        let error = redis::cmd("LPUSH")
+            .arg(&["resp:hash", "wrong type"])
+            .query::<Value>(&mut con)
+            .unwrap_err();
+        assert_eq!(error.code(), Some("WRONGTYPE"));
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
     Ok(())
 }
 
@@ -1633,15 +1696,15 @@ fn test_string_ownership_additional_encodings() -> Result<()> {
             .arg("text-set")
             .arg(0)
             .query(&mut con)?;
-        let Value::Bulk(top) = response else {
+        let Value::Array(top) = response else {
             panic!("scan array")
         };
         assert_eq!(top[0], Value::Int(2));
-        let Value::Bulk(pairs) = &top[1] else {
+        let Value::Array(pairs) = &top[1] else {
             panic!("pair array")
         };
         for row in pairs {
-            let Value::Bulk(pair) = row else {
+            let Value::Array(pair) = row else {
                 panic!("pair")
             };
             assert_eq!(pair[1], Value::Nil);
@@ -1671,15 +1734,15 @@ fn test_string_ownership_additional_encodings() -> Result<()> {
                 .arg("expires")
                 .arg(0)
                 .query(&mut con)?;
-            let Value::Bulk(top) = response else {
+            let Value::Array(top) = response else {
                 panic!("scan array")
             };
             assert_eq!(top[0], Value::Int(1));
             assert_eq!(
                 top[1],
-                Value::Bulk(vec![Value::Bulk(vec![
-                    Value::Data(b"f".to_vec()),
-                    Value::Data(b"value".to_vec())
+                Value::Array(vec![Value::Array(vec![
+                    Value::BulkString(b"f".to_vec()),
+                    Value::BulkString(b"value".to_vec())
                 ])])
             );
         }
@@ -1888,24 +1951,24 @@ fn test_string_ownership_scans() -> Result<()> {
                 .arg("entries")
                 .arg(0)
                 .query(&mut con)?;
-            let Value::Bulk(top) = response else {
+            let Value::Array(top) = response else {
                 panic!("scan response must be an array")
             };
-            let count: usize = redis::from_redis_value(&top[0])?;
-            let Value::Bulk(rows) = &top[1] else {
+            let count: usize = redis::from_redis_value_ref(&top[0])?;
+            let Value::Array(rows) = &top[1] else {
                 panic!("scan pairs must be an array")
             };
             let mut pairs = Vec::new();
             for row in rows {
-                let Value::Bulk(pair) = row else {
+                let Value::Array(pair) = row else {
                     panic!("pair must be an array")
                 };
                 assert_eq!(pair.len(), 2);
-                let field: Vec<u8> = redis::from_redis_value(&pair[0])?;
+                let field: Vec<u8> = redis::from_redis_value_ref(&pair[0])?;
                 let value: Option<Vec<u8>> = if pair[1] == Value::Nil {
                     None
                 } else {
-                    Some(redis::from_redis_value(&pair[1])?)
+                    Some(redis::from_redis_value_ref(&pair[1])?)
                 };
                 pairs.push((field, value));
             }
@@ -1934,10 +1997,10 @@ fn test_string_ownership_scans() -> Result<()> {
                 .arg("entries")
                 .arg(0)
                 .query(&mut con)?;
-            let Value::Bulk(top) = response else {
+            let Value::Array(top) = response else {
                 panic!("scan response must be an array")
             };
-            let again: usize = redis::from_redis_value(&top[0])?;
+            let again: usize = redis::from_redis_value_ref(&top[0])?;
             assert_eq!(again, 2);
         }
     }
@@ -2275,7 +2338,7 @@ fn test_module_lifecycle_reload_and_failed_load_recovery() -> Result<()> {
         let modules: Vec<HashMap<String, Value>> = redis::cmd("MODULE").arg("LIST").query(con)?;
         for module in modules {
             assert_ne!(
-                redis::from_redis_value::<String>(&module["name"])?,
+                redis::from_redis_value_ref::<String>(&module["name"])?,
                 "lifecycle"
             );
         }
@@ -2371,7 +2434,8 @@ fn test_long_utf8_module_name_is_preserved_across_load_and_unload() -> Result<()
         assert!(
             modules
                 .iter()
-                .any(|module| module.get("name") == Some(&Value::Data(name.as_bytes().to_vec())))
+                .any(|module| module.get("name")
+                    == Some(&Value::BulkString(name.as_bytes().to_vec())))
         );
         Ok(())
     };
@@ -2401,9 +2465,9 @@ fn test_module_version_from_cargo() -> Result<()> {
     let modules: Vec<HashMap<String, Value>> = redis::cmd("MODULE").arg("LIST").query(&mut con)?;
     let hello = modules
         .iter()
-        .find(|module| module.get("name") == Some(&Value::Data(b"hello".to_vec())))
+        .find(|module| module.get("name") == Some(&Value::BulkString(b"hello".to_vec())))
         .context("hello must appear in MODULE LIST")?;
-    let version: i32 = redis::from_redis_value(&hello["ver"])?;
+    let version: i32 = redis::from_redis_value_ref(&hello["ver"])?;
     assert_eq!(version, redis_module::module_version!());
     assert_eq!(
         version,
@@ -2964,11 +3028,11 @@ fn test_insertion_ordered_map() -> Result<()> {
     assert_eq!(
         res,
         [
-            redis::Value::Data(b"zebra".to_vec()),
+            redis::Value::BulkString(b"zebra".to_vec()),
             redis::Value::Int(1),
-            redis::Value::Data(b"apple".to_vec()),
+            redis::Value::BulkString(b"apple".to_vec()),
             redis::Value::Int(2),
-            redis::Value::Data(b"mango".to_vec()),
+            redis::Value::BulkString(b"mango".to_vec()),
             redis::Value::Int(3),
         ]
     );
@@ -3460,9 +3524,13 @@ fn test_call_reply_kinds_and_dry_run() -> Result<()> {
             .query(&mut con)?;
         assert_eq!(res, Value::Okay, "{command} SET");
         let res: Value = redis::cmd(command).arg(&["GET", "k"]).query(&mut con)?;
-        assert_eq!(res, Value::Data(b"v".to_vec()), "{command} GET");
+        assert_eq!(res, Value::BulkString(b"v".to_vec()), "{command} GET");
         let res: Value = redis::cmd(command).arg(&["PING"]).query(&mut con)?;
-        assert_eq!(res, Value::Status("PONG".to_owned()), "{command} PING");
+        assert_eq!(
+            res,
+            Value::SimpleString("PONG".to_owned()),
+            "{command} PING"
+        );
     }
     let error = redis::cmd("call.forward")
         .arg(&["INCR", "k"])
@@ -3593,7 +3661,7 @@ fn test_acl_category_survives_module_reload() -> Result<()> {
                 .arg(&["INFO", "get_current_user"])
                 .query(con)?;
             assert_eq!(command.len(), 1);
-            let categories: Vec<String> = redis::from_redis_value(
+            let categories: Vec<String> = redis::from_redis_value_ref(
                 command[0]
                     .get(6)
                     .context("COMMAND INFO includes ACL categories")?,
@@ -3655,7 +3723,7 @@ fn test_acl_category_invalid_name_fails_module_load() -> Result<()> {
     );
     let modules: Vec<HashMap<String, Value>> = redis::cmd("MODULE").arg("LIST").query(&mut con)?;
     for module in modules {
-        let name: String = redis::from_redis_value(&module["name"])?;
+        let name: String = redis::from_redis_value_ref(&module["name"])?;
         assert_ne!(name, "acl_invalid_category");
     }
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
@@ -3738,7 +3806,7 @@ fn test_acl_command_and_channel_checks() -> Result<()> {
     let log: Vec<HashMap<String, redis::Value>> =
         redis::cmd("ACL").arg(&["LOG", "1"]).query(&mut con)?;
     let entry = &log[0];
-    let text = |field: &str| redis::from_redis_value::<String>(&entry[field]).unwrap();
+    let text = |field: &str| redis::from_redis_value_ref::<String>(&entry[field]).unwrap();
     assert_eq!(text("username"), "bob");
     assert_eq!(text("object"), "sports:1");
     assert_eq!(text("reason"), "channel");
@@ -4540,7 +4608,7 @@ fn test_configuration_observers_follow_client_and_worker_setter_threads() -> Res
         rows.iter()
             .map(|row| {
                 anyhow::ensure!(row.len() == 3, "observer name, count and thread flag");
-                let name: String = redis::from_redis_value(&row[0])?;
+                let name: String = redis::from_redis_value_ref(&row[0])?;
                 // Redis 8.0 passes the module-prefixed name to enum setters.
                 // This test identifies the setting; it does not constrain the
                 // native callback's naming convention.
@@ -4551,8 +4619,8 @@ fn test_configuration_observers_follow_client_and_worker_setter_threads() -> Res
                 };
                 Ok((
                     name,
-                    redis::from_redis_value(&row[1])?,
-                    redis::from_redis_value::<i64>(&row[2])? != 0,
+                    redis::from_redis_value_ref(&row[1])?,
+                    redis::from_redis_value_ref::<i64>(&row[2])? != 0,
                 ))
             })
             .collect()
@@ -4704,12 +4772,12 @@ mod parsed_configuration_tests {
         assert_eq!(config(&mut con, "prefix")?, "items:");
         let seen = observations(&mut con)?;
         assert!(
-            seen.contains(&vec![Value::Data(b"8".to_vec()), Value::Int(8)]),
+            seen.contains(&vec![Value::BulkString(b"8".to_vec()), Value::Int(8)]),
             "an accepted intermediate value must be observable: {seen:?}"
         );
         assert_eq!(
             seen.last(),
-            Some(&vec![Value::Data(b"4".to_vec()), Value::Int(4)]),
+            Some(&vec![Value::BulkString(b"4".to_vec()), Value::Int(4)]),
             "rollback must restore the old raw/parsed pair"
         );
         // The callback history is not rolled back with the stored values.
@@ -4754,7 +4822,7 @@ mod parsed_configuration_tests {
         let observed: Vec<Value> = redis::cmd("parsed_config.observed").query(&mut con)?;
         assert!(!observed.is_empty());
         for pair in observed {
-            let pair: (String, i64) = redis::from_redis_value(&pair)?;
+            let pair: (String, i64) = redis::from_redis_value_ref(&pair)?;
             assert_eq!(pair, (" 008 ".into(), 8));
         }
         redis::cmd("CONFIG")
@@ -4968,9 +5036,9 @@ fn test_command_proc_macro() -> Result<()> {
         ("num_keys", -2),
     ]) {
         let fields = entry.as_sequence().expect("COMMAND INFO entry");
-        assert_eq!(redis::from_redis_value::<String>(&fields[0])?, name);
-        assert_eq!(redis::from_redis_value::<i64>(&fields[1])?, arity);
-        let flags: Vec<String> = redis::from_redis_value(&fields[2])?;
+        assert_eq!(redis::from_redis_value_ref::<String>(&fields[0])?, name);
+        assert_eq!(redis::from_redis_value_ref::<i64>(&fields[1])?, arity);
+        let flags: Vec<String> = redis::from_redis_value_ref(&fields[2])?;
         assert!(flags.iter().any(|flag| flag == "readonly"));
     }
     let keyless = info[0].as_sequence().expect("Keyless command metadata");
@@ -5021,10 +5089,10 @@ fn test_redis_value_derive() -> Result<()> {
         .query(&mut con)
         .with_context(|| "failed structured redis_value_derive reply")?;
 
-    let fields: HashMap<String, Value> = redis::from_redis_value(&res)?;
+    let fields: HashMap<String, Value> = redis::from_redis_value_ref(&res)?;
     assert_eq!(fields.len(), 11);
-    let text = |s: &str| Value::Data(s.as_bytes().to_vec());
-    let inner = |i| Value::Bulk(vec![text("i1"), Value::Int(i)]);
+    let text = |s: &str| Value::BulkString(s.as_bytes().to_vec());
+    let inner = |i| Value::Array(vec![text("i1"), Value::Int(i)]);
     for (name, expected) in [
         ("i", Value::Int(10)),
         ("i1", Value::Int(1)),
@@ -5032,17 +5100,17 @@ fn test_redis_value_derive() -> Result<()> {
         ("s", text("s")),
         (
             "v",
-            Value::Bulk(vec![Value::Int(1), Value::Int(2), Value::Int(3)]),
+            Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]),
         ),
-        ("v2", Value::Bulk(vec![inner(1), inner(2)])),
-        ("hash_map", Value::Bulk(vec![text("key"), text("val")])),
-        ("hash_set", Value::Bulk(vec![text("key")])),
-        ("ordered_map", Value::Bulk(vec![text("key"), inner(10)])),
-        ("ordered_set", Value::Bulk(vec![text("key")])),
+        ("v2", Value::Array(vec![inner(1), inner(2)])),
+        ("hash_map", Value::Array(vec![text("key"), text("val")])),
+        ("hash_set", Value::Array(vec![text("key")])),
+        ("ordered_map", Value::Array(vec![text("key"), inner(10)])),
+        ("ordered_set", Value::Array(vec![text("key")])),
     ] {
         assert_eq!(fields.get(name), Some(&expected), "Reply field {name}");
     }
-    assert_eq!(redis::from_redis_value::<f64>(&fields["f"])?, 1.1);
+    assert_eq!(redis::from_redis_value_ref::<f64>(&fields["f"])?, 1.1);
     assert!(
         !fields.contains_key("inner"),
         "Flattened fields belong at the top level"
@@ -5151,14 +5219,14 @@ fn test_call_reply_strings_are_bulk() -> Result<()> {
             .arg(input.as_slice())
             .query(&mut con)
             .with_context(|| format!("failed to forward ECHO {input:?}"))?;
-        assert_eq!(echoed, Value::Data(input.clone()), "ECHO {input:?}");
+        assert_eq!(echoed, Value::BulkString(input.clone()), "ECHO {input:?}");
 
         redis::cmd("SET")
             .arg(key)
             .arg(input.as_slice())
             .query::<()>(&mut con)?;
         let value: Value = redis::cmd("call_reply.get").arg(key).query(&mut con)?;
-        assert_eq!(value, Value::Data(input.clone()), "GET {input:?}");
+        assert_eq!(value, Value::BulkString(input.clone()), "GET {input:?}");
 
         let direct: Value = redis::cmd("DUMP").arg(key).query(&mut con)?;
         let forwarded: Value = redis::cmd("call_reply.dump").arg(key).query(&mut con)?;
@@ -5166,8 +5234,8 @@ fn test_call_reply_strings_are_bulk() -> Result<()> {
     }
 
     let values: Value = redis::cmd("call_reply.mget").arg(&keys).query(&mut con)?;
-    let expected = inputs.iter().cloned().map(Value::Data).collect();
-    assert_eq!(values, Value::Bulk(expected));
+    let expected = inputs.iter().cloned().map(Value::BulkString).collect();
+    assert_eq!(values, Value::Array(expected));
 
     let missing: Value = redis::cmd("call_reply.get")
         .arg("call_reply:missing")
