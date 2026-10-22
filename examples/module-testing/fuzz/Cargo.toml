@@ -1,0 +1,30 @@
+[package]
+name = "module-testing-fuzz"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+license = "BSD-3-Clause"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+resolver = "3"
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+module-testing-parser = { path = ".." }
+redis-module = { path = "../../..", optional = true, default-features = false, features = ["min-redis-compatibility-version-6-0"] }
+
+[features]
+# These are fuzz-binary controls, never production-module features.
+sdk-allocator = ["dep:redis-module"]
+system-fallback = ["sdk-allocator", "redis-module/system-allocator-fallback"]
+
+[[bin]]
+name = "limit"
+path = "fuzz_targets/limit.rs"
+test = false
+doc = false
+bench = false

@@ -299,6 +299,12 @@ These compile unchanged but behave differently:
 
 ## Build, tooling and documentation
 
+- [Module testing patterns](docs/TESTING-MODULES.md) reuse existing event
+  modules for a companion-input recipe and provide an independent parser/fuzz
+  fixture. The pinned libFuzzer setup checks both system allocation and explicit
+  SDK test fallback, plus refusal without fallback. Normal SDK dependencies and
+  production allocator guards are unchanged.
+
 - A [native module shipping guide](docs/SHIPPING-MODULES.md) records build
   inputs, platform limits, archive checksums and a disposable-server load check
   of the extracted artifact. It links the module upgrade/recovery guide.

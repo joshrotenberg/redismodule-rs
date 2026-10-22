@@ -104,6 +104,9 @@ For distributing a native module binary, see
 [Shipping a native module](docs/SHIPPING-MODULES.md) for build inputs, platform
 compatibility, checksums and an extracted-artifact load check.
 
+For companion-module input checks and pure parser fuzzing outside Redis, see
+[Testing module inputs and pure parsers](docs/TESTING-MODULES.md).
+
 ## Features
 
 ### Optional command builders
