@@ -299,6 +299,10 @@ These compile unchanged but behave differently:
 
 ## Build, tooling and documentation
 
+- A [native module shipping guide](docs/SHIPPING-MODULES.md) records build
+  inputs, platform limits, archive checksums and a disposable-server load check
+  of the extracted artifact. It links the module upgrade/recovery guide.
+
 - Strict documentation checks select every SDK workspace package, including
   public and internal macro crates, at each CI API floor. Public macro docs use
   qualified SDK type text and accessible links without private implementation

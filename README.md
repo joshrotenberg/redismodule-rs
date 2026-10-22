@@ -100,6 +100,10 @@ For writes triggered by keyspace notifications, see
 [notification-to-stream example](examples/keyspace_to_stream.rs). It uses
 Redis 7.2+ post-notification jobs, explicit replication, and role/loading gates.
 
+For distributing a native module binary, see
+[Shipping a native module](docs/SHIPPING-MODULES.md) for build inputs, platform
+compatibility, checksums and an extracted-artifact load check.
+
 ## Features
 
 ### Optional command builders
