@@ -119,6 +119,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- Internal API wrappers and mixed command-list registration macros now parse
+  Rust syntax with Syn 2. Command syntax and API-floor-dependent signatures are
+  unchanged. The public macro crate retains its existing metadata parser.
+
 - **Breaking:** timers return `Result<TimerHandle<T>, RedisError>` and require
   `Send + 'static` callbacks and payloads. `cancel_timer(&handle)` replaces
   untyped `stop_timer<T>` and recovers the payload at most once;

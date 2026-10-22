@@ -13,6 +13,9 @@ Released with redis-module 3.0.0.
 
 ### Changed
 
+- Parse API wrappers and mixed command lists with Syn 2; accepted declarations
+  and compatibility-floor-dependent return types remain unchanged.
+
 - The `api!` macro's required APIs panic with the missing API's name instead of unwrapping `None`.
 - Edition 2024; `rust-version = "1.87"`.
 
