@@ -1,9 +1,10 @@
 use redis_module::{
     BlockedClient, CallOptionResp, CallOptionsBuilder, CallReply, CallResult, Context,
-    FutureCallReply, PromiseCallReply, RedisError, RedisResult, RedisString, RedisValue, Status,
-    ThreadSafeContext, raw, redis_module,
+    EventContext, FutureCallReply, FutureHandler, PromiseCallReply, RedisError, RedisResult,
+    RedisString, RedisValue, Status, ThreadSafeContext, raw, redis_module,
 };
 
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::thread;
 
@@ -212,11 +213,57 @@ fn call_blocking_abort(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     })
 }
 
-/// Replies with the handler calls and capture drops since the module loaded.
+// A function pointer handler, so a kept handle has a nameable type.
+type KeptHandler = fn(&EventContext, CallResult<'static>);
+
+static KEPT_HANDLER_CALLS: AtomicI64 = AtomicI64::new(0);
+
+thread_local! {
+    // Commands run on the main thread, where the handle must stay.
+    static KEPT_HANDLE: RefCell<Option<FutureHandler<KeptHandler>>> = const { RefCell::new(None) };
+}
+
+fn count_kept_call(_ctx: &EventContext, _reply: CallResult<'static>) {
+    KEPT_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
+}
+
+/// `call.blocking_keep <key>` starts `BLPOP <key> 0` and keeps its handle
+/// after the command returns, for `call.blocking_abort_kept`.
+fn call_blocking_keep(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let [_, key] = args.as_slice() else {
+        return Err(RedisError::WrongArity);
+    };
+    let options = CallOptionsBuilder::new().build_blocking();
+    let future = match ctx.call_blocking("blpop", &options, &[key.try_as_str()?, "0"]) {
+        PromiseCallReply::Future(future) => future,
+        PromiseCallReply::Resolved(_) => return Err(RedisError::Str("ERR the call did not block")),
+    };
+    let handle = future.set_unblock_handler(count_kept_call as KeptHandler);
+    if let Some(previous) = KEPT_HANDLE.replace(Some(handle)) {
+        previous.dispose(ctx);
+    }
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
+/// Aborts the handle `call.blocking_keep` kept, which fails once the call
+/// has unblocked and its handler has run.
+fn call_blocking_abort_kept(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let handle = KEPT_HANDLE
+        .take()
+        .ok_or(RedisError::Str("ERR no kept handle"))?;
+    Ok(match handle.abort_and_dispose(ctx) {
+        Status::Ok => RedisValue::SimpleStringStatic("aborted"),
+        Status::Err => RedisValue::SimpleStringStatic("not aborted"),
+    })
+}
+
+/// Replies with the aborted handler calls, capture drops and kept handler
+/// calls since the module loaded.
 fn call_blocking_abort_stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Array(vec![
         ABORTED_HANDLER_CALLS.load(Ordering::SeqCst).into(),
         ABORTED_CAPTURE_DROPS.load(Ordering::SeqCst).into(),
+        KEPT_HANDLER_CALLS.load(Ordering::SeqCst).into(),
     ]))
 }
 
@@ -358,6 +405,8 @@ redis_module! {
         ["call.blocking", call_blocking, "", 0, 0, 0, ""],
         ["call.blocking_from_detached_ctx", call_blocking_from_detach_ctx, "", 0, 0, 0, ""],
         ["call.blocking_abort", call_blocking_abort, "", 0, 0, 0, ""],
+        ["call.blocking_keep", call_blocking_keep, "", 0, 0, 0, ""],
+        ["call.blocking_abort_kept", call_blocking_abort_kept, "", 0, 0, 0, ""],
         ["call.blocking_abort_stats", call_blocking_abort_stats, "", 0, 0, 0, ""],
         ["call.dump_test", call_dump_test, "", 0, 0, 0, ""],
         ["call.binary_data_test", call_binary_data_test, "", 0, 0, 0, ""],
