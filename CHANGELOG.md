@@ -115,6 +115,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- **Breaking:** configuration `on_changed` closures must be `Send`, including
+  those in `redis_module!`. A locked worker's `CONFIG SET` can invoke them on
+  that worker; serialization does not make non-`Send` captures transferable.
+  Function callbacks are unchanged, and `Sync` is not required. The
+  `configuration_observers` example covers client and worker delivery.
+
 - **Breaking:** `redis_module!` requires a constant `&str` module name without
   NUL bytes. Its terminated buffer is built at compile time, allowing long and
   UTF-8 names without allocation before native initialization. Runtime name

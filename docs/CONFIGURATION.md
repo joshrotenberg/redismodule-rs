@@ -138,6 +138,22 @@ storage. It returns no result and cannot veto an update. It is also distinct
 from Redis's native `applyfn` for grouped changes; the SDK registration helpers
 do not expose that grouped apply callback.
 
+Observers run on the thread executing the setter. A worker can hold the Redis
+lock and call `CONFIG SET`, which invokes observers on that worker. Redis
+serializes these invocations, but serialization alone does not make `Rc` or
+other non-`Send` captures safe to access from a different thread. All four
+registration helpers, including observers declared in `redis_module!`, require
+`Send` closures. Ordinary function callbacks are unchanged. For shared state,
+use `Arc` with appropriate synchronization, atomics, or Redis-locked storage.
+Owned `Cell` or `RefCell` captures can be used because invocation is serialized;
+the closure need not be `Sync`. Explicit `Box<dyn Fn(...)>` annotations must
+include `+ Send`.
+
+The [configuration observer example](../examples/configuration_observers.rs)
+registers all four types with owned `Cell` counters, records the invoking
+thread, and updates them from client and worker calls. It joins finished workers
+before unloading, refusing unload while a worker still runs.
+
 Keep parsing free of side effects, and make observers repeatable and
 non-panicking. They can run during loading and rollback, and are not a
 commit notification for an entire `CONFIG SET` command. In particular:

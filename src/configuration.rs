@@ -13,6 +13,11 @@
 //! Loading and rollback can invoke setters repeatedly. Keep parsers free of
 //! side effects and do not assume callback effects will be rolled back.
 //!
+//! Observers run on the thread executing the setter, including a locked worker
+//! that calls `CONFIG SET`. Their owned captures must be [`Send`]. Redis's lock
+//! serializes invocation, so [`Sync`] is not required. The lock proof itself
+//! remains confined to the callback's thread.
+//!
 //! See the [configuration notes](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/CONFIGURATION.md)
 //! for argument syntax, precedence examples, storage choices and reload behavior.
 
@@ -212,7 +217,10 @@ impl ConfigurationValue<bool> for AtomicBool {
     }
 }
 
-type OnUpdatedCallback<T> = Box<dyn Fn(&ConfigurationContext, &str, &'static T)>;
+// Redis retains the closure and can invoke it from a different locked thread.
+// Serialization protects exclusive access, but does not make non-Send captures
+// (for example Rc clones shared outside Redis) transferable between threads.
+type OnUpdatedCallback<T> = Box<dyn Fn(&ConfigurationContext, &str, &'static T) + Send>;
 
 struct ConfigrationPrivateData<G, T: ConfigurationValue<G> + 'static> {
     variable: &'static T,
@@ -280,6 +288,40 @@ extern "C" fn i64_configuration_get<T: ConfigurationValue<i64> + 'static>(
 /// callback of a rejected registration are dropped. Outside the `configurations`
 /// block of `redis_module!`, call [`load_configurations`] after the last
 /// registration.
+///
+/// Observers must own `Send` captures because a locked worker can execute
+/// `CONFIG SET`. Owned `Cell` state is supported; it need not be `Sync`:
+///
+/// ```no_run
+/// use redis_module::{RedisError, RegistrationContext};
+/// use redis_module::configuration::{ConfigurationFlags, register_i64_configuration};
+/// use std::{cell::Cell, sync::atomic::AtomicI64};
+/// static VALUE: AtomicI64 = AtomicI64::new(0);
+/// fn register(ctx: &RegistrationContext<'_>) -> Result<(), RedisError> {
+///     let calls = Cell::new(0);
+///     register_i64_configuration(ctx, "count", &VALUE, 0, 0, 100,
+///         ConfigurationFlags::DEFAULT,
+///         Some(Box::new(move |_, _, _| calls.set(calls.get() + 1))))
+/// }
+/// ```
+///
+/// Captures shared through `Rc` are rejected even though invocation is locked:
+///
+/// ```compile_fail,E0277
+/// use redis_module::{RedisError, RegistrationContext};
+/// use redis_module::configuration::{ConfigurationFlags, register_i64_configuration};
+/// use std::{cell::Cell, rc::Rc, sync::atomic::AtomicI64};
+/// static VALUE: AtomicI64 = AtomicI64::new(0);
+/// fn register(ctx: &RegistrationContext<'_>) -> Result<(), RedisError> {
+///     let shared = Rc::new(Cell::new(0));
+///     let capture = Rc::clone(&shared);
+///     register_i64_configuration(ctx, "count", &VALUE, 0, 0, 100,
+///         ConfigurationFlags::DEFAULT,
+///         Some(Box::new(move |_, _, _| capture.set(capture.get() + 1))))?;
+///     shared.set(2);
+///     Ok(())
+/// }
+/// ```
 #[expect(clippy::too_many_arguments)]
 pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
     ctx: &RegistrationContext<'_>,
@@ -434,6 +476,10 @@ extern "C" fn string_configuration_get<T: ConfigurationValue<RedisString> + 'sta
 /// `on_changed` callback of a rejected registration are dropped. Outside the
 /// `configurations` block of `redis_module!`, call [`load_configurations`]
 /// after the last registration.
+///
+/// The observer runs on the setter's thread, including locked workers, so its
+/// captures must be `Send`; `Sync` is not required. See
+/// [`register_i64_configuration`] for capture examples.
 pub fn register_string_configuration<T: ConfigurationValue<RedisString>>(
     ctx: &RegistrationContext<'_>,
     name: &str,
@@ -513,6 +559,10 @@ extern "C" fn bool_configuration_get<T: ConfigurationValue<bool> + 'static>(
 /// `on_changed` callback of a rejected registration are dropped. Outside the
 /// `configurations` block of `redis_module!`, call [`load_configurations`]
 /// after the last registration.
+///
+/// The observer runs on the setter's thread, including locked workers, so its
+/// captures must be `Send`; `Sync` is not required. See
+/// [`register_i64_configuration`] for capture examples.
 pub fn register_bool_configuration<T: ConfigurationValue<bool>>(
     ctx: &RegistrationContext<'_>,
     name: &str,
@@ -616,6 +666,10 @@ extern "C" fn enum_configuration_get<
 /// `on_changed` callback of a rejected registration are dropped. Outside the
 /// `configurations` block of `redis_module!`, call [`load_configurations`]
 /// after the last registration.
+///
+/// The observer runs on the setter's thread, including locked workers, so its
+/// captures must be `Send`; `Sync` is not required. See
+/// [`register_i64_configuration`] for capture examples.
 pub fn register_enum_configuration<G: EnumConfigurationValue, T: ConfigurationValue<G>>(
     ctx: &RegistrationContext<'_>,
     name: &str,

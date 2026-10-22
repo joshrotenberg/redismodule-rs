@@ -3866,6 +3866,118 @@ fn test_configuration_registration_errors_fail_the_load() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_configuration_observers_follow_client_and_worker_setter_threads() -> Result<()> {
+    fn observed(con: &mut TestConnection) -> Result<Vec<(String, i64, bool)>> {
+        let rows: Vec<Vec<Value>> = redis::cmd("config_observers.observed").query(con)?;
+        rows.iter()
+            .map(|row| {
+                anyhow::ensure!(row.len() == 3, "observer name, count and thread flag");
+                Ok((
+                    redis::from_redis_value(&row[0])?,
+                    redis::from_redis_value(&row[1])?,
+                    redis::from_redis_value::<i64>(&row[2])? != 0,
+                ))
+            })
+            .collect()
+    }
+
+    fn client_update(con: &mut TestConnection) -> Result<()> {
+        redis::cmd("CONFIG")
+            .arg(&[
+                "SET",
+                "configuration_observers.number",
+                "7",
+                "configuration_observers.text",
+                "client",
+                "configuration_observers.toggle",
+                "yes",
+                "configuration_observers.choice",
+                "Two",
+            ])
+            .query::<()>(con)?;
+        Ok(())
+    }
+
+    let mut con = TestConnection::new("configuration_observers");
+    assert!(observed(&mut con)?.is_empty());
+    client_update(&mut con)?;
+    let first = observed(&mut con)?;
+    assert_eq!(first.len(), 4);
+    let counts: HashMap<_, _> = first
+        .into_iter()
+        .map(|(name, count, main_thread)| {
+            assert!(main_thread, "client update runs on the registration thread");
+            (name, count)
+        })
+        .collect();
+    assert_eq!(counts.len(), 4);
+    for name in ["number", "text", "toggle", "choice"] {
+        assert!(counts.contains_key(name), "missing {name} observer");
+    }
+
+    assert_eq!(
+        redis::cmd("config_observers.worker").query::<String>(&mut con)?,
+        "OK"
+    );
+    utils::wait_until(
+        Duration::from_secs(5),
+        "configuration worker to exit",
+        || Ok(redis::cmd("config_observers.finish").query::<i64>(&mut con)? == 1),
+    )?;
+    let after_worker = observed(&mut con)?;
+    assert_eq!(after_worker.len(), 8);
+    for (name, count, main_thread) in &after_worker[4..] {
+        assert!(
+            !main_thread,
+            "worker CONFIG SET invokes {name} on the worker"
+        );
+        assert_eq!(
+            *count,
+            counts[name] + 1,
+            "captured Cell persists for {name}"
+        );
+    }
+    let configs: HashMap<String, String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration_observers.*"])
+        .query(&mut con)?;
+    for (name, value) in [
+        ("number", "11"),
+        ("text", "worker"),
+        ("toggle", "no"),
+        ("choice", "One"),
+    ] {
+        assert_eq!(configs[&format!("configuration_observers.{name}")], value);
+    }
+    assert!(
+        redis::cmd("CONFIG")
+            .arg(&["SET", "configuration_observers.number", "101"])
+            .query::<()>(&mut con)
+            .is_err()
+    );
+    assert_eq!(
+        observed(&mut con)?,
+        after_worker,
+        "rejected setter emits no observer call"
+    );
+
+    client_update(&mut con)?;
+    let after_client = observed(&mut con)?;
+    assert_eq!(after_client.len(), 12);
+    for (name, count, main_thread) in &after_client[8..] {
+        assert!(
+            main_thread,
+            "later client update returns {name} to the main thread"
+        );
+        assert_eq!(*count, counts[name] + 2);
+    }
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "configuration_observers"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
 mod parsed_configuration_tests {
     use super::*;
 
