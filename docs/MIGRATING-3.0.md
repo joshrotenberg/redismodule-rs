@@ -245,6 +245,7 @@ Ordinary command handlers and blocked-client reply/timeout handlers keep
 | Keyspace/server/timer/post-notification/event-loop callback, module unload, blocking-call unblock handler | `&EventContext` | Module-owned timers/subscriptions/shared APIs, shared runtime operations |
 | `ThreadSafeContext::lock` or `DetachedContext::lock` | Guard dereferencing to `WorkerContext` | Shared runtime operations; blocking calls only for module-owned detached workers |
 | Database scan callback or helper shared across these scopes | `&RuntimeContext` | Calls, keys, database selection, logging, server info, explicit replication |
+| Module INFO callback, including crash reports | `&InfoContext` | INFO output only; no Redis lock proof or runtime operations |
 
 Change callback parameters from `&Context` to the type in this table. A helper
 that calls Redis without needing a client or module ownership should accept

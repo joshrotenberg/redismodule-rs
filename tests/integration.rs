@@ -2773,6 +2773,41 @@ fn test_helper_info() -> Result<()> {
 }
 
 #[test]
+fn test_info_handler_atomic_snapshot() -> Result<()> {
+    let mut con = TestConnection::new("info_handler_builder");
+    let info: String = redis::cmd("INFO")
+        .arg("info_handler_builder")
+        .query(&mut con)?;
+    assert!(
+        info.lines()
+            .any(|line| line == "info_handler_builder_recorded:0")
+    );
+
+    for _ in 0..3 {
+        let reply: String = redis::cmd("info_handler_builder.record").query(&mut con)?;
+        assert_eq!(reply, "OK");
+    }
+    assert!(
+        redis::cmd("info_handler_builder.record")
+            .arg("extra")
+            .query::<String>(&mut con)
+            .is_err()
+    );
+
+    // Both the protocol INFO path and a nested native GetServerInfo callback
+    // see the independently synchronized scalar. No runtime context is added
+    // to the INFO callback, and this does not simulate crash reporting.
+    let info: String = redis::cmd("INFO").arg("modules").query(&mut con)?;
+    assert!(
+        info.lines()
+            .any(|line| line == "info_handler_builder_recorded:3")
+    );
+    let snapshot: String = redis::cmd("info_handler_builder.snapshot").query(&mut con)?;
+    assert_eq!(snapshot, "3");
+    Ok(())
+}
+
+#[test]
 fn test_info_handler_multiple_sections() -> Result<()> {
     const MODULES: [&str; 1] = ["info_handler_multiple_sections"];
 

@@ -116,10 +116,13 @@ fn add_trace_info(ctx: &InfoContext) -> RedisResult<()> {
     Ok(())
 }
 
-/// A type alias for the custom info command handler.
-/// The function may optionally return an object of one section to add.
-/// If nothing is returned, it is assumed that the function has already
-/// filled all the information required via [`InfoContext::builder`].
+/// A custom INFO handler. Add fields through [`InfoContext::builder`] and
+/// return success, or return an error for the dispatcher to log.
+///
+/// The boolean is `for_crash_report`. Preserve it when forwarding to other
+/// handlers. A crash callback can interrupt state access or run on another
+/// thread; ordinary INFO handlers should return early when it is true. See
+/// [`InfoContext`] for the shared-state restrictions and an atomic snapshot.
 pub type InfoHandlerFunctionType = fn(&InfoContext, bool) -> RedisResult<()>;
 
 /// Default "INFO" command handler for the module.
