@@ -22,8 +22,7 @@ lazy_static! {
     static ref CONFIGURATION_I64: RedisGILGuard<i64> = RedisGILGuard::default();
     static ref CONFIGURATION_ATOMIC_I64: AtomicI64 = AtomicI64::new(1);
     static ref CONFIGURATION_MEMORY: AtomicI64 = AtomicI64::new(1024);
-    static ref CONFIGURATION_REDIS_STRING: RedisGILGuard<RedisString> =
-        RedisGILGuard::new(RedisString::create(None, "default"));
+    static ref CONFIGURATION_BYTES: RedisGILGuard<Vec<u8>> = RedisGILGuard::new(Vec::new());
     static ref CONFIGURATION_STRING: RedisGILGuard<String> = RedisGILGuard::new("default".into());
     static ref CONFIGURATION_MUTEX_STRING: Mutex<String> = Mutex::new("default".into());
     static ref CONFIGURATION_ATOMIC_BOOL: AtomicBool = AtomicBool::default();
@@ -74,7 +73,7 @@ redis_module! {
             ["memory", &*CONFIGURATION_MEMORY, 1024, 1024, 8 << 20, ConfigurationFlags::MEMORY, None],
         ],
         string: [
-            ["redis_string", &*CONFIGURATION_REDIS_STRING, "default", ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed))],
+            ["bytes", &*CONFIGURATION_BYTES, "default", ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed::<RedisString, _>))],
             ["string", &*CONFIGURATION_STRING, "default", ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed::<String, _>))],
             ["mutex_string", &*CONFIGURATION_MUTEX_STRING, "default", ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed::<String, _>))],
         ],

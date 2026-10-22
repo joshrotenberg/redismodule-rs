@@ -19,10 +19,27 @@ storage that fits the setting:
 | Storage | Use |
 |---|---|
 | `AtomicI64`, `AtomicBool` | Simple numeric or boolean values. |
-| `RedisGILGuard<T>` | Values read while holding a Redis lock proof, including strings and enums. |
+| `RedisGILGuard<T>` | `Send` values read while holding a Redis lock proof, including strings, bytes and enums; `T: Sync` is not required. |
 | `Mutex<T>` | Supported cloneable storage; release its guard before operations that could reenter its configuration callbacks. |
 | `ParsedStringConfig<T>` | UTF-8 text kept together with its validated parsed representation, without requiring `T: Clone` or `T: Sync`. |
 | A custom `ConfigurationValue<T>` | Validation or storage behavior beyond the provided implementations. |
+
+String configurations support `RedisGILGuard<String>` and `Mutex<String>` for
+UTF-8 text, or `RedisGILGuard<Vec<u8>>` and `Mutex<Vec<u8>>` for arbitrary bytes.
+Byte storage copies the setter's accepted bytes and creates a native string in
+the getter's locked callback. It retains no native string owner between calls.
+For example:
+
+```rust
+static BYTES: redis_module::RedisGILGuard<Vec<u8>> =
+    redis_module::RedisGILGuard::new(Vec::new());
+// In the macro's string group:
+// ["bytes", &BYTES, "default", ConfigurationFlags::DEFAULT, None],
+```
+
+`RedisString` remains non-`Send` and non-`Sync`, so it cannot be the value of a
+shared guard. Keep native owners within their legal thread and Redis access
+phase. A guard's lock does not make aliases outside the guard thread safe.
 
 Inside `redis_module!`, list the groups you need; unused groups are optional.
 For example, the lifecycle module declares:
@@ -128,8 +145,9 @@ old value. Returning an error should leave the prior value unchanged.
 `ParsedStringConfig<T>` rejects invalid UTF-8 and parser errors before changing
 either its text or parsed value. It preserves accepted text exactly for
 `CONFIG GET`, even if the parsed value normalizes it. `String` storage also
-requires UTF-8; use `RedisString` storage when runtime string values need to
-retain arbitrary bytes. The macro's string defaults and string argument
+requires UTF-8; use `Vec<u8>` storage when runtime string values need to
+retain arbitrary bytes. Empty values, embedded NUL and invalid UTF-8 are
+preserved. The macro's string defaults and string argument
 conversion remain UTF-8.
 
 `on_changed` runs inside the setter trampoline, after storage succeeds. It

@@ -334,6 +334,43 @@ fn test_event_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Res
 }
 
 #[test]
+fn test_context_user_registry_survives_module_unload_and_reload() -> Result<()> {
+    let mut con = TestConnection::new("context_acl");
+    configure_context_acl_user(&mut con)?;
+    let before: Vec<i64> = redis::cmd("context_acl.client")
+        .arg("context-reader")
+        .query(&mut con)?;
+    assert_context_user_flags(&before);
+    for mode in ["plain", "detached"] {
+        let flags: Vec<i64> = redis::cmd("context_acl.worker")
+            .arg(&[mode, "context-reader"])
+            .query(&mut con)?;
+        assert_context_user_flags(&flags);
+        utils::wait_until(Duration::from_secs(5), "scoped-user worker exit", || {
+            Ok(redis::cmd("context_acl.finish").query::<i64>(&mut con)? == 1)
+        })?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "context_acl"])
+            .query::<()>(&mut con)?;
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(utils::module_path("context_acl")?)
+            .query::<()>(&mut con)?;
+        let after: Vec<i64> = redis::cmd("context_acl.client")
+            .arg("context-reader")
+            .query(&mut con)?;
+        assert_context_user_flags(&after);
+        assert_eq!(
+            &after[..2],
+            &before[..2],
+            "fresh registry after {mode} reload"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn test_timer_event_context_uses_its_selected_database() -> Result<()> {
     let mut con = TestConnection::new("timer");
     redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
@@ -3491,12 +3528,9 @@ fn test_configuration() -> Result<()> {
     config_set(&mut con, "configuration.atomic_i64", "100")?;
     assert_eq!(config_get(&mut con, "configuration.atomic_i64")?, "100");
 
-    assert_eq!(
-        config_get(&mut con, "configuration.redis_string")?,
-        "default"
-    );
-    config_set(&mut con, "configuration.redis_string", "new")?;
-    assert_eq!(config_get(&mut con, "configuration.redis_string")?, "new");
+    assert_eq!(config_get(&mut con, "configuration.bytes")?, "default");
+    config_set(&mut con, "configuration.bytes", "new")?;
+    assert_eq!(config_get(&mut con, "configuration.bytes")?, "new");
 
     assert_eq!(config_get(&mut con, "configuration.string")?, "default");
     config_set(&mut con, "configuration.string", "new")?;
@@ -3658,13 +3692,13 @@ fn test_configuration_string_storage_utf8_and_binary_values() -> Result<()> {
     let mut con = TestConnection::new("configuration");
     let bytes = b"binary\xff\0value";
     redis::cmd("CONFIG")
-        .arg(&["SET", "configuration.redis_string"])
+        .arg(&["SET", "configuration.bytes"])
         .arg(bytes.as_slice())
         .query::<()>(&mut con)?;
     let reply: HashMap<String, Vec<u8>> = redis::cmd("CONFIG")
-        .arg(&["GET", "configuration.redis_string"])
+        .arg(&["GET", "configuration.bytes"])
         .query(&mut con)?;
-    assert_eq!(reply["configuration.redis_string"], bytes);
+    assert_eq!(reply["configuration.bytes"], bytes);
     for name in ["configuration.string", "configuration.mutex_string"] {
         assert!(
             redis::cmd("CONFIG")
@@ -3677,6 +3711,81 @@ fn test_configuration_string_storage_utf8_and_binary_values() -> Result<()> {
             redis::cmd("CONFIG").arg(&["GET", name]).query(&mut con)?;
         assert_eq!(reply[name], "default");
     }
+    Ok(())
+}
+
+#[test]
+fn test_binary_configuration_storage_from_clients_workers_and_reload() -> Result<()> {
+    let mut con = TestConnection::new("configuration_observers");
+    let names = [
+        "configuration_observers.text",
+        "configuration_observers.binary",
+    ];
+    let payloads = [
+        Vec::new(),
+        b"nul\0invalid\xffutf8".to_vec(),
+        "café\0".as_bytes().to_vec(),
+        (0..=255).cycle().take(32768).collect::<Vec<u8>>(),
+    ];
+    for payload in payloads {
+        for name in names {
+            redis::cmd("CONFIG")
+                .arg(&["SET", name])
+                .arg(b"client seed".as_slice())
+                .query::<()>(&mut con)?;
+        }
+        redis::cmd("config_observers.worker")
+            .arg(&payload)
+            .query::<()>(&mut con)?;
+        utils::wait_until(
+            Duration::from_secs(5),
+            "binary configuration worker exit",
+            || Ok(redis::cmd("config_observers.finish").query::<i64>(&mut con)? == 1),
+        )?;
+        for _ in 0..3 {
+            let values: HashMap<String, Vec<u8>> = redis::cmd("CONFIG")
+                .arg("GET")
+                .arg(&names)
+                .query(&mut con)?;
+            for name in names {
+                assert_eq!(values[name], payload, "worker {name}");
+            }
+        }
+        for name in names {
+            redis::cmd("CONFIG")
+                .arg(&["SET", name])
+                .arg(b"different".as_slice())
+                .query::<()>(&mut con)?;
+            redis::cmd("CONFIG")
+                .arg(&["SET", name])
+                .arg(&payload)
+                .query::<()>(&mut con)?;
+        }
+        let values: HashMap<String, Vec<u8>> = redis::cmd("CONFIG")
+            .arg("GET")
+            .arg(&names)
+            .query(&mut con)?;
+        for name in names {
+            assert_eq!(values[name], payload, "client {name}");
+        }
+    }
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "configuration_observers"])
+        .query::<()>(&mut con)?;
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("configuration_observers")?)
+        .query::<()>(&mut con)?;
+    let values: HashMap<String, Vec<u8>> = redis::cmd("CONFIG")
+        .arg("GET")
+        .arg(&names)
+        .query(&mut con)?;
+    assert_eq!(values[names[0]], b"");
+    assert_eq!(values[names[1]], b"seed");
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "configuration_observers"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
 
@@ -3913,6 +4022,10 @@ fn test_configuration_observers_follow_client_and_worker_setter_threads() -> Res
     client_update(&mut con)?;
     let first = observed(&mut con)?;
     assert_eq!(first.len(), 4);
+    assert_eq!(
+        redis::cmd("config_observers.shared_calls").query::<i64>(&mut con)?,
+        4
+    );
     let counts: HashMap<_, _> = first
         .into_iter()
         .map(|(name, count, main_thread)| {
@@ -3936,6 +4049,10 @@ fn test_configuration_observers_follow_client_and_worker_setter_threads() -> Res
     )?;
     let after_worker = observed(&mut con)?;
     assert_eq!(after_worker.len(), 8);
+    assert_eq!(
+        redis::cmd("config_observers.shared_calls").query::<i64>(&mut con)?,
+        8
+    );
     for (name, count, main_thread) in &after_worker[4..] {
         assert!(
             !main_thread,
@@ -3973,6 +4090,10 @@ fn test_configuration_observers_follow_client_and_worker_setter_threads() -> Res
     client_update(&mut con)?;
     let after_client = observed(&mut con)?;
     assert_eq!(after_client.len(), 12);
+    assert_eq!(
+        redis::cmd("config_observers.shared_calls").query::<i64>(&mut con)?,
+        12
+    );
     for (name, count, main_thread) in &after_client[8..] {
         assert!(
             main_thread,

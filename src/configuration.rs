@@ -18,6 +18,12 @@
 //! serializes invocation, so [`Sync`] is not required. The lock proof itself
 //! remains confined to the callback's thread.
 //!
+//! Store string configurations in `String` for UTF-8, or `Vec<u8>` for binary
+//! values, protected by [`RedisGILGuard`] or [`Mutex`]. Byte storage copies
+//! accepted bytes and creates native strings only during getter callbacks.
+//! Shared guards require `Send` values; native [`RedisString`] owners are not
+//! `Send` or `Sync`.
+//!
 //! See the [configuration notes](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/CONFIGURATION.md)
 //! for argument syntax, precedence examples, storage choices and reload behavior.
 
@@ -149,7 +155,7 @@ pub trait EnumConfigurationValue: TryFrom<i32, Error = RedisError> + Into<i32> +
     fn get_options(&self) -> (Vec<String>, Vec<i32>);
 }
 
-impl<T: Clone> ConfigurationValue<T> for RedisGILGuard<T> {
+impl<T: Clone + Send> ConfigurationValue<T> for RedisGILGuard<T> {
     fn get(&self, ctx: &ConfigurationContext) -> T {
         let value = self.lock(ctx);
         value.clone()
@@ -203,6 +209,29 @@ impl ConfigurationValue<RedisString> for Mutex<String> {
     fn set(&self, _ctx: &ConfigurationContext, val: RedisString) -> Result<(), RedisError> {
         let mut value = self.lock().unwrap();
         *value = val.try_as_str()?.to_string();
+        Ok(())
+    }
+}
+
+/// Binary string configuration storage, without retaining a native owner.
+/// Defaults and macro arguments still use the existing UTF-8 string syntax.
+impl ConfigurationValue<RedisString> for RedisGILGuard<Vec<u8>> {
+    fn get(&self, ctx: &ConfigurationContext) -> RedisString {
+        RedisString::from_bytes(&self.lock(ctx))
+    }
+    fn set(&self, ctx: &ConfigurationContext, val: RedisString) -> Result<(), RedisError> {
+        *self.lock(ctx) = val.as_slice().to_vec();
+        Ok(())
+    }
+}
+
+/// Binary string configuration storage protected by a Rust mutex.
+impl ConfigurationValue<RedisString> for Mutex<Vec<u8>> {
+    fn get(&self, _ctx: &ConfigurationContext) -> RedisString {
+        RedisString::from_bytes(&self.lock().unwrap())
+    }
+    fn set(&self, _ctx: &ConfigurationContext, val: RedisString) -> Result<(), RedisError> {
+        *self.lock().unwrap() = val.as_slice().to_vec();
         Ok(())
     }
 }

@@ -13,6 +13,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- Binary string configuration adapters for `RedisGILGuard<Vec<u8>>` and
+  `Mutex<Vec<u8>>`, preserving empty values, NUL and invalid UTF-8. Native
+  strings are created only during getters and are not retained as storage.
+
 - [Configuration notes](docs/CONFIGURATION.md) explain registration and load
   precedence, argument syntax, UTF-8 versus binary storage, validation,
   observers and rollback. Regression tests cover explicit Redis settings over
@@ -115,6 +119,14 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- **Breaking:** shared `RedisGILGuard<T>` storage now requires `T: Send`.
+  Serialization cannot protect non-`Send` aliases outside the guard.
+  `T: Sync` is not required. Migrate shared native string configurations to
+  `String` or `Vec<u8>` storage; `RedisString` remains non-`Send` and non-`Sync`.
+  Scoped call-user bookkeeping is now thread-local, and the native ownership
+  fixture keeps retained handles on their originating thread with explicit
+  cleanup during Redis callbacks.
+
 - **Breaking:** configuration `on_changed` closures must be `Send`, including
   those in `redis_module!`. A locked worker's `CONFIG SET` can invoke them on
   that worker; serialization does not make non-`Send` captures transferable.
@@ -171,7 +183,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - **Breaking:** `RedisError` implements `std::error::Error`, which replaces the blanket `From<T: Error>` conversion with `From` for a list of standard library errors; other errors convert with `RedisError::from_error`.
 - **Breaking:** `register_i64_configuration`, `register_string_configuration`, `register_bool_configuration` and `register_enum_configuration` return `Result<(), RedisError>`.
 - **Breaking:** `register_i64_configuration` rejects defaults outside the declared inclusive bounds, including defaults supplied as module arguments. Boolean module arguments accept only `yes` or `no`, ignoring ASCII case; other values fail the load instead of becoming false.
-- **Breaking:** `RedisGILGuard<T>` is `Send` only when `T` is, and locking it twice panics. `ConfigurationContext` is neither `Send` nor `Sync`. `ConfigurationValue` no longer requires `Send`.
+- **Breaking:** locking `RedisGILGuard` twice panics. `ConfigurationContext` is neither `Send` nor `Sync`. `ConfigurationValue` no longer requires `Send`.
 - **Breaking:** `RedisType::raw_type` is a method instead of a public `RefCell` field, `create_data_type` takes `&Context`, and an invalid type name or encoding version fails to compile.
 - **Breaking:** command flags in `redis_module!` must be a constant expression and are checked at compile time. `redis_command!` and `redis_event_handler!` take `&Context`.
 - **Breaking:** `KeyType` and `ReplyType` are `#[non_exhaustive]`, and `KeyType` has an `Unknown` variant. The raw enums are `#[repr(i32)]` and convert from `c_int` without panicking; `Status::from(c_int)` maps every value but `REDISMODULE_OK` to `Err`.

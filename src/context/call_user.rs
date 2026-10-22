@@ -5,18 +5,19 @@ use std::ptr;
 use std::rc::{Rc, Weak};
 
 use super::RuntimeContext;
-use super::thread_safe::RedisGILGuard;
 use crate::{RedisError, RedisString, raw};
 
 type SetUser = unsafe extern "C" fn(*mut raw::RedisModuleCtx, *const raw::RedisModuleUser);
 type FreeUser = unsafe extern "C" fn(*mut raw::RedisModuleUser);
 
-// Redis serializes access, including reference-count changes and destruction.
-// A view never leaves its invocation/lock scope. Weak entries do not retain
-// native users or let a later invocation inherit state at a reused ctx address.
-// Never retain this registry's borrow across native calls or user callbacks.
-static CALL_USERS: RedisGILGuard<BTreeMap<usize, Weak<CallUserState>>> =
-    RedisGILGuard::new(BTreeMap::new());
+thread_local! {
+    // Views of one active native context are on the same thread. They cannot
+    // outlive their invocation/worker lock, so no Rc state crosses threads.
+    // Weak entries own no native users; even TLS destruction cannot free one.
+    // Never retain a registry borrow across native calls or user callbacks.
+    static CALL_USERS: RefCell<BTreeMap<usize, Weak<CallUserState>>> =
+        const { RefCell::new(BTreeMap::new()) };
+}
 
 #[derive(Debug)]
 pub(super) struct CallUserView {
@@ -162,20 +163,22 @@ impl RuntimeContext {
         }
         let user = NativeUser { user, free };
         let view = self.call_users.get_or_init(|| {
-            let mut registry = CALL_USERS.lock(self);
-            let state = registry
-                .get(&(self.ctx as usize))
-                .and_then(Weak::upgrade)
-                .unwrap_or_else(|| {
-                    let state = Rc::new(CallUserState {
-                        ctx: self.ctx,
-                        set_user,
-                        baseline: Cell::new(ptr::null()),
-                        frames: RefCell::new(Vec::new()),
-                    });
-                    registry.insert(self.ctx as usize, Rc::downgrade(&state));
-                    state
-                });
+            let state = CALL_USERS.with(|registry| {
+                let mut registry = registry.borrow_mut();
+                registry
+                    .get(&(self.ctx as usize))
+                    .and_then(Weak::upgrade)
+                    .unwrap_or_else(|| {
+                        let state = Rc::new(CallUserState {
+                            ctx: self.ctx,
+                            set_user,
+                            baseline: Cell::new(ptr::null()),
+                            frames: RefCell::new(Vec::new()),
+                        });
+                        registry.insert(self.ctx as usize, Rc::downgrade(&state));
+                        state
+                    })
+            });
             CallUserView {
                 state,
                 owner: Rc::new(()),
@@ -223,8 +226,9 @@ impl RuntimeContext {
         if let Some(view) = self.call_users.take() {
             view.state.remove_owner(&view.owner);
             if Rc::strong_count(&view.state) == 1 {
-                let mut registry = CALL_USERS.lock(self);
-                registry.remove(&(self.ctx as usize));
+                CALL_USERS.with(|registry| {
+                    registry.borrow_mut().remove(&(self.ctx as usize));
+                });
             }
         }
     }
