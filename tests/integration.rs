@@ -334,6 +334,43 @@ fn test_event_context_user_enforces_acl_and_clears_on_return_and_unwind() -> Res
 }
 
 #[test]
+fn test_context_user_registry_survives_module_unload_and_reload() -> Result<()> {
+    let mut con = TestConnection::new("context_acl");
+    configure_context_acl_user(&mut con)?;
+    let before: Vec<i64> = redis::cmd("context_acl.client")
+        .arg("context-reader")
+        .query(&mut con)?;
+    assert_context_user_flags(&before);
+    for mode in ["plain", "detached"] {
+        let flags: Vec<i64> = redis::cmd("context_acl.worker")
+            .arg(&[mode, "context-reader"])
+            .query(&mut con)?;
+        assert_context_user_flags(&flags);
+        utils::wait_until(Duration::from_secs(5), "scoped-user worker exit", || {
+            Ok(redis::cmd("context_acl.finish").query::<i64>(&mut con)? == 1)
+        })?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "context_acl"])
+            .query::<()>(&mut con)?;
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(utils::module_path("context_acl")?)
+            .query::<()>(&mut con)?;
+        let after: Vec<i64> = redis::cmd("context_acl.client")
+            .arg("context-reader")
+            .query(&mut con)?;
+        assert_context_user_flags(&after);
+        assert_eq!(
+            &after[..2],
+            &before[..2],
+            "fresh registry after {mode} reload"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn test_timer_event_context_uses_its_selected_database() -> Result<()> {
     let mut con = TestConnection::new("timer");
     redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
