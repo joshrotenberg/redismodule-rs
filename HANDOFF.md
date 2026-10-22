@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `00cb5d2`, native module shipping guide merged after independent review and all 20 PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `be41e00`, module testing/fuzzing patterns merged after independent review and all 20 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `00cb5d2` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `be41e00` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -275,6 +275,13 @@ extracted `hello` release artifact in a bounded native Redis process. Its pinned
 recipe and corruption/load-failure controls were validated on ARM64 macOS,
 including Python optimization. SDK runtime and host source are unchanged.
 
+The [module testing guide](docs/TESTING-MODULES.md) merged in `be41e00`.
+It reuses existing modules for companion event input and adds an isolated pure
+parser/fuzz fixture. The pinned libFuzzer setup validates ordinary allocation,
+explicit SDK test fallback and refusal without fallback. The normal SDK graph,
+production allocator guards and host source are unchanged. Check the fixture
+separately; its manifests declare independent workspaces.
+
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).
 The [priority 2 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A2+sort%3Acreated-asc)
@@ -324,6 +331,18 @@ cargo clippy --manifest-path wasm/guests/hello/Cargo.toml --target wasm32-unknow
 cargo clippy --manifest-path wasm/bench/guest/Cargo.toml --target wasm32-unknown-unknown -- -D warnings
 cargo test --manifest-path wasm/guest-sdk/Cargo.toml
 ```
+
+The author parser fixture has its own workspace. Check it separately:
+
+```bash
+cargo fmt --manifest-path examples/module-testing/Cargo.toml -- --check
+cargo fmt --manifest-path examples/module-testing/fuzz/Cargo.toml -- --check
+cargo clippy --manifest-path examples/module-testing/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path examples/module-testing/Cargo.toml
+```
+
+The [testing guide](docs/TESTING-MODULES.md) has the native companion and pinned
+fuzz/allocator controls. Run those when changing the fixture or its SDK integration.
 
 `cargo test -p redis-module-wasm` builds the module and the example guests
 itself before starting servers. Plain `cargo clippy` and `cargo test` at the

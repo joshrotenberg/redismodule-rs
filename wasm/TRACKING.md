@@ -222,6 +222,20 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-22: rebased onto SDK master `be41e00`, which adds companion-module
+  testing and an isolated pure-parser fuzz fixture. SDK PR 76 received independent
+  native review and all 20 exact-head CI checks passed before merge. All 59
+  existing wasm patches are unchanged; no host source adaptation is needed.
+  Normal SDK dependencies, runtime behavior and production allocator guards are
+  unchanged. The fixture is validated in its own workspaces.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy, strict default workspace and host-excluded 7.2 docs pass.
+  Guest formatting/wasm32 linting pass. Tests pass: 69 SDK units, 154 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 7 host units, 21 host
+  integrations including JavaScript, 84 SDK doctests and 4 guest helper tests.
+  Separate parser formatting/lint/unit and native companion controls pass.
+  Both pinned ASan fuzz modes pass 10,000 runs on this branch, and disabled
+  fallback still produces the specific allocator refusal.
 - 2026-10-22: rebased onto SDK master `00cb5d2`, which adds the native module
   shipping guide with a pinned hello release/archive/checksum/load recipe.
   The recipe and failure controls were validated on ARM64 macOS, including
