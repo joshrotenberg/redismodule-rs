@@ -9,9 +9,7 @@ use std::{
 
 use libc::c_void;
 
-use crate::{
-    EventContext, RedisError, RedisLockIndicator, RuntimeContext, deallocate_pointer, raw::*,
-};
+use crate::{EventContext, RedisError, RedisLockIndicator, RuntimeContext, raw::*};
 
 pub struct StringCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
@@ -879,6 +877,9 @@ where
     /// and we can not use the Drop is that [FutureHandler] must be released
     /// when the Redis GIL is held. This is also why this function also gets a
     /// lock indicator.
+    ///
+    /// Disposing releases this handle only: the unblock handler still runs
+    /// when the command unblocks. Use [Self::abort_and_dispose] to cancel it.
     pub fn dispose<LockIndicator: RedisLockIndicator>(mut self, _lock_indicator: &LockIndicator) {
         free_call_reply(self.reply.as_ptr());
         self.reply_freed = true;
@@ -900,7 +901,10 @@ where
         }.into();
 
         if !callback.is_null() {
-            unsafe { deallocate_pointer(callback) };
+            // SAFETY: a successful abort returns the pointer set_unblock_handler
+            // made with Box::into_raw, and Redis will not invoke it. Box::from_raw
+            // also releases zero-sized handlers, whose pointer is dangling.
+            drop(unsafe { Box::from_raw(callback) });
         }
 
         self.dispose(lock_indicator);
@@ -945,7 +949,56 @@ extern "C" fn on_unblock<C: FnOnce(&EventContext, CallResult<'static>)>(
 impl<'ctx> FutureCallReply<'ctx> {
     /// Install a handler called when the command unblocks. Returns a handle
     /// that can be used to abort the command.
-    pub fn set_unblock_handler<C: FnOnce(&EventContext, CallResult<'static>)>(
+    ///
+    /// Redis keeps the handler until the command unblocks or is aborted, after
+    /// the current invocation returns and whether or not the returned handle is
+    /// disposed, dropped or forgotten. It runs on the main thread, also when a
+    /// module-owned worker installed it. The handler therefore owns its
+    /// captures and must be `Send`:
+    ///
+    /// ```no_run
+    /// fn install(ctx: &redis_module::RuntimeContext, future: redis_module::FutureCallReply<'_>) {
+    ///     let owned = String::from("moved into the handler");
+    ///     future.set_unblock_handler(move |_, _| drop(owned)).dispose(ctx);
+    /// }
+    /// ```
+    ///
+    /// A borrowed capture is rejected, whether the handle is disposed, aborted
+    /// or forgotten:
+    ///
+    /// ```compile_fail,E0597
+    /// fn install(ctx: &redis_module::RuntimeContext, future: redis_module::FutureCallReply<'_>) {
+    ///     let local = String::from("scoped");
+    ///     let borrowed = &local;
+    ///     future.set_unblock_handler(move |_, _| drop(borrowed.len())).dispose(ctx);
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0597
+    /// fn install(ctx: &redis_module::RuntimeContext, future: redis_module::FutureCallReply<'_>) {
+    ///     let local = String::from("scoped");
+    ///     let borrowed = &local;
+    ///     future.set_unblock_handler(move |_, _| drop(borrowed.len())).abort_and_dispose(ctx);
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0597
+    /// fn install(future: redis_module::FutureCallReply<'_>) {
+    ///     let local = String::from("scoped");
+    ///     let borrowed = &local;
+    ///     std::mem::forget(future.set_unblock_handler(move |_, _| drop(borrowed.len())));
+    /// }
+    /// ```
+    ///
+    /// So is a capture that cannot move to the main thread:
+    ///
+    /// ```compile_fail,E0277
+    /// fn install(ctx: &redis_module::RuntimeContext, future: redis_module::FutureCallReply<'_>) {
+    ///     let shared = std::rc::Rc::new(String::from("thread-bound"));
+    ///     future.set_unblock_handler(move |_, _| drop(shared)).dispose(ctx);
+    /// }
+    /// ```
+    pub fn set_unblock_handler<C: FnOnce(&EventContext, CallResult<'static>) + Send + 'static>(
         mut self,
         unblock_handler: C,
     ) -> FutureHandler<C> {

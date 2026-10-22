@@ -173,13 +173,6 @@ pub fn init_api(ctx: &RuntimeContext) {
     unsafe { crate::raw::Export_RedisModule_InitAPI(ctx.ctx) };
 }
 
-pub(crate) unsafe fn deallocate_pointer<P>(p: *mut P) {
-    unsafe {
-        std::ptr::drop_in_place(p);
-        std::alloc::dealloc(p as *mut u8, std::alloc::Layout::new::<P>());
-    }
-}
-
 #[cfg(test)]
 mod clock_tests {
     #[test]

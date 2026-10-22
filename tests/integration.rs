@@ -5335,6 +5335,42 @@ fn test_call_blocking() -> Result<()> {
     feature = "min-redis-compatibility-version-7-4",
     feature = "min-redis-compatibility-version-7-2"
 ))]
+fn test_call_blocking_abort_releases_handlers_once() -> Result<()> {
+    let mut con = TestConnection::new("call");
+
+    // The empty handler is zero-sized, so its boxed pointer was never allocated.
+    for (key, kind) in [("abort:empty", "empty"), ("abort:capture", "capture")] {
+        let status: String = redis::cmd("call.blocking_abort")
+            .arg(key)
+            .arg(kind)
+            .query(&mut con)
+            .with_context(|| format!("failed to abort a {kind} handler"))?;
+        assert_eq!(status, "aborted", "{kind}");
+    }
+
+    // An aborted call neither runs its handler nor consumes a later push.
+    for key in ["abort:empty", "abort:capture"] {
+        let len: i64 = redis::cmd("RPUSH").arg(key).arg("value").query(&mut con)?;
+        assert_eq!(len, 1, "{key}");
+    }
+    let stats: Vec<i64> = redis::cmd("call.blocking_abort_stats").query(&mut con)?;
+    assert_eq!(stats, vec![0, 1], "handler calls and capture drops");
+    for key in ["abort:empty", "abort:capture"] {
+        let len: i64 = redis::cmd("LLEN").arg(key).query(&mut con)?;
+        assert_eq!(len, 1, "{key}");
+    }
+
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
 fn test_call_dump() -> Result<()> {
     let mut con = TestConnection::new("call");
 
