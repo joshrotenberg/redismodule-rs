@@ -31,6 +31,26 @@ without a `From` conversion.
 
 ## Changes the compiler reports
 
+### Configuration observers require `Send`
+
+The optional `on_changed` closures passed to all four
+`configuration::register_*_configuration` functions, including the
+`redis_module!` configuration block, must be `Send`. A worker holding the Redis
+lock can call `CONFIG SET` and invoke the observer on its own thread. The lock
+serializes invocation but cannot make captures such as shared `Rc` values
+safe to move between threads.
+
+Function callbacks and closures that capture nothing are unchanged. Replace
+shared `Rc` state with `Arc` and thread-safe storage, or use atomics or
+Redis-locked storage. If the capture is private to the closure, owned `Cell`
+or `RefCell` state is allowed: `Sync` is not required. Explicit trait object
+types must change from `Box<dyn Fn(...)>` to `Box<dyn Fn(...) + Send>`.
+`ConfigurationContext` remains confined to the setter's thread, and registered
+`ConfigurationValue` storage still requires `Sync` rather than `Send`.
+
+See the [configuration notes](CONFIGURATION.md#validate-before-storage-observe-afterward)
+and [observer example](../examples/configuration_observers.rs).
+
 ### Module names are constant strings
 
 `redis_module!` requires `name:` to be a constant `&str` expression without

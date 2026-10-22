@@ -117,6 +117,14 @@ NUL bytes; long and UTF-8 names are preserved. See the
 [migration guide](docs/MIGRATING-3.0.md#module-names-are-constant-strings) and
 [module-name example](examples/module_name.rs).
 
+Configuration observers now require `Send` captures: a worker's locked
+`CONFIG SET` invokes them on the worker thread. The Redis lock serializes
+invocation, so `Sync` is not required, but non-`Send` captures shared outside
+Redis were unsafe. **Breaking:** add `+ Send` to explicit callback trait
+objects and replace shared `Rc` captures with thread-safe state. See the
+[migration guide](docs/MIGRATING-3.0.md#configuration-observers-require-send)
+and [observer example](examples/configuration_observers.rs).
+
 | change | addition |
 |---|---|
 | [Notification writes](docs/KEYSPACE-NOTIFICATIONS.md) | A runnable Redis 7.2+ notification-to-stream example demonstrates deferred writes, owned callback data, database scopes, role/loading gates, propagation and teardown. Rejected post-notification jobs now drop their captures instead of leaking. |
