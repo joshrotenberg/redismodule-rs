@@ -81,10 +81,10 @@ jobs:
           cargo clippy --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},system-allocator-fallback -- -D warnings
           cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},system-allocator-fallback --test system_allocator_fallback
 
-      - name: Doc
+      - name: Document SDK and macro workspace packages
         env:
           RUSTDOCFLAGS: "-D warnings"
-        run: cargo doc --no-default-features --features "all-features-but-xor min-redis-compatibility-version-${{ matrix.floor }}"
+        run: cargo doc --workspace --no-deps --no-default-features --features "all-features-but-xor min-redis-compatibility-version-${{ matrix.floor }}"
 
       - name: Upload failure logs
         if: failure()

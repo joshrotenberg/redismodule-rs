@@ -299,6 +299,11 @@ These compile unchanged but behave differently:
 
 ## Build, tooling and documentation
 
+- Strict documentation checks select every SDK workspace package, including
+  public and internal macro crates, at each CI API floor. Public macro docs use
+  qualified SDK type text and accessible links without private implementation
+  references or warning suppressions; generated code is unchanged.
+
 - The integration harness uses Redis client 1.2.2 as a development dependency,
   with optional features disabled. An exact pin preserves the Rust 1.87 minimum:
   client releases from 1.2.3 require Rust 1.88. Response checks preserve binary

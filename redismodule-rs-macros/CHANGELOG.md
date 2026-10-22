@@ -17,6 +17,10 @@ Released with redis-module 3.0.0; see its changelog and docs/MIGRATING-3.0.md.
 
 ### Changed
 
+- Public documentation fixes inaccessible SDK/private-type links and the
+  `RedisValue::OrderedMap` variant name; the SDK workspace is documented strictly
+  in CI. Macro expansion is unchanged.
+
 - `#[command]` handlers that panic reply `ERR command panicked: <message>` instead of aborting the server.
 - Modules no longer need a direct `linkme` dependency for the registration attributes.
 - The generated code needs redis-module 3.0: it calls the `unsafe` `Context::new`, the panic guard in `redis_module::panic`, and the `linkme` re-export.
