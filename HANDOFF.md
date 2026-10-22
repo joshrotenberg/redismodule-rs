@@ -14,13 +14,14 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
 
-Latest SDK checkpoint: `d0bba7d` binds server INFO snapshots to their producing
-runtime context. Earlier INFO guidance (`a14b71b`) and release-note indexes
-(`084cd23`) are included. Each SDK change received independent native review
-and all 20 latest exact-head CI checks passed before merge. CHANGES-FROM-UPSTREAM
-and the migration guide include this work. The layout table retains the shared
-baseline while experiment CI proposal PR 79 awaits approval; its source is not
-included on this branch. The checkpoints below have validation details.
+Latest SDK checkpoint: `01b37b5` binds open read/write key handles and owning
+scan cursors to their opening runtime context. Server INFO snapshot lifetimes
+(`d0bba7d`) and earlier INFO guidance (`a14b71b`, `084cd23`) are included. Each
+SDK change received independent native review and all 20 latest exact-head CI
+checks passed before merge. CHANGES-FROM-UPSTREAM and the migration guide include
+this work. The layout table retains the shared baseline while experiment CI
+proposal PR 79 awaits approval; its source is not included on this branch.
+The checkpoints below have validation details.
 
 The fork branches from upstream master at `a808377`. Upstream has two commits
 since: `cca5360` (the `ServerInfo::field` leak fix; the fork has its own fix) and
@@ -321,6 +322,15 @@ Compiler controls reject scope escape and early unlock; native workers pass
 with AutoMemory off and on. This is separate from the general storage API in
 issue 51, and the host needs no source adaptation.
 
+The open key lifetime fix merged in `01b37b5`. All four safe key opens now
+borrow the runtime context; an owning scan cursor keeps the same borrow. Native
+key close needs the original context even with AutoMemory disabled. DMA and
+stream views preserve that borrow through their key. Compiler controls reject
+scope escape and early unlock, while native workers copy binary data and scan
+results into Rust storage before unlocking, with AutoMemory off and on. Raw
+constructors remain unsafe with explicit lifetime and lock obligations. This
+adds no general storage API and requires no host/guest source adaptation.
+
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).
 The [priority 2 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A2+sort%3Acreated-asc)
@@ -408,8 +418,8 @@ git push --force-with-lease fork experiment/wasm-host
 ```
 
 While an experiment PR awaits review, preserve its base ancestry by merging
-merged SDK changes instead of rebasing the experiment branch. The INFO guide
-sync uses this approach to keep PR 79's reviewed diff intact. That PR remains
+merged SDK changes instead of rebasing the experiment branch. Recent SDK
+syncs use this approach to keep PR 79's reviewed diff intact. That PR remains
 unmerged; do not include its proposed workflow in an SDK sync.
 
 Refer to the branch's commits by subject in notes, since a rebase changes

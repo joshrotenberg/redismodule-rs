@@ -62,6 +62,27 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 ### Latest SDK sync
 
+- 2026-10-22: synced merged SDK master `01b37b5`, binding read/write key
+  handles and owning key scan cursors to their opening runtime context. SDK
+  PR 83 received independent native review at `203077d`; all 20 latest
+  exact-head CI checks passed before merge and the squash tree matches that
+  head. A real retry resolved one unfinished check after its original job
+  steps had completed successfully; the full expected check set was verified.
+  All four safe opens, owning scans and DMA/stream views now prevent key use
+  or cleanup after worker unlock. Native worker coverage copies binary data
+  and scan results into Rust storage, with AutoMemory off/on. Raw constructor
+  obligations remain explicit; general native-handle storage stays separate.
+  No host/guest source adaptation or dependency graph changes were needed.
+  This sync preserves PR 79's ancestry and reviewed diff without importing
+  its unmerged workflow. On Rust 1.94 and Redis 8.10.2: examples, workspace
+  formatting/Clippy, exclusive 7.2 SDK Clippy, strict default workspace and
+  host-excluded 7.2 docs pass. Guest formatting/wasm32 linting pass. Tests
+  pass: 69 SDK units, 157 SDK integrations, 1 allocator fallback, 6 harness
+  helpers, 9 macro parser tests, 7 host units, 21 host integrations including
+  JavaScript, 100 SDK doctests and 4 guest helper tests. The focused native
+  worker regression also passed on Redis 7.0.15; all 100 SDK doctests passed
+  with Rust 1.87 before syncing. Local JavaScript validation used Node 26.12.0.
+
 - 2026-10-22: synced merged SDK master `d0bba7d`, binding server INFO snapshots
   to the runtime context used by native cleanup. SDK PR 82 received independent
   native review at `51d7dde` and all 20 latest exact-head CI checks passed before
