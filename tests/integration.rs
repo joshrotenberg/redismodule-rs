@@ -5335,6 +5335,79 @@ fn test_call_blocking() -> Result<()> {
     feature = "min-redis-compatibility-version-7-4",
     feature = "min-redis-compatibility-version-7-2"
 ))]
+fn test_call_blocking_abort_releases_handlers_once() -> Result<()> {
+    let mut con = TestConnection::new("call");
+
+    // The empty handler is zero-sized, so its boxed pointer was never allocated.
+    for (key, kind) in [("abort:empty", "empty"), ("abort:capture", "capture")] {
+        let status: String = redis::cmd("call.blocking_abort")
+            .arg(key)
+            .arg(kind)
+            .query(&mut con)
+            .with_context(|| format!("failed to abort a {kind} handler"))?;
+        assert_eq!(status, "aborted", "{kind}");
+    }
+
+    // Redis serves blocked calls after each command, so a still-pending BLPOP
+    // would have run its handler and emptied the list before the next command.
+    for key in ["abort:empty", "abort:capture"] {
+        let _: i64 = redis::cmd("RPUSH").arg(key).arg("value").query(&mut con)?;
+    }
+    let stats: Vec<i64> = redis::cmd("call.blocking_abort_stats").query(&mut con)?;
+    assert_eq!(stats, vec![0, 1, 0], "handler calls and capture drops");
+    for key in ["abort:empty", "abort:capture"] {
+        let len: i64 = redis::cmd("LLEN").arg(key).query(&mut con)?;
+        assert_eq!(len, 1, "{key}");
+    }
+
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_call_blocking_abort_after_unblock_keeps_handler_result() -> Result<()> {
+    let mut con = TestConnection::new("call");
+
+    let res: String = redis::cmd("call.blocking_keep")
+        .arg("abort:kept")
+        .query(&mut con)?;
+    assert_eq!(res, "OK");
+
+    // The push unblocks the kept call: its handler runs once, consumes the
+    // push, and drops its capture when it returns.
+    let _: i64 = redis::cmd("RPUSH")
+        .arg("abort:kept")
+        .arg("value")
+        .query(&mut con)?;
+    let stats: Vec<i64> = redis::cmd("call.blocking_abort_stats").query(&mut con)?;
+    assert_eq!(stats, vec![0, 1, 1], "capture drops and kept handler calls");
+    let len: i64 = redis::cmd("LLEN").arg("abort:kept").query(&mut con)?;
+    assert_eq!(len, 0);
+
+    // A later abort fails and releases nothing: releasing the handler again
+    // would drop the capture twice.
+    let status: String = redis::cmd("call.blocking_abort_kept").query(&mut con)?;
+    assert_eq!(status, "not aborted");
+    let stats: Vec<i64> = redis::cmd("call.blocking_abort_stats").query(&mut con)?;
+    assert_eq!(stats, vec![0, 1, 1], "after the failed abort");
+
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
 fn test_call_dump() -> Result<()> {
     let mut con = TestConnection::new("call");
 

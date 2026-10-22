@@ -48,8 +48,8 @@ pub use crate::raw::{KeyType, ModuleOptions, NotifyEvent, Status, Version};
 
 pub use crate::configuration::ConfigurationValue;
 pub use crate::configuration::EnumConfigurationValue;
-pub use crate::context::call_reply::FutureCallReply;
 pub use crate::context::call_reply::{CallReply, CallResult, ErrorReply, PromiseCallReply};
+pub use crate::context::call_reply::{FutureCallReply, FutureHandler};
 pub use crate::context::commands;
 pub use crate::context::commands::{CommandBuilder, CommandFlags, KeyRange};
 pub use crate::context::defrag;
@@ -171,13 +171,6 @@ pub fn milliseconds() -> i64 {
 /// Initialize RedisModuleAPI without register as a module.
 pub fn init_api(ctx: &RuntimeContext) {
     unsafe { crate::raw::Export_RedisModule_InitAPI(ctx.ctx) };
-}
-
-pub(crate) unsafe fn deallocate_pointer<P>(p: *mut P) {
-    unsafe {
-        std::ptr::drop_in_place(p);
-        std::alloc::dealloc(p as *mut u8, std::alloc::Layout::new::<P>());
-    }
 }
 
 #[cfg(test)]

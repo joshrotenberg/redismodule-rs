@@ -175,6 +175,27 @@ let version: String = {
 }; // snapshot and native string are dropped before guard unlocks
 ```
 
+### Blocking-call unblock handlers own their captures
+
+`FutureCallReply::set_unblock_handler` now requires a `Send + 'static`
+handler. Redis keeps the handler until the blocked command unblocks or
+`FutureHandler::abort_and_dispose` cancels it by returning `Status::Ok`;
+`dispose`, dropping or forgetting the handle does not cancel it. The handler
+runs on the main thread after the installing invocation returns, also when a
+module-owned worker installed it. Move owned data into the handler instead of
+borrowing locals:
+
+```rust,ignore
+let key = key_name.try_as_str()?.to_owned();
+future
+    .set_unblock_handler(move |_ctx, reply| { /* uses `key` and `reply` */ })
+    .dispose(ctx);
+```
+
+A `RedisString` or `Rc` capture no longer compiles: copy the bytes into a
+`String` or `Vec<u8>`, or share data through `Arc`. A `BlockedClient` capture,
+as in the `call` example, compiles unchanged.
+
 ### Shared Redis guards require `Send` values
 
 `RedisGILGuard<T>` is now `Send` and `Sync` only when `T: Send`. The Redis lock
