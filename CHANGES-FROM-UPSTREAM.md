@@ -110,6 +110,19 @@ these in October 2026.
 
 ## Additions
 
+`redis_module!` owns accepted configuration private data per load, releasing
+observer captures and the final cached string getter reply after caught load
+failures or successful deinit. Refused or panicking deinit retains this data;
+caller-owned static storage is never destroyed. Callback access closes before
+cleanup, and captured destructor panics are isolated after teardown commits.
+Native configuration frames block unload until deferred completion. A
+main-thread timer provides a fallback when a regular post-notification job is
+unavailable or rejected; a worker in that situation conservatively blocks
+unload for its load generation. Custom loaders retain the previous accepted
+allocation behavior. This does not add general native-handle storage or change
+public `RedisString` thread bounds. See the
+[configuration lifecycle notes](docs/CONFIGURATION.md#registration-ownership-and-unload).
+
 Timers use opaque `TimerHandle<T>` values with explicit cancellation and
 metadata-only queries. **Breaking:** creation returns a result and requires
 `Send + 'static` callbacks and payloads; untyped `stop_timer<T>` and

@@ -3,6 +3,8 @@
 //! through a wrapper around its own `RedisModule_FreeString` pointer, so tests
 //! can check that CONFIG GET does not leak getter replies.
 use std::collections::BTreeSet;
+use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -18,6 +20,7 @@ static FREE_STRING: OnceLock<FreeString> = OnceLock::new();
 static TRACKING: AtomicBool = AtomicBool::new(false);
 static RETURNED: AtomicI64 = AtomicI64::new(0);
 static LIVE: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
+static FREE_MARKERS: Mutex<Option<PathBuf>> = Mutex::new(None);
 static VALUE: Mutex<String> = Mutex::new(String::new());
 
 unsafe extern "C" fn counting_free_string(
@@ -25,7 +28,20 @@ unsafe extern "C" fn counting_free_string(
     string: *mut raw::RedisModuleString,
 ) {
     unsafe {
-        LIVE.lock().unwrap().remove(&(string as usize));
+        let tracked = LIVE.lock().unwrap().remove(&(string as usize));
+        if tracked {
+            if let Some(path) = FREE_MARKERS.lock().unwrap().as_ref() {
+                // Test-only external evidence survives dlclose. A failed write
+                // becomes a missing marker assertion, never an FFI panic.
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .append(true)
+                    .create(true)
+                    .open(path)
+                {
+                    let _ = file.write_all(b"F");
+                }
+            }
+        }
         let free_string = FREE_STRING.get().expect("FreeString saved at load");
         free_string(ctx, string);
     }
@@ -50,7 +66,10 @@ impl ConfigurationValue<RedisString> for Text {
     }
 }
 
-fn init(_: &redis_module::RegistrationContext<'_>, _: &[RedisString]) -> Status {
+fn init(_: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> Status {
+    *FREE_MARKERS.lock().unwrap() = args
+        .first()
+        .map(|path| PathBuf::from(path.try_as_str().expect("UTF-8 marker path")));
     // SAFETY: OnLoad runs on the main thread before any command, so nothing
     // reads the module's FreeString pointer while it is replaced.
     unsafe {
