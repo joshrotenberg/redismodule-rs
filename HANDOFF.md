@@ -14,12 +14,13 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
 
-Latest SDK checkpoint: `084cd23` includes the INFO handler guide from
-`a14b71b` and its release-note indexes. Both SDK PRs received independent native
-review and all 20 exact-head checks passed before merge. CHANGES-FROM-UPSTREAM
+Latest SDK checkpoint: `d0bba7d` binds server INFO snapshots to their producing
+runtime context. Earlier INFO guidance (`a14b71b`) and release-note indexes
+(`084cd23`) are included. Each SDK change received independent native review
+and all 20 latest exact-head CI checks passed before merge. CHANGES-FROM-UPSTREAM
 and the migration guide include this work. The layout table retains the shared
 baseline while experiment CI proposal PR 79 awaits approval; its source is not
-included on this branch. The INFO guide checkpoint below has validation details.
+included on this branch. The checkpoints below have validation details.
 
 The fork branches from upstream master at `a808377`. Upstream has two commits
 since: `cca5360` (the `ServerInfo::field` leak fix; the fork has its own fix) and
@@ -310,6 +311,15 @@ An atomic telemetry example and native test cover ordinary INFO and nested
 `GetServerInfo`; compile controls reject lock-proof or runtime promotion. This
 adds no context capability and makes no async-signal-safety promise. Issue 61
 stays open for the parked API design. The host requires no adaptation.
+
+The server INFO snapshot lifetime fix merged in `d0bba7d`. Its handle now
+borrows the producing runtime context, preventing cleanup after a worker guard
+has freed that context or AutoMemory has reclaimed the allocation. Copy needed
+fields into Rust-owned values before leaving the context/lock scope. The field
+string remains an independent native owner with its existing requirements.
+Compiler controls reject scope escape and early unlock; native workers pass
+with AutoMemory off and on. This is separate from the general storage API in
+issue 51, and the host needs no source adaptation.
 
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).

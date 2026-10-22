@@ -62,6 +62,25 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 ### Latest SDK sync
 
+- 2026-10-22: synced merged SDK master `d0bba7d`, binding server INFO snapshots
+  to the runtime context used by native cleanup. SDK PR 82 received independent
+  native review at `51d7dde` and all 20 latest exact-head CI checks passed before
+  merge; the squash tree matches that reviewed head. The legacy Redis CI job
+  was retried after its completed steps left an unfinished check, and the retry
+  passed at the same commit. Full check-attempt evidence is retained locally.
+  The snapshot cannot escape a worker lock or survive early guard drop. Field
+  ownership is unchanged; native tests copy Rust-owned data before unlocking,
+  with AutoMemory off and on. General native-handle storage remains separate.
+  No host/guest source adaptation is needed. This sync preserves experiment
+  ancestry and PR 79's reviewed diff; its unmerged CI workflow is not included.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy, strict default workspace and host-excluded 7.2 docs pass.
+  Guest formatting/wasm32 linting pass. Tests pass: 69 SDK units, 156 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 9 macro parser tests,
+  7 host units, 21 host integrations including JavaScript, 90 SDK doctests and
+  4 guest helper tests. The focused worker snapshot regression also passed on
+  Redis 7.0.15, and all 90 SDK doctests passed with Rust 1.87 before syncing.
+
 - 2026-10-22: synced merged SDK master `084cd23`, including INFO callback
   state-access guidance (`a14b71b`) and its release-note indexes. Both SDK PRs
   received independent native review and all 20 exact-head CI checks passed;
