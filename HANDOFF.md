@@ -1,15 +1,15 @@
 # Handoff
 
 How to pick up work on this fork: the `redis-module` SDK on `master`, and the
-wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
+wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 
 ## What is where
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `cbf3f3f`, configuration registration ownership merged after all 20 PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `0f6e76b`, internal macro Syn 2 migration merged after independent review and all 20 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `cbf3f3f` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `0f6e76b` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -247,6 +247,12 @@ fallback. Workers without a usable completion job conservatively prevent unload
 for that load generation; joining does not clear it. General native-handle storage
 remains separate. The host's synchronous numeric/bool registration needs no source
 adaptation, and its existing unload/reload regression covers this integration.
+
+Internal macro parsing moved to Syn 2 in `0f6e76b`: API wrappers and mixed
+command declarations retain their existing syntax and generated code. The public
+metadata macros retain Syn 1 and `serde_syn`; their JSONY grammar needs a separate
+compatibility decision before migration. Issue 57 remains open for that stage.
+No host source adaptation needed.
 
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).

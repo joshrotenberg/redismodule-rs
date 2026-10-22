@@ -7,7 +7,7 @@ scope and readiness. Historical H/S/G IDs remain useful for the evidence below.
 
 Status: `done`, `next` (being worked on or first in line), `todo`, `blocked`.
 
-Last updated 2026-10-21.
+Last updated 2026-10-22.
 
 ## Where it stands
 
@@ -222,6 +222,16 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-22: rebased onto SDK master `0f6e76b`, which migrates the internal
+  API-wrapper and mixed command-list parsers to Syn 2. The public metadata parser
+  remains separate under issue 57. All 55 existing wasm patches are unchanged;
+  no host source adaptation or new wasm features are needed. SDK PR 72 received
+  independent native review and all 20 exact-head CI checks passed before merge.
+  On Rust 1.94 and Redis 8.10.2: example builds, workspace formatting/Clippy,
+  alternate-floor SDK Clippy and strict SDK/host docs pass. Tests pass: 69 SDK
+  units, 151 SDK integrations, 1 allocator fallback, 5 harness helpers, 7 host
+  units, 21 host integrations including JavaScript, 84 SDK doctests and 4 guest
+  helper tests. Guest formatting and wasm32 linting pass.
 - 2026-10-21: rebased onto SDK master `cbf3f3f`, which owns accepted
   configuration registrations through load failure and successful deinit.
   Refused unload preserves private data; native CONFIG operations prevent
