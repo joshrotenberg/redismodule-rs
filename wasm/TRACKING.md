@@ -222,6 +222,25 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-22: rebased onto SDK master `6c1f3a1`, which completes the public
+  macro Syn 2 migration and closes issue 57. SDK PR 77 received independent
+  native review and all 20 exact-head CI checks passed before merge; its tree
+  equals the reviewed head. All 60 existing wasm patches are unchanged, with
+  no host source adaptation. The private metadata parser preserves typed and
+  quoted forms, option/default rules, key specs, recursive help/ACL data and
+  integer syntax; command/reply generation and helper names are unchanged.
+  Nine grouped parser tests pass before and after migration; 48 downstream
+  controls per version pass across all six SDK floors, and an independent
+  46-case grammar comparison found no differences.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy, strict default workspace and host-excluded 7.2 docs pass.
+  Guest formatting/wasm32 linting pass. Tests pass: 69 SDK units, 154 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 9 macro parser tests,
+  7 host units, 21 host integrations including JavaScript, 84 SDK doctests and
+  4 guest helper tests. The isolated author parser fixture passes its stable
+  format/lint/unit checks. Its fuzz target is unchanged; no new fuzz run is
+  claimed for this sync. Native review also cleared the branch sync.
+
 - 2026-10-22: rebased onto SDK master `be41e00`, which adds companion-module
   testing and an isolated pure-parser fuzz fixture. SDK PR 76 received independent
   native review and all 20 exact-head CI checks passed before merge. All 59

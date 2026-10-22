@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `be41e00`, module testing/fuzzing patterns merged after independent review and all 20 PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `6c1f3a1`, public macro Syn 2 migration merged after independent review and all 20 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `be41e00` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `6c1f3a1` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -102,7 +102,9 @@ git fetch fork && git fetch origin
 6. The user has authorized future SDK PRs from this workflow to be merged once
    independent review is clear and every CI check passes on the reviewed head.
    Squash-merge that exact head with a conventional subject without PR numbers
-   or attribution trailers. Unresolved API designs still need discussion.
+   or attribution trailers. Unresolved API designs still need discussion: record
+   the needed decision, park the item and move to independent actionable work
+   in priority order. A pending decision must not stall the whole workflow.
 7. Rebase `experiment/wasm-host` onto the new master (below).
 
 ## SDK changes and open work
@@ -251,10 +253,13 @@ remains separate. The host's synchronous numeric/bool registration needs no sour
 adaptation, and its existing unload/reload regression covers this integration.
 
 Internal macro parsing moved to Syn 2 in `0f6e76b`: API wrappers and mixed
-command declarations retain their existing syntax and generated code. The public
-metadata macros retain Syn 1 and `serde_syn`; their JSONY grammar needs a separate
-compatibility decision before migration. Issue 57 remains open for that stage.
-No host source adaptation needed.
+command declarations retain their existing syntax and generated code. Public
+metadata parsing followed in `6c1f3a1`, replacing `serde_syn` with a private parser
+for the existing grammar and closing issue 57. Baseline compatibility tests cover
+typed/quoted names, options, key specs, recursive help/ACL data and integer rules.
+Registration/reply generation and helper names are unchanged; invalid-input
+diagnostic wording may differ. CI executes macro tests on the matrix and Rust
+1.87. No host source adaptation needed.
 
 The SDK test client moved to pinned Redis 1.2.2 in `ef5b2c9`, preserving the
 Rust 1.87 minimum, bounded sockets, binary distinctions and pipeline alignment.
