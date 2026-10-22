@@ -126,6 +126,26 @@ result would produce a second reply. Worker errors must be sent through the
 blocked client's thread-safe context. Dropping the handle unblocks the client,
 but does not synthesize a reply. See [block.rs](../examples/block.rs).
 
+### Server INFO snapshots stay inside the context scope
+
+`RuntimeContext::server_info` now borrows its producing context. Drop the
+snapshot before returning from a callback or releasing a worker lock guard.
+Its destructor needs the live native context even with AutoMemory disabled;
+AutoMemory can also reclaim its allocation at callback cleanup. Code that kept
+a snapshot after the context ended must copy the needed fields into owned
+Rust data such as `String` or `Vec<u8>` inside the locked scope. A field's
+`RedisString` owns its result independently of the snapshot, but still has
+the existing native-string thread and lock requirements.
+
+```rust,ignore
+let version: String = {
+    let guard = owner.lock();
+    let info = guard.server_info("server");
+    let value = info.field("redis_version").unwrap();
+    value.try_as_str().unwrap().to_owned()
+}; // snapshot and native string are dropped before guard unlocks
+```
+
 ### Shared Redis guards require `Send` values
 
 `RedisGILGuard<T>` is now `Send` and `Sync` only when `T: Send`. The Redis lock
