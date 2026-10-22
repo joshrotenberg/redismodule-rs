@@ -110,6 +110,15 @@ these in October 2026.
 
 ## Additions
 
+Direct client blocking now validates the invocation before calling Redis.
+Scripts, transactions, denied module calls and reply/timeout callback reentry
+return an error rather than exposing an unusable handle or reaching native
+assertions. **Breaking:** `Context::block_client()` returns a result; add `?`
+before starting a worker. The reply-callback helper shares the checks, including
+a fallback for Redis 6.0's older flags. See the
+[migration guide](docs/MIGRATING-3.0.md#direct-client-blocking-returns-a-result)
+and [blocked-client example](examples/block.rs).
+
 Shared `RedisGILGuard<T>` storage now requires `T: Send`, closing access to
 non-`Send` aliases outside Redis's lock. Owned non-`Sync` values remain
 supported. String configurations can use `RedisGILGuard<Vec<u8>>` or

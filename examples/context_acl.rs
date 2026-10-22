@@ -228,7 +228,7 @@ fn worker(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     if worker.is_some() {
         return Err(RedisError::Str("ERR worker already started"));
     }
-    let blocked = ctx.block_client();
+    let blocked = ctx.block_client()?;
     *worker = Some(std::thread::spawn(move || {
         let result = if detached {
             let guard = redis_module::MODULE_CONTEXT.lock();

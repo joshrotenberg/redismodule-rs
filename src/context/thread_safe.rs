@@ -234,7 +234,7 @@ impl ThreadSafeContext<BlockedClient> {
     #[must_use]
     pub fn with_blocked_client(blocked_client: BlockedClient) -> Self {
         let ctx = unsafe {
-            crate::__required_api!(RedisModule_GetThreadSafeContext)(blocked_client.inner)
+            crate::__required_api!(RedisModule_GetThreadSafeContext)(blocked_client.inner.as_ptr())
         };
         Self {
             ctx,

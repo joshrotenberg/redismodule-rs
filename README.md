@@ -262,6 +262,13 @@ it cannot veto storage. See [parsed_configuration.rs](examples/parsed_configurat
 for registration, typed reads and observer usage. Cross-field validation and
 transactional side effects require a custom configuration implementation.
 
+## Blocking clients
+
+For worker replies, `Context::block_client()` returns a result. Check it before
+starting work, send the reply through the blocked client's `ThreadSafeContext`,
+and return `RedisValue::NoReply`. Scripts, transactions and other denied
+invocations fail before native blocking. See [block.rs](examples/block.rs).
+
 ## Server clock
 
 `redis_module::milliseconds()` reads the current Unix time in milliseconds

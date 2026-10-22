@@ -1,41 +1,102 @@
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
 use std::os::raw::{c_int, c_longlong};
-use std::ptr;
+use std::ptr::{self, NonNull};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use crate::raw;
 use crate::{Context, ContextFlags, RedisError, RedisResult};
 
+/// A successfully blocked client, unblocked when this handle is dropped.
+/// Send it to a worker and use [`crate::ThreadSafeContext::with_blocked_client`]
+/// to reply. A successful command must return [`crate::RedisValue::NoReply`].
 pub struct BlockedClient {
-    pub(crate) inner: *mut raw::RedisModuleBlockedClient,
+    pub(crate) inner: NonNull<raw::RedisModuleBlockedClient>,
 }
 
-// We need to be able to send the inner pointer to another thread
+// SAFETY: Redis permits UnblockClient and blocked-client thread-safe contexts
+// on module workers. Ownership ensures one eventual UnblockClient call.
 unsafe impl Send for BlockedClient {}
 
 impl Drop for BlockedClient {
     fn drop(&mut self) {
-        unsafe { crate::__required_api!(RedisModule_UnblockClient)(self.inner, ptr::null_mut()) };
+        unsafe {
+            crate::__required_api!(RedisModule_UnblockClient)(self.inner.as_ptr(), ptr::null_mut())
+        };
     }
 }
 
 impl Context {
-    #[must_use]
-    pub fn block_client(&self) -> BlockedClient {
-        let blocked_client = unsafe {
-            crate::__required_api!(RedisModule_BlockClient)(
-                self.ctx, // ctx
-                None,     // reply_func
-                None,     // timeout_func
-                None, 0,
-            )
-        };
+    /// Blocks a client so a worker can reply through a thread-safe context.
+    /// Dropping the returned handle unblocks the client. Once this succeeds,
+    /// return [`crate::RedisValue::NoReply`] and send the reply through that
+    /// thread-safe context; returning a normal reply would send a second one.
+    ///
+    /// # Errors
+    ///
+    /// Rejects invocations with no client, scripts, transactions, module calls
+    /// without blocking permission, and blocked-client reply/timeout callbacks,
+    /// before calling Redis's blocking API. Also returns an error if a required
+    /// API is unavailable or the native call unexpectedly returns a null handle.
+    ///
+    /// ```no_run
+    /// use redis_module::{Context, RedisResult, RedisValue, ThreadSafeContext};
+    /// fn command(ctx: &Context) -> RedisResult {
+    ///     let blocked = ctx.block_client()?;
+    ///     std::thread::spawn(move || {
+    ///         let reply = ThreadSafeContext::with_blocked_client(blocked);
+    ///         reply.reply(Ok("done".into()));
+    ///     });
+    ///     Ok(RedisValue::NoReply)
+    /// }
+    /// ```
+    pub fn block_client(&self) -> Result<BlockedClient, RedisError> {
+        let block = unsafe { crate::__available_api!(RedisModule_BlockClient) };
+        unsafe { crate::__available_api!(RedisModule_UnblockClient) };
+        self.validate_blocking_context()?;
+        let inner = NonNull::new(unsafe { block(self.ctx, None, None, None, 0) })
+            .ok_or(RedisError::Str("ERR Redis did not block the client"))?;
+        Ok(BlockedClient { inner })
+    }
 
-        BlockedClient {
-            inner: blocked_client,
+    fn validate_blocking_context(&self) -> Result<(), RedisError> {
+        let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
+        let is_reply = unsafe { crate::__available_api!(RedisModule_IsBlockedReplyRequest) };
+        let is_timeout = unsafe { crate::__available_api!(RedisModule_IsBlockedTimeoutRequest) };
+        let flags = unsafe { crate::__available_api!(RedisModule_GetContextFlags) };
+        // A non-null native handle is not proof that the client was blocked:
+        // Redis can emit an error and still return an aborted handle.
+        let id = unsafe { client_id(self.ctx) };
+        if id == 0 {
+            return Err(RedisError::Str("ERR this context has no client to block"));
         }
+        if unsafe { is_reply(self.ctx) != 0 || is_timeout(self.ctx) != 0 } {
+            return Err(RedisError::Str(
+                "ERR cannot block from a blocked client's reply or timeout callback",
+            ));
+        }
+        // Older servers report script/transaction flags without DENY_BLOCKING.
+        if ContextFlags::from_bits_truncate(unsafe { flags(self.ctx) })
+            .intersects(ContextFlags::DENY_BLOCKING | ContextFlags::LUA | ContextFlags::MULTI)
+        {
+            return Err(RedisError::Str(
+                "ERR this command cannot block here (MULTI, a script, or a call without K)",
+            ));
+        }
+        // Redis 6.0 does not expose DENY_BLOCKING and its RM_Call clients
+        // cannot block. Those temporary clients are not in the client index.
+        let legacy_flags = unsafe { raw::RedisModule_GetServerVersion }
+            .is_none_or(|version| unsafe { version() } < 0x0006_0200);
+        if legacy_flags {
+            let info = unsafe { crate::__available_api!(RedisModule_GetClientInfoById) };
+            if unsafe { info(ptr::null_mut(), id) } != raw::REDISMODULE_OK as c_int {
+                return Err(RedisError::Str(
+                    "ERR this command cannot block here (MULTI, a script, or a call without K)",
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Blocks the client until [`ReplyingBlockedClient::unblock`] hands over a
@@ -68,25 +129,7 @@ impl Context {
             unsafe { crate::__available_api!(RedisModule_BlockClientSetPrivateData) };
         unsafe { crate::__available_api!(RedisModule_GetBlockedClientPrivateData) };
         unsafe { crate::__available_api!(RedisModule_UnblockClient) };
-        let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
-        let is_reply = unsafe { crate::__available_api!(RedisModule_IsBlockedReplyRequest) };
-        let is_timeout = unsafe { crate::__available_api!(RedisModule_IsBlockedTimeoutRequest) };
-
-        // Redis replies with an error but still returns a handle in these
-        // cases; unblocking that handle later would crash the server.
-        if unsafe { client_id(self.ctx) } == 0 {
-            return Err(RedisError::Str("ERR this context has no client to block"));
-        }
-        if unsafe { is_reply(self.ctx) != 0 || is_timeout(self.ctx) != 0 } {
-            return Err(RedisError::Str(
-                "ERR cannot block from a blocked client's reply or timeout callback",
-            ));
-        }
-        if self.get_flags().contains(ContextFlags::DENY_BLOCKING) {
-            return Err(RedisError::Str(
-                "ERR this command cannot block here (MULTI, a script, or a call without K)",
-            ));
-        }
+        self.validate_blocking_context()?;
         // 0 means no timeout to Redis, so a timeout under a millisecond is 1.
         // Redis rejects a timeout that overflows when added to the current
         // time; anything this large is rejected first.

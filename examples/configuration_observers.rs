@@ -137,7 +137,7 @@ fn worker(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     if worker.is_some() {
         return Err(RedisError::Str("ERR finish the earlier worker first"));
     }
-    let blocked = ctx.block_client();
+    let blocked = ctx.block_client()?;
     *worker = Some(thread::spawn(move || {
         let owner = ThreadSafeContext::with_blocked_client(blocked);
         let result = {

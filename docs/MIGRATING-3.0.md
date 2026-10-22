@@ -31,6 +31,29 @@ without a `From` conversion.
 
 ## Changes the compiler reports
 
+### Direct client blocking returns a result
+
+`Context::block_client()` now returns `Result<BlockedClient, RedisError>`.
+Check it before creating a worker, usually with `?`:
+
+```rust,ignore
+let blocked = ctx.block_client()?;
+let worker = ThreadSafeContext::with_blocked_client(blocked);
+// Send the reply through worker, then return RedisValue::NoReply.
+```
+
+The SDK rejects scripts, transactions, module calls without blocking permission,
+missing clients, and attempts to block again inside reply or timeout callbacks.
+Validation happens before native blocking, and a null native result cannot
+become a handle. `block_client_on_reply` uses the same invocation checks and
+keeps its existing result type. On Redis 6.0, where the newer denial flag is
+absent, nested module-call clients are rejected through client lookup.
+
+After successful blocking, return `RedisValue::NoReply`; returning a normal
+result would produce a second reply. Worker errors must be sent through the
+blocked client's thread-safe context. Dropping the handle unblocks the client,
+but does not synthesize a reply. See [block.rs](../examples/block.rs).
+
 ### Shared Redis guards require `Send` values
 
 `RedisGILGuard<T>` is now `Send` and `Sync` only when `T: Send`. The Redis lock
