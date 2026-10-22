@@ -235,6 +235,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- Public macro documentation uses accessible type references and links. CI
+  documents every SDK workspace package with warnings denied at each API floor,
+  including both macro crates. Macro expansion and runtime behavior are unchanged.
+
 - `redis_module!` now owns accepted configuration private data per load and
   releases captured observers and final string getter replies after caught
   load failures or successful deinit. Refused or panicking deinit retains

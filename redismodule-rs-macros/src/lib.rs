@@ -1,3 +1,9 @@
+//! Registration attributes and reply derives for the `redis-module` SDK.
+//!
+//! The generated handlers use SDK context and reply types. See the
+//! [SDK migration guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/MIGRATING-3.0.md)
+//! for their public paths and capabilities.
+
 use proc_macro::TokenStream;
 
 mod command;
@@ -8,12 +14,12 @@ mod registration;
 /// This proc macro allow to specify that the follow function is a Redis command.
 /// The macro accept the following arguments that discribe the command properties:
 /// * name (optional) - The command name. in case not given, the function name will be taken.
-/// * flags - An array of [`command::RedisCommandFlags`].
-/// * enterprise_flags - An array of [`command::RedisEnterpriseCommandFlags`].
+/// * flags - An array of command flag names, such as `ReadOnly`, `Write` or `DenyOOM`.
+/// * enterprise_flags - An array of enterprise command flag names; accepts `ProxyFiltered`.
 /// * summary (optional) - Command summary
 /// * complexity (optional) - Command compexity
 /// * since (optional) - At which module version the command was first introduce
-/// * tips (optional) - Command tips for proxy, for more information please refer to https://redis.io/topics/command-tips
+/// * tips (optional) - Command tips for proxy, see [Redis command tips](https://redis.io/docs/latest/develop/reference/command-tips/).
 /// * arity - Number of arguments, including the command name itself. A positive number specifies an exact number of arguments and a negative number
 ///   specifies a minimum number of arguments.
 /// * key_spec - A list of specs representing how to find the keys that the command might touch. the following options are available:
@@ -86,7 +92,8 @@ pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Proc macro which is set on a function that need to be called whenever the server role changes.
-/// The function must accept a [EventContext] and [ServerRole].
+/// The function must accept `&redis_module::EventContext` and
+/// `redis_module::server_events::ServerRole`.
 ///
 /// Example:
 ///
@@ -103,7 +110,8 @@ pub fn role_changed_event_handler(_attr: TokenStream, item: TokenStream) -> Toke
 }
 
 /// Proc macro which is set on a function that need to be called whenever a loading event happened.
-/// The function must accept a [EventContext] and [LoadingSubevent].
+/// The function must accept `&redis_module::EventContext` and
+/// `redis_module::server_events::LoadingSubevent`.
 ///
 /// Example:
 ///
@@ -120,7 +128,8 @@ pub fn loading_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStre
 }
 
 /// Proc macro which is set on a function that need to be called whenever a flush event happened.
-/// The function must accept a [EventContext] and [FlushSubevent].
+/// The function must accept `&redis_module::EventContext` and
+/// `redis_module::server_events::FlushSubevent`.
 ///
 /// Example:
 ///
@@ -182,7 +191,8 @@ pub fn swapdb_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStrea
 }
 
 /// Proc macro which is set on a function that need to be called whenever a module is loaded or unloaded on the server.
-/// The function must accept a [EventContext] and [ModuleChangeSubevent].
+/// The function must accept `&redis_module::EventContext` and
+/// `redis_module::server_events::ModuleChangeSubevent`.
 ///
 /// Example:
 ///
@@ -199,8 +209,8 @@ pub fn module_changed_event_handler(_attr: TokenStream, item: TokenStream) -> To
 }
 
 /// Proc macro which is set on a function that need to be called whenever a configuration change
-/// event is happening. The function must accept a [EventContext] and [&[&str]] that contains the names
-/// of the configiration values that was changed.
+/// event is happening. The function must accept `&redis_module::EventContext` and
+/// `&[&str]` containing the names of the configuration values that changed.
 ///
 /// Example:
 ///
@@ -217,7 +227,7 @@ pub fn config_changed_event_handler(_attr: TokenStream, item: TokenStream) -> To
 }
 
 /// Proc macro which is set on a function that need to be called on Redis cron.
-/// The function must accept a [EventContext] and [u64] that represent the cron hz.
+/// The function must accept `&redis_module::EventContext` and a [u64] representing the cron hz.
 ///
 /// Example:
 ///
@@ -234,7 +244,7 @@ pub fn cron_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStream 
 }
 
 /// Proc macro which is set on a function that needs to be called when Redis
-/// shuts down. The function must accept a [EventContext].
+/// shuts down. The function must accept `&redis_module::EventContext`.
 ///
 /// Example:
 ///
@@ -250,7 +260,8 @@ pub fn shutdown_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStr
     )
 }
 
-/// The macro auto generate a [From] implementation that can convert the struct into [RedisValue].
+/// Generates a [From] implementation that converts the struct into
+/// `redis_module::RedisValue`.
 ///
 /// Example:
 ///
@@ -308,9 +319,8 @@ pub fn shutdown_event_handler(_attr: TokenStream, item: TokenStream) -> TokenStr
 /// }
 /// ```
 ///
-/// The [From] implementation generates a [RedisValue::OrderMap] such that the fields names
-/// are the map keys and the values are the result of running [Into] function on the field
-/// value and convert it into a [RedisValue].
+/// The [From] implementation produces a `redis_module::RedisValue::OrderedMap`:
+/// field names become map keys, and each field value is converted with [Into].
 ///
 /// The code above will generate the following reply (in resp3):
 ///
@@ -426,7 +436,7 @@ pub fn info_command_handler(_attr: TokenStream, item: TokenStream) -> TokenStrea
 
 /// Implements a corresponding [`From`] for this struct, to convert
 /// objects of this struct to an information object to be sent to the
-/// [`redis_module::InfoContext`] as a reply.
+/// `redis_module::InfoContext` as a reply.
 ///
 /// Example:
 ///
@@ -469,9 +479,9 @@ pub fn info_command_handler(_attr: TokenStream, item: TokenStream) -> TokenStrea
 ///    [`std::collections::HashMap`].
 /// 3. In dictionaries, the value type can be anything that can be
 ///    converted into an object of type
-///    [`redis_module::InfoContextBuilderFieldBottomLevelValue`], for
+///    `redis_module::InfoContextBuilderFieldBottomLevelValue`, for
 ///    example, a [`std::string::String`] or [`u64`]. Please, refer to
-///    [`redis_module::InfoContextBuilderFieldBottomLevelValue`] for more
+///    `redis_module::InfoContextBuilderFieldBottomLevelValue` for more
 ///    information.
 #[proc_macro_derive(InfoSection)]
 pub fn info_section(item: TokenStream) -> TokenStream {
@@ -479,7 +489,8 @@ pub fn info_section(item: TokenStream) -> TokenStream {
 }
 
 /// Proc macro which is set on a function that need to be called whenever server performs defrag.
-/// The function must accept a [&DefragContext]. If defrag is not supported by the Redis version
+/// The function must accept `&redis_module::defrag::DefragContext`.
+/// If defrag is not supported by the Redis version
 /// the function will never be called.
 ///
 /// Example:
@@ -497,7 +508,8 @@ pub fn defrag_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Proc macro which is set on a function that need to be called whenever server start performs defrag.
-/// The function must accept a [&DefragContext]. If defrag start event is not supported by the Redis version
+/// The function must accept `&redis_module::defrag::DefragContext`.
+/// If the defrag start event is not supported by the Redis version
 /// the function will never be called.
 ///
 /// Example:
@@ -515,7 +527,8 @@ pub fn defrag_start_function(_attr: TokenStream, item: TokenStream) -> TokenStre
 }
 
 /// Proc macro which is set on a function that need to be called whenever server end performs defrag.
-/// The function must accept a [&DefragContext]. If defrag end event is not supported by the Redis version
+/// The function must accept `&redis_module::defrag::DefragContext`.
+/// If the defrag end event is not supported by the Redis version
 /// the function will never be called.
 ///
 /// Example:
