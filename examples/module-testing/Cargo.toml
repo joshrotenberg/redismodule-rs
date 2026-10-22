@@ -1,0 +1,12 @@
+[package]
+name = "module-testing-parser"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+license = "BSD-3-Clause"
+
+# An author-owned parser can be tested without linking the SDK or Redis.
+[workspace]
+exclude = ["fuzz"]
+resolver = "3"

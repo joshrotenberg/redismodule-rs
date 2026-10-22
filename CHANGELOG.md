@@ -13,6 +13,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- [Module testing patterns](docs/TESTING-MODULES.md) demonstrate companion
+  event input and an isolated pure-parser fuzz target, with bounded native
+  probes and validated libFuzzer/allocator-fallback controls. Parser checks run
+  separately in CI; SDK allocator and runtime behavior are unchanged.
+
 - A [module shipping guide](docs/SHIPPING-MODULES.md) covering native build
   inputs, architecture/libc limits, checksummed archives and a bounded load
   smoke test of the extracted artifact, with a pinned `hello` example recipe.
