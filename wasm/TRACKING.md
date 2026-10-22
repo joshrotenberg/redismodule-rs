@@ -222,6 +222,20 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-21: rebased onto SDK master `cbf3f3f`, which owns accepted
+  configuration registrations through load failure and successful deinit.
+  Refused unload preserves private data; native CONFIG operations prevent
+  teardown until completion. Unsupported worker completion conservatively
+  refuses unload for that load generation. All 54 existing wasm patches are
+  unchanged, and the host needs no source adaptation. Independent native review
+  found no blocking issues. On Rust 1.94 and Redis 8.10.2: examples, workspace
+  formatting/Clippy, alternate-floor SDK Clippy and strict SDK/host docs pass;
+  69 SDK unit tests, 151 SDK integration tests, 1 harness helper test, 5 allocator
+  tests, 7 host unit tests, 21 host integration tests including JavaScript,
+  84 SDK doctests and 4 guest helper tests pass. Rust guest formatting and wasm32
+  linting pass. New SDK work now follows independent subagent review, fixes and
+  re-review as needed, then merge after exact-head CI passes under the user's
+  standing authorization. No new wasm features added.
 - 2026-10-21: rebased onto SDK master `5a99fb1`, which adds typed timer
   handles, explicit cancellation and lifecycle ownership. Timer creation is
   restricted to active runtime commands/events; handle drop remains passive.

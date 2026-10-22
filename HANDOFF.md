@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `5a99fb1`, typed timers and lifecycle ownership merged after all 19 PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `cbf3f3f`, configuration registration ownership merged after all 20 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `5a99fb1` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `cbf3f3f` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -41,7 +41,8 @@ git fetch fork && git fetch origin
   `PATH=$HOME/.cargo/bin:$PATH` so rustup's pinned toolchain is used.
 - Redis: the integration tests start `redis-server` from the `PATH` (run
   locally with 8.10.2). CI builds pinned Redis 7.2, 7.4 and 8.0 through 8.10 releases, plus Valkey
-  8.1 and 9.1 at the default SDK floor. For other
+  8.1 and 9.1 at the default SDK floor. Focused native-floor checks cover Redis
+  6.0 blocking/timers and Redis 7.0 configuration ownership. For other
   versions, the `redis:<version>` Docker images work; with colima on macOS only
   `$HOME` is mounted, so copy a built module into a container with `docker cp`.
 - wasm branch only: `rustup target add wasm32-unknown-unknown`. The JavaScript
@@ -71,7 +72,7 @@ git fetch fork && git fetch origin
 
 ## Making an SDK change
 
-1. Branch off `fork/master`: `git switch -c <type>/<slug> fork/master`.
+1. Branch off `fork/master`: `git switch -c codex/<slug> fork/master`.
 2. Push an empty `chore: start <topic> [skip ci]` commit and open a draft PR
    against `master` whose body has Plan, Changes, Verification and Out of
    scope sections.
@@ -93,10 +94,13 @@ git fetch fork && git fetch origin
    The integration tests load example modules beside their executable's build
    profile, including with `CARGO_TARGET_DIR`. Build examples explicitly before
    running filtered integration tests to avoid loading stale modules.
-5. Append a Results table of the gates to the PR body, mark it ready, and have
-   it reviewed.
-6. Squash-merge once every check passes, with the PR title as the subject and
-   the commit messages (minus the empty start commit) as the body.
+5. Record the gate results in the PR body and have an independent native
+   subagent review the actual PR diff. Fix findings, run the appropriate checks,
+   and have the resulting changes reviewed again until no blocking findings remain.
+6. The user has authorized future SDK PRs from this workflow to be merged once
+   independent review is clear and every CI check passes on the reviewed head.
+   Squash-merge that exact head with a conventional subject without PR numbers
+   or attribution trailers. Unresolved API designs still need discussion.
 7. Rebase `experiment/wasm-host` onto the new master (below).
 
 ## SDK changes and open work
@@ -233,6 +237,16 @@ time only, and dropping a handle leaves its timer scheduled. The SDK protects
 pending/executing timers from unload and rejects creation during initialization
 and unload. Start timers from runtime commands or events. No host adaptation
 needed. Cancellation-on-drop and payload inspection have separate design issues.
+
+Configuration registration ownership merged in `cbf3f3f`: accepted private
+allocations and final cached string getter replies belong to the macro-managed
+load generation. Caught load failures and successful deinit release them under
+the Redis lock; refused deinit retains them. Unload waits for native CONFIG
+execution to finish, using regular post-notification jobs or a main-thread timer
+fallback. Workers without a usable completion job conservatively prevent unload
+for that load generation; joining does not clear it. General native-handle storage
+remains separate. The host's synchronous numeric/bool registration needs no source
+adaptation, and its existing unload/reload regression covers this integration.
 
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).
