@@ -31,7 +31,7 @@ fn error_code(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 /// string so both RESP2 and RESP3 clients can read it.
 fn protocol(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let key = args.get(1).ok_or(RedisError::WrongArity)?;
-    let mut options = CallOptionsBuilder::new().errors_as_replies();
+    let mut options = CallOptionsBuilder::new();
     for selection in &args[2..] {
         options = options.resp(match selection.try_as_str()? {
             "2" => CallOptionResp::Resp2,
