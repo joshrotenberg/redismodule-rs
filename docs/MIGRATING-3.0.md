@@ -196,6 +196,47 @@ A `RedisString` or `Rc` capture no longer compiles: copy the bytes into a
 `String` or `Vec<u8>`, or share data through `Arc`. A `BlockedClient` capture,
 as in the `call` example, compiles unchanged.
 
+### Call replies stay inside their context scope
+
+`RuntimeContext::call_ext` and the replies `call_blocking` resolves at once now
+return `CallResult<'ctx>`, borrowing the context they were called through,
+instead of `CallResult<'static>`. Redis 6.0 to 7.0 read that context when a
+reply is freed, and with AutoMemory any release frees the reply itself when
+the callback returns. Drop replies before returning from a callback or
+releasing a worker lock guard, and copy what is needed into Rust storage:
+
+```rust,ignore
+let bytes = {
+    let guard = owner.lock();
+    match guard.call_ext("GET", &CallOptionsBuilder::new().build(), &["key"]) {
+        Ok(CallReply::String(value)) => Some(value.as_bytes().to_vec()),
+        _ => None,
+    }
+}; // reply dropped before the guard unlocks
+```
+
+Functions that return a reply must tie it to their context input, for example
+`fn read<'c>(ctx: &'c RuntimeContext) -> CallResult<'c>`. Closures passed to
+`with_call_user` and `with_db` may now return values that borrow the view.
+`Context::call` returns an owned `RedisValue` and is unchanged, as is the
+`CallResult<'static>` an unblock handler receives: Redis parses that reply
+without a context.
+
+### `auto_memory` is unsafe
+
+`RuntimeContext::auto_memory` is now an `unsafe fn`. The SDK releases its own
+handles without AutoMemory, but AutoMemory also frees the promise reply of each
+blocking call made through the context. Dispose or abort every `FutureHandler`
+from such a call before the callback returns or the thread-safe context is
+freed, then wrap the call with a safety comment:
+
+```rust,ignore
+// SAFETY: this callback disposes every FutureHandler it creates before it returns.
+unsafe { ctx.auto_memory() };
+```
+
+Without AutoMemory, a `FutureHandler` may still be kept and aborted later.
+
 ### Shared Redis guards require `Send` values
 
 `RedisGILGuard<T>` is now `Send` and `Sync` only when `T: Send`. The Redis lock

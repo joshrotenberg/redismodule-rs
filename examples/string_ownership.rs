@@ -75,7 +75,10 @@ fn snapshot() -> [u64; 5] {
 fn mode(ctx: &Context, value: i64) -> Result<(), RedisError> {
     match value {
         0 => (),
-        1 => ctx.auto_memory(),
+        // SAFETY: these commands make no blocking calls, so they own no
+        // FutureHandler, and every SDK handle they create is released before
+        // the callback returns.
+        1 => unsafe { ctx.auto_memory() },
         _ => return Err(RedisError::Str("ERR AM mode must be 0 or 1")),
     }
     Ok(())

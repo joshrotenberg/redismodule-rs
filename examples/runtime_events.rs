@@ -1,7 +1,7 @@
 //! Choose subscriptions at load time or from a module command.
 use redis_module::{
-    Context, NotifyEvent, RedisError, RedisResult, RedisString, RedisValue, Status, redis_command,
-    redis_event_handler, redis_module,
+    CallOptionsBuilder, CallReply, CallResult, Context, NotifyEvent, RedisError, RedisResult,
+    RedisString, RedisValue, Status, redis_command, redis_event_handler, redis_module,
 };
 use std::sync::Mutex;
 
@@ -137,9 +137,42 @@ fn worker_keys(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     start_worker(ctx, WorkerOperation::Keys(auto_memory_arg(&args)?))
 }
 
+fn worker_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    start_worker(ctx, WorkerOperation::CallReply(auto_memory_arg(&args)?))
+}
+
+/// `runtime.call_reply manual|auto` runs the same call in the command's own
+/// callback context.
+fn call_reply(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    owned_call_reply(ctx, auto_memory_arg(&args)?)
+}
+
+fn owned_call_reply(ctx: &redis_module::RuntimeContext, auto_memory: bool) -> RedisResult {
+    if auto_memory {
+        // SAFETY: this context makes no blocking calls, so it owns no
+        // FutureHandler, and every SDK handle it creates is released before
+        // it ends.
+        unsafe { ctx.auto_memory() };
+    }
+    let options = CallOptionsBuilder::new().build();
+    let reply: CallResult<'_> = ctx.call_ext("ECHO", &options, &[b"\0\xffreply".as_slice()]);
+    // The reply borrows `ctx`: Redis frees or reads that context when the
+    // reply is freed. Copy the bytes into Rust storage before it ends.
+    let bytes = match &reply {
+        Ok(CallReply::String(value)) => value.as_bytes().to_vec(),
+        Ok(other) => return Err(RedisError::String(format!("ERR unexpected reply {other}"))),
+        Err(error) => return Err(RedisError::String(format!("ERR call failed: {error}"))),
+    };
+    drop(reply);
+    Ok(RedisValue::StringBuffer(bytes))
+}
+
 fn owned_server_version(ctx: &redis_module::RuntimeContext, auto_memory: bool) -> RedisResult {
     if auto_memory {
-        ctx.auto_memory();
+        // SAFETY: this context makes no blocking calls, so it owns no
+        // FutureHandler, and every SDK handle it creates is released before
+        // it ends.
+        unsafe { ctx.auto_memory() };
     }
     let info = ctx.server_info("server");
     let value = info
@@ -156,7 +189,10 @@ fn owned_key_data(ctx: &redis_module::RuntimeContext, auto_memory: bool) -> Redi
     use redis_module::key::KeyFlags;
 
     if auto_memory {
-        ctx.auto_memory();
+        // SAFETY: this context makes no blocking calls, so it owns no
+        // FutureHandler, and every SDK handle it creates is released before
+        // it ends.
+        unsafe { ctx.auto_memory() };
     }
     let name = ctx.create_string("worker:scoped:key");
     {
@@ -196,6 +232,7 @@ enum WorkerOperation {
     Runtime,
     ServerInfo(bool),
     Keys(bool),
+    CallReply(bool),
 }
 
 fn start_worker(ctx: &Context, operation: WorkerOperation) -> RedisResult {
@@ -210,6 +247,7 @@ fn start_worker(ctx: &Context, operation: WorkerOperation) -> RedisResult {
         let result = match operation {
             WorkerOperation::ServerInfo(auto_memory) => owned_server_version(&guard, auto_memory),
             WorkerOperation::Keys(auto_memory) => owned_key_data(&guard, auto_memory),
+            WorkerOperation::CallReply(auto_memory) => owned_call_reply(&guard, auto_memory),
             WorkerOperation::Runtime => worker_runtime(&guard),
         };
         drop(guard);
@@ -273,6 +311,8 @@ redis_module! {
         redis_command!("runtime.worker", worker),
         redis_command!("runtime.worker_info", worker_info),
         redis_command!("runtime.worker_keys", worker_keys),
+        redis_command!("runtime.worker_call", worker_call),
+        redis_command!("runtime.call_reply", call_reply),
         redis_command!("runtime.finish_worker", finish_worker),
         redis_command!("runtime.counts", counts).read_only(),
         redis_command!("runtime.last", last).read_only(),

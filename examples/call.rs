@@ -263,6 +263,34 @@ fn call_blocking_abort_kept(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     })
 }
 
+static AUTO_MEMORY_HANDLER_CALLS: AtomicI64 = AtomicI64::new(0);
+
+/// `call.blocking_auto_memory <key>` enables AutoMemory, starts `BLPOP <key> 0`
+/// and disposes the handle before returning, as `auto_memory` requires.
+fn call_blocking_auto_memory(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let [_, key] = args.as_slice() else {
+        return Err(RedisError::WrongArity);
+    };
+    // SAFETY: the only FutureHandler this callback creates is disposed below,
+    // before AutoMemory frees its promise reply.
+    unsafe { ctx.auto_memory() };
+    let options = CallOptionsBuilder::new().build_blocking();
+    let future = match ctx.call_blocking("blpop", &options, &[key.try_as_str()?, "0"]) {
+        PromiseCallReply::Future(future) => future,
+        PromiseCallReply::Resolved(_) => return Err(RedisError::Str("ERR the call did not block")),
+    };
+    future
+        .set_unblock_handler(|_ctx, _reply| {
+            AUTO_MEMORY_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
+        })
+        .dispose(ctx);
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
+fn call_blocking_auto_memory_calls(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(AUTO_MEMORY_HANDLER_CALLS.load(Ordering::SeqCst).into())
+}
+
 /// Replies with the aborted handler calls, capture drops and kept handler
 /// calls since the module loaded.
 fn call_blocking_abort_stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
@@ -414,6 +442,8 @@ redis_module! {
         ["call.blocking_keep", call_blocking_keep, "", 0, 0, 0, ""],
         ["call.blocking_abort_kept", call_blocking_abort_kept, "", 0, 0, 0, ""],
         ["call.blocking_abort_stats", call_blocking_abort_stats, "", 0, 0, 0, ""],
+        ["call.blocking_auto_memory", call_blocking_auto_memory, "", 0, 0, 0, ""],
+        ["call.blocking_auto_memory_calls", call_blocking_auto_memory_calls, "", 0, 0, 0, ""],
         ["call.dump_test", call_dump_test, "", 0, 0, 0, ""],
         ["call.binary_data_test", call_binary_data_test, "", 0, 0, 0, ""],
         ["call.verbatim", call_verbatim, "", 0, 0, 0, ""],

@@ -86,10 +86,10 @@ pub struct RegistrationContext<'load> {
 impl<'load> RegistrationContext<'load> {
     /// Runs a call-user scope while preserving registration capabilities.
     /// See [`RuntimeContext::with_call_user`](crate::RuntimeContext::with_call_user).
-    pub fn with_call_user<T>(
-        &self,
+    pub fn with_call_user<'s, T>(
+        &'s self,
         user_name: &crate::RedisString,
-        f: impl FnOnce(&RegistrationContext<'load>) -> T,
+        f: impl FnOnce(&'s RegistrationContext<'load>) -> T,
     ) -> Result<T, crate::RedisError> {
         self.context.with_call_user(user_name, |_| f(self))
     }

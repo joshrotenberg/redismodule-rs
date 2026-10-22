@@ -263,6 +263,20 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- **Breaking:** call replies borrow the context that made them: `call_ext`
+  and immediately resolved `call_blocking` replies are tied to the context
+  borrow, as keys and server INFO snapshots are. Redis 6.0 to 7.0 read the
+  reply's context when it is freed, and with AutoMemory every release frees
+  the reply when the callback returns, so a reply kept past its context read
+  freed memory or was freed twice. `with_call_user` and `with_db` closures can
+  return values that borrow their view. See the
+  [call reply migration notes](docs/MIGRATING-3.0.md#call-replies-stay-inside-their-context-scope).
+
+- **Breaking:** `RuntimeContext::auto_memory` is `unsafe`. AutoMemory also
+  frees the promise reply of each blocking call, so the caller must dispose or
+  abort every `FutureHandler` from such a call before the callback returns.
+  See the [AutoMemory migration notes](docs/MIGRATING-3.0.md#auto_memory-is-unsafe).
+
 - **Breaking:** blocking-call unblock handlers require `Send + 'static`. Redis
   keeps a handler after `FutureHandler::dispose`, a drop or `mem::forget`, and
   runs it on the main thread, including handlers a module-owned worker

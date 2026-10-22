@@ -1011,6 +1011,27 @@ fn test_worker_keys_close_before_unlock_and_return_owned_rust_data() -> Result<(
 }
 
 #[test]
+fn test_call_replies_stay_in_their_context_with_and_without_auto_memory() -> Result<()> {
+    let mut con = TestConnection::new("runtime_events");
+    for mode in ["manual", "auto"] {
+        let bytes: Vec<u8> = redis::cmd("runtime.call_reply").arg(mode).query(&mut con)?;
+        assert_eq!(bytes, b"\0\xffreply", "{mode} command");
+        let bytes: Vec<u8> = redis::cmd("runtime.worker_call")
+            .arg(mode)
+            .query(&mut con)?;
+        assert_eq!(bytes, b"\0\xffreply", "{mode} worker");
+        utils::wait_until(Duration::from_secs(2), "call reply worker exit", || {
+            Ok(redis::cmd("runtime.finish_worker").query::<i64>(&mut con)? == 1)
+        })?;
+    }
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "runtime_events"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_command_builders_mix_with_legacy_and_preserve_metadata() -> Result<()> {
     let mut con = TestConnection::new("command_builder");
     for command in [
@@ -5396,6 +5417,36 @@ fn test_call_blocking_abort_after_unblock_keeps_handler_result() -> Result<()> {
     assert_eq!(status, "not aborted");
     let stats: Vec<i64> = redis::cmd("call.blocking_abort_stats").query(&mut con)?;
     assert_eq!(stats, vec![0, 1, 1], "after the failed abort");
+
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_call_blocking_with_auto_memory_disposes_before_return() -> Result<()> {
+    let mut con = TestConnection::new("call");
+
+    let res: String = redis::cmd("call.blocking_auto_memory")
+        .arg("auto:memory")
+        .query(&mut con)?;
+    assert_eq!(res, "OK");
+
+    // AutoMemory freed only the reply's already disposed reference: the
+    // handler still runs when the push unblocks the call.
+    let _: i64 = redis::cmd("RPUSH")
+        .arg("auto:memory")
+        .arg("value")
+        .query(&mut con)?;
+    let calls: i64 = redis::cmd("call.blocking_auto_memory_calls").query(&mut con)?;
+    assert_eq!(calls, 1);
+    let len: i64 = redis::cmd("LLEN").arg("auto:memory").query(&mut con)?;
+    assert_eq!(len, 0);
 
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
 

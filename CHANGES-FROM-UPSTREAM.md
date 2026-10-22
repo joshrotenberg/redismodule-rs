@@ -11,6 +11,25 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Call reply context lifetimes
+
+`call_ext`, immediately resolved `call_blocking` replies and values returned
+from `with_call_user` and `with_db` closures now borrow their context.
+Previously they were `CallResult<'static>`. Redis 6.0 to 7.0 store the calling
+context in every reply and read it in `RM_FreeCallReply`; with AddressSanitizer
+on Redis 7.0.15, a reply kept past a command was a stack-use-after-return and
+one kept past a worker guard a heap-use-after-free. Redis 7.2 and later attach
+the context only under AutoMemory, which frees the reply when the callback
+returns: a kept reply then crashed Redis 7.0.15 and 8.10.2 when dropped.
+`RuntimeContext::auto_memory` is now `unsafe`, because AutoMemory also frees a
+blocking call's promise reply and a `FutureHandler` kept past its callback
+crashed Redis 8.10.2 in `abort_and_dispose`. Compile-fail controls reject the
+escapes and a safe AutoMemory call; native regressions copy reply bytes in
+command and worker contexts with AutoMemory off and on, and dispose a blocking
+call's handle before an AutoMemory callback returns. Upstream has the same
+signatures; upstream PR 233 noted that AutoMemory may not work with the SDK's
+RAII ownership, and no upstream issue or pull request addresses call replies.
+
 ## Blocking-call unblock handlers
 
 `FutureCallReply::set_unblock_handler` requires `Send + 'static` handlers.
