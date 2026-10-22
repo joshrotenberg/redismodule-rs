@@ -222,6 +222,17 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-22: rebased onto SDK master `85791c4`, which fixes public macro
+  documentation and checks all SDK workspace packages strictly in CI. All 57
+  existing wasm patches are unchanged; no host source adaptation is needed.
+  SDK PR 74 received independent native review and all 20 exact-head CI checks
+  passed before merge. No generated code, public API or wasm feature changed.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy and guest formatting/wasm32 linting pass. Strict documentation
+  now passes for the full default-floor workspace, plus the SDK workspace at
+  exclusive 7.2 with the host excluded. Tests pass: 69 SDK units, 154 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 7 host units, 21 host
+  integrations including JavaScript, 84 SDK doctests and 4 guest helper tests.
 - 2026-10-22: rebased onto SDK master `ef5b2c9`, which refreshes the SDK test
   client to pinned Redis 1.2.2 while retaining Rust 1.87. Bounded transport,
   binary/protocol assertions and pipeline error alignment are preserved. All 56

@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `ef5b2c9`, SDK development client refresh merged after independent review and all 20 PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `85791c4`, strict macro documentation cleanup merged after independent review and all 20 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `ef5b2c9` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `85791c4` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -86,10 +86,12 @@ git fetch fork && git fetch origin
    cargo clippy --workspace --all-targets --no-default-features --features min-redis-compatibility-version-7-2 -- -D warnings
    cargo build --examples
    RUST_TEST_THREADS=4 cargo test --workspace --no-fail-fast
+   RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --features all-features-but-xor
    ```
 
-   On `experiment/wasm-host`, exclude `redis-module-wasm` from the alternate-floor
-   SDK Clippy check, as shown below; the host uses the default floor.
+   On `experiment/wasm-host`, exclude `redis-module-wasm` from alternate-floor
+   SDK Clippy and documentation checks, as shown below; the host uses the default
+   floor. Default-floor documentation includes the full workspace.
 
    The integration tests load example modules beside their executable's build
    profile, including with `CARGO_TARGET_DIR`. Build examples explicitly before
@@ -261,6 +263,12 @@ covers supported client and transport controls; the full matrix retains cases
 that require newer APIs. No SDK runtime dependency or host source changes.
 The wasm host keeps its independent development client for this sync.
 
+Strict public macro documentation was fixed in `85791c4`: qualified SDK type
+text and public links replace inaccessible references, and the derive docs name
+`RedisValue::OrderedMap` correctly. CI documents every SDK workspace package with
+warnings denied at each API floor. Generated code is unchanged; the wasm branch
+can now run full strict workspace docs instead of selecting only SDK/host packages.
+
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).
 The [priority 2 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A2+sort%3Acreated-asc)
@@ -303,6 +311,7 @@ workspace Clippy and test runs use the default floor. Then check the guests:
 
 ```bash
 cargo clippy --workspace --exclude redis-module-wasm --all-targets --no-default-features --features min-redis-compatibility-version-7-2 -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude redis-module-wasm --no-deps --no-default-features --features "all-features-but-xor min-redis-compatibility-version-7-2"
 for m in wasm/guest-sdk wasm/guests/hello wasm/bench/guest; do cargo fmt --manifest-path $m/Cargo.toml -- --check; done
 cargo clippy --manifest-path wasm/guest-sdk/Cargo.toml --all-targets -- -D warnings
 cargo clippy --manifest-path wasm/guests/hello/Cargo.toml --target wasm32-unknown-unknown -- -D warnings
