@@ -11,6 +11,18 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Open key context lifetimes
+
+Safe key opens now return `RedisKey<'ctx>` and `RedisKeyWritable<'ctx>` tied to
+`RuntimeContext`; an owning `ScanKeyCursor<'ctx>` preserves that borrow. Native
+key close uses the opening context even without AutoMemory, so previously a
+worker could unlock and free that context before dropping its key. Compiler
+regressions reject guard escape and early unlock across all four open methods,
+DMA/stream views and owning key scans. Native worker coverage exercises reads,
+writes, binary DMA data and scanning with AutoMemory disabled and enabled.
+Unsafe raw constructors retain their context, lifetime and lock obligations;
+no general native-handle storage API is introduced.
+
 ## Server INFO snapshot lifetime
 
 `RuntimeContext::server_info` returns a snapshot tied to its runtime borrow.

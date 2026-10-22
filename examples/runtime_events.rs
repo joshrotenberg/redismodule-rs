@@ -115,19 +115,26 @@ fn worker_runtime(ctx: &redis_module::RuntimeContext) -> RedisResult {
 }
 
 fn worker(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
-    start_worker(ctx, None)
+    start_worker(ctx, WorkerOperation::Runtime)
 }
 
-fn worker_info(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+fn auto_memory_arg(args: &[RedisString]) -> Result<bool, RedisError> {
     if args.len() != 2 {
         return Err(RedisError::WrongArity);
     }
-    let auto_memory = match args[1].try_as_str()? {
-        "manual" => false,
-        "auto" => true,
-        _ => return Err(RedisError::Str("ERR expected manual or auto")),
-    };
-    start_worker(ctx, Some(auto_memory))
+    match args[1].try_as_str()? {
+        "manual" => Ok(false),
+        "auto" => Ok(true),
+        _ => Err(RedisError::Str("ERR expected manual or auto")),
+    }
+}
+
+fn worker_info(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    start_worker(ctx, WorkerOperation::ServerInfo(auto_memory_arg(&args)?))
+}
+
+fn worker_keys(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    start_worker(ctx, WorkerOperation::Keys(auto_memory_arg(&args)?))
 }
 
 fn owned_server_version(ctx: &redis_module::RuntimeContext, auto_memory: bool) -> RedisResult {
@@ -145,7 +152,53 @@ fn owned_server_version(ctx: &redis_module::RuntimeContext, auto_memory: bool) -
     Ok(RedisValue::BulkString(version))
 }
 
-fn start_worker(ctx: &Context, info_mode: Option<bool>) -> RedisResult {
+fn owned_key_data(ctx: &redis_module::RuntimeContext, auto_memory: bool) -> RedisResult {
+    use redis_module::key::KeyFlags;
+
+    if auto_memory {
+        ctx.auto_memory();
+    }
+    let name = ctx.create_string("worker:scoped:key");
+    {
+        let mut key = ctx.open_key_writable(&name);
+        key.as_string_dma()?.write(b"\0\xffvalue")?;
+    }
+    {
+        let mut key = ctx.open_key_writable_with_flags(&name, KeyFlags::empty());
+        key.as_string_dma()?.append(b"!")?;
+    }
+    let bytes = ctx.open_key(&name).read()?.unwrap().to_vec();
+    let flagged_bytes = ctx
+        .open_key_with_flags(&name, KeyFlags::empty())
+        .read()?
+        .unwrap()
+        .to_vec();
+
+    ctx.call("HSET", &["worker:scoped:hash", "field", "value"])?;
+    let hash_name = ctx.create_string("worker:scoped:hash");
+    let cursor = redis_module::ScanKeyCursor::new(ctx.open_key(&hash_name));
+    let mut entries = Vec::new();
+    cursor.for_each(|_, field, value| {
+        entries.push(field.as_slice().to_vec());
+        entries.push(value.unwrap().as_slice().to_vec());
+    });
+    // Closing the cursor also closes its key while the worker context is live.
+    drop(cursor);
+    // Only Rust-owned data leaves this helper and the locked worker scope.
+    Ok(RedisValue::Array(vec![
+        RedisValue::StringBuffer(bytes),
+        RedisValue::StringBuffer(flagged_bytes),
+        RedisValue::Array(entries.into_iter().map(RedisValue::StringBuffer).collect()),
+    ]))
+}
+
+enum WorkerOperation {
+    Runtime,
+    ServerInfo(bool),
+    Keys(bool),
+}
+
+fn start_worker(ctx: &Context, operation: WorkerOperation) -> RedisResult {
     let mut task = WORKER_THREAD.lock().unwrap();
     if task.is_some() {
         return Err(RedisError::Str("ERR runtime worker already started"));
@@ -154,9 +207,10 @@ fn start_worker(ctx: &Context, info_mode: Option<bool>) -> RedisResult {
     *task = Some(std::thread::spawn(move || {
         let thread_ctx = redis_module::ThreadSafeContext::new();
         let guard = thread_ctx.lock();
-        let result = match info_mode {
-            Some(auto_memory) => owned_server_version(&guard, auto_memory),
-            None => worker_runtime(&guard),
+        let result = match operation {
+            WorkerOperation::ServerInfo(auto_memory) => owned_server_version(&guard, auto_memory),
+            WorkerOperation::Keys(auto_memory) => owned_key_data(&guard, auto_memory),
+            WorkerOperation::Runtime => worker_runtime(&guard),
         };
         drop(guard);
         drop(thread_ctx);
@@ -218,6 +272,7 @@ redis_module! {
         ["runtime.subscribe_legacy", subscribe, "", 0, 0, 0, ""],
         redis_command!("runtime.worker", worker),
         redis_command!("runtime.worker_info", worker_info),
+        redis_command!("runtime.worker_keys", worker_keys),
         redis_command!("runtime.finish_worker", finish_worker),
         redis_command!("runtime.counts", counts).read_only(),
         redis_command!("runtime.last", last).read_only(),
