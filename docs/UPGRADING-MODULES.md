@@ -6,7 +6,8 @@ and a failed replacement load does not restore the old module. Prepare a
 known-good artifact and its configuration before unloading.
 
 This guide concerns replacing a running module. For source changes when moving
-to this SDK, see [Migrating to 3.0](MIGRATING-3.0.md).
+to this SDK, see [Migrating to 3.0](MIGRATING-3.0.md). For building and verifying the artifact
+you distribute, see [Shipping a native module](SHIPPING-MODULES.md).
 
 ## Check that the module can unload
 

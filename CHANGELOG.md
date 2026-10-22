@@ -13,6 +13,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- A [module shipping guide](docs/SHIPPING-MODULES.md) covering native build
+  inputs, architecture/libc limits, checksummed archives and a bounded load
+  smoke test of the extracted artifact, with a pinned `hello` example recipe.
+
 - Binary string configuration adapters for `RedisGILGuard<Vec<u8>>` and
   `Mutex<Vec<u8>>`, preserving empty values, NUL and invalid UTF-8. Native
   strings are created only during getters and are not retained as storage.
