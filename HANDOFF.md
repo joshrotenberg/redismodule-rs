@@ -14,7 +14,7 @@ Git dependency recipe in [README.md](README.md).
 | Track | Branch in [the fork](https://github.com/joshrotenberg/redismodule-rs) | Current functional checkpoint |
 |---|---|---|
 | Core SDK, priority 1 | `master` | `29d046c`, successful zero-deletion stream trims; earlier context/key/INFO lifetime fixes included |
-| Paired examples and author documentation, priority 2 | SDK PRs target `master` | Existing guides are linked below; paired original/new example selection is still open in issue 63 |
+| Paired examples and author documentation, priority 2 | SDK PRs target `master` | Existing guides are linked below; issue 63 selects redis-event-stream-module, following the issue 89 port report |
 | Wasm sidecar, priority 3 | `experiment/wasm-host` | `b787fef`, branch-scoped CI merged; includes SDK through `29d046c` |
 
 Wasm remains an experiment on its own branch. Its [README](https://github.com/joshrotenberg/redismodule-rs/blob/experiment/wasm-host/wasm/README.md),
@@ -75,18 +75,18 @@ implementation patch carried only in the working tree at this checkpoint.
 
 | Issue priority | Issue | Status / next step |
 |---|---|---|
-| 1 | [85: blocking-call capture ownership](https://github.com/joshrotenberg/redismodule-rs/issues/85) | Source-inspection candidate only; no defect established. Build compiler controls and trace native promise/callback ownership before choosing a fix. No implementation started. |
+| 1 | [85: blocking-call capture ownership](https://github.com/joshrotenberg/redismodule-rs/issues/85) | Next SDK item, ahead of 62/88/89. Source-inspection candidate only; no defect established. Build compiler controls and trace native promise/callback ownership before choosing a fix. No implementation started. |
 | 1 | [88: git pre-release](https://github.com/joshrotenberg/redismodule-rs/issues/88) | Choose tag/version policy and obtain explicit release authorization before tagging. No tag, release or publication is authorized by this handoff. |
 | 1 | [89: downstream module port](https://github.com/joshrotenberg/redismodule-rs/issues/89) | Pin revisions and agree on the port repository/branch first; no PR to the other organization without its owner's agreement. Record migration-guide corrections, behavior differences, unsafe workarounds and harness needs. |
-| 1 | [63: original/new paired module examples](https://github.com/joshrotenberg/redismodule-rs/issues/63) | Choose the example and location, using the downstream port as input; provide shared behavior tests and an annotated comparison. |
-| 1 | [62: loaded-keys-in-RAM option](https://github.com/joshrotenberg/redismodule-rs/issues/62) | Explicit adoption and target-server support decision required. |
+| 1 | [63: original/new paired module examples](https://github.com/joshrotenberg/redismodule-rs/issues/63) | The example is redis-event-stream-module. Start the paired walkthrough after issue 89's report; provide shared behavior tests and an annotated comparison. |
+| 1 | [62: loaded-keys-in-RAM option](https://github.com/joshrotenberg/redismodule-rs/issues/62) | Adoption approved in issue 62. Sync the upstream define and committed bindings; verify semantics/server support, fit the existing module-option type and preserve the base floor. |
 | 2 | [51: retained native-handle storage](https://github.com/joshrotenberg/redismodule-rs/issues/51) | Design parked; no public shape or blanket `Send` wrapper approved. Keep separate from focused lifetime fixes. |
-| 2 | [60: server configuration reads](https://github.com/joshrotenberg/redismodule-rs/issues/60) | Ownership, availability and native-versus-call fallback proposal needed. |
+| 2 | [60: server configuration reads](https://github.com/joshrotenberg/redismodule-rs/issues/60) | Deferred: `CONFIG GET` remains the current pattern. Revisit only if the downstream port or coverage inventory establishes a concrete need. |
 | 2 | [90: safe-wrapper coverage](https://github.com/joshrotenberg/redismodule-rs/issues/90) | Produce a checked, version-aware API inventory; rank concrete downstream needs before proposing wrappers. Missing coverage alone does not justify adding an API. |
-| 3 | [54: external-runtime context access](https://github.com/joshrotenberg/redismodule-rs/issues/54) | Design audit; no persistent public context or new host-access API approved. |
-| 3 | [55: streaming replies](https://github.com/joshrotenberg/redismodule-rs/issues/55) | Measure a concrete cost and settle reply capability/partial-output behavior before implementation. |
-| 3 | [68: wasm allocator/accounting](https://github.com/joshrotenberg/redismodule-rs/issues/68) | Reproduce observations before choosing policy; distinguish compiler peaks, lasting heap, guest memory and Redis accounting. |
-| 3 | [86: sidecar versus Redis core](https://github.com/joshrotenberg/redismodule-rs/issues/86) | Historical exploratory comparison needs a fresh, version-pinned capability matrix and equivalent bounded workloads. No fresh measurements or architecture decision. |
+| 3 | [54: external-runtime context access](https://github.com/joshrotenberg/redismodule-rs/issues/54) | Deferred until issue 86 decides whether the wasm host continues. No persistent public context or new host-access API approved. |
+| 3 | [55: streaming replies](https://github.com/joshrotenberg/redismodule-rs/issues/55) | Deferred until issue 86. Measure a concrete remaining cost and settle reply capability/partial-output behavior before implementation. |
+| 3 | [68: wasm allocator/accounting](https://github.com/joshrotenberg/redismodule-rs/issues/68) | Deferred until issue 86. Reproduce observations before choosing policy; distinguish compiler peaks, lasting heap, guest memory and Redis accounting. |
+| 3 | [86: sidecar versus Redis core](https://github.com/joshrotenberg/redismodule-rs/issues/86) | First wasm item; gates 68/54/55. Refresh the historical comparison with a version-pinned capability matrix and equivalent bounded workloads. No fresh measurements or architecture decision. |
 
 Issue priorities reflect the latest backlog triage; the overall track order remains
 core SDK, examples/documentation, then wasm. Closed design decisions from the
