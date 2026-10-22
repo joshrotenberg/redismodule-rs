@@ -11,6 +11,26 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Unload with pending blocking calls
+
+The `redis_module!` unload hook now refuses `MODULE UNLOAD` while an unblock
+handler installed with `set_unblock_handler` has neither run nor been
+aborted. Redis does not count an async `RM_Call`'s temporary client in
+`module->blocked_clients`, so it accepted the unload, then
+`moduleCallCommandUnblockedHandler` read the freed module struct and called the
+handler when the call unblocked: a heap-use-after-free under AddressSanitizer
+on Redis 8.10.2. The SDK counts installed handlers, releasing each after its
+callback or a successful abort, and checks the count before user deinit.
+Blocking calls fail while the module loads or unloads: Redis frees a failed
+load without calling the unload hook, and asserts that the forced unload after
+a rejected `MODULE LOADEX` configuration succeeds. Native regressions refuse
+an unload with a pending, panicking or worker-installed handler and allow it
+once the handler runs, after an abort, after a failed abort, with no handler and
+after a reload; `init` and deinit blocking calls are refused, and the forced
+unload after a rejected `LOADEX` succeeds.
+Upstream has the same blocking-call code, from upstream PR 333; no upstream
+issue or pull request reports it.
+
 ## Call reply context lifetimes
 
 `call_ext` and immediately resolved `call_blocking` replies now borrow their

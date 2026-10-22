@@ -485,6 +485,8 @@ macro_rules! redis_module {
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
                     let runtime_context = unsafe { $crate::EventContext::new(ctx) };
+                    // A handler installed now could outlive a load Redis rejects.
+                    let _blocking_load = $crate::__private::BlockingCallLoadGuard::begin();
                     // SAFETY: Init succeeded; this is the module's single OnLoad.
                     let timer_load = match unsafe { $crate::__private::TimerLoadGuard::begin(&runtime_context) } {
                         Ok(guard) => guard,
@@ -709,6 +711,16 @@ macro_rules! redis_module {
                     };
                     // SAFETY: This is the module's native OnUnload callback.
                     let timer_unload = match unsafe { $crate::__private::TimerUnloadGuard::begin(&context) } {
+                        Ok(guard) => guard,
+                        Err(error) => {
+                            context.log_warning(&format!("{error}"));
+                            return $crate::Status::Err as c_int;
+                        }
+                    };
+                    // Redis calls a pending unblock handler, and reads this
+                    // module, when its call unblocks. The guard also refuses
+                    // blocking calls from deinit.
+                    let _blocking_unload = match $crate::__private::BlockingCallUnloadGuard::begin() {
                         Ok(guard) => guard,
                         Err(error) => {
                             context.log_warning(&format!("{error}"));
