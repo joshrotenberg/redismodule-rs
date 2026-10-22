@@ -11,6 +11,14 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Macro implementation dependencies
+
+Both macro crates use Syn 2. The public crate replaces `serde_syn` with a private
+parser for the existing metadata grammar; command and reply generation retain
+their existing names and behavior. Compatibility tests cover typed and quoted
+metadata, options, recursive command help, key specs and integer rules. Invalid
+metadata still fails compilation; diagnostic wording may differ.
+
 ## Base
 
 - This fork branches from upstream master at [a808377] (2026-09-27, the merge of
@@ -324,8 +332,8 @@ These compile unchanged but behave differently:
 
 - Internal API-wrapper and mixed command-list parsers use Syn 2, preserving
   existing declarations, generated registration paths and compatibility-floor
-  signatures. The public macro crate still uses `serde_syn` with Syn 1 until a
-  metadata backend can preserve its accepted JSONY grammar.
+  signatures. The public macro crate uses the SDK-owned parser described above
+  for its existing metadata grammar.
 
 - Edition 2024, with `rust-version = "1.87"` declared and tested in CI ([cfebad5], [2daa0ea]).
 - CI pins checksum-verified Redis 7.2, 7.4 and 8.0 through 8.10 releases and Valkey 8.1/9.1, caches server binaries per platform, concrete runner image and build inputs, validates the selected product/version, and uploads integration directories and server build logs on failure. Valkey uses the default API floor.

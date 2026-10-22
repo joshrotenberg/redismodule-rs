@@ -29,6 +29,17 @@ without a `From` conversion.
   edition 2021 and on edition 2024 both build with `redis_module!` and the
   proc macros.
 
+## Macro metadata syntax
+
+Both macro crates now use Syn 2 internally. The public macro crate parses its
+existing metadata grammar directly, so modules do not need to rewrite
+`#[command({ ... })]` or `#[RedisValueAttr{flatten: true}]`. Braced and typed
+structs, quoted field/enum names, bare or explicit `Some`/`None`, trailing commas
+and matching integer suffixes keep their existing meaning. Unknown or duplicate
+fields remain errors; integer ranges and required fields are unchanged.
+Generated helper names remain stable. Invalid-input diagnostic wording may
+change because `serde_syn` is no longer involved.
+
 ## Changes the compiler reports
 
 ### Timers use typed handles

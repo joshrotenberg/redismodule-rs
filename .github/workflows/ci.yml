@@ -76,6 +76,9 @@ jobs:
       - name: Test
         run: cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
 
+      - name: Test macro parsers
+        run: cargo test -p redis-module-macros -p redis-module-macros-internals
+
       - name: Lint and test the system allocator fallback
         run: |
           cargo clippy --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},system-allocator-fallback -- -D warnings
@@ -345,7 +348,9 @@ jobs:
           rustflags: ""
 
       - name: Check
-        run: cargo check --workspace --all-targets
+        run: |
+          cargo check --workspace --all-targets
+          cargo test -p redis-module-macros -p redis-module-macros-internals
 
       - name: Unit tests
         run: |

@@ -1,8 +1,7 @@
+use crate::metadata::{MetadataValue, metadata_struct};
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
 use quote::quote;
-use serde::Deserialize;
-use serde_syn::{config, from_stream};
 use syn::{
     Data, DataEnum, DataStruct, DeriveInput, Fields, parse,
     parse::{Parse, ParseStream},
@@ -33,15 +32,17 @@ fn enum_redis_value(struct_name: Ident, enum_data: DataEnum) -> TokenStream {
     res.into()
 }
 
-/// Represent a single field attributes
-#[derive(Debug, Deserialize, Default)]
-struct FieldAttr {
-    flatten: bool,
+metadata_struct! {
+    /// Represent a single field attributes
+    #[derive(Debug, Default)]
+    struct FieldAttr {
+        flatten: bool,
+    }
 }
 
 impl Parse for FieldAttr {
     fn parse(input: ParseStream) -> parse::Result<Self> {
-        from_stream(config::JSONY, input)
+        Self::parse_metadata(input)
     }
 }
 
@@ -70,9 +71,21 @@ fn struct_redis_value(struct_name: Ident, struct_data: DataStruct) -> TokenStrea
             let field_attr = v.attrs.into_iter().next().map_or(
                 Ok::<_, String>(FieldAttr::default()),
                 |attr| {
-                    let tokens = attr.tokens;
-                    let field_attr: FieldAttr =
-                        parse_macro_input::parse(tokens.into()).map_err(|e| format!("{e}"))?;
+                    // Syn 2 stores the attribute delimiter separately. Retain it:
+                    // the historical metadata grammar requires braces and rejects
+                    // parenthesized or bracketed field metadata.
+                    let tokens = match attr.meta {
+                        syn::Meta::List(list) => {
+                            let inner = list.tokens;
+                            match list.delimiter {
+                                syn::MacroDelimiter::Brace(_) => quote! {{ #inner }},
+                                syn::MacroDelimiter::Paren(_) => quote! {( #inner )},
+                                syn::MacroDelimiter::Bracket(_) => quote! {[ #inner ]},
+                            }
+                        }
+                        _ => return Err("expected braced field metadata".to_owned()),
+                    };
+                    let field_attr: FieldAttr = syn::parse2(tokens).map_err(|e| format!("{e}"))?;
                     Ok(field_attr)
                 },
             )?;
@@ -144,3 +157,7 @@ pub fn redis_value(item: TokenStream) -> TokenStream {
         _ => quote! {compile_error!("RedisValue derive can only be apply on struct.")}.into(),
     }
 }
+
+#[cfg(test)]
+#[path = "redis_value_compatibility.rs"]
+mod compatibility;
