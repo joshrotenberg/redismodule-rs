@@ -13,8 +13,8 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
-- `FutureHandler`, the handle a blocking call's unblock handler returns, is
-  exported at the crate root, so modules can name a kept handle and its
+- `FutureHandler`, the handle `FutureCallReply::set_unblock_handler` returns,
+  is exported at the crate root, so modules can name a kept handle and its
   `dispose` and `abort_and_dispose` documentation renders.
 
 - [INFO handler state-access guidance](docs/INFO-HANDLERS.md) documents the
