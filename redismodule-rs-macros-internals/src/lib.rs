@@ -21,7 +21,8 @@ impl Parse for Args {
     fn parse(input: ParseStream) -> Result<Self> {
         let content;
         let _paren_token: token::Bracket = bracketed!(content in input);
-        let vars: Punctuated<Ident, Token![,]> = content.parse_terminated(Ident::parse)?;
+        let vars: Punctuated<Ident, Token![,]> =
+            content.parse_terminated(Ident::parse, Token![,])?;
         input.parse::<Token![,]>()?;
         let function: ItemFn = input.parse()?;
         Ok(Args {

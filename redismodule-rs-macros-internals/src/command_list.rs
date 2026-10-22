@@ -24,7 +24,7 @@ impl Parse for CommandList {
         input.parse::<Token![,]>()?;
         let entries;
         bracketed!(entries in input);
-        let entries = entries.parse_terminated(Expr::parse)?;
+        let entries = entries.parse_terminated(Expr::parse, Token![,])?;
         Ok(Self { sdk, ctx, entries })
     }
 }
