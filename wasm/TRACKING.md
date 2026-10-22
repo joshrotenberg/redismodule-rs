@@ -60,7 +60,34 @@ Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 `wit-bindgen` 0.44.
 
-### Latest SDK sync
+### Current handoff checkpoint
+
+The shared [development handoff](../HANDOFF.md) records completed SDK work,
+all open issues and the account-independent review/merge workflow. SDK functional
+changes through `29d046c` are integrated. PR 79 is merged as `b787fef`;
+its [PR CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39809579615)
+and actual [experiment push CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39811561168)
+passed. H14 / issue 69 is complete. S6 / issue 70 was rechecked on the pinned
+Rust 1.94 toolchain; retain `strip = "none"` on the host.
+
+The source-level callback audit is tracked in
+[issue 85](https://github.com/joshrotenberg/redismodule-rs/issues/85), without
+claiming a confirmed defect. Refreshing the exploratory sidecar versus Redis core
+comparison is tracked in [issue 86](https://github.com/joshrotenberg/redismodule-rs/issues/86);
+existing benchmark results below are historical, not fresh measurements. Issue 86
+is the first wasm item and gates the allocator policy (68), external-runtime
+access (54) and streaming replies (55).
+
+The account handoff documentation from SDK master `53ab335` is also integrated
+([PR 87](https://github.com/joshrotenberg/redismodule-rs/pull/87), independently
+reviewed at `bbbc3a0`; all 20 exact-head checks passed). This sync replaces the
+old root handoff with the shared document; its earlier long-form narrative
+remains linked in Git history. No runtime source or dependency graph changed.
+
+### Historical SDK sync checkpoints
+
+These entries describe the state at each sync. References to PR 79 awaiting
+approval or its workflow being unmerged predate its completed merge above.
 
 - 2026-10-22: synced merged SDK master `29d046c`, fixing successful stream
   trims that remove zero entries. SDK PR 84 received independent native review
@@ -229,7 +256,7 @@ avoids both instantiating and tearing down, and was adopted.
 | H11 | done | **Bounds check cost.** Decided: keep signal-based traps off, so guests get explicit bounds checks. With H3's benchmark, turning them on made `primes` 18% faster (185 against 226 µs, old sieve loop) and `median` 6%. On Linux they are not safe in a module: wasmtime installs `SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE` handlers that chain to Redis's crash handler, but `CONFIG SET crash-log-enabled` (either value) reinstalls Redis's handlers or the defaults over them, and the next out-of-bounds guest access kills the server: silently after `no`, with a crash report after `yes` (G7). On macOS wasmtime takes faults through Mach exception ports, so the same steps are safe there. A crash outside wasm (`DEBUG SEGFAULT`) still produced Redis's crash report with wasmtime's handlers installed. | A decision, with a crash report checked with handlers on. |
 | H12 | done | **Context in the store.** The store holds a raw pointer to the command's `Context`. The safety argument is written down in `host.rs` ("The context pointer"): set and cleared around each guest run, re-entrant calls use their own instance, a panic drops the instance with the stale pointer, and instances stay on the main thread. No SDK pattern replaces it yet (S3). | Reviewed and documented, or replaced. |
 | H13 | todo ([issue 68](https://github.com/joshrotenberg/redismodule-rs/issues/68)) | **Footprint.** The release dylib is 12.4 MB (macOS). Loading the JavaScript component (release build, macOS): `INFO wasm` accounts for 95 MB of compiled code and 7.7 MB of linear memory, and RSS reached 0.97 GB, then 1.35 GB after a delete and two more loads. The compiler allocates through the module's global allocator, Redis's, so `used_memory_peak` reached 1.05 GB during the load, and 57.7 MB stayed counted after `WASM.DELETE` (not growing on later loads: caches, not a leak). With `std::alloc::System` as the module's allocator, `used_memory` stayed near 1 MB (peak 25 MB, the argument itself) and RSS behaved the same. Decision needed: count wasmtime's heap in `used_memory`, so a load's transient 1 GB counts against `maxmemory`, or not, so 70 MB of lasting heap per JavaScript library is invisible to it. | Sizes recorded before and after. |
-| H14 | implemented ([issue 69](https://github.com/joshrotenberg/redismodule-rs/issues/69)) | **CI.** A [branch-scoped Ubuntu job](CI.md) pins Rust 1.94, Node 24.22.1, Redis 8.10.2 and Rust/JS dependency inputs, checks the default workspace and host-excluded SDK 7.2, builds/lints Rust guests and requires JavaScript tests. Commands are bounded, cached and logged. SDK master retains its separate server matrix. | Successful experiment push and PR validation. |
+| H14 | done ([issue 69](https://github.com/joshrotenberg/redismodule-rs/issues/69)) | **CI.** A [branch-scoped Ubuntu job](CI.md) pins Rust 1.94, Node 24.22.1, Redis 8.10.2 and Rust/JS dependency inputs, checks the default workspace and host-excluded SDK 7.2, builds/lints Rust guests and requires JavaScript tests. Commands are bounded, cached and logged. SDK master retains its separate server matrix. | Successful experiment push and PR validation. |
 | H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30); not investigated. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
 | H17 | done | **Load time.** Loading an RDB compiled each library's component on the main thread before the server served: 1.56 to 1.67 s for the JavaScript library (release build), 15 ms of it reading. Now the libraries are added at once with their code compiling on a thread (`code.rs`): a call to a library still compiling blocks its client until the code is ready (or waits in place inside `MULTI` or a script), `INFO wasm` counts the libraries compiling, and the server was ready in 0.11 to 0.12 s. | Load time with the JavaScript library, before and after. |
 | H18 | done | **Dump, restore, flush.** `WASM.DUMP`, `WASM.RESTORE <payload> [FLUSH\|APPEND\|REPLACE]` and `WASM.FLUSH`, as `FUNCTION DUMP`, `RESTORE` and `FLUSH` work. The payload (`dump.rs`) holds names and components with an FNV-1a checksum; a restore compiles on a thread, lists every library's functions, checks every conflict, then adds all or none. | Tests restore into another server under each policy, refuse a conflicting or damaged payload without changing anything, and replicate `WASM.FLUSH` and `WASM.RESTORE`. |
@@ -266,10 +293,10 @@ can be an ordinary PR. A done item names its commit on master.
 |---|---|---|
 | S1 | done, dad8637 and 9258efb | `RedisValue::Error(String)`, an error reply with an owned message that can sit inside an array; a call reply's error converts to it. |
 | S2 | done, a5eb60d | `RedisValueKey` had no simple string, so a map key sent as a simple string went out as a bulk string. `RedisValueKey::SimpleString` keeps it. |
-| S3 | todo ([issue 54](https://github.com/joshrotenberg/redismodule-rs/issues/54)) | No lifetime-safe way to hand a `Context` to code that needs `'static` data, such as a runtime's store. |
-| S4 | todo ([issue 55](https://github.com/joshrotenberg/redismodule-rs/issues/55)) | Replies can only be built as a `RedisValue` tree; the low-level reply functions are crate-private since 3.0, so nothing streams a reply. |
-| S5 | current contract documented; design open ([issue 59](https://github.com/joshrotenberg/redismodule-rs/issues/59)) | All consumers selected in one Cargo build must agree on one `min-redis-compatibility-*` floor. Separate package builds can choose independently; the [workspace guide](../docs/COMPATIBILITY-FLOORS.md) and compile controls cover both. The SDK build script now diagnoses zero/multiple floors early. Full-workspace 7.2 validation combines that floor with the host's default 6.0: exclude `redis-module-wasm` for alternate-floor SDK checks, and check the host in the default-floor workspace build. Floor redesign remains parked. |
-| S6 | worked around ([issue 70](https://github.com/joshrotenberg/redismodule-rs/issues/70)) | On macOS a stripped release build of the host fails to load ("mis-aligned LINKEDIT string pool"); the workspace sets `strip = "none"` for it. Check with a newer toolchain. |
+| S3 | deferred pending issue 86 ([issue 54](https://github.com/joshrotenberg/redismodule-rs/issues/54)) | No lifetime-safe way to hand a `Context` to code that needs `'static` data, such as a runtime's store. |
+| S4 | deferred pending issue 86 ([issue 55](https://github.com/joshrotenberg/redismodule-rs/issues/55)) | Replies can only be built as a `RedisValue` tree; the low-level reply functions are crate-private since 3.0, so nothing streams a reply. |
+| S5 | current contract retained; issue closed ([issue 59](https://github.com/joshrotenberg/redismodule-rs/issues/59)) | All consumers selected in one Cargo build must agree on one `min-redis-compatibility-*` floor. Separate package builds can choose independently; the [workspace guide](../docs/COMPATIBILITY-FLOORS.md) and compile controls cover both. The SDK build script now diagnoses zero/multiple floors early. Full-workspace 7.2 validation combines that floor with the host's default 6.0: exclude `redis-module-wasm` for alternate-floor SDK checks, and check the host in the default-floor workspace build. The exactly-one-floor contract was explicitly retained; reopen a redesign only for a concrete downstream need. |
+| S6 | worked around ([issue 70](https://github.com/joshrotenberg/redismodule-rs/issues/70)) | Rechecked 2026-10-22 on pinned Rust 1.94 and ARM64 macOS 27.0.1: stripped host libraries still fail dyld loading ("mis-aligned LINKEDIT string pool"); the workspace retains `strip = "none"`. Unstripped native load/call/persistence and unload/reload probes passed; removing only the manifest override reproduced the loader failure. Issue 70 is closed with inputs, artifact hashes and evidence; recheck after a supported-toolchain change. No result is claimed for newer Rust, Intel macOS or Linux. |
 | S7 | done, 9ea85f4 | `ServerInfo::field` panicked on a field name with a NUL byte; upstream returns `None`, and so does it now. |
 | S8 | done, 6d21760 | `Cargo.toml`'s `repository` field named upstream. |
 | S10 | done, d100d13 | No safe wrappers for `RedisModule_GetCommandKeysWithFlags` and `RedisModule_ClusterKeySlot`, and `ContextFlags` was not `Copy`. `Context::get_command_keys` and `cluster::key_slot` (computed in Rust, so it works before Redis 7.4) replace the host's `raw` calls. |
@@ -426,8 +453,8 @@ evidence as the host meets them.
   68 SDK unit tests, 140 SDK integration tests, five standalone harness cases,
   seven host unit tests, 21 host integration tests with JavaScript,
   84 SDK doctests and four guest helper tests.
-  Active SDK, examples and wasm work now lives in GitHub issues; open H13/H14
-  and S3-S6 entries above link there. Historical measurements and external
+  Active SDK, examples and wasm work now lives in GitHub issues; H13/H14
+  and S3-S6 entries above link to their active or completed issues. Historical measurements and external
   module API limitations remain in this file.
 
 - 2026-10-21: rebased onto SDK master `f1cdbd2`, which makes repeated

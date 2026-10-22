@@ -13,6 +13,9 @@ makes the breaking changes those needed, as version 3.0.0.
 upstream issues and pull requests it relates to. The upstream README is kept,
 unchanged, as [README.upstream.md](README.upstream.md).
 
+For current development state, branch ownership, remaining decisions and
+validation, start with [the development handoff](HANDOFF.md).
+
 ## Using it
 
 3.0.0 is not published to crates.io. Depend on it from git, pinned to a commit:
