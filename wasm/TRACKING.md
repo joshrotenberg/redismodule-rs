@@ -62,6 +62,23 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 ### Latest SDK sync
 
+- 2026-10-22: synced merged SDK master `29d046c`, fixing successful stream
+  trims that remove zero entries. SDK PR 84 received independent native review
+  at `a0c28fd`; all 20 exact-head CI checks passed before merge and the squash
+  tree matches that head. Exact/approximate native regressions compare deletion
+  counts and retained entries with `XTRIM MINID`, including zero/positive
+  counts, repeated maximum-ID thresholds and empty streams. Native errors for
+  missing/wrong-type keys and API availability are unchanged. No public API,
+  host/guest source or dependency graph changes were needed. This sync preserves
+  PR 79's ancestry and reviewed diff without importing its unmerged workflow.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy, strict default workspace and host-excluded 7.2 docs pass.
+  Guest formatting/wasm32 linting pass. Tests pass: 69 SDK units, 158 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 9 macro parser tests,
+  7 host units, 21 host integrations including JavaScript, 100 SDK doctests
+  and 4 guest helper tests. The focused native trim regression also passed on
+  Redis 7.0.15 before syncing. Local JavaScript validation used Node 26.12.0.
+
 - 2026-10-22: synced merged SDK master `01b37b5`, binding read/write key
   handles and owning key scan cursors to their opening runtime context. SDK
   PR 83 received independent native review at `203077d`; all 20 latest

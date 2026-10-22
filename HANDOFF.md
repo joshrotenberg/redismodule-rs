@@ -14,12 +14,12 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
 
-Latest SDK checkpoint: `01b37b5` binds open read/write key handles and owning
-scan cursors to their opening runtime context. Server INFO snapshot lifetimes
-(`d0bba7d`) and earlier INFO guidance (`a14b71b`, `084cd23`) are included. Each
-SDK change received independent native review and all 20 latest exact-head CI
-checks passed before merge. CHANGES-FROM-UPSTREAM and the migration guide include
-this work. The layout table retains the shared baseline while experiment CI
+Latest SDK checkpoint: `29d046c` accepts successful zero-deletion stream trims.
+Open key/context lifetimes (`01b37b5`), server INFO snapshot lifetimes (`d0bba7d`)
+and earlier INFO guidance (`a14b71b`, `084cd23`) are included. Each SDK change
+received independent native review and all 20 latest exact-head CI checks passed
+before merge. CHANGES-FROM-UPSTREAM and the migration guide cover the relevant
+changes. The layout table retains the shared baseline while experiment CI
 proposal PR 79 awaits approval; its source is not included on this branch.
 The checkpoints below have validation details.
 
@@ -330,6 +330,13 @@ scope escape and early unlock, while native workers copy binary data and scan
 results into Rust storage before unlocking, with AutoMemory off and on. Raw
 constructors remain unsafe with explicit lifetime and lock obligations. This
 adds no general storage API and requires no host/guest source adaptation.
+
+The stream trim result fix merged in `29d046c`. `trim_stream_by_id` now returns
+`Ok(0)` for successful no-op and empty-stream trims instead of treating zero as
+failure. Negative native results still report errors, including missing and
+wrong-type keys; native API availability and the public signature are unchanged.
+The example and native regression compare exact/approximate deletion counts and
+retained entries with `XTRIM MINID`. No host/guest source adaptation is needed.
 
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).
