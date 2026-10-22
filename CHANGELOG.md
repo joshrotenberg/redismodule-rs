@@ -13,6 +13,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- [INFO handler state-access guidance](docs/INFO-HANDLERS.md) documents the
+  output-only context, native callback paths and crash-report limitations.
+  A tested atomic-counter example supports ordinary INFO and nested native
+  server-info queries without adding a Redis lock capability.
+
 - A [compatibility-floor workspace guide](docs/COMPATIBILITY-FLOORS.md) and
   isolated multi-consumer compile controls show separate-package and aligned
   builds, including rejection of conflicting floors and dependency defaults.
