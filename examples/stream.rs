@@ -1,6 +1,6 @@
 use redis_module::raw::{KeyType, RedisModuleStreamID};
 use redis_module::{
-    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
+    ArgCursor, Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
 };
 
 fn stream_read_from(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -61,6 +61,28 @@ fn stream_first_twice(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Array(vec![first_id()?, first_id()?]))
 }
 
+/// Trim entries older than an ID and report the count, including zero.
+fn stream_trim_before(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = ArgCursor::new(&args[1..]);
+    let name = args.next_arg()?;
+    let (ms, seq) = args.next_str()?.split_once('-').ok_or(RedisError::Str(
+        "ERR expected a stream ID as milliseconds-sequence",
+    ))?;
+    let id = RedisModuleStreamID {
+        ms: ms.parse()?,
+        seq: seq.parse()?,
+    };
+    let approximate = match args.next_str()? {
+        "exact" => false,
+        "approx" => true,
+        _ => return Err(RedisError::Str("ERR expected exact or approx")),
+    };
+    args.done()?;
+    let key = ctx.open_key_writable(name);
+    let removed = key.trim_stream_by_id(id, approximate)?;
+    Ok(RedisValue::Integer(i64::try_from(removed)?))
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -71,5 +93,6 @@ redis_module! {
     commands: [
         ["STREAM_POP", stream_read_from, "write", 1, 1, 1, ""],
         ["STREAM_FIRST_TWICE", stream_first_twice, "readonly", 1, 1, 1, ""],
+        ["STREAM_TRIM_BEFORE", stream_trim_before, "write", 1, 1, 1, ""],
     ],
 }
