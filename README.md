@@ -107,6 +107,9 @@ compatibility, checksums and an extracted-artifact load check.
 For companion-module input checks and pure parser fuzzing outside Redis, see
 [Testing module inputs and pure parsers](docs/TESTING-MODULES.md).
 
+For shared state in INFO callbacks and the crash-report boundary, see
+[INFO handler state access](docs/INFO-HANDLERS.md) and its atomic counter example.
+
 ## Features
 
 ### Optional command builders
