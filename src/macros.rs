@@ -286,6 +286,7 @@ macro_rules! redis_event_handler {
 /// before the Redis allocator is initialized.
 ///
 /// ```compile_fail,E0080
+/// # macro_rules! assert { ($($tokens:tt)*) => {}; }
 /// redis_module::redis_module! {
 ///     name: "truncated\0name", version: 1,
 ///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
@@ -430,15 +431,15 @@ macro_rules! redis_module {
             // An anonymous const also reports bad inputs during cargo check.
             // Local let bindings stay hygienic with caller-defined constants.
             const _: () = {
-                let source: &str = $module_name;
+                let source: &::core::primitive::str = $module_name;
                 let mut index = 0;
                 while index < source.len() {
-                    assert!(source.as_bytes()[index] != 0, "module name must not contain NUL bytes");
+                    ::core::assert!(source.as_bytes()[index] != 0, "module name must not contain NUL bytes");
                     index += 1;
                 }
             };
-            let __redis_module_name_bytes: &[u8] = &const {
-                let source: &str = $module_name;
+            let __redis_module_name_bytes = &const {
+                let source: &::core::primitive::str = $module_name;
                 let mut buffer = [0; ($module_name).len() + 1];
                 let mut index = 0;
                 while index < source.len() {
