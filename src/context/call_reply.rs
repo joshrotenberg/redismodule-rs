@@ -944,6 +944,7 @@ extern "C" fn on_unblock<C: FnOnce(&EventContext, CallResult<'static>)>(
 ) {
     let on_unblock = unsafe { Box::from_raw(private_data as *mut C) };
     let ctx = unsafe { EventContext::new(ctx) };
+    // Redis parses this reply without a context, so it may outlive the callback.
     let reply = NonNull::new(reply).map_or(Ok(CallReply::Unknown), create_call_reply);
     crate::panic::run_callback(
         "blocking call unblock handler",
@@ -1051,10 +1052,14 @@ pub enum PromiseCallReply<'root, 'ctx> {
     Future(FutureCallReply<'ctx>),
 }
 
-pub(crate) fn create_promise_call_reply(
-    ctx: &RuntimeContext,
+/// Wraps a reply from `RedisModule_Call` made through `ctx`. Redis 6.0 to 7.0
+/// store that context in every reply; later releases store it in error replies
+/// created before the command runs and in every reply under AutoMemory. Freeing
+/// the reply reads the context, so the reply borrows it.
+pub(crate) fn create_promise_call_reply<'ctx>(
+    ctx: &'ctx RuntimeContext,
     reply: Option<NonNull<RedisModuleCallReply>>,
-) -> PromiseCallReply<'static, '_> {
+) -> PromiseCallReply<'ctx, 'ctx> {
     reply.map_or(PromiseCallReply::Resolved(Ok(CallReply::Unknown)), |val| {
         let ty = unsafe { crate::__required_api!(RedisModule_CallReplyType)(val.as_ptr()) };
         if ty == REDISMODULE_REPLY_PROMISE as i32 {
@@ -1067,8 +1072,8 @@ pub(crate) fn create_promise_call_reply(
     })
 }
 
-impl<'ctx> From<PromiseCallReply<'static, 'ctx>> for CallResult<'static> {
-    fn from(value: PromiseCallReply<'static, 'ctx>) -> Self {
+impl<'root, 'ctx> From<PromiseCallReply<'root, 'ctx>> for CallResult<'root> {
+    fn from(value: PromiseCallReply<'root, 'ctx>) -> Self {
         match value {
             PromiseCallReply::Resolved(c) => c,
             PromiseCallReply::Future(_) => panic!("Got unexpected future call reply"),

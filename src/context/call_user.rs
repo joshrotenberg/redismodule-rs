@@ -200,7 +200,7 @@ impl RuntimeContext {
     ///
     /// ```no_run
     /// use redis_module::{CallOptionsBuilder, CallResult, RedisError, RedisString, RuntimeContext};
-    /// fn read(ctx: &RuntimeContext, user: &RedisString) -> Result<CallResult<'static>, RedisError> {
+    /// fn read<'c>(ctx: &'c RuntimeContext, user: &RedisString) -> Result<CallResult<'c>, RedisError> {
     ///     let options = CallOptionsBuilder::new().verify_acl().build();
     ///     ctx.with_call_user(user, |ctx| ctx.call_ext("GET", &options, &["allowed:item"]))
     /// }
@@ -213,10 +213,10 @@ impl RuntimeContext {
     ///     ctx.with_call_user(user, |ctx| ctx.reply(Ok("OK".into()))).unwrap();
     /// }
     /// ```
-    pub fn with_call_user<T>(
-        &self,
+    pub fn with_call_user<'s, T>(
+        &'s self,
         user_name: &RedisString,
-        f: impl FnOnce(&RuntimeContext) -> T,
+        f: impl FnOnce(&'s RuntimeContext) -> T,
     ) -> Result<T, RedisError> {
         let _scope = self.scoped_call_user(user_name)?;
         Ok(f(self))

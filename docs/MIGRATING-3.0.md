@@ -196,6 +196,54 @@ A `RedisString` or `Rc` capture no longer compiles: copy the bytes into a
 `String` or `Vec<u8>`, or share data through `Arc`. A `BlockedClient` capture,
 as in the `call` example, compiles unchanged.
 
+### Call replies stay inside their context scope
+
+`RuntimeContext::call_ext` and the replies `call_blocking` resolves at once now
+return `CallResult<'ctx>`, borrowing the context they were called through,
+instead of `CallResult<'static>`. Redis reads that context when a reply is
+freed: on 6.0 to 7.0 for every reply, and on 7.2 and later for error replies
+created before the command runs and for every reply under AutoMemory, which
+also frees the reply itself when the callback returns. Drop replies before
+returning from a callback or releasing a worker lock guard, and copy what is
+needed into Rust storage:
+
+```rust,ignore
+let bytes = {
+    let guard = owner.lock();
+    let reply = guard.call_ext("GET", &CallOptionsBuilder::new().build(), &["key"]);
+    match reply {
+        Ok(CallReply::String(value)) => Some(value.as_bytes().to_vec()),
+        _ => None,
+    }
+}; // reply dropped before the guard unlocks
+```
+
+Functions that return a reply must tie it to their context input, for example
+`fn read<'c>(ctx: &'c RuntimeContext) -> CallResult<'c>`. Closures passed to
+`with_call_user` and `with_db` may now return values that borrow the view.
+`Context::call` returns an owned `RedisValue` and is unchanged, as is the
+`CallResult<'static>` an unblock handler receives: Redis parses that reply
+without a context.
+
+### `auto_memory` is unsafe
+
+`RuntimeContext::auto_memory` is now an `unsafe fn`. The SDK releases its own
+handles without AutoMemory, but AutoMemory also frees the promise reply of each
+blocking call made through the context. Dispose or abort every `FutureHandler`
+from such a call before the callback returns or the thread-safe context is
+freed. AutoMemory stays enabled for the rest of the native context's life, so
+this covers blocking calls made later through any view of the same context.
+Drop call replies on the thread that holds the context. Then wrap the call with
+a safety comment:
+
+```rust,ignore
+// SAFETY: every FutureHandler from this context is disposed before the
+// callback returns, and its call replies are dropped on this thread.
+unsafe { ctx.auto_memory() };
+```
+
+Without AutoMemory, a `FutureHandler` may still be kept and aborted later.
+
 ### Shared Redis guards require `Send` values
 
 `RedisGILGuard<T>` is now `Send` and `Sync` only when `T: Send`. The Redis lock
@@ -362,9 +410,10 @@ requires only a live context and the Redis lock. All require valid invocation an
 lock scope throughout use. Replace `Context::dummy` with `RuntimeContext::dummy`
 for APIs that explicitly accept a null context, such as logging.
 
-This split limits capabilities. It does not yet tie every key, server-info,
-call-reply, or other native resource to its invocation or lock lifetime. Close
-those resources before the callback returns or the worker guard is dropped.
+This split limits capabilities. Keys, server INFO snapshots and call replies
+also borrow the context they came from, as the sections above describe. Release
+other native resources obtained through raw APIs before the callback returns
+or the worker guard is dropped.
 
 ### Scoped call users
 
