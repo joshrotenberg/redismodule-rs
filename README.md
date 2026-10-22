@@ -222,6 +222,10 @@ The [configuration notes](docs/CONFIGURATION.md) explain registration, load
 precedence, module arguments, validation, observers and rollback across all
 configuration types.
 
+For binary string values, use `RedisGILGuard<Vec<u8>>` or `Mutex<Vec<u8>>`.
+Both preserve NUL and invalid UTF-8 without retaining a native string owner.
+Shared Redis guards require `Send` values; `RedisString` remains thread-bound.
+
 ### Validated string configurations
 
 `configuration::ParsedStringConfig<T>` stores accepted UTF-8 text together

@@ -31,6 +31,36 @@ without a `From` conversion.
 
 ## Changes the compiler reports
 
+### Shared Redis guards require `Send` values
+
+`RedisGILGuard<T>` is now `Send` and `Sync` only when `T: Send`. The Redis lock
+serializes guarded access, but cannot protect an `Rc` alias used outside the
+guard. Replace shared `Rc` state with transferable ownership or thread-safe
+shared state. `T: Sync` is not required: owned `Cell` values remain supported.
+Non-`Send` values can still be used in a guard confined to one thread.
+
+`RedisString` remains non-`Send` and non-`Sync`. Replace shared
+`RedisGILGuard<RedisString>` configuration storage with
+`RedisGILGuard<String>` for UTF-8 or `RedisGILGuard<Vec<u8>>` for binary values:
+
+```rust
+use redis_module::RedisGILGuard;
+static BYTES: RedisGILGuard<Vec<u8>> = RedisGILGuard::new(Vec::new());
+// The existing string registration group accepts &BYTES.
+```
+
+Both byte guards and `Mutex<Vec<u8>>` implement
+`ConfigurationValue<RedisString>`. They preserve empty values, NUL and invalid
+UTF-8 by copying the accepted bytes. The getter creates its native string
+while Redis is locked. Registration defaults and the macro's module-argument
+conversion keep their existing UTF-8 syntax. Custom native-handle retention
+still needs its own thread, alias and destruction guarantees; sharing a guard
+does not provide those guarantees.
+
+The generic guard implementation of `ConfigurationValue<T>` now requires
+`T: Clone + Send`. The `ConfigurationValue` trait itself still requires only
+`Sync` storage, preserving custom shared storage that is not `Send`.
+
 ### Configuration observers require `Send`
 
 The optional `on_changed` closures passed to all four
@@ -350,7 +380,8 @@ let value = parse(text).map_err(RedisError::from_error)?;
   `configuration::load_configurations` after the last registration.
 - `ConfigurationValue` no longer requires `Send`. `ConfigurationContext` is
   neither `Send` nor `Sync`.
-- `RedisGILGuard<T>` is `Send` only when `T` is.
+- `RedisGILGuard<T>` is `Send` and `Sync` only when `T: Send`; see the guard
+  storage migration above.
 
 ### Data types
 

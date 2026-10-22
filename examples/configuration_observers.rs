@@ -22,11 +22,13 @@ enum_configuration! {
 }
 
 static NUMBER: AtomicI64 = AtomicI64::new(0);
-static TEXT: Mutex<String> = Mutex::new(String::new());
+static TEXT: RedisGILGuard<Vec<u8>> = RedisGILGuard::new(Vec::new());
+static BINARY: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 static TOGGLE: AtomicBool = AtomicBool::new(false);
 static CHOICE: Mutex<Choice> = Mutex::new(Choice::One);
 static OBSERVED: RedisGILGuard<Vec<(String, i64, bool)>> = RedisGILGuard::new(Vec::new());
 static WORKER: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+static SHARED_CALLS: RedisGILGuard<Cell<i64>> = RedisGILGuard::new(Cell::new(0));
 
 fn observer<T: 'static>() -> impl Fn(&ConfigurationContext, &str, &'static T) + Send {
     let registering_thread = thread::current().id();
@@ -34,6 +36,8 @@ fn observer<T: 'static>() -> impl Fn(&ConfigurationContext, &str, &'static T) + 
     let calls = Cell::new(0_i64);
     move |ctx, name, _| {
         calls.set(calls.get() + 1);
+        let total = SHARED_CALLS.lock(ctx);
+        total.set(total.get() + 1);
         OBSERVED.lock(ctx).push((
             name.to_owned(),
             calls.get(),
@@ -78,6 +82,14 @@ fn init(ctx: &RegistrationContext<'_>, _: &[RedisString]) -> Status {
             ConfigurationFlags::DEFAULT,
             Some(Box::new(observer())),
         )?;
+        register_string_configuration(
+            ctx,
+            "binary",
+            &BINARY,
+            "seed",
+            ConfigurationFlags::DEFAULT,
+            None,
+        )?;
         load_configurations(ctx)
     })();
     if let Err(error) = result {
@@ -85,6 +97,7 @@ fn init(ctx: &RegistrationContext<'_>, _: &[RedisString]) -> Status {
         return Status::Err;
     }
     OBSERVED.lock(ctx).clear();
+    SHARED_CALLS.lock(ctx).set(0);
     Status::Ok
 }
 
@@ -104,7 +117,17 @@ fn observed(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     ))
 }
 
-fn worker(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+fn shared_calls(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(SHARED_CALLS.lock(ctx).get().into())
+}
+
+fn worker(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if args.len() > 2 {
+        return Err(RedisError::WrongArity);
+    }
+    let bytes = args
+        .get(1)
+        .map_or_else(|| b"worker".to_vec(), |arg| arg.as_slice().to_vec());
     if ctx.get_flags().contains(ContextFlags::DENY_BLOCKING) {
         return Err(RedisError::Str(
             "ERR worker command requires a blockable client",
@@ -123,15 +146,17 @@ fn worker(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
                 .call(
                     "CONFIG",
                     &[
-                        "SET",
-                        "configuration_observers.number",
-                        "11",
-                        "configuration_observers.text",
-                        "worker",
-                        "configuration_observers.toggle",
-                        "no",
-                        "configuration_observers.choice",
-                        "One",
+                        b"SET".as_slice(),
+                        b"configuration_observers.number",
+                        b"11",
+                        b"configuration_observers.text",
+                        bytes.as_slice(),
+                        b"configuration_observers.toggle",
+                        b"no",
+                        b"configuration_observers.choice",
+                        b"One",
+                        b"configuration_observers.binary",
+                        bytes.as_slice(),
                     ],
                 )
                 .map(|_| "OK".into())
@@ -172,6 +197,7 @@ redis_module! {
     data_types: [], init: init, deinit: deinit,
     commands: [
         redis_command!("config_observers.observed", observed).read_only(),
+        redis_command!("config_observers.shared_calls", shared_calls).read_only(),
         redis_command!("config_observers.worker", worker).deny_script(),
         redis_command!("config_observers.finish", finish),
     ],

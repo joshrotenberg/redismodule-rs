@@ -110,6 +110,16 @@ these in October 2026.
 
 ## Additions
 
+Shared `RedisGILGuard<T>` storage now requires `T: Send`, closing access to
+non-`Send` aliases outside Redis's lock. Owned non-`Sync` values remain
+supported. String configurations can use `RedisGILGuard<Vec<u8>>` or
+`Mutex<Vec<u8>>` for binary values, converting native strings only within
+configuration callbacks. **Breaking:** shared native-string guards must migrate
+to owned text/bytes or a separately audited retention design. `RedisString`
+remains non-`Send` and non-`Sync`. The private call-user registry is thread-local;
+native ownership fixtures retain their handles on the command thread. See the
+[migration guide](docs/MIGRATING-3.0.md#shared-redis-guards-require-send-values).
+
 Module initialization now constructs its NUL-terminated name buffer in constant
 evaluation. The old unchecked 64-byte copy could overrun the buffer or leave
 it without a terminator. **Breaking:** `name:` must be a constant `&str` without

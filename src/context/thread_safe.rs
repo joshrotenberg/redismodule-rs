@@ -53,15 +53,46 @@ impl<'ctx, 'mutex, T, G: RedisLockIndicator> Drop for RedisGILGuardScope<'ctx, '
 /// User might also decide to implement this trait but he should
 /// carefully consider that because it is easy to make mistakes,
 /// this is why the trait is marked as unsafe.
+/// A reference must prove that the lock remains held on the current thread
+/// for the entire borrow. Implementations must prevent transferring that proof
+/// to a thread that does not hold the lock.
 pub unsafe trait RedisLockIndicator {}
 
-/// This struct allows to guard some data and makes sure
-/// the data is only access when the Redis GIL is locked.
-/// From example, assuming you module want to save some
-/// statistics inside some global variable, but without the
-/// need to protect this variable with some mutex (because
-/// we know this variable is protected by Redis lock).
-/// For example, look at examples/threads.rs
+/// Data accessible only while the Redis lock is held.
+///
+/// Sharing or moving this guard between threads requires `T: Send`. The lock
+/// serializes accesses through this guard, but cannot protect aliases held
+/// outside it. `T: Sync` is not required, so owned `Cell` values are supported:
+///
+/// ```
+/// use redis_module::RedisGILGuard;
+/// use std::cell::Cell;
+/// fn shareable<T: Send + Sync>(_: T) {}
+/// shareable(RedisGILGuard::new(Cell::new(0)));
+/// ```
+///
+/// An `Rc` can have aliases outside the guard and cannot be shared this way:
+///
+/// ```compile_fail,E0277
+/// use redis_module::RedisGILGuard;
+/// use std::{cell::Cell, rc::Rc};
+/// fn shareable<T: Sync>(_: &T) {}
+/// let outside = Rc::new(Cell::new(0));
+/// let guarded = RedisGILGuard::new(Rc::clone(&outside));
+/// shareable(&guarded);
+/// ```
+///
+/// Native string owners also cannot be shared in a guard. Use `String` for
+/// UTF-8 configuration storage or `Vec<u8>` for arbitrary bytes:
+///
+/// ```compile_fail,E0277
+/// use redis_module::{RedisGILGuard, RedisString};
+/// fn shareable<T: Sync>() {}
+/// shareable::<RedisGILGuard<RedisString>>();
+/// ```
+///
+/// Non-`Send` values remain usable in a guard confined to one thread. See
+/// `examples/threads.rs` for shared module state.
 pub struct RedisGILGuard<T> {
     obj: UnsafeCell<T>,
     /// Whether a scope from [`Self::lock`] is live. Only read and written by
@@ -106,10 +137,10 @@ impl<T: Default> Default for RedisGILGuard<T> {
 }
 
 // SAFETY: the value and the lock flag are only used by the thread holding the
-// Redis lock, as a RedisLockIndicator proves. T is not required to be Send:
-// RedisGILGuard<RedisString> holds string configurations, and RedisString is
-// not Send. A value cloned out of a scope follows its own thread rules.
-unsafe impl<T> Sync for RedisGILGuard<T> {}
+// Redis lock, as a RedisLockIndicator proves. Access may move between threads,
+// so T must be Send even though accesses are serialized. Otherwise, e.g. Rc
+// aliases outside this guard could race with a locked worker's accesses.
+unsafe impl<T: Send> Sync for RedisGILGuard<T> {}
 // Moving the guard moves the value to another thread, so T must be Send.
 unsafe impl<T: Send> Send for RedisGILGuard<T> {}
 

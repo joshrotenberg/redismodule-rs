@@ -1,11 +1,12 @@
 //! Exercises RedisString ownership across producers (hash, list, stream, scan,
-//! ServerInfo, RDB), statics, and AutoMemory on and off.
-use lazy_static::lazy_static;
+//! ServerInfo, RDB), command-thread retention, and AutoMemory on and off.
 use redis_module::{
-    Context, KeysCursor, NextArg, RedisError, RedisGILGuard, RedisResult, RedisString, RedisValue,
+    Context, EventContext, KeysCursor, NextArg, RedisError, RedisResult, RedisString, RedisValue,
     ScanKeyCursor, Status, raw, redis_module,
 };
 use std::{
+    cell::RefCell,
+    mem::ManuallyDrop,
     os::raw::c_char,
     ptr::{self, NonNull},
     sync::{
@@ -143,8 +144,24 @@ fn lifecycle(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
             .collect(),
     ))
 }
-lazy_static! {
-    static ref STORED: RedisGILGuard<Vec<RedisString>> = RedisGILGuard::new(Vec::new());
+thread_local! {
+    // Fixture-only retention on the invoking command thread. TLS teardown has
+    // no Redis lock proof, so it must not run native string destructors. Owners
+    // are instead released by replace/clear/deinit during a legal Redis phase;
+    // process-exit leftovers are reclaimed with the process.
+    static STORED: RefCell<ManuallyDrop<Vec<RedisString>>> =
+        const { RefCell::new(ManuallyDrop::new(Vec::new())) };
+}
+
+fn replace_stored(owners: Vec<RedisString>) {
+    let previous = STORED.with(|stored| std::mem::replace(&mut **stored.borrow_mut(), owners));
+    // Release the RefCell borrow before native destruction.
+    drop(previous);
+}
+
+fn deinit(_: &EventContext) -> Status {
+    replace_stored(Vec::new());
+    Status::Ok
 }
 fn store(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
     let mut args = argv.into_iter().skip(1);
@@ -230,27 +247,27 @@ fn store(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
         _ => return Err(RedisError::Str("ERR unknown producer")),
     }
     let count = owners.len();
-    *STORED.lock(ctx) = owners;
+    replace_stored(owners);
     Ok(RedisValue::Integer(count as i64))
 }
-fn read(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
+fn read(_: &Context, argv: Vec<RedisString>) -> RedisResult {
     if argv.len() != 1 {
         return Err(RedisError::WrongArity);
     }
     // Fresh views in this later command, after any command-return argv trimming.
-    Ok(RedisValue::Array(
-        STORED
-            .lock(ctx)
+    Ok(RedisValue::Array(STORED.with(|stored| {
+        stored
+            .borrow()
             .iter()
             .map(|s| RedisValue::StringBuffer(s.as_slice().to_vec()))
-            .collect(),
-    ))
+            .collect()
+    })))
 }
-fn clear(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
+fn clear(_: &Context, argv: Vec<RedisString>) -> RedisResult {
     if argv.len() != 1 {
         return Err(RedisError::WrongArity);
     }
-    STORED.lock(ctx).clear();
+    replace_stored(Vec::new());
     Ok(RedisValue::SimpleStringStatic("OK"))
 }
 fn scan(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
@@ -438,7 +455,7 @@ fn transfer(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
 redis_module! {
     name: "string_ownership", version: 1,
     allocator: (redis_module::alloc::RedisAlloc,redis_module::alloc::RedisAlloc),
-    data_types: [OWNER_TYPE], init: init,
+    data_types: [OWNER_TYPE], init: init, deinit: deinit,
     commands: [
         ["owner.lifecycle",lifecycle,"",0,0,0,""],
         ["owner.store",store,"",0,0,0,""],
