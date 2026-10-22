@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `f1cdbd2`, call protocol selection merged after all 19 PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `5a99fb1`, typed timers and lifecycle ownership merged after all 19 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `f1cdbd2` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `5a99fb1` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -47,16 +47,18 @@ git fetch fork && git fetch origin
 - wasm branch only: `rustup target add wasm32-unknown-unknown`. The JavaScript
   guest needs `node` and `npm` (its test is skipped without `node`; the first
   run does `npm ci` in `wasm/guests/js`). `wasm-tools` is optional.
-- Issues are disabled on the fork. SDK work is tracked in draft PRs; wasm work
-  in `wasm/TRACKING.md`.
+- Active work is tracked in [GitHub issues](https://github.com/joshrotenberg/redismodule-rs/issues).
+  Area and priority labels distinguish core SDK, examples/documentation and wasm.
+  Design questions carry `needs-design`; implementation still uses draft PRs.
+  `wasm/TRACKING.md` retains experiment details and historical measurements.
 - The fork's Actions allow only GitHub-owned actions,
   `actions-rust-lang/setup-rust-toolchain` and `swatinem/rust-cache`. The
   release workflows run only in the upstream repository.
 
 ## Conventions
 
-- Conventional-commit prefixes on the branch (`fix/<slug>`), the PR title and
-  each commit subject.
+- Use `codex/<slug>` for new work branches and conventional-commit prefixes
+  for PR titles and commit subjects.
 - Commit messages, PR bodies and docs are technical: what changed, why in code
   terms, which gates ran. No em dashes, and no AI attribution lines or
   trailers.
@@ -82,8 +84,11 @@ git fetch fork && git fetch origin
    cargo clippy --workspace --all-targets -- -D warnings
    cargo clippy --workspace --all-targets --no-default-features --features min-redis-compatibility-version-7-2 -- -D warnings
    cargo build --examples
-   cargo test --workspace --no-fail-fast
+   RUST_TEST_THREADS=4 cargo test --workspace --no-fail-fast
    ```
+
+   On `experiment/wasm-host`, exclude `redis-module-wasm` from the alternate-floor
+   SDK Clippy check, as shown below; the host uses the default floor.
 
    The integration tests load example modules beside their executable's build
    profile, including with `CARGO_TARGET_DIR`. Build examples explicitly before
@@ -94,7 +99,12 @@ git fetch fork && git fetch origin
    the commit messages (minus the empty start commit) as the body.
 7. Rebase `experiment/wasm-host` onto the new master (below).
 
-## SDK backlog
+## SDK changes and open work
+
+The [issue backlog](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+sort%3Acreated-asc)
+is the source for active work. Priorities are core SDK first, examples and
+migration material second, and new wasm features third. The following records
+completed SDK changes.
 
 From a survey of
 [redis-developer/redis-event-stream-module](https://github.com/redis-developer/redis-event-stream-module)
@@ -214,20 +224,22 @@ older context flags. No host adaptation needed.
 Call protocol selection merged in `f1cdbd2`: repeated `CallOptionsBuilder::resp`
 calls replace the prior selection, including a reset to RESP2. Native tests
 cover RESP2 and RESP3 clients and a Redis 6.0 reset to RESP2. No host adaptation
-needed. Timer ownership and cancellation safety are the next SDK design topic;
-implementation has not started.
+needed.
 
-Also open:
+Typed timers and lifecycle ownership merged in `5a99fb1`: creation returns a
+`TimerHandle<T>` result with `Send + 'static` callback and payload bounds.
+Cancellation is explicit and recovers the payload once; queries expose remaining
+time only, and dropping a handle leaves its timer scheduled. The SDK protects
+pending/executing timers from unload and rejects creation during initialization
+and unload. Start timers from runtime commands or events. No host adaptation
+needed. Cancellation-on-drop and payload inspection have separate design issues.
 
-- From the wasm host (wasm/TRACKING.md): S3, no lifetime-safe way to hand a
-  `Context` to code that needs `'static` data; S4, replies can only be built as
-  a `RedisValue` tree, so nothing streams one; S5, the
-  `min-redis-compatibility-*` floors are mutually exclusive and Cargo unifies
-  features across the workspace.
-- Whether to take upstream PR 489's header define (regenerate the bindings).
-- Upstream issue 351, splitting the context types: partly done (see
-  CHANGES-FROM-UPSTREAM.md).
-- `syn` 1 in both macro crates and the `redis` 0.23 dev-dependency are old.
+Open SDK design and maintenance work is recorded in
+[priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).
+The [priority 2 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A2+sort%3Acreated-asc)
+cover examples and author documentation; the
+[priority 3 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A3+sort%3Acreated-asc)
+cover new wasm experiment work. Do not treat design questions as settled APIs.
 
 ## The wasm host
 

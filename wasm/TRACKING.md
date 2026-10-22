@@ -1,7 +1,9 @@
 # redis-module-wasm: tracking
 
-Work items for the wasm host, with what is done, what is next, and what is
-outside this repository's control. Each item has an ID to cite in commits.
+Technical tracking for the wasm host, including completed work, measurements
+and module API limitations. [GitHub issues](https://github.com/joshrotenberg/redismodule-rs/issues)
+are the active work backlog; area, priority and `needs-design` labels describe
+scope and readiness. Historical H/S/G IDs remain useful for the evidence below.
 
 Status: `done`, `next` (being worked on or first in line), `todo`, `blocked`.
 
@@ -148,8 +150,8 @@ avoids both instantiating and tearing down, and was adopted.
 | H10 | done | **Guest helper library.** `wasm/guest-sdk`, crate `redis-wasm-guest`: a `Value` type that converts to and from pre-order node lists and flat replies, `From` conversions, and `call`, `pcall` and `log` that take and return `Value`s. It generates bindings for a `guest-imports` world (the host's interface alone), and a library's own bindings share its types through wit-bindgen's `with`. | The example guest uses it. |
 | H11 | done | **Bounds check cost.** Decided: keep signal-based traps off, so guests get explicit bounds checks. With H3's benchmark, turning them on made `primes` 18% faster (185 against 226 µs, old sieve loop) and `median` 6%. On Linux they are not safe in a module: wasmtime installs `SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE` handlers that chain to Redis's crash handler, but `CONFIG SET crash-log-enabled` (either value) reinstalls Redis's handlers or the defaults over them, and the next out-of-bounds guest access kills the server: silently after `no`, with a crash report after `yes` (G7). On macOS wasmtime takes faults through Mach exception ports, so the same steps are safe there. A crash outside wasm (`DEBUG SEGFAULT`) still produced Redis's crash report with wasmtime's handlers installed. | A decision, with a crash report checked with handlers on. |
 | H12 | done | **Context in the store.** The store holds a raw pointer to the command's `Context`. The safety argument is written down in `host.rs` ("The context pointer"): set and cleared around each guest run, re-entrant calls use their own instance, a panic drops the instance with the stale pointer, and instances stay on the main thread. No SDK pattern replaces it yet (S3). | Reviewed and documented, or replaced. |
-| H13 | todo | **Footprint.** The release dylib is 12.4 MB (macOS). Loading the JavaScript component (release build, macOS): `INFO wasm` accounts for 95 MB of compiled code and 7.7 MB of linear memory, and RSS reached 0.97 GB, then 1.35 GB after a delete and two more loads. The compiler allocates through the module's global allocator, Redis's, so `used_memory_peak` reached 1.05 GB during the load, and 57.7 MB stayed counted after `WASM.DELETE` (not growing on later loads: caches, not a leak). With `std::alloc::System` as the module's allocator, `used_memory` stayed near 1 MB (peak 25 MB, the argument itself) and RSS behaved the same. Decision needed: count wasmtime's heap in `used_memory`, so a load's transient 1 GB counts against `maxmemory`, or not, so 70 MB of lasting heap per JavaScript library is invisible to it. | Sizes recorded before and after. |
-| H14 | todo | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
+| H13 | todo ([issue 68](https://github.com/joshrotenberg/redismodule-rs/issues/68)) | **Footprint.** The release dylib is 12.4 MB (macOS). Loading the JavaScript component (release build, macOS): `INFO wasm` accounts for 95 MB of compiled code and 7.7 MB of linear memory, and RSS reached 0.97 GB, then 1.35 GB after a delete and two more loads. The compiler allocates through the module's global allocator, Redis's, so `used_memory_peak` reached 1.05 GB during the load, and 57.7 MB stayed counted after `WASM.DELETE` (not growing on later loads: caches, not a leak). With `std::alloc::System` as the module's allocator, `used_memory` stayed near 1 MB (peak 25 MB, the argument itself) and RSS behaved the same. Decision needed: count wasmtime's heap in `used_memory`, so a load's transient 1 GB counts against `maxmemory`, or not, so 70 MB of lasting heap per JavaScript library is invisible to it. | Sizes recorded before and after. |
+| H14 | todo ([issue 69](https://github.com/joshrotenberg/redismodule-rs/issues/69)) | **CI.** A job that builds the guest, runs the host's tests and lints the guest. | Wherever the crate lives with CI. |
 | H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30); not investigated. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
 | H17 | done | **Load time.** Loading an RDB compiled each library's component on the main thread before the server served: 1.56 to 1.67 s for the JavaScript library (release build), 15 ms of it reading. Now the libraries are added at once with their code compiling on a thread (`code.rs`): a call to a library still compiling blocks its client until the code is ready (or waits in place inside `MULTI` or a script), `INFO wasm` counts the libraries compiling, and the server was ready in 0.11 to 0.12 s. | Load time with the JavaScript library, before and after. |
 | H18 | done | **Dump, restore, flush.** `WASM.DUMP`, `WASM.RESTORE <payload> [FLUSH\|APPEND\|REPLACE]` and `WASM.FLUSH`, as `FUNCTION DUMP`, `RESTORE` and `FLUSH` work. The payload (`dump.rs`) holds names and components with an FNV-1a checksum; a restore compiles on a thread, lists every library's functions, checks every conflict, then adds all or none. | Tests restore into another server under each policy, refuse a conflicting or damaged payload without changing anything, and replicate `WASM.FLUSH` and `WASM.RESTORE`. |
@@ -186,10 +188,10 @@ can be an ordinary PR. A done item names its commit on master.
 |---|---|---|
 | S1 | done, dad8637 and 9258efb | `RedisValue::Error(String)`, an error reply with an owned message that can sit inside an array; a call reply's error converts to it. |
 | S2 | done, a5eb60d | `RedisValueKey` had no simple string, so a map key sent as a simple string went out as a bulk string. `RedisValueKey::SimpleString` keeps it. |
-| S3 | todo | No lifetime-safe way to hand a `Context` to code that needs `'static` data, such as a runtime's store. |
-| S4 | todo | Replies can only be built as a `RedisValue` tree; the low-level reply functions are crate-private since 3.0, so nothing streams a reply. |
-| S5 | todo | The `min-redis-compatibility-*` floors are mutually exclusive, and Cargo unifies features across a workspace, so a second module crate in the workspace must use the root's floor. The full-workspace 7.2 Clippy check combines that floor with the host's default 6.0 floor and fails. Run alternate-floor SDK checks with `--exclude redis-module-wasm`; check the host in the default-floor workspace build. |
-| S6 | worked around | On macOS a stripped release build of the host fails to load ("mis-aligned LINKEDIT string pool"); the workspace sets `strip = "none"` for it. Check with a newer toolchain. |
+| S3 | todo ([issue 54](https://github.com/joshrotenberg/redismodule-rs/issues/54)) | No lifetime-safe way to hand a `Context` to code that needs `'static` data, such as a runtime's store. |
+| S4 | todo ([issue 55](https://github.com/joshrotenberg/redismodule-rs/issues/55)) | Replies can only be built as a `RedisValue` tree; the low-level reply functions are crate-private since 3.0, so nothing streams a reply. |
+| S5 | todo ([issue 59](https://github.com/joshrotenberg/redismodule-rs/issues/59)) | The `min-redis-compatibility-*` floors are mutually exclusive, and Cargo unifies features across a workspace, so a second module crate in the workspace must use the root's floor. The full-workspace 7.2 Clippy check combines that floor with the host's default 6.0 floor and fails. Run alternate-floor SDK checks with `--exclude redis-module-wasm`; check the host in the default-floor workspace build. |
+| S6 | worked around ([issue 70](https://github.com/joshrotenberg/redismodule-rs/issues/70)) | On macOS a stripped release build of the host fails to load ("mis-aligned LINKEDIT string pool"); the workspace sets `strip = "none"` for it. Check with a newer toolchain. |
 | S7 | done, 9ea85f4 | `ServerInfo::field` panicked on a field name with a NUL byte; upstream returns `None`, and so does it now. |
 | S8 | done, 6d21760 | `Cargo.toml`'s `repository` field named upstream. |
 | S10 | done, d100d13 | No safe wrappers for `RedisModule_GetCommandKeysWithFlags` and `RedisModule_ClusterKeySlot`, and `ContextFlags` was not `Copy`. `Context::get_command_keys` and `cluster::key_slot` (computed in Rust, so it works before Redis 7.4) replace the host's `raw` calls. |
@@ -219,6 +221,19 @@ evidence as the host meets them.
 | Q1 | Where the crate lives so others can use it. Answered: the fork's `experiment/wasm-host` branch, kept rebased on master. |
 
 ## Log
+
+- 2026-10-21: rebased onto SDK master `5a99fb1`, which adds typed timer
+  handles, explicit cancellation and lifecycle ownership. Timer creation is
+  restricted to active runtime commands/events; handle drop remains passive.
+  No host adaptation needed. Rust 1.94.0 and Redis 8.10.2: example builds,
+  workspace/guest formatting and Clippy, separate SDK 7.2 Clippy and strict SDK
+  and host documentation passed. With `RUST_TEST_THREADS=4`, the suite passed:
+  68 SDK unit tests, 140 SDK integration tests, five standalone harness cases,
+  seven host unit tests, 21 host integration tests with JavaScript,
+  84 SDK doctests and four guest helper tests.
+  Active SDK, examples and wasm work now lives in GitHub issues; open H13/H14
+  and S3-S6 entries above link there. Historical measurements and external
+  module API limitations remain in this file.
 
 - 2026-10-21: rebased onto SDK master `f1cdbd2`, which makes repeated
   call-protocol selections replace earlier ones. No host adaptation needed.
