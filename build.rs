@@ -43,6 +43,21 @@ impl ParseCallbacks for RedisModuleCallback {
 }
 
 fn main() {
+    // Cargo unifies normal dependency features across selected consumers. Fail
+    // before compiling C/bindings or expanding API wrappers: choosing a lower
+    // wrapper branch from several enabled floors is not a supported contract.
+    let api_floor_count = env::vars_os()
+        .filter(|(name, _)| {
+            name.to_str().is_some_and(|name| {
+                name.starts_with("CARGO_FEATURE_MIN_REDIS_COMPATIBILITY_VERSION_")
+            })
+        })
+        .count();
+    assert_eq!(
+        api_floor_count, 1,
+        "enable exactly one min-redis-compatibility-version-* feature; disable SDK defaults when selecting another floor"
+    );
+
     println!("cargo:rerun-if-changed=src/redismodule.c");
     println!("cargo:rerun-if-changed=src/include/redismodule.h");
     println!("cargo:rerun-if-changed=build.rs");

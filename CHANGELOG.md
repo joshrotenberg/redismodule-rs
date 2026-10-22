@@ -13,6 +13,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- A [compatibility-floor workspace guide](docs/COMPATIBILITY-FLOORS.md) and
+  isolated multi-consumer compile controls show separate-package and aligned
+  builds, including rejection of conflicting floors and dependency defaults.
+  SDK features and runtime availability behavior are unchanged.
+
 - [Module testing patterns](docs/TESTING-MODULES.md) demonstrate companion
   event input and an isolated pure-parser fuzz target, with bounded native
   probes and validated libFuzzer/allocator-fallback controls. Parser checks run
@@ -248,6 +253,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - The dependencies `nix`, `strum_macros`, `regex`, `backtrace`, `enum-primitive-derive` and `num-traits`.
 
 ### Fixed
+
+- The SDK build script now rejects zero or multiple compatibility-floor features
+  before C compilation and API wrapper expansion. Mixed floors previously could
+  choose lower-version signatures and fail elsewhere with confusing type errors.
+  Valid single-floor builds keep their existing behavior.
 
 - Public macro documentation uses accessible type references and links. CI
   documents every SDK workspace package with warnings denied at each API floor,

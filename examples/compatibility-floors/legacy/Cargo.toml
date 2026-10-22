@@ -1,0 +1,18 @@
+[package]
+name = "floor-legacy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+path = "../module.rs"
+
+[dependencies]
+redis-module.workspace = true
+
+[features]
+default = ["redis-6"]
+redis-6 = ["redis-module/min-redis-compatibility-version-6-0"]
+redis-7-2 = ["redis-module/min-redis-compatibility-version-7-2"]

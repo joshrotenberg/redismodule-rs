@@ -92,6 +92,12 @@ jobs:
           cargo clippy --manifest-path examples/module-testing/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path examples/module-testing/Cargo.toml
 
+      - name: Check multi-consumer compatibility floors
+        if: matrix.floor == '6-0' && matrix.server == 'redis'
+        run: |
+          cargo fmt --manifest-path examples/compatibility-floors/Cargo.toml --all -- --check
+          python3 examples/compatibility-floors/check.py
+
       - name: Document SDK and macro workspace packages
         env:
           RUSTDOCFLAGS: "-D warnings"
@@ -104,6 +110,7 @@ jobs:
           name: logs-${{ matrix.os }}-${{ matrix.server }}-${{ matrix.version }}-${{ matrix.floor }}
           path: |
             target/**/integration-test/**
+            examples/compatibility-floors/target/check-logs/**
             ${{ runner.temp }}/sdk-server-build.log
           if-no-files-found: ignore
           retention-days: 7
@@ -356,3 +363,4 @@ jobs:
         run: |
           cargo test --lib
           cargo test --manifest-path examples/module-testing/Cargo.toml
+          python3 examples/compatibility-floors/check.py

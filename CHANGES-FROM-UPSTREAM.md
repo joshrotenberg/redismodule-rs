@@ -11,6 +11,15 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Compatibility-floor workspace controls
+
+A [workspace guide](docs/COMPATIBILITY-FLOORS.md) and isolated compile fixture
+exercise two module consumers using the same SDK. They verify separate and
+aligned floor selections. The SDK build script now rejects conflicting defaults,
+combined floors and missing floors before C compilation or wrapper expansion. CI runs the controls on the pinned toolchain
+and MSRV. This documents the current contract without changing defaults or native
+availability checks; feature redesign is separate.
+
 ## Macro implementation dependencies
 
 Both macro crates use Syn 2. The public crate replaces `serde_syn` with a private
