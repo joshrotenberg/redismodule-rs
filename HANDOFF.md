@@ -19,9 +19,9 @@ Open key/context lifetimes (`01b37b5`), server INFO snapshot lifetimes (`d0bba7d
 and earlier INFO guidance (`a14b71b`, `084cd23`) are included. Each SDK change
 received independent native review and all 20 latest exact-head CI checks passed
 before merge. CHANGES-FROM-UPSTREAM and the migration guide cover the relevant
-changes. The layout table retains the shared baseline while experiment CI
-proposal PR 79 awaits approval; its source is not included on this branch.
-The checkpoints below have validation details.
+changes. The layout table retains the earlier shared baseline. Branch-scoped
+wasm CI validates the current SDK integration and required Rust/JavaScript guests;
+the checkpoints below have validation details.
 
 The fork branches from upstream master at `a808377`. Upstream has two commits
 since: `cca5360` (the `ServerInfo::field` leak fix; the fork has its own fix) and
@@ -429,9 +429,9 @@ git push --force-with-lease fork experiment/wasm-host
 ```
 
 While an experiment PR awaits review, preserve its base ancestry by merging
-merged SDK changes instead of rebasing the experiment branch. Recent SDK
-syncs use this approach to keep PR 79's reviewed diff intact. That PR remains
-unmerged; do not include its proposed workflow in an SDK sync.
+merged SDK changes instead of rebasing the experiment branch. Keep proposed
+experiment changes on their PR branch until merged. Review lock snapshot drift
+and confirm the experiment push CI succeeds after every SDK sync.
 
 Refer to the branch's commits by subject in notes, since a rebase changes
 their hashes.
