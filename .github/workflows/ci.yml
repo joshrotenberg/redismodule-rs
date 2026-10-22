@@ -99,7 +99,7 @@ jobs:
 
   legacy-blocking:
     # The full integration suite needs newer APIs. This focused regression
-    # exercises blocking and SDK timer unload protection on the oldest runtime.
+    # exercises client decoding, blocking and timer protection on the oldest runtime.
     name: Blocking and timer lifecycle (Redis 6.0.20)
     runs-on: ubuntu-latest
     steps:
@@ -130,13 +130,22 @@ jobs:
           RUST_TEST_THREADS: "4"
         run: |
           cargo build --example hello --example call_reply --no-default-features --features min-redis-compatibility-version-6-0
-          cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test utils
+          # Configuration APIs and bind-error diagnostics differ on 6.0;
+          # retain those harness cases in the full server matrix above.
+          for test_name in \
+            connection_tests::test_harness_partial_and_malformed_replies_close_connection \
+            connection_tests::test_harness_unresponsive_listener_is_bounded \
+            connection_tests::test_harness_rejects_a_different_process_on_the_port
+          do
+            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test utils "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-transport-tests.txt"
+            grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-transport-tests.txt"
+            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test utils "$test_name" -- --exact
+          done
           for test_name in \
             test_harness_pipeline_error_drains_remaining_replies \
             test_harness_nested_error_preserves_reply_alignment \
             test_harness_resp2_and_resp3_decoding \
             test_call_reply_strings_are_bulk \
-            test_call_reply_status_and_collections \
             test_call_protocol_resets_to_resp2_without_newer_format_flags
           do
             cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-client-tests.txt"

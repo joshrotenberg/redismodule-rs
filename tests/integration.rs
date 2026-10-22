@@ -1638,6 +1638,12 @@ fn test_harness_resp2_and_resp3_decoding() -> Result<()> {
         assert_eq!(matches!(hello, Value::Array(_)), !resp3, "{hello:?}");
         let info: HashMap<String, Value> = redis::from_redis_value(hello)?;
         assert_eq!(info["proto"], Value::Int(protocol));
+        assert_eq!(
+            redis::cmd("SET")
+                .arg(&["resp:string", "value"])
+                .query::<Value>(&mut con)?,
+            Value::Okay
+        );
         let bytes = b"a\0\xff\r\n";
         let echoed: Value = redis::cmd("ECHO").arg(bytes.as_slice()).query(&mut con)?;
         assert_eq!(echoed, Value::BulkString(bytes.to_vec()));
