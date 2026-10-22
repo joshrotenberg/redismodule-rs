@@ -64,7 +64,7 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 The repository's [contributing rules](../CONTRIBUTING.md) record the review,
 merge and sync workflow, and the issue backlog is the work list. SDK functional
-changes through `41f4f1a` are integrated. PR 79 is merged as `b787fef`;
+changes through `a751b2c` are integrated. PR 79 is merged as `b787fef`;
 its [PR CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39809579615)
 and actual [experiment push CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39811561168)
 passed. H14 / issue 69 is complete. S6 / issue 70 was rechecked on the pinned
@@ -73,12 +73,18 @@ Rust 1.94 toolchain; retain `strip = "none"` on the host.
 The blocking-call callback audit ([issue 85](https://github.com/joshrotenberg/redismodule-rs/issues/85))
 is complete: [PR 91](https://github.com/joshrotenberg/redismodule-rs/pull/91),
 merged as `41f4f1a`, requires `Send + 'static` unblock handlers and fixes
-the zero-sized handler free on abort. The host makes no blocking calls. Its
-follow-ups are SDK audits: module unload with a pending blocking call
-([issue 92](https://github.com/joshrotenberg/redismodule-rs/issues/92)) and
-call replies kept past AutoMemory collection
-([issue 93](https://github.com/joshrotenberg/redismodule-rs/issues/93)).
-The host does not enable AutoMemory. Refreshing the exploratory sidecar versus Redis core
+the zero-sized handler free on abort. The host makes no blocking calls.
+Module unload with a pending blocking call is an open SDK audit
+([issue 92](https://github.com/joshrotenberg/redismodule-rs/issues/92)).
+
+The call reply audit ([issue 93](https://github.com/joshrotenberg/redismodule-rs/issues/93))
+is complete: [PR 95](https://github.com/joshrotenberg/redismodule-rs/pull/95),
+merged as `a751b2c`, ties `call_ext` replies to their context and makes
+`auto_memory` unsafe. The host's `run_command` now returns `CallResult<'_>`;
+its callers already converted each reply into guest nodes before the guest
+call returned, and the host does not enable AutoMemory. Whether call replies
+should be `Send` is [issue 96](https://github.com/joshrotenberg/redismodule-rs/issues/96).
+Refreshing the exploratory sidecar versus Redis core
 comparison is tracked in [issue 86](https://github.com/joshrotenberg/redismodule-rs/issues/86);
 existing benchmark results below are historical, not fresh measurements. Issue 86
 is the first wasm item and gates the allocator policy (68), external-runtime
@@ -93,6 +99,17 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-10-22: merged SDK master `a751b2c` into the branch as `3117f8e`, with
+  the one adaptation it requires: `run_command` returns `CallResult<'_>`
+  because `call_ext` replies now borrow their context. SDK PR 95 passed two
+  rounds of independent review and all 20 exact-head CI checks at `a2f4fc6`,
+  and the squash tree equals that head. No guest source, dependency graph or
+  lock snapshot changed. With `wasm/ci/check.sh` on Rust 1.94.0, Redis 8.10.2
+  and Node 26.10.0 (CI pins 24.22.1), ARM64 macOS: every stage passes, 382
+  workspace tests including the required JavaScript guest, 1 allocator
+  fallback and 4 guest SDK tests; all four lockfiles stayed identical to their
+  snapshots.
 
 - 2026-10-22: merged SDK master `e99779e` into the branch as `e7f9e9a`. It
   removes `HANDOFF.md` and adds `CONTRIBUTING.md`, which keeps the durable
