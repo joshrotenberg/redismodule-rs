@@ -210,9 +210,13 @@ command-time subscriptions.
 
 | feature | effect |
 |---|---|
-| `min-redis-compatibility-version-6-0` (default), `-6-2`, `-7-0`, `-7-2`, `-7-4`, `-8-0` | The oldest Redis the module supports. Choose one. Module APIs newer than it are looked up when called, and fail with an error naming the API on an older server. |
+| `min-redis-compatibility-version-6-0` (default), `-6-2`, `-7-0`, `-7-2`, `-7-4`, `-8-0` | The minimum Redis API assumption for SDK wrappers. Choose exactly one; it does not probe the server or guarantee that every module operation is supported. See the workspace guide below. |
 | `bindgen-runtime`, `bindgen-static` | Generate the bindings with bindgen instead of using the committed ones. Both need libclang: `bindgen-runtime` loads it at build time, `bindgen-static` links it. |
 | `system-allocator-fallback` | Lets a module's `cargo test` allocate outside a Redis server. Enable it in `[dev-dependencies]` only. |
+
+For separate or shared floor selections across several module packages, see
+[Redis API floors in module workspaces](docs/COMPATIBILITY-FLOORS.md), including
+compile controls for conflicting features and accidental dependency defaults.
 
 ## Bindings
 

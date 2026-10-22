@@ -1,0 +1,15 @@
+# Isolated compile fixture, not a workspace member or a publishable module.
+[workspace]
+members = ["legacy", "modern", "default-edge"]
+default-members = ["legacy"]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+license = "BSD-3-Clause"
+
+[workspace.dependencies]
+redis-module = { path = "../..", default-features = false }
