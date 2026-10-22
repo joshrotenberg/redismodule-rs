@@ -8,6 +8,7 @@ use proc_macro::TokenStream;
 
 mod command;
 mod info_section;
+mod metadata;
 mod redis_value;
 mod registration;
 

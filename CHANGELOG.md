@@ -128,6 +128,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- The public macro crate completes the Syn 2 migration with a private metadata
+  parser, removing its `serde_syn`/Syn 1 dependency without changing accepted
+  attribute syntax or generated registration names. Compatibility tests run on
+  the supported toolchains in CI; parser error wording may differ.
+
 - Integration tests use the Redis 1.2.2 development client, pinned to preserve
   Rust 1.87 builds. The bounded harness retains binary reply distinctions,
   server-error propagation and pipeline alignment, and directly checks RESP3
@@ -136,7 +141,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 - Internal API wrappers and mixed command-list registration macros now parse
   Rust syntax with Syn 2. Command syntax and API-floor-dependent signatures are
-  unchanged. The public macro crate retains its existing metadata parser.
+  unchanged. Public attribute metadata uses the compatible SDK-owned parser.
 
 - **Breaking:** timers return `Result<TimerHandle<T>, RedisError>` and require
   `Send + 'static` callbacks and payloads. `cancel_timer(&handle)` replaces

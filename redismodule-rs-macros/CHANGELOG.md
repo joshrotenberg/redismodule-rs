@@ -17,6 +17,12 @@ Released with redis-module 3.0.0; see its changelog and docs/MIGRATING-3.0.md.
 
 ### Changed
 
+- Public macros now use Syn 2 and a private SDK-owned metadata parser, removing
+  `serde_syn` and their Syn 1 dependency. Existing braced metadata, typed/quoted
+  names, explicit options, integer rules and generated registration names are
+  preserved. Invalid metadata receives parser errors without changing module
+  behavior; error wording may differ.
+
 - Public documentation fixes inaccessible SDK/private-type links and the
   `RedisValue::OrderedMap` variant name; the SDK workspace is documented strictly
   in CI. Macro expansion is unchanged.
