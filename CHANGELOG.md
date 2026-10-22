@@ -259,6 +259,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- **Breaking:** server INFO snapshots borrow their producing runtime context,
+  preventing cleanup after a worker guard frees that native context or a
+  callback's AutoMemory reclaims the snapshot. Copy fields into Rust-owned
+  data before leaving the context or unlocking the worker.
+
 - The SDK build script now rejects zero or multiple compatibility-floor features
   before C compilation and API wrapper expansion. Mixed floors previously could
   choose lower-version signatures and fail elsewhere with confusing type errors.
