@@ -31,6 +31,26 @@ without a `From` conversion.
 
 ## Changes the compiler reports
 
+### Module names are constant strings
+
+`redis_module!` requires `name:` to be a constant `&str` expression without
+NUL bytes. Ordinary string literals are unchanged. Move runtime-computed names
+to a string constant, `concat!`, a const function, or compile-time environment
+input, for example:
+
+```rust
+const MODULE_NAME: &str = concat!("prefix_", env!("CARGO_PKG_NAME"));
+// In redis_module!: name: MODULE_NAME,
+```
+
+The macro creates the terminated C string in constant evaluation without a
+fixed buffer size. The old unchecked 64-byte copy could write past the buffer
+for longer names; an exactly 64-byte name also left no terminator. Embedded
+NUL bytes previously truncated the name Redis received. These are now rejected
+at compile time. Long NUL-free names, including UTF-8 names, are supported.
+This concerns the module name; native data-type names still have their own
+9-byte restriction.
+
 ### Load-time registration uses `RegistrationContext`
 
 `CommandBuilder::register`, `commands::register_commands`,

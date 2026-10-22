@@ -1889,6 +1889,41 @@ fn test_module_with_native_type_refuses_unload_without_keys() -> Result<()> {
 }
 
 #[test]
+fn test_long_utf8_module_name_is_preserved_across_load_and_unload() -> Result<()> {
+    let mut con = TestConnection::new("module_name");
+    let name: String = redis::cmd("module_name.name").query(&mut con)?;
+    assert_eq!(name.len(), 118);
+    assert!(name.ends_with("_café"));
+    let assert_registered = |con: &mut TestConnection| -> Result<()> {
+        let modules: Vec<HashMap<String, Value>> = redis::cmd("MODULE").arg("LIST").query(con)?;
+        assert!(
+            modules
+                .iter()
+                .any(|module| module.get("name") == Some(&Value::Data(name.as_bytes().to_vec())))
+        );
+        Ok(())
+    };
+    assert_registered(&mut con)?;
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", &name])
+        .query::<()>(&mut con)?;
+    let command: Vec<Value> = redis::cmd("COMMAND")
+        .arg(&["INFO", "module_name.name"])
+        .query(&mut con)?;
+    assert_eq!(command, vec![Value::Nil]);
+    let module = utils::module_path("module_name")?;
+    redis::cmd("MODULE")
+        .arg(&["LOAD", &module])
+        .query::<()>(&mut con)?;
+    assert_registered(&mut con)?;
+    assert_eq!(
+        redis::cmd("module_name.name").query::<String>(&mut con)?,
+        name
+    );
+    Ok(())
+}
+
+#[test]
 fn test_module_version_from_cargo() -> Result<()> {
     let mut con = TestConnection::new("hello");
     let modules: Vec<HashMap<String, Value>> = redis::cmd("MODULE").arg("LIST").query(&mut con)?;

@@ -115,6 +115,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- **Breaking:** `redis_module!` requires a constant `&str` module name without
+  NUL bytes. Its terminated buffer is built at compile time, allowing long and
+  UTF-8 names without allocation before native initialization. Runtime name
+  expressions must become constants or compile-time inputs.
+
 - **Breaking:** `authenticate_user` is now `RuntimeContext::scoped_call_user`,
   returning the root-exported `CallUserScope` (previously `ContextUserScope`).
   Nested guards now restore the latest still-active scope on drop, including
@@ -185,6 +190,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - The dependencies `nix`, `strum_macros`, `regex`, `backtrace`, `enum-primitive-derive` and `num-traits`.
 
 ### Fixed
+
+- Module initialization no longer copies an unchecked name into a 64-byte
+  buffer. Names of 64 bytes lacked a terminator and longer names could overrun
+  that buffer. Embedded NUL names now fail compilation instead of truncating.
 
 - The integration harness retries confirmed TCP address-in-use failures at
   `listen()` as well as `bind()`, while preserving other startup failures.
