@@ -11,6 +11,15 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## INFO handler state access
+
+The [INFO handler guide](docs/INFO-HANDLERS.md) traces ordinary, nested and crash
+callbacks across tagged Redis releases. `InfoContext` remains an output-only
+view without a Redis lock proof or runtime operations. Compile-fail controls
+preserve that boundary; a native-tested atomic snapshot example supports
+ordinary INFO while skipping custom output for crash reports. This does not
+promise an async-signal-safe SDK crash-report path or introduce a new capability.
+
 ## Compatibility-floor workspace controls
 
 A [workspace guide](docs/COMPATIBILITY-FLOORS.md) and isolated compile fixture
