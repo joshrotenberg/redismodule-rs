@@ -1,0 +1,104 @@
+name: Wasm experiment
+
+on:
+  push:
+    branches: [experiment/wasm-host]
+  pull_request:
+    branches: [experiment/wasm-host]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-guests:
+    name: Wasm host and Rust/JavaScript guests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      RUST_TEST_THREADS: "2"
+      WASM_TEST_REQUIRE_JS: "1"
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Read runner image
+        id: runner-image
+        run: echo "image=${ImageOS:?}-${ImageVersion:?}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pinned Rust dependency inputs
+        run: |
+          cp wasm/ci/locks/workspace.lock Cargo.lock
+          cp wasm/ci/locks/guest-sdk.lock wasm/guest-sdk/Cargo.lock
+          cp wasm/ci/locks/hello.lock wasm/guests/hello/Cargo.lock
+          cp wasm/ci/locks/bench.lock wasm/bench/guest/Cargo.lock
+
+      - name: Install Rust 1.94 and wasm target
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.94.0"
+          components: rustfmt, clippy
+          target: wasm32-unknown-unknown
+          cache: false
+
+      - name: Cache Rust dependencies and build products
+        uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: wasm-v1
+          key: ${{ steps.runner-image.outputs.image }}-${{ hashFiles('wasm/ci/locks/*.lock') }}
+          workspaces: ". -> target"
+          cache-all-crates: true
+
+      - name: Install pinned Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "24.22.1"
+          cache: npm
+          cache-dependency-path: wasm/guests/js/package-lock.json
+
+      - name: Cache Redis 8.10.2
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sdk-server
+          key: wasm-server-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-image.outputs.image }}-redis-8.10.2-${{ hashFiles('.github/servers.json', '.github/scripts/build-server.py') }}
+
+      - name: Build or verify pinned Redis
+        run: |
+          python3 .github/scripts/build-server.py redis-8.10.2 "$RUNNER_TEMP/sdk-server"
+          echo "$RUNNER_TEMP/sdk-server" >> "$GITHUB_PATH"
+          echo "TEST_REDIS_SERVER_BIN=$RUNNER_TEMP/sdk-server/redis-server" >> "$GITHUB_ENV"
+
+      - name: Verify JavaScript toolchain
+        run: |
+          test "$(node --version)" = "v24.22.1"
+          npm --version
+
+      - name: Fetch pinned Rust dependencies
+        run: |
+          timeout --kill-after=20s 6m cargo fetch --locked
+          for manifest in wasm/guest-sdk wasm/guests/hello wasm/bench/guest; do
+            timeout --kill-after=20s 2m cargo fetch --locked --manifest-path "$manifest/Cargo.toml"
+          done
+
+      - name: Check host, SDK and guests
+        run: bash wasm/ci/check.sh
+
+      - name: Retain validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-validation-${{ github.run_attempt }}
+          path: |
+            target/wasm-ci-logs/**
+            target/wasm-test-*/**
+            target/**/integration-test/**
+            ${{ runner.temp }}/sdk-server-build.log
+          if-no-files-found: ignore
+          retention-days: 7

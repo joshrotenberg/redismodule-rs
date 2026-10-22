@@ -483,7 +483,7 @@ fn a_library_keeps_its_instance_until_a_call_fails_or_it_is_replaced() {
 }
 
 /// The JavaScript example (`guests/js`) as a component, built once, or `None`
-/// when Node.js is not installed.
+/// when Node.js is not installed and JavaScript coverage is not required.
 fn js_component() -> Option<&'static [u8]> {
     static COMPONENT: OnceLock<Option<Vec<u8>>> = OnceLock::new();
     COMPONENT.get_or_init(build_js_component).as_deref()
@@ -491,9 +491,16 @@ fn js_component() -> Option<&'static [u8]> {
 
 fn build_js_component() -> Option<Vec<u8>> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("guests/js");
-    if Command::new("node").arg("--version").output().is_err() {
-        eprintln!("skipping the JavaScript guest: node is not installed");
-        return None;
+    match Command::new("node").arg("--version").output() {
+        Ok(output) => assert!(output.status.success(), "node --version failed"),
+        Err(error) => {
+            assert!(
+                std::env::var_os("WASM_TEST_REQUIRE_JS").is_none(),
+                "JavaScript guest coverage is required but node is unavailable: {error}"
+            );
+            eprintln!("skipping the JavaScript guest: node is not installed");
+            return None;
+        }
     }
     if !dir.join("node_modules").exists() {
         let status = Command::new("npm")

@@ -8,7 +8,7 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 | | where | state |
 |---|---|---|
 | SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `3b2b845`, early compatibility-floor validation and workspace guide merged after independent review and all 20 PR checks passed |
-| wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
+| wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus wasm commits; experiment changes target this branch, not SDK master |
 | What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `3b2b845` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
@@ -321,8 +321,12 @@ State (wasm/TRACKING.md has each item and the log):
 - Open: H13, the footprint: the compiler's temporary allocations count in
   `used_memory` with Redis's allocator (peak 1.05 GB loading the JavaScript
   library) and not with the system allocator. Which allocator to use is an
-  open decision. H14, CI: nothing runs on this branch, since CI runs on master
-  pushes and PRs only.
+  open decision.
+- H14 has a [branch-scoped CI workflow](wasm/CI.md): one Ubuntu job pins Rust,
+  Node, Redis and Rust/JavaScript dependency inputs. JavaScript coverage is
+  required. SDK master keeps its own server matrix; the experiment checks the
+  default workspace and a host-excluded SDK 7.2 build. SDK syncs must review
+  lock snapshot changes and run the experiment workflow.
 - Module API gaps G1 to G8 are recorded with what each costs the host.
 - Run: the whole suite on macOS with Redis 8.10.2 and on Linux arm64 with
   8.0.2 (JavaScript tests skipped on that Linux run without Node); a smoke
