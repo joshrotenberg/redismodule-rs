@@ -11,6 +11,15 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Server INFO snapshot lifetime
+
+`RuntimeContext::server_info` returns a snapshot tied to its runtime borrow.
+Previously safe code could keep the snapshot after a worker guard unlocked
+and freed its native context; snapshot cleanup then used that stale context.
+Compile controls now reject both scope escape and early guard drop. Native
+tests cover valid worker use with AutoMemory off and on, and copying fields
+into owned Rust values before unlocking. General native-handle storage is separate.
+
 ## INFO handler state access
 
 The [INFO handler guide](docs/INFO-HANDLERS.md) traces ordinary, nested and crash

@@ -115,6 +115,37 @@ fn worker_runtime(ctx: &redis_module::RuntimeContext) -> RedisResult {
 }
 
 fn worker(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    start_worker(ctx, None)
+}
+
+fn worker_info(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if args.len() != 2 {
+        return Err(RedisError::WrongArity);
+    }
+    let auto_memory = match args[1].try_as_str()? {
+        "manual" => false,
+        "auto" => true,
+        _ => return Err(RedisError::Str("ERR expected manual or auto")),
+    };
+    start_worker(ctx, Some(auto_memory))
+}
+
+fn owned_server_version(ctx: &redis_module::RuntimeContext, auto_memory: bool) -> RedisResult {
+    if auto_memory {
+        ctx.auto_memory();
+    }
+    let info = ctx.server_info("server");
+    let value = info
+        .field("redis_version")
+        .ok_or(RedisError::Str("ERR missing server version"))?;
+    // Field results own their strings and may outlive the snapshot, while the
+    // worker is still locked. Copy into Rust storage before unlocking as well.
+    drop(info);
+    let version = value.try_as_str()?.to_owned();
+    Ok(RedisValue::BulkString(version))
+}
+
+fn start_worker(ctx: &Context, info_mode: Option<bool>) -> RedisResult {
     let mut task = WORKER_THREAD.lock().unwrap();
     if task.is_some() {
         return Err(RedisError::Str("ERR runtime worker already started"));
@@ -123,7 +154,10 @@ fn worker(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     *task = Some(std::thread::spawn(move || {
         let thread_ctx = redis_module::ThreadSafeContext::new();
         let guard = thread_ctx.lock();
-        let result = worker_runtime(&guard);
+        let result = match info_mode {
+            Some(auto_memory) => owned_server_version(&guard, auto_memory),
+            None => worker_runtime(&guard),
+        };
         drop(guard);
         drop(thread_ctx);
         let reply = redis_module::ThreadSafeContext::with_blocked_client(blocked);
@@ -183,6 +217,7 @@ redis_module! {
         redis_command!("runtime.subscribe", subscribe),
         ["runtime.subscribe_legacy", subscribe, "", 0, 0, 0, ""],
         redis_command!("runtime.worker", worker),
+        redis_command!("runtime.worker_info", worker_info),
         redis_command!("runtime.finish_worker", finish_worker),
         redis_command!("runtime.counts", counts).read_only(),
         redis_command!("runtime.last", last).read_only(),
