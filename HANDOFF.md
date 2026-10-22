@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `1a715a0`, configuration notes and regression coverage merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `1915b2f`, safe module-name initialization merged after all PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `1a715a0` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `1915b2f` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -189,8 +189,12 @@ after correcting existing API links. No host adaptation needed.
 
 Configuration notes merged in `1a715a0`: load precedence, argument parsing,
 validation, observers, rollback, storage and reload behavior, with regression
-coverage. No host adaptation needed. The next SDK item is safe module-name
-initialization, replacing the unchecked fixed-size copy before allocator setup.
+coverage. No host adaptation needed.
+
+Safe module-name initialization merged in `1915b2f`: the macro builds a
+terminated constant byte array sized to the name and rejects NUL bytes at
+compile time, replacing the unchecked fixed-size copy before allocator setup.
+No host adaptation needed. Core SDK safety and lifecycle audits continue.
 
 Also open:
 
