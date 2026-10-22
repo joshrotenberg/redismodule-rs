@@ -5,6 +5,7 @@ use std::{
     fmt::{Debug, Display, Formatter},
     marker::PhantomData,
     ptr::NonNull,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use libc::c_void;
@@ -862,6 +863,32 @@ fn fmt_call_result(res: CallResult<'_>, f: &mut Formatter<'_>) -> fmt::Result {
 
 pub type CallResult<'root> = Result<CallReply<'root>, ErrorReply<'root>>;
 
+// Unblock handlers Redis holds: installed and neither run nor aborted. When a
+// call unblocks, Redis reads this module's state and calls the handler, so a
+// pending handler must keep the module loaded.
+static PENDING_UNBLOCK_HANDLERS: AtomicUsize = AtomicUsize::new(0);
+
+/// Releases one pending handler when dropped, also while unwinding.
+struct PendingUnblockHandler;
+
+impl Drop for PendingUnblockHandler {
+    fn drop(&mut self) {
+        PENDING_UNBLOCK_HANDLERS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Internal binding for `redis_module!`: refuses `MODULE UNLOAD` while an
+/// unblock handler from this module is pending.
+#[doc(hidden)]
+pub fn __check_unload_pending_unblock_handlers() -> Result<(), RedisError> {
+    match PENDING_UNBLOCK_HANDLERS.load(Ordering::SeqCst) {
+        0 => Ok(()),
+        _ => Err(RedisError::Str(
+            "ERR module has blocking calls with pending unblock handlers",
+        )),
+    }
+}
+
 /// The handle [FutureCallReply::set_unblock_handler] returns. Release it with
 /// [Self::dispose] or cancel the command with [Self::abort_and_dispose] while
 /// the Redis lock is held. It stays on the thread that installed the handler.
@@ -909,6 +936,8 @@ where
         self.dispose(lock_indicator);
 
         if !callback.is_null() {
+            // Redis no longer holds the handler once the abort succeeds.
+            let _pending = PendingUnblockHandler;
             // SAFETY: a successful abort returns the pointer set_unblock_handler
             // made with Box::into_raw, and Redis will not invoke it. Box::from_raw
             // also releases zero-sized handlers, whose pointer is dangling.
@@ -942,6 +971,8 @@ extern "C" fn on_unblock<C: FnOnce(&EventContext, CallResult<'static>)>(
     reply: *mut RedisModuleCallReply,
     private_data: *mut ::std::os::raw::c_void,
 ) {
+    // Declared first, so it is released after the handler and its captures.
+    let _pending = PendingUnblockHandler;
     let on_unblock = unsafe { Box::from_raw(private_data as *mut C) };
     let ctx = unsafe { EventContext::new(ctx) };
     // Redis parses this reply without a context, so it may outlive the callback.
@@ -984,7 +1015,9 @@ impl<'ctx> FutureCallReply<'ctx> {
     /// ```
     ///
     /// The handler runs with the Redis lock held, so it must not lock a
-    /// thread-safe context or the module context itself.
+    /// thread-safe context or the module context itself. A pending handler
+    /// also keeps the module loaded: `MODULE UNLOAD` is refused until it runs
+    /// or [`FutureHandler::abort_and_dispose`] cancels it.
     ///
     /// A borrowed capture is rejected, whether the handle is disposed, aborted
     /// or forgotten:
@@ -1026,6 +1059,7 @@ impl<'ctx> FutureCallReply<'ctx> {
         unblock_handler: C,
     ) -> FutureHandler<C> {
         let reply = self.reply.take().expect("Got a NULL future reply");
+        PENDING_UNBLOCK_HANDLERS.fetch_add(1, Ordering::SeqCst);
         unsafe {
             RedisModule_CallReplyPromiseSetUnblockHandler
                 .expect("RedisModule_CallReplyPromiseSetUnblockHandler is expected to be available if we got a promise call reply")

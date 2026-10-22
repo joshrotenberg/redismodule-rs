@@ -263,6 +263,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- `MODULE UNLOAD` is refused while an unblock handler from `call_blocking` is
+  pending. Redis does not count the call's temporary client as blocked, and
+  when the call unblocks after an unload it reads the freed module state and
+  calls the handler. Abort pending calls or let them finish before unloading;
+  see the [upgrade guide](docs/UPGRADING-MODULES.md#blocking-calls-and-unload).
+
 - **Breaking:** call replies borrow the context that made them: `call_ext`
   and immediately resolved `call_blocking` replies are tied to the context
   borrow, as keys and server INFO snapshots are. Redis reads a reply's context

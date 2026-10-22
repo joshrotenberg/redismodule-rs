@@ -18,6 +18,8 @@ use a planned server restart with compatible persistence readers instead.
 
 Other blockers include shared APIs in use by another module and blocked clients.
 Current Redis also checks outstanding timers before the module's unload hook.
+The SDK also refuses unload while a blocking call's unblock handler is pending;
+see [Blocking calls and unload](#blocking-calls-and-unload).
 Finish or cancel that work through the module's normal controls first.
 An unload hook may also refuse by returning `Status::Err`.
 See [MODULE UNLOAD](https://redis.io/docs/latest/commands/module-unload/) and
@@ -56,6 +58,21 @@ commands or events after loading finishes. Creation requires the lifecycle
 binding supplied by `redis_module!`; custom native loaders without that binding
 cannot create SDK timers. Hidden macro hooks are not a stable custom-loader
 interface.
+
+## Blocking calls and unload
+
+A blocking call started with `call_blocking` keeps the module loaded while its
+unblock handler is pending. Redis does not count the call's temporary client as
+a blocked client of the module, and when the call unblocks it reads the
+module's state and calls the handler. The `redis_module!` lifecycle therefore
+refuses unload until every installed handler has run or `abort_and_dispose`
+has cancelled it, and checks again after the deinit hook in case it started a
+call. Disposing a handle does not release its handler.
+
+Abort pending calls through the module's normal controls, or let them unblock,
+before `MODULE UNLOAD`. A call started without a handler does not block unload,
+but its command still runs after the module is gone; a pending `BLPOP`, for
+example, still consumes a later push.
 
 ## Record configuration and pause module traffic
 

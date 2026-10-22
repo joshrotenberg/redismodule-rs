@@ -291,6 +291,45 @@ fn call_blocking_auto_memory_calls(_: &Context, _: Vec<RedisString>) -> RedisRes
     Ok(AUTO_MEMORY_HANDLER_CALLS.load(Ordering::SeqCst).into())
 }
 
+static FIRED_HANDLER_CALLS: AtomicI64 = AtomicI64::new(0);
+
+/// `call.blocking_fire <key> handler|none|abort` starts `BLPOP <key> 0` without
+/// blocking the caller. `handler` leaves an unblock handler pending, which
+/// keeps the module loaded until it runs; `none` installs no handler and
+/// `abort` cancels it.
+fn call_blocking_fire(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let [_, key, mode] = args.as_slice() else {
+        return Err(RedisError::WrongArity);
+    };
+    let options = CallOptionsBuilder::new().build_blocking();
+    let future = match ctx.call_blocking("blpop", &options, &[key.try_as_str()?, "0"]) {
+        PromiseCallReply::Future(future) => future,
+        PromiseCallReply::Resolved(_) => return Err(RedisError::Str("ERR the call did not block")),
+    };
+    let handler = |_: &redis_module::EventContext, _: CallResult<'static>| {
+        FIRED_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
+    };
+    Ok(RedisValue::SimpleStringStatic(match mode.try_as_str()? {
+        "handler" => {
+            future.set_unblock_handler(handler).dispose(ctx);
+            "pending"
+        }
+        "none" => {
+            drop(future);
+            "no handler"
+        }
+        "abort" => match future.set_unblock_handler(handler).abort_and_dispose(ctx) {
+            Status::Ok => "aborted",
+            Status::Err => "not aborted",
+        },
+        _ => return Err(RedisError::Str("ERR expected handler, none or abort")),
+    }))
+}
+
+fn call_blocking_fire_calls(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(FIRED_HANDLER_CALLS.load(Ordering::SeqCst).into())
+}
+
 /// Replies with the aborted handler calls, capture drops and kept handler
 /// calls since the module loaded.
 fn call_blocking_abort_stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
@@ -444,6 +483,8 @@ redis_module! {
         ["call.blocking_abort_stats", call_blocking_abort_stats, "", 0, 0, 0, ""],
         ["call.blocking_auto_memory", call_blocking_auto_memory, "", 0, 0, 0, ""],
         ["call.blocking_auto_memory_calls", call_blocking_auto_memory_calls, "", 0, 0, 0, ""],
+        ["call.blocking_fire", call_blocking_fire, "", 0, 0, 0, ""],
+        ["call.blocking_fire_calls", call_blocking_fire_calls, "", 0, 0, 0, ""],
         ["call.dump_test", call_dump_test, "", 0, 0, 0, ""],
         ["call.binary_data_test", call_binary_data_test, "", 0, 0, 0, ""],
         ["call.verbatim", call_verbatim, "", 0, 0, 0, ""],

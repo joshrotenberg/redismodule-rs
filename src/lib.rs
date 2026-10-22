@@ -5,6 +5,7 @@ pub use crate::context::InfoContext;
 #[doc(hidden)]
 pub mod __private {
     pub use crate::configuration::lifecycle::{ConfigurationLoad, ConfigurationUnload};
+    pub use crate::context::call_reply::__check_unload_pending_unblock_handlers;
     pub use crate::context::timer::{TimerLoadGuard, TimerUnloadGuard};
     pub use ::libc::EBUSY;
     pub use ::linkme;

@@ -5460,6 +5460,69 @@ fn test_call_blocking_with_auto_memory_disposes_before_return() -> Result<()> {
     feature = "min-redis-compatibility-version-7-4",
     feature = "min-redis-compatibility-version-7-2"
 ))]
+fn test_module_unload_waits_for_pending_unblock_handlers() -> Result<()> {
+    let mut con = TestConnection::new("call");
+
+    let res: String = redis::cmd("call.blocking_fire")
+        .arg("unload:pending")
+        .arg("handler")
+        .query(&mut con)?;
+    assert_eq!(res, "pending");
+
+    // Redis would call the handler, and read the module, after an unload.
+    let refused = redis::cmd("MODULE")
+        .arg(&["UNLOAD", "call"])
+        .query::<()>(&mut con);
+    assert!(
+        refused.is_err(),
+        "unload with a pending handler: {refused:?}"
+    );
+
+    // Once the push unblocks the call and its handler has run, unload works.
+    let _: i64 = redis::cmd("RPUSH")
+        .arg("unload:pending")
+        .arg("value")
+        .query(&mut con)?;
+    let calls: i64 = redis::cmd("call.blocking_fire_calls").query(&mut con)?;
+    assert_eq!(calls, 1);
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "call"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_module_unload_allows_blocking_calls_without_pending_handlers() -> Result<()> {
+    for (mode, reply) in [("none", "no handler"), ("abort", "aborted")] {
+        let mut con = TestConnection::new("call");
+        let res: String = redis::cmd("call.blocking_fire")
+            .arg("unload:released")
+            .arg(mode)
+            .query(&mut con)?;
+        assert_eq!(res, reply, "{mode}");
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "call"])
+            .query::<()>(&mut con)
+            .with_context(|| format!("unload after {mode}"))?;
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
 fn test_call_dump() -> Result<()> {
     let mut con = TestConnection::new("call");
 

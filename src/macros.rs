@@ -715,11 +715,22 @@ macro_rules! redis_module {
                             return $crate::Status::Err as c_int;
                         }
                     };
+                    // Redis calls a pending unblock handler, and reads this
+                    // module, when its call unblocks.
+                    if let Err(error) = $crate::__private::__check_unload_pending_unblock_handlers() {
+                        context.log_warning(&format!("{error}"));
+                        return $crate::Status::Err as c_int;
+                    }
                     $(
                         if $deinit_func(&context) == $crate::Status::Err {
                             return $crate::Status::Err as c_int;
                         }
                     )*
+                    // Deinit may have started blocking calls of its own.
+                    if let Err(error) = $crate::__private::__check_unload_pending_unblock_handlers() {
+                        context.log_warning(&format!("{error}"));
+                        return $crate::Status::Err as c_int;
+                    }
 
                     if let Err(error) = configuration_unload.commit() {
                         context.log_warning(&format!("{error}"));
