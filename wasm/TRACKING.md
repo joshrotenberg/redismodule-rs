@@ -220,6 +220,16 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-21: rebased onto SDK master `43fff6b`, which requires `Send`
+  configuration observer captures and adds client/worker delivery coverage.
+  No host adaptation needed. Rust 1.94.0 and Redis 8.10.2: workspace/guest
+  formatting, workspace Clippy, separate SDK 7.2 Clippy, example builds,
+  guest Clippy and strict SDK documentation passed. With
+  `RUST_TEST_THREADS=4`, the full suite passed: 63 SDK unit tests,
+  125 SDK integration tests, five standalone harness cases, seven host unit
+  tests, 21 host integration tests with JavaScript, 76 SDK doctests, and
+  four guest helper tests.
+
 - 2026-10-21: rebased onto SDK master `1915b2f`, which fixes module-name
   initialization with a correctly sized constant terminated buffer and rejects
   embedded NUL bytes at compile time. No host adaptation needed. Rust 1.94.0
