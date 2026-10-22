@@ -7,9 +7,9 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-21.
 
 | | where | state |
 |---|---|---|
-| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `c2566c9`, guard bounds and binary configuration storage merged after all PR checks passed |
+| SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `e94c0ff`, checked client blocking merged after all 19 PR checks passed |
 | wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
-| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `c2566c9` |
+| What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `e94c0ff` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
@@ -206,7 +206,11 @@ Guard thread bounds and binary storage merged in `c2566c9`: shared guards
 require `Send` values, binary configurations use owned `Vec<u8>` storage, and
 private call-user bookkeeping is thread-local. Native strings remain non-`Send`.
 No host adaptation needed. General native-handle storage remains separate.
-Core SDK work continues with blocked-client validation.
+Checked client blocking merged in `e94c0ff`: `block_client()` returns a result,
+both blocking helpers reject denied invocation contexts before native blocking,
+and direct handles are non-null. A focused Redis 6.0 CI regression covers its
+older context flags. No host adaptation needed. Core SDK work continues with
+call-option protocol selection.
 
 Also open:
 

@@ -220,6 +220,16 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-21: rebased onto SDK master `e94c0ff`, which makes direct client
+  blocking fallible and validates both blocking helpers before native calls.
+  No host adaptation needed. Rust 1.94.0 and Redis 8.10.2: workspace/guest
+  formatting, workspace Clippy, separate SDK 7.2 Clippy, example builds,
+  guest Clippy and strict SDK documentation passed. With
+  `RUST_TEST_THREADS=4`, the full suite passed: 63 SDK unit tests, 130 SDK
+  integration tests, five standalone harness cases, seven host unit tests,
+  21 host integration tests with JavaScript, 80 SDK doctests, and four guest
+  helper tests. New SDK work remains separate from this branch until merged.
+
 - 2026-10-21: rebased onto SDK master `c2566c9`, which fixes guard thread
   bounds, adds owned binary configuration storage and migrates private
   non-`Send` bookkeeping. No host adaptation needed. Rust 1.94.0 and Redis
