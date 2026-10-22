@@ -15,8 +15,8 @@ Redis refuses unload for modules that register native data types, even when
 there are no keys of those types. Deleting keys does not remove that restriction;
 use a planned server restart with compatible persistence readers instead.
 
-Other blockers include shared APIs in use by another module, blocked clients,
-and outstanding timers. These checks run before the module's unload hook.
+Other blockers include shared APIs in use by another module and blocked clients.
+Current Redis also checks outstanding timers before the module's unload hook.
 Finish or cancel that work through the module's normal controls first.
 An unload hook may also refuse by returning `Status::Err`.
 See [MODULE UNLOAD](https://redis.io/docs/latest/commands/module-unload/) and
@@ -26,6 +26,35 @@ Build and test the replacement against the intended server and SDK compatibility
 floor. Use distinct, versioned artifact paths, and retain the previous file.
 Do not overwrite a library file that a running process may still have mapped.
 On macOS the extension is normally `.dylib`; on Linux it is `.so`.
+
+## SDK timers and unload
+
+Retain typed `TimerHandle<T>` values for timers that may need to be cancelled
+before an upgrade. Dropping a handle does not stop its timer. Cancel pending
+timers explicitly while the module is active, and then request `MODULE UNLOAD`.
+`cancel_timer(&handle)` returns the payload once on success; `None` means firing
+has begun or the timer has already finished or been cancelled.
+
+Pending or firing SDK timers prevent unload. Modern Redis performs its native
+timer check before calling `OnUnload`, so cancelling only in `deinit` cannot
+clear that blocker. Redis 6.0 lacks that native check; the SDK's lifecycle
+guard refuses unload while its timers remain live. See the
+[Redis 8.10 timer guard](https://github.com/redis/redis/blob/8.10/src/module.c#L12940-L12957)
+and [Redis 6.0 unload path](https://github.com/redis/redis/blob/6.0/src/module.c#L7172-L7200).
+
+The `redis_module!` lifecycle rejects new timer registration while unload
+is in progress. This prevents a deinit hook from creating a callback after
+Redis's initial eligibility check. If unload is
+refused or the deinit hook panics, the SDK timer lifecycle becomes active again;
+application state changed by the hook still needs its own recovery.
+
+Timer creation also returns an error during module loading or initialization.
+Redis can reject a module after its `OnLoad` hook succeeds, so the SDK does not
+retain native timer callbacks during initialization. Start timers from runtime
+commands or events after loading finishes. Creation requires the lifecycle
+binding supplied by `redis_module!`; custom native loaders without that binding
+cannot create SDK timers. Hidden macro hooks are not a stable custom-loader
+interface.
 
 ## Record configuration and pause module traffic
 
@@ -116,7 +145,9 @@ shows the stopping gate for a module with no workers or timers.
 Treat failed initialization separately: clean up application-owned work started
 by `init` before returning `Status::Err`. Do not depend on `deinit` being called
 after an `OnLoad` failure. Use local ownership for fallible setup and publish
-long-lived state only after it succeeds. See
+long-lived state only after it succeeds. SDK timer creation is rejected during
+initialization; application-owned threads, native handles and external callbacks
+still need their own cleanup. See
 [Redis's load-failure cleanup](https://github.com/redis/redis/blob/8.2/src/module.c#L11786-L11800).
 
 ## Exercise the sequence locally

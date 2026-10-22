@@ -99,8 +99,8 @@ jobs:
 
   legacy-blocking:
     # The full integration suite needs newer APIs. This focused regression
-    # exercises direct blocking where GetContextFlags lacks DENY_BLOCKING.
-    name: Checked client blocking (Redis 6.0.20)
+    # exercises blocking and SDK timer unload protection on the oldest runtime.
+    name: Blocking and timer lifecycle (Redis 6.0.20)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -133,6 +133,25 @@ jobs:
           cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-blocking-tests.txt"
           grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-blocking-tests.txt"
           cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact
+
+      - name: Test typed timer lifecycle
+        env:
+          TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
+          RUST_TEST_THREADS: "4"
+        run: |
+          cargo build --example timer --no-default-features --features min-redis-compatibility-version-6-0
+          for test_name in \
+            test_typed_timer_cancellation_recovers_data_and_drops_captures_once \
+            test_typed_timer_cancellation_destructor_panic_finishes_ownership \
+            test_typed_timer_firing_passive_drop_panic_and_reentry \
+            test_typed_timer_pending_unload_refusal_and_reload \
+            test_typed_timer_init_rejects_creation_and_releases_owned_values \
+            test_typed_timer_unload_phase_rejects_creation_and_restores_after_refusal
+          do
+            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-timer-tests.txt"
+            grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-timer-tests.txt"
+            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact
+          done
 
       - name: Upload failure logs
         if: failure()
