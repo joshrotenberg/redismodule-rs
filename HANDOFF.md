@@ -73,28 +73,35 @@ are the live backlog. Do not duplicate completed survey items or infer that an
 old local branch or historical TODO is active work. There is no outstanding
 implementation patch carried only in the working tree at this checkpoint.
 
-| Priority | Issue | Status / next step |
+| Issue priority | Issue | Status / next step |
 |---|---|---|
 | 1 | [85: blocking-call capture ownership](https://github.com/joshrotenberg/redismodule-rs/issues/85) | Source-inspection candidate only; no defect established. Build compiler controls and trace native promise/callback ownership before choosing a fix. No implementation started. |
-| 1 | [51: retained native-handle storage](https://github.com/joshrotenberg/redismodule-rs/issues/51) | Design parked; no public shape or blanket `Send` wrapper approved. Keep separate from focused lifetime fixes. |
-| 1 | [52: timer cancellation on drop](https://github.com/joshrotenberg/redismodule-rs/issues/52) | Design parked; passive handles and explicit cancellation remain the contract. |
-| 1 | [53: timer payload inspection](https://github.com/joshrotenberg/redismodule-rs/issues/53) | Design parked; preserve metadata-only queries and keep separate from cancellation on drop. |
-| 1 | [54: external-runtime context access](https://github.com/joshrotenberg/redismodule-rs/issues/54) | Design audit; no persistent public context or new host-access API approved. |
-| 1 | [55: streaming replies](https://github.com/joshrotenberg/redismodule-rs/issues/55) | Measure a concrete cost and settle reply capability/partial-output behavior before implementation. |
-| 1 | [56: command-builder metadata](https://github.com/joshrotenberg/redismodule-rs/issues/56) | Discuss one bounded arity/help addition; no full module builder approved. |
-| 1 | [59: compatibility-floor composition](https://github.com/joshrotenberg/redismodule-rs/issues/59) | Current exactly-one-floor contract, diagnostics and workspace recipe are complete; redesign remains parked. |
-| 1 | [60: server configuration reads](https://github.com/joshrotenberg/redismodule-rs/issues/60) | Ownership, availability and native-versus-call fallback proposal needed. |
-| 1 | [61: INFO shared-state capability](https://github.com/joshrotenberg/redismodule-rs/issues/61) | Current-contract audit/atomic example complete; capability design parked. `InfoContext` remains output-only with no lock proof. |
+| 1 | [88: git pre-release](https://github.com/joshrotenberg/redismodule-rs/issues/88) | Choose tag/version policy and obtain explicit release authorization before tagging. No tag, release or publication is authorized by this handoff. |
+| 1 | [89: downstream module port](https://github.com/joshrotenberg/redismodule-rs/issues/89) | Pin revisions and agree on the port repository/branch first; no PR to the other organization without its owner's agreement. Record migration-guide corrections, behavior differences, unsafe workarounds and harness needs. |
+| 1 | [63: original/new paired module examples](https://github.com/joshrotenberg/redismodule-rs/issues/63) | Choose the example and location, using the downstream port as input; provide shared behavior tests and an annotated comparison. |
 | 1 | [62: loaded-keys-in-RAM option](https://github.com/joshrotenberg/redismodule-rs/issues/62) | Explicit adoption and target-server support decision required. |
-| 2 | [63: original/new paired module examples](https://github.com/joshrotenberg/redismodule-rs/issues/63) | Choose one realistic module and repository/docs location, then shared behavior tests and an annotated comparison. |
-| 2 | [65: downstream test support](https://github.com/joshrotenberg/redismodule-rs/issues/65) | Decide ownership/support contract; no new crate or server-wrapper dependency selected. |
-| 3 | [68: wasm allocator/accounting policy](https://github.com/joshrotenberg/redismodule-rs/issues/68) | Reproduce allocation/RSS/Redis-accounting observations before selecting a policy. |
-| 3 | [86: module-versus-core comparison](https://github.com/joshrotenberg/redismodule-rs/issues/86) | Refresh earlier exploratory work with pinned revisions and equivalent probes. Historical notes are not a current benchmark or architecture decision. |
+| 2 | [51: retained native-handle storage](https://github.com/joshrotenberg/redismodule-rs/issues/51) | Design parked; no public shape or blanket `Send` wrapper approved. Keep separate from focused lifetime fixes. |
+| 2 | [60: server configuration reads](https://github.com/joshrotenberg/redismodule-rs/issues/60) | Ownership, availability and native-versus-call fallback proposal needed. |
+| 2 | [90: safe-wrapper coverage](https://github.com/joshrotenberg/redismodule-rs/issues/90) | Produce a checked, version-aware API inventory; rank concrete downstream needs before proposing wrappers. Missing coverage alone does not justify adding an API. |
+| 3 | [54: external-runtime context access](https://github.com/joshrotenberg/redismodule-rs/issues/54) | Design audit; no persistent public context or new host-access API approved. |
+| 3 | [55: streaming replies](https://github.com/joshrotenberg/redismodule-rs/issues/55) | Measure a concrete cost and settle reply capability/partial-output behavior before implementation. |
+| 3 | [68: wasm allocator/accounting](https://github.com/joshrotenberg/redismodule-rs/issues/68) | Reproduce observations before choosing policy; distinguish compiler peaks, lasting heap, guest memory and Redis accounting. |
+| 3 | [86: sidecar versus Redis core](https://github.com/joshrotenberg/redismodule-rs/issues/86) | Historical exploratory comparison needs a fresh, version-pinned capability matrix and equivalent bounded workloads. No fresh measurements or architecture decision. |
 
-When a decision is missing, record it, park that item and move to independent
-work in priority order. Do not repeatedly ask the same unanswered question or
-implement an unagreed API. The paired-example sprint and wasm comparison remain
-separate from core SDK safety fixes.
+Issue priorities reflect the latest backlog triage; the overall track order remains
+core SDK, examples/documentation, then wasm. Closed design decisions from the
+2026-10-22 review are also part of the handoff:
+
+- [52](https://github.com/joshrotenberg/redismodule-rs/issues/52): keep passive timer handles and explicit cancellation; no cancellation-on-drop owner planned.
+- [53](https://github.com/joshrotenberg/redismodule-rs/issues/53): keep payload inspection in caller-owned state and `timer_remaining` metadata-only.
+- [56](https://github.com/joshrotenberg/redismodule-rs/issues/56): keep the small command builder; use `#[command]` for richer metadata.
+- [59](https://github.com/joshrotenberg/redismodule-rs/issues/59): retain exactly one compatibility floor; the guide and compile controls satisfy the issue.
+- [61](https://github.com/joshrotenberg/redismodule-rs/issues/61): keep INFO output-only with atomics or other `Sync` state; the audit and guide are complete.
+- [65](https://github.com/joshrotenberg/redismodule-rs/issues/65): downstream harness assessment is folded into issue 89; no new crate selected.
+
+Reopen closed designs only with a concrete consumer; do not treat their closure
+as an implementation of the previously proposed API. Park undecided work and
+continue independent actionable items rather than blocking the whole workflow.
 
 ## Working agreement
 
