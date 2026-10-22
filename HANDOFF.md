@@ -3,16 +3,23 @@
 How to pick up work on this fork: the `redis-module` SDK on `master`, and the
 wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 
-## What is where
+## What is where (baseline before the INFO guide)
 
 | | where | state |
 |---|---|---|
 | SDK, 3.0.0 (unpublished) | `master` of [joshrotenberg/redismodule-rs](https://github.com/joshrotenberg/redismodule-rs) | `3b2b845`, early compatibility-floor validation and workspace guide merged after independent review and all 20 PR checks passed |
-| wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus the wasm commits; no PR, kept as a branch |
+| wasm host, crate `redis-module-wasm` | `wasm/` on branch `experiment/wasm-host` | `master` plus wasm commits; experiment changes target this branch, not SDK master |
 | What the fork changes from upstream | [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) | current through `3b2b845` |
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
+
+Latest SDK checkpoint: `084cd23` includes the INFO handler guide from
+`a14b71b` and its release-note indexes. Both SDK PRs received independent native
+review and all 20 exact-head checks passed before merge. CHANGES-FROM-UPSTREAM
+and the migration guide include this work. The layout table retains the shared
+baseline while experiment CI proposal PR 79 awaits approval; its source is not
+included on this branch. The INFO guide checkpoint below has validation details.
 
 The fork branches from upstream master at `a808377`. Upstream has two commits
 since: `cca5360` (the `ServerInfo::field` leak fix; the fork has its own fix) and
@@ -296,6 +303,14 @@ package builds can use different floors; a combined build must agree on one.
 Issue 59 stays open for the parked feature-design decision. No host adaptation
 needed; the existing alternate-floor host exclusion remains required.
 
+The [INFO handler guide](docs/INFO-HANDLERS.md) merged in `a14b71b`, with
+release-note indexes in `084cd23`. It documents the existing output-only view,
+callback lifetime and native crash/thread paths across Redis 6.0 through 8.10.
+An atomic telemetry example and native test cover ordinary INFO and nested
+`GetServerInfo`; compile controls reject lock-proof or runtime promotion. This
+adds no context capability and makes no async-signal-safety promise. Issue 61
+stays open for the parked API design. The host requires no adaptation.
+
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).
 The [priority 2 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A2+sort%3Acreated-asc)
@@ -381,6 +396,11 @@ git rebase fork/master
 # adapt wasm/ to any SDK change, run the gates, update wasm/TRACKING.md
 git push --force-with-lease fork experiment/wasm-host
 ```
+
+While an experiment PR awaits review, preserve its base ancestry by merging
+merged SDK changes instead of rebasing the experiment branch. The INFO guide
+sync uses this approach to keep PR 79's reviewed diff intact. That PR remains
+unmerged; do not include its proposed workflow in an SDK sync.
 
 Refer to the branch's commits by subject in notes, since a rebase changes
 their hashes.

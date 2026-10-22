@@ -60,6 +60,27 @@ Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 `wit-bindgen` 0.44.
 
+### Latest SDK sync
+
+- 2026-10-22: synced merged SDK master `084cd23`, including INFO callback
+  state-access guidance (`a14b71b`) and its release-note indexes. Both SDK PRs
+  received independent native review and all 20 exact-head CI checks passed;
+  both squash trees match their reviewed heads. INFO remains output-only,
+  without a lock proof; the ordinary atomic snapshot and nested `GetServerInfo`
+  regression pass. Issue 61's capability API decision remains parked.
+  This sync preserves the prior experiment ancestry with SDK merges while
+  PR 79 awaits approval. The proposed wasm CI workflow is not included, and
+  the host and guest sources are unchanged. PR 79's three-dot diff and reviewed
+  head remain intact; no approval or merge is implied by this sync.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy, strict default workspace and host-excluded 7.2 docs pass.
+  Guest formatting/wasm32 linting pass. Tests pass: 69 SDK units, 155 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 9 macro parser tests,
+  7 host units, 21 host integrations including JavaScript, 87 SDK doctests and
+  4 guest helper tests. The focused snapshot also passed on Redis 6.0.20 and
+  7.0.15; all 87 SDK doctests passed with Rust 1.87 before syncing. These
+  ordinary-callback tests do not certify crash-report or signal safety.
+
 ### Numbers
 
 `wasm/bench/run.sh` (see `wasm/bench/README.md`), two runs, Apple M4 Pro,
@@ -218,7 +239,7 @@ evidence as the host meets them.
 
 | ID | question |
 |---|---|
-| Q1 | Where the crate lives so others can use it. Answered: the fork's `experiment/wasm-host` branch, kept rebased on master. |
+| Q1 | Where the crate lives so others can use it. Answered: the fork's `experiment/wasm-host` branch, kept in sync with master. |
 
 ## Log
 
