@@ -254,3 +254,11 @@ workspace `Cargo.toml`); unoptimized, loading the JavaScript component took
 [TRACKING.md](TRACKING.md) has every open item, with IDs and what done means. The main ones:
 
 - Choosing whether wasmtime's heap counts in `used_memory` (H13).
+
+
+## Continuous integration
+
+[The branch CI guide](CI.md) maps pinned host/guest inputs to checks, caches,
+timeouts and retained diagnostics. JavaScript tests are mandatory in CI via
+`WASM_TEST_REQUIRE_JS=1`; ordinary local test runs can skip them without Node.
+The experiment workflow runs on pushes and PRs to `experiment/wasm-host`.

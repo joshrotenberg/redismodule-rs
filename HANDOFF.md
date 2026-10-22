@@ -19,9 +19,9 @@ Open key/context lifetimes (`01b37b5`), server INFO snapshot lifetimes (`d0bba7d
 and earlier INFO guidance (`a14b71b`, `084cd23`) are included. Each SDK change
 received independent native review and all 20 latest exact-head CI checks passed
 before merge. CHANGES-FROM-UPSTREAM and the migration guide cover the relevant
-changes. The layout table retains the shared baseline while experiment CI
-proposal PR 79 awaits approval; its source is not included on this branch.
-The checkpoints below have validation details.
+changes. The layout table retains the earlier shared baseline. Branch-scoped
+wasm CI validates the current SDK integration and required Rust/JavaScript guests;
+the checkpoints below have validation details.
 
 The fork branches from upstream master at `a808377`. Upstream has two commits
 since: `cca5360` (the `ServerInfo::field` leak fix; the fork has its own fix) and
@@ -363,8 +363,12 @@ State (wasm/TRACKING.md has each item and the log):
 - Open: H13, the footprint: the compiler's temporary allocations count in
   `used_memory` with Redis's allocator (peak 1.05 GB loading the JavaScript
   library) and not with the system allocator. Which allocator to use is an
-  open decision. H14, CI: nothing runs on this branch, since CI runs on master
-  pushes and PRs only.
+  open decision.
+- H14 has a [branch-scoped CI workflow](wasm/CI.md): one Ubuntu job pins Rust,
+  Node, Redis and Rust/JavaScript dependency inputs. JavaScript coverage is
+  required. SDK master keeps its own server matrix; the experiment checks the
+  default workspace and a host-excluded SDK 7.2 build. SDK syncs must review
+  lock snapshot changes and run the experiment workflow.
 - Module API gaps G1 to G8 are recorded with what each costs the host.
 - Run: the whole suite on macOS with Redis 8.10.2 and on Linux arm64 with
   8.0.2 (JavaScript tests skipped on that Linux run without Node); a smoke
@@ -425,9 +429,9 @@ git push --force-with-lease fork experiment/wasm-host
 ```
 
 While an experiment PR awaits review, preserve its base ancestry by merging
-merged SDK changes instead of rebasing the experiment branch. Recent SDK
-syncs use this approach to keep PR 79's reviewed diff intact. That PR remains
-unmerged; do not include its proposed workflow in an SDK sync.
+merged SDK changes instead of rebasing the experiment branch. Keep proposed
+experiment changes on their PR branch until merged. Review lock snapshot drift
+and confirm the experiment push CI succeeds after every SDK sync.
 
 Refer to the branch's commits by subject in notes, since a rebase changes
 their hashes.
