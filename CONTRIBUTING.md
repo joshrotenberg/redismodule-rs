@@ -104,13 +104,21 @@ rerun `check.sh`. Record the sync in
 ## Tracking upstream
 
 The [upstream watch workflow](.github/workflows/upstream-watch.yml) runs
-weekly. It compares upstream `master` with the last reviewed commit in
-`.github/upstream.json` and keeps one open issue, labelled `upstream`, that
-lists new upstream commits and open upstream pull requests updated since that
-review. Reviewing it is ordinary backlog work: assess each item against the
-fork, record relevant ones in CHANGES-FROM-UPSTREAM.md and file issues for work
-to port, then set `reviewed` and `reviewed_at` in the same pull request. The
-next run closes the issue when nothing new remains. To run it now, use
+weekly. It compares upstream `master` with the review recorded in
+`.github/upstream.json` and keeps the issue titled "Review upstream changes"
+listing new upstream commits and open upstream pull requests updated since
+that review. Its links to upstream pull requests go through
+`redirect.github.com`, which adds no backlink to upstream; link upstream items
+the same way, or name them as "upstream PR N", anywhere else in this
+repository's issues and pull requests.
+
+Reviewing it is ordinary backlog work: assess each item against the fork,
+record relevant ones in CHANGES-FROM-UPSTREAM.md and file issues for work to
+port. In the same pull request set `reviewed` to the upstream `master` commit
+you reviewed and `reviewed_at` to the UTC time you checked the open pull
+requests, as `YYYY-MM-DDTHH:MM:SSZ`; pull requests updated after that time are
+listed again. The pull request's preview job should then print "Would close
+issue N", and the merge closes it. To run the report now, use
 `gh workflow run upstream-watch.yml`; to preview it locally, run
 `python3 .github/scripts/upstream-watch.py --repo joshrotenberg/redismodule-rs --dry-run`.
 

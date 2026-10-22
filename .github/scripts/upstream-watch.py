@@ -14,11 +14,15 @@ RECORD = Path(__file__).resolve().parents[1] / "upstream.json"
 LABEL = "upstream"
 TITLE = "Review upstream changes"
 LABELS = [LABEL, "area:sdk", "priority:2"]
+# Rows per table; the rest are linked through the compare view or counted.
+MAX_ROWS = 100
+TIMESTAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
 
 def gh(*args, stdin=None):
+    # gh's stderr reaches the job log, so a failed call says why.
     return subprocess.run(
-        ["gh", *args], check=True, capture_output=True, text=True, input=stdin
+        ["gh", *args], check=True, stdout=subprocess.PIPE, text=True, input=stdin
     ).stdout
 
 
@@ -31,22 +35,27 @@ def pages(path):
     return [item for page in json.loads(gh("api", "--paginate", "--slurp", path)) for item in page]
 
 
-def plain(text):
-    """Keep upstream references from linking to this repository's items or pinging users."""
-    text = re.sub(r"\(#(\d+)\)", r"(upstream PR \1)", text)
-    text = re.sub(r"(?<![\w/])#(\d+)", r"upstream \1", text)
-    return text.replace("@", "@​").replace("|", "\\|")
+def cell(text):
+    """Render untrusted upstream text as an inline code span in a table cell.
+
+    Code spans are not autolinked or rendered, so upstream titles cannot
+    reference other repositories' items, mention users or add markup.
+    """
+    text = " ".join(text.split()) or "(empty)"
+    fence = "`" * (max(map(len, re.findall(r"`+", text)), default=0) + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{pad}{text}{pad}{fence}".replace("|", "\\|")
 
 
 def changes(record, reviewed, reviewed_at):
     upstream, branch = record["repository"], record["branch"]
     compare = api(f"repos/{upstream}/compare/{reviewed}...{branch}")
     commits = [
-        (c["sha"], c["commit"]["committer"]["date"], c["commit"]["message"].splitlines()[0])
+        (c["sha"], c["commit"]["committer"]["date"], (c["commit"]["message"].splitlines() or [""])[0])
         for c in compare["commits"]
     ]
     pulls = [
-        (p["number"], p["updated_at"], p["title"], p["html_url"])
+        (p["number"], p["updated_at"], p["title"])
         for p in pages(f"repos/{upstream}/pulls?state=open&sort=updated&direction=desc&per_page=100")
         if p["updated_at"] > reviewed_at
     ]
@@ -54,37 +63,45 @@ def changes(record, reviewed, reviewed_at):
 
 
 def body(record, reviewed, reviewed_at, compare, commits, pulls):
-    upstream = record["repository"]
+    upstream, branch = record["repository"], record["branch"]
     base = f"https://github.com/{upstream}"
+    # Links through redirect.github.com add no backlink to upstream timelines.
+    redirect = f"https://redirect.github.com/{upstream}"
+    total = compare["total_commits"]
     lines = [
         f"Upstream [{upstream}]({base}) changed since the last review at "
-        f"[`{reviewed[:7]}`]({base}/commit/{reviewed}) ({reviewed_at[:10]}).",
+        f"[`{reviewed[:7]}`]({base}/commit/{reviewed}) ({reviewed_at}).",
         "",
         "Assess each item against this fork. Record relevant ones in CHANGES-FROM-UPSTREAM.md "
         "and file issues for work to port, then set `reviewed` and `reviewed_at` in "
-        "`.github/upstream.json` in the same pull request. The next weekly run closes this "
-        "issue when nothing new remains.",
+        "`.github/upstream.json` in the same pull request; see CONTRIBUTING.md. This issue "
+        "closes when that change reaches `master` and nothing new remains.",
     ]
     if compare["behind_by"]:
         lines += [
             "",
-            f"The reviewed commit is {compare['behind_by']} commit(s) off upstream "
-            f"`{record['branch']}`: upstream history was rewritten. Review the branch afresh.",
+            f"The reviewed commit is {compare['behind_by']} commit(s) off upstream `{branch}`: "
+            "upstream history was rewritten. Review the branch afresh.",
         ]
-    if commits:
-        lines += ["", f"### Commits on `{record['branch']}` ({len(commits)})", "",
+    if total:
+        lines += ["", f"### Commits on `{branch}` ({total})", "",
                   "| commit | date | subject |", "|---|---|---|"]
         lines += [
-            f"| [`{sha[:7]}`]({base}/commit/{sha}) | {date[:10]} | {plain(subject)} |"
-            for sha, date, subject in commits
+            f"| [`{sha[:7]}`]({base}/commit/{sha}) | {date[:10]} | {cell(subject)} |"
+            for sha, date, subject in commits[:MAX_ROWS]
         ]
+        if total > min(len(commits), MAX_ROWS):
+            lines += ["", f"The oldest {min(len(commits), MAX_ROWS)} are shown; see "
+                      f"[the full comparison]({base}/compare/{reviewed}...{branch})."]
     if pulls:
         lines += ["", f"### Open pull requests updated since the review ({len(pulls)})", "",
                   "| pull request | updated | title |", "|---|---|---|"]
         lines += [
-            f"| [upstream PR {number}]({url}) | {updated[:10]} | {plain(title)} |"
-            for number, updated, title, url in pulls
+            f"| [upstream PR {number}]({redirect}/pull/{number}) | {updated[:10]} | {cell(title)} |"
+            for number, updated, title in pulls[:MAX_ROWS]
         ]
+        if len(pulls) > MAX_ROWS:
+            lines += ["", f"The {MAX_ROWS} most recently updated are shown."]
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines += ["", f"_Generated by the upstream watch workflow on {generated}._", ""]
     return "\n".join(lines)
@@ -104,14 +121,17 @@ def main():
     record = json.loads(RECORD.read_text())
     reviewed = args.reviewed or record["reviewed"]
     reviewed_at = args.reviewed_at or record["reviewed_at"]
+    # Compared as strings with GitHub's updated_at, which uses this UTC form.
+    if not TIMESTAMP.fullmatch(reviewed_at):
+        sys.exit(f"reviewed_at must be a UTC time like 2026-10-22T20:45:00Z, not {reviewed_at!r}")
     compare, commits, pulls = changes(record, reviewed, reviewed_at)
     open_issues = json.loads(gh("issue", "list", "--repo", args.repo, "--label", LABEL,
                                 "--state", "open", "--json", "number,title"))
     existing = next((i["number"] for i in open_issues if i["title"] == TITLE), None)
-    print(f"{len(commits)} commit(s), {len(pulls)} pull request(s) since {reviewed[:7]} "
-          f"({reviewed_at}); open issue: {existing or 'none'}")
+    print(f"{compare['total_commits']} commit(s), {len(pulls)} pull request(s) since "
+          f"{reviewed[:7]} ({reviewed_at}); open issue: {existing or 'none'}")
 
-    if not commits and not pulls and not compare["behind_by"]:
+    if not compare["total_commits"] and not pulls and not compare["behind_by"]:
         if existing is None:
             print("Up to date; nothing to do.")
         elif args.dry_run:
@@ -130,11 +150,6 @@ def main():
         gh("issue", "edit", str(existing), "--repo", args.repo, "--body-file", "-", stdin=text)
         print(f"Updated issue {existing}.")
     else:
-        try:
-            gh("label", "create", LABEL, "--repo", args.repo, "--color", "c5def5",
-               "--description", "Upstream changes to review")
-        except subprocess.CalledProcessError:
-            pass  # The label exists.
         url = gh("issue", "create", "--repo", args.repo, "--title", TITLE,
                  *[flag for label in LABELS for flag in ("--label", label)],
                  "--body-file", "-", stdin=text)

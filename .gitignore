@@ -25,4 +25,6 @@ venv/
 
 # Git worktrees
 .worktrees/
+
+# Python bytecode
 __pycache__/
