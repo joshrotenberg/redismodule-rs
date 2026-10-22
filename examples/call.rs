@@ -135,7 +135,7 @@ fn call_blocking(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     match res {
         PromiseCallReply::Resolved(r) => r.map_or_else(|e| Err(e.into()), |v| Ok((&v).into())),
         PromiseCallReply::Future(f) => {
-            let blocked_client = ctx.block_client();
+            let blocked_client = ctx.block_client()?;
             call_blocking_handle_future(ctx, f, blocked_client);
             Ok(RedisValue::NoReply)
         }
@@ -143,7 +143,7 @@ fn call_blocking(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
 }
 
 fn call_blocking_from_detach_ctx(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
-    let blocked_client = ctx.block_client();
+    let blocked_client = ctx.block_client()?;
     thread::spawn(move || {
         let ctx_guard = redis_module::MODULE_CONTEXT.lock();
         let res = ctx_guard.call_blocking(

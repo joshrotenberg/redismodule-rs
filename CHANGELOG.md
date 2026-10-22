@@ -119,6 +119,13 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Changed
 
+- **Breaking:** `Context::block_client` returns `Result<BlockedClient,
+  RedisError>`. It rejects denied invocations before native blocking, including
+  scripts, transactions, module calls without blocking permission, and
+  reply/timeout callback reentry. It shares validation with
+  `block_client_on_reply`, handles Redis 6.0's older flags, and stores only
+  non-null native handles. Examples check the result before starting workers.
+
 - **Breaking:** shared `RedisGILGuard<T>` storage now requires `T: Send`.
   Serialization cannot protect non-`Send` aliases outside the guard.
   `T: Sync` is not required. Migrate shared native string configurations to

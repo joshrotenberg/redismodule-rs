@@ -188,10 +188,6 @@ impl LaunchSpec {
                 "",
                 "--appendonly",
                 "no",
-                "--enable-debug-command",
-                "yes",
-                "--enable-module-command",
-                "local",
                 "--repl-diskless-sync-delay",
                 "0",
                 "--dir",
@@ -199,6 +195,17 @@ impl LaunchSpec {
             .arg(&self.directory)
             .args(["--dbfilename", "dump.rdb", "--logfile"])
             .arg(&self.log_file);
+        // Redis 6.0 predates these command-policy settings. Its focused
+        // blocking regression opts out; this does not enable the full suite
+        // on older servers with missing module APIs.
+        if std::env::var_os("TEST_REDIS_SERVER_LEGACY_OPTIONS").is_none() {
+            command.args([
+                "--enable-debug-command",
+                "yes",
+                "--enable-module-command",
+                "local",
+            ]);
+        }
         if let Some(primary) = self.replica_of {
             command
                 .args(["--replicaof", "127.0.0.1"])

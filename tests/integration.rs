@@ -2643,6 +2643,87 @@ fn test_block_client_on_reply() -> Result<()> {
     Ok(())
 }
 
+fn check_client_blocking_rejections(commands: &[(&str, &[&str])], calls: &[&str]) -> Result<()> {
+    let mut con = TestConnection::new("block");
+    for &(command, args) in commands {
+        let error = redis::cmd("EVAL")
+            .arg("return redis.pcall(ARGV[1], unpack(ARGV, 2))")
+            .arg(0)
+            .arg(command)
+            .arg(args)
+            .query::<Value>(&mut con)
+            .expect_err("client blocked inside a script");
+        assert!(error.to_string().contains("cannot block here"), "{error}");
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+        redis::cmd("MULTI").query::<()>(&mut con)?;
+        redis::cmd(command).arg(args).query::<()>(&mut con)?;
+        let error = redis::cmd("EXEC")
+            .query::<Value>(&mut con)
+            .expect_err("client blocked inside a transaction");
+        assert!(error.to_string().contains("cannot block here"), "{error}");
+        assert_eq!(
+            redis::cmd("ECHO")
+                .arg("aligned")
+                .query::<String>(&mut con)?,
+            "aligned"
+        );
+    }
+    for command in calls {
+        let error = redis::cmd(command)
+            .query::<Value>(&mut con)
+            .expect_err("nested call blocked without permission");
+        assert!(error.to_string().contains("cannot block here"), "{error}");
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    assert_eq!(redis::cmd("block.direct_blocks").query::<i64>(&mut con)?, 0);
+    assert_eq!(redis::cmd("block.live_values").query::<i64>(&mut con)?, 0);
+    assert_eq!(
+        redis::cmd("block.direct").query::<String>(&mut con)?,
+        "direct reply"
+    );
+    assert_eq!(redis::cmd("block.direct_blocks").query::<i64>(&mut con)?, 1);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+// This also runs against Redis 6.0 in CI to exercise its older context flags.
+#[test]
+fn test_direct_client_blocking_rejects_denied_invocations() -> Result<()> {
+    check_client_blocking_rejections(&[("block.direct", &[])], &["block.call_direct"])
+}
+
+#[test]
+fn test_callback_client_blocking_rejects_denied_invocations() -> Result<()> {
+    check_client_blocking_rejections(&[("block.reply", &["0", "ignored"])], &["block.call_reply"])
+}
+
+#[test]
+fn test_client_blocking_rejects_reply_and_timeout_reentry() -> Result<()> {
+    let mut con = TestConnection::new("block");
+    for command in ["block.reblock_reply", "block.reblock_timeout"] {
+        let errors: Vec<String> = redis::cmd(command).query(&mut con)?;
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.contains("reply or timeout callback")),
+            "{errors:?}"
+        );
+        utils::wait_until(
+            Duration::from_secs(5),
+            "late blocked-client payload cleanup",
+            || Ok(redis::cmd("block.live_values").query::<i64>(&mut con)? == 0),
+        )?;
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    assert_eq!(
+        redis::cmd("block.direct").query::<String>(&mut con)?,
+        "direct reply"
+    );
+    Ok(())
+}
+
 #[test]
 fn test_string() -> Result<()> {
     let mut con = TestConnection::new("string");

@@ -262,6 +262,13 @@ it cannot veto storage. See [parsed_configuration.rs](examples/parsed_configurat
 for registration, typed reads and observer usage. Cross-field validation and
 transactional side effects require a custom configuration implementation.
 
+## Blocking clients
+
+For worker replies, `Context::block_client()` returns a result. Check it before
+starting work, send the reply through the blocked client's `ThreadSafeContext`,
+and return `RedisValue::NoReply`. Scripts, transactions and other denied
+invocations fail before native blocking. See [block.rs](examples/block.rs).
+
 ## Server clock
 
 `redis_module::milliseconds()` reads the current Unix time in milliseconds
@@ -332,6 +339,13 @@ To reproduce a server leg locally:
 python3 .github/scripts/build-server.py redis-8.10.2 /tmp/sdk-server
 TEST_REDIS_SERVER_BIN=/tmp/sdk-server/redis-server cargo test
 ```
+
+CI also runs a focused direct-blocking regression on Redis 6.0.20, which lacks
+the newer context flag for denied blocking. This job sets
+`TEST_REDIS_SERVER_LEGACY_OPTIONS=1` to omit command-policy settings that old
+servers do not recognize. It runs only
+`test_direct_client_blocking_rejects_denied_invocations`; it does not establish
+that the full integration suite works with Redis 6.0.
 
 Use a separate destination for each server version. When updating a release,
 copy its SHA-256 from [redis/redis-hashes](https://github.com/redis/redis-hashes)

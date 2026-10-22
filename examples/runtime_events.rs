@@ -119,7 +119,7 @@ fn worker(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     if task.is_some() {
         return Err(RedisError::Str("ERR runtime worker already started"));
     }
-    let blocked = ctx.block_client();
+    let blocked = ctx.block_client()?;
     *task = Some(std::thread::spawn(move || {
         let thread_ctx = redis_module::ThreadSafeContext::new();
         let guard = thread_ctx.lock();
