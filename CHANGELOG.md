@@ -13,6 +13,10 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `FutureHandler`, the handle a blocking call's unblock handler returns, is
+  exported at the crate root, so modules can name a kept handle and its
+  `dispose` and `abort_and_dispose` documentation renders.
+
 - [INFO handler state-access guidance](docs/INFO-HANDLERS.md) documents the
   output-only context, native callback paths and crash-report limitations.
   A tested atomic-counter example supports ordinary INFO and nested native
@@ -264,8 +268,7 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
   runs it on the main thread, including handlers a module-owned worker
   installs. `abort_and_dispose` no longer frees a dangling pointer when it
   releases a zero-sized handler, and releases the reply before the handler.
-  `FutureHandler` is exported at the crate root, so a kept handle can be
-  named. See the
+  See the
   [unblock handler migration notes](docs/MIGRATING-3.0.md#blocking-call-unblock-handlers-own-their-captures).
 
 - `RedisKeyWritable::trim_stream_by_id` returns `Ok(0)` when a successful

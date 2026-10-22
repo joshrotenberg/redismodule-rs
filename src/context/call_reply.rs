@@ -975,6 +975,7 @@ impl<'ctx> FutureCallReply<'ctx> {
     ///     future.set_unblock_handler(move |_, _| drop(owned)).abort_and_dispose(ctx);
     /// }
     ///
+    /// // Only illustrates the bound: forgetting leaks the reply's reference.
     /// fn install_and_forget(future: FutureCallReply<'_>) {
     ///     let owned = String::from("kept by Redis");
     ///     std::mem::forget(future.set_unblock_handler(move |_, _| drop(owned)));

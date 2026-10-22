@@ -5379,21 +5379,23 @@ fn test_call_blocking_abort_after_unblock_keeps_handler_result() -> Result<()> {
         .query(&mut con)?;
     assert_eq!(res, "OK");
 
-    // The push unblocks the kept call, whose handler runs and consumes it.
+    // The push unblocks the kept call: its handler runs once, consumes the
+    // push, and drops its capture when it returns.
     let _: i64 = redis::cmd("RPUSH")
         .arg("abort:kept")
         .arg("value")
         .query(&mut con)?;
     let stats: Vec<i64> = redis::cmd("call.blocking_abort_stats").query(&mut con)?;
-    assert_eq!(stats, vec![0, 0, 1], "kept handler calls");
+    assert_eq!(stats, vec![0, 1, 1], "capture drops and kept handler calls");
     let len: i64 = redis::cmd("LLEN").arg("abort:kept").query(&mut con)?;
     assert_eq!(len, 0);
 
-    // A later abort fails, returns no handler to release and runs nothing.
+    // A later abort fails and releases nothing: releasing the handler again
+    // would drop the capture twice.
     let status: String = redis::cmd("call.blocking_abort_kept").query(&mut con)?;
     assert_eq!(status, "not aborted");
     let stats: Vec<i64> = redis::cmd("call.blocking_abort_stats").query(&mut con)?;
-    assert_eq!(stats, vec![0, 0, 1], "kept handler calls after the abort");
+    assert_eq!(stats, vec![0, 1, 1], "after the failed abort");
 
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
 

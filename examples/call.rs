@@ -1,10 +1,11 @@
 use redis_module::{
     BlockedClient, CallOptionResp, CallOptionsBuilder, CallReply, CallResult, Context,
-    EventContext, FutureCallReply, FutureHandler, PromiseCallReply, RedisError, RedisResult,
-    RedisString, RedisValue, Status, ThreadSafeContext, raw, redis_module,
+    FutureCallReply, PromiseCallReply, RedisError, RedisResult, RedisString, RedisValue, Status,
+    ThreadSafeContext, raw, redis_module,
 };
 
 use std::cell::RefCell;
+use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::thread;
 
@@ -166,7 +167,7 @@ fn call_blocking_from_detach_ctx(ctx: &Context, _: Vec<RedisString>) -> RedisRes
     Ok(RedisValue::NoReply)
 }
 
-// Unblock handlers that ran, and captures that were dropped, after an abort.
+// Unblock handlers that ran after an abort, and handler captures dropped.
 static ABORTED_HANDLER_CALLS: AtomicI64 = AtomicI64::new(0);
 static ABORTED_CAPTURE_DROPS: AtomicI64 = AtomicI64::new(0);
 
@@ -213,22 +214,22 @@ fn call_blocking_abort(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     })
 }
 
-// A function pointer handler, so a kept handle has a nameable type.
-type KeptHandler = fn(&EventContext, CallResult<'static>);
+// Aborts a kept handle; boxed because its handler type is a closure.
+type KeptAbort = Box<dyn FnOnce(&Context) -> Status>;
 
 static KEPT_HANDLER_CALLS: AtomicI64 = AtomicI64::new(0);
 
 thread_local! {
-    // Commands run on the main thread, where the handle must stay.
-    static KEPT_HANDLE: RefCell<Option<FutureHandler<KeptHandler>>> = const { RefCell::new(None) };
+    // Commands run on the main thread, where the handle must stay. A
+    // thread-local with a destructor can keep MODULE UNLOAD from unloading
+    // the module on glibc; ManuallyDrop leaves this one without one.
+    static KEPT_ABORT: ManuallyDrop<RefCell<Option<KeptAbort>>> =
+        const { ManuallyDrop::new(RefCell::new(None)) };
 }
 
-fn count_kept_call(_ctx: &EventContext, _reply: CallResult<'static>) {
-    KEPT_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
-}
-
-/// `call.blocking_keep <key>` starts `BLPOP <key> 0` and keeps its handle
-/// after the command returns, for `call.blocking_abort_kept`.
+/// `call.blocking_keep <key>` starts `BLPOP <key> 0`, installs a handler that
+/// owns a [DropCounter], and keeps its handle after the command returns, for
+/// `call.blocking_abort_kept`.
 fn call_blocking_keep(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let [_, key] = args.as_slice() else {
         return Err(RedisError::WrongArity);
@@ -238,9 +239,14 @@ fn call_blocking_keep(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         PromiseCallReply::Future(future) => future,
         PromiseCallReply::Resolved(_) => return Err(RedisError::Str("ERR the call did not block")),
     };
-    let handle = future.set_unblock_handler(count_kept_call as KeptHandler);
-    if let Some(previous) = KEPT_HANDLE.replace(Some(handle)) {
-        previous.dispose(ctx);
+    let capture = DropCounter(key.to_string());
+    let handle = future.set_unblock_handler(move |_ctx, _reply| {
+        let _owned = &capture.0;
+        KEPT_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
+    });
+    let abort: KeptAbort = Box::new(move |ctx| handle.abort_and_dispose(ctx));
+    if let Some(previous) = KEPT_ABORT.with(|kept| kept.replace(Some(abort))) {
+        previous(ctx);
     }
     Ok(RedisValue::SimpleStringStatic("OK"))
 }
@@ -248,10 +254,10 @@ fn call_blocking_keep(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 /// Aborts the handle `call.blocking_keep` kept, which fails once the call
 /// has unblocked and its handler has run.
 fn call_blocking_abort_kept(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
-    let handle = KEPT_HANDLE
-        .take()
+    let abort = KEPT_ABORT
+        .with(|kept| kept.take())
         .ok_or(RedisError::Str("ERR no kept handle"))?;
-    Ok(match handle.abort_and_dispose(ctx) {
+    Ok(match abort(ctx) {
         Status::Ok => RedisValue::SimpleStringStatic("aborted"),
         Status::Err => RedisValue::SimpleStringStatic("not aborted"),
     })

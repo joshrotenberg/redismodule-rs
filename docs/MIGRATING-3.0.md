@@ -180,9 +180,10 @@ let version: String = {
 `FutureCallReply::set_unblock_handler` now requires a `Send + 'static`
 handler. Redis keeps the handler until the blocked command unblocks or
 `FutureHandler::abort_and_dispose` cancels it by returning `Status::Ok`;
-`dispose`, dropping or forgetting the handle does not cancel it. The handler runs on the main thread
-after the installing invocation returns, also when a module-owned worker
-installed it. Move owned data into the handler instead of borrowing locals:
+`dispose`, dropping or forgetting the handle does not cancel it. The handler
+runs on the main thread after the installing invocation returns, also when a
+module-owned worker installed it. Move owned data into the handler instead of
+borrowing locals:
 
 ```rust,ignore
 let key = key_name.try_as_str()?.to_owned();
