@@ -126,6 +126,35 @@ result would produce a second reply. Worker errors must be sent through the
 blocked client's thread-safe context. Dropping the handle unblocks the client,
 but does not synthesize a reply. See [block.rs](../examples/block.rs).
 
+### Open keys stay inside their opening context scope
+
+All four `RuntimeContext::open_key*` methods now return handles borrowing the
+opening context. Close keys before returning from a callback or releasing its
+worker lock guard; `CloseKey` needs the live context even with AutoMemory off.
+`ScanKeyCursor` owns a key and keeps the same context borrow. DMA and stream
+views borrow a key and therefore also keep its opening context in scope.
+
+Code that stores these handles must carry the context lifetime explicitly:
+`RedisKey<'ctx>`, `RedisKeyWritable<'ctx>` and `ScanKeyCursor<'ctx>`. Function
+parameters can usually use `RedisKey<'_>` or `RedisKeyWritable<'_>`. Helpers
+returning keys must tie the result to their runtime input, for example:
+
+```rust
+use redis_module::{RuntimeContext, RedisString, key::RedisKey};
+
+fn open<'ctx>(ctx: &'ctx RuntimeContext, name: &RedisString) -> RedisKey<'ctx> {
+    ctx.open_key(name)
+}
+```
+
+To retain data after a worker unlocks, copy it to `Vec<u8>` or another Rust-owned
+value while locked. Closing a key early does not release the guard borrow of
+other keys or views still in use. Native `RedisString` results keep their
+existing thread and lock requirements; this change adds no storage API.
+Unsafe raw constructors cannot infer lifetimes from pointers: callers must
+still guarantee the opening context and Redis lock through the handle's drop.
+Raw parts transfer the close obligation and do not extend native validity.
+
 ### Server INFO snapshots stay inside the context scope
 
 `RuntimeContext::server_info` now borrows its producing context. Drop the

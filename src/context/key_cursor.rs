@@ -44,14 +44,25 @@ use crate::{RedisString, key::RedisKey, raw};
 /// 5) "location"
 /// 6) "Austin"
 /// ```
-pub struct ScanKeyCursor {
-    key: RedisKey,
+pub struct ScanKeyCursor<'ctx> {
+    key: RedisKey<'ctx>,
     inner_cursor: *mut raw::RedisModuleScanCursor,
 }
 
-impl ScanKeyCursor {
-    /// Creates a new scan cursor for the given key.
-    pub fn new(key: RedisKey) -> Self {
+impl<'ctx> ScanKeyCursor<'ctx> {
+    /// Creates a cursor owning the key and its borrow of the opening context.
+    ///
+    /// ```compile_fail,E0597
+    /// # use redis_module::{DetachedFromClient, RedisString, ScanKeyCursor, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let cursor = {
+    ///     let guard = owner.lock();
+    ///     ScanKeyCursor::new(guard.open_key(name))
+    /// };
+    /// drop(cursor);
+    /// # }
+    /// ```
+    pub fn new(key: RedisKey<'ctx>) -> Self {
         let inner_cursor = unsafe { crate::__required_api!(RedisModule_ScanCursorCreate)() };
         Self { key, inner_cursor }
     }
@@ -129,7 +140,7 @@ impl ScanKeyCursor {
     }
 }
 
-impl Drop for ScanKeyCursor {
+impl Drop for ScanKeyCursor<'_> {
     fn drop(&mut self) {
         unsafe { crate::__required_api!(RedisModule_ScanCursorDestroy)(self.inner_cursor) };
     }

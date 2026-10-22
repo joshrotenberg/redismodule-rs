@@ -779,33 +779,111 @@ impl RuntimeContext {
         R::from(res)
     }
 
+    /// Opens a read-only key within this runtime context's scope.
+    ///
+    /// Close it before leaving a callback or unlocking a worker. Copy any data
+    /// needed later into Rust storage while the context is still locked:
+    ///
+    /// ```
+    /// # use redis_module::{DetachedFromClient, RedisError, RedisString, ThreadSafeContext};
+    /// # fn read(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString)
+    /// #     -> Result<Option<Vec<u8>>, RedisError> {
+    /// let bytes = {
+    ///     let guard = owner.lock();
+    ///     let key = guard.open_key(name);
+    ///     key.read()?.map(<[u8]>::to_vec)
+    /// };
+    /// # Ok(bytes) }
+    /// ```
+    ///
+    /// A key cannot escape the opening guard, even if it names a missing key:
+    ///
+    /// ```compile_fail,E0597
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let key = { let guard = owner.lock(); guard.open_key(name) };
+    /// drop(key);
+    /// # }
+    /// ```
+    ///
+    /// ```compile_fail,E0505
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let guard = owner.lock();
+    /// let key = guard.open_key(name);
+    /// drop(guard);
+    /// drop(key);
+    /// # }
+    /// ```
     #[must_use]
-    pub fn open_key(&self, key: &RedisString) -> RedisKey {
+    pub fn open_key(&self, key: &RedisString) -> RedisKey<'_> {
         // SAFETY: RuntimeContext construction requires a valid context and lock, so
-        // self.ctx is valid and the lock is held now. The key's type does not
-        // tie it to the Context or the lock; callers must not keep it past
-        // them; borrowing native resources for their full lifetime is separate work.
+        // self.ctx is valid and the lock is held now. The returned key borrows
+        // self, so it must be closed before this context or guard is dropped.
         unsafe { RedisKey::open(self.ctx, key) }
     }
 
+    /// Opens a read-only key with flags, borrowing this context as in [`Self::open_key`].
+    ///
+    /// ```compile_fail,E0597
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext, key::KeyFlags};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let key = {
+    ///     let guard = owner.lock();
+    ///     guard.open_key_with_flags(name, KeyFlags::empty())
+    /// };
+    /// drop(key);
+    /// # }
+    /// ```
     #[must_use]
-    pub fn open_key_with_flags(&self, key: &RedisString, flags: KeyFlags) -> RedisKey {
+    pub fn open_key_with_flags(&self, key: &RedisString, flags: KeyFlags) -> RedisKey<'_> {
         // SAFETY: as for open_key.
         unsafe { RedisKey::open_with_flags(self.ctx, key, flags) }
     }
 
+    /// Opens a writable key, borrowing this context until the key is closed.
+    ///
+    /// ```compile_fail,E0597
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let key = { let guard = owner.lock(); guard.open_key_writable(name) };
+    /// drop(key);
+    /// # }
+    /// ```
+    ///
+    /// ```compile_fail,E0505
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let guard = owner.lock();
+    /// let key = guard.open_key_writable(name);
+    /// drop(guard);
+    /// drop(key);
+    /// # }
+    /// ```
     #[must_use]
-    pub fn open_key_writable(&self, key: &RedisString) -> RedisKeyWritable {
+    pub fn open_key_writable(&self, key: &RedisString) -> RedisKeyWritable<'_> {
         // SAFETY: as for open_key.
         unsafe { RedisKeyWritable::open(self.ctx, key) }
     }
 
+    /// Opens a writable key with flags, borrowing this context as in [`Self::open_key_writable`].
+    ///
+    /// ```compile_fail,E0597
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext, key::KeyFlags};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let key = {
+    ///     let guard = owner.lock();
+    ///     guard.open_key_writable_with_flags(name, KeyFlags::empty())
+    /// };
+    /// drop(key);
+    /// # }
+    /// ```
     #[must_use]
     pub fn open_key_writable_with_flags(
         &self,
         key: &RedisString,
         flags: KeyFlags,
-    ) -> RedisKeyWritable {
+    ) -> RedisKeyWritable<'_> {
         // SAFETY: as for open_key.
         unsafe { RedisKeyWritable::open_with_flags(self.ctx, key, flags) }
     }
