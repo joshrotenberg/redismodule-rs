@@ -746,6 +746,71 @@ fn test_command_builder_panics_are_caught() -> Result<()> {
 }
 
 #[test]
+fn test_call_protocol_resets_to_resp2_without_newer_format_flags() -> Result<()> {
+    let mut con = TestConnection::new("call_reply");
+    redis::cmd("HSET")
+        .arg(&["protocol:hash", "field", "value"])
+        .query::<()>(&mut con)?;
+    // Redis 6.0 rejects RESP3/Auto call flags. Resetting to RESP2 must remove
+    // them before the native call, so these also run against 6.0 unchanged.
+    for first in ["2", "3", "auto"] {
+        let actual: String = redis::cmd("call_reply.protocol")
+            .arg(&["protocol:hash", first, "2"])
+            .query(&mut con)?;
+        assert_eq!(actual, "array", "{first} -> 2");
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_call_protocol_selection_uses_the_last_setting() -> Result<()> {
+    use redis::ConnectionLike;
+
+    let mut con = TestConnection::new("call_reply");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    con.set_write_timeout(Some(Duration::from_secs(5)))?;
+    redis::cmd("HSET")
+        .arg(&["protocol:hash", "field", "value"])
+        .query::<()>(&mut con)?;
+
+    for client_resp3 in [false, true] {
+        if client_resp3 {
+            // redis-rs 0.23 cannot parse HELLO's RESP3 map. Suppress only the
+            // handshake replies; CLIENT REPLY ON returns the one +OK below.
+            let mut switch = Vec::new();
+            for args in [
+                &["CLIENT", "REPLY", "OFF"][..],
+                &["HELLO", "3"],
+                &["CLIENT", "REPLY", "ON"],
+            ] {
+                switch.extend(redis::cmd(args[0]).arg(&args[1..]).get_packed_command());
+            }
+            assert_eq!(con.req_packed_commands(&switch, 0, 1)?, [Value::Okay]);
+        }
+        let default: String = redis::cmd("call_reply.protocol")
+            .arg("protocol:hash")
+            .query(&mut con)?;
+        assert_eq!(default, "array", "the default is RESP2 for either client");
+        for first in ["2", "3", "auto"] {
+            for last in ["2", "3", "auto"] {
+                let actual: String = redis::cmd("call_reply.protocol")
+                    .arg(&["protocol:hash", first, last])
+                    .query(&mut con)?;
+                let expected = if last == "3" || (last == "auto" && client_resp3) {
+                    "map"
+                } else {
+                    "array"
+                };
+                assert_eq!(actual, expected, "{first} -> {last}, RESP3={client_resp3}");
+            }
+        }
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    Ok(())
+}
+
+#[test]
 fn test_call_error_codes_classify_native_and_synthesized_errors() -> Result<()> {
     let mut con = TestConnection::new("call_reply");
     redis::cmd("SET")

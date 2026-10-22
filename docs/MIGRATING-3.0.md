@@ -441,6 +441,14 @@ These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
 
+- **Repeated call protocol selections.** `CallOptionsBuilder::resp` now replaces
+  its previous protocol selection. For example, `.resp(Resp3).resp(Resp2)`
+  produces RESP2 call replies, and `.resp(Resp3).resp(Auto)` follows the client's
+  protocol. Previously, the stale RESP3 flag took precedence. RESP2 remains the
+  default and the method signatures are unchanged. This also applies to
+  `build_blocking`. RESP3 and Auto module-call formats require Redis 7.0 or
+  later; older Redis rejects those flags. Selecting RESP2 removes them even
+  when an earlier selection requested RESP3 or Auto.
 - **Keyspace subscription ownership.** Subscriptions require `EventContext`,
   also exposed by command and registration contexts. Redis removes the callback
   when its owning module unloads. A raw context obtained from

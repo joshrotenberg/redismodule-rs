@@ -72,10 +72,15 @@ pub struct BlockingCallOptions {
     options: CString,
 }
 
+/// The reply protocol selected by [`CallOptionsBuilder::resp`].
 #[derive(Copy, Clone)]
 pub enum CallOptionResp {
+    /// RESP2 replies, the default for module calls.
     Resp2,
+    /// RESP3 replies, such as a map for `HGETALL` (Redis 7.0 and later).
     Resp3,
+    /// Match the protocol of the client attached to the call's context
+    /// (Redis 7.0 and later).
     Auto,
 }
 
@@ -231,8 +236,21 @@ impl CallOptionsBuilder {
         self
     }
 
-    /// Allow control the protocol version in which the replies will be returned.
+    /// Selects the protocol of the command's call reply. The default is RESP2.
+    /// Each selection replaces the previous one, including when switching back
+    /// to RESP2. Auto follows the client attached to the call's context.
+    /// Redis before 7.0 rejects the RESP3 and Auto call flags; selecting RESP2
+    /// removes those flags even if an earlier selection requested them.
+    ///
+    /// ```
+    /// use redis_module::{CallOptionResp, CallOptionsBuilder};
+    /// let options = CallOptionsBuilder::new()
+    ///     .resp(CallOptionResp::Resp3)
+    ///     .resp(CallOptionResp::Resp2)
+    ///     .build(); // Uses RESP2, the last selection.
+    /// ```
     pub fn resp(mut self, resp: CallOptionResp) -> CallOptionsBuilder {
+        self.options.retain(|flag| flag != '0' && flag != '3');
         match resp {
             CallOptionResp::Auto => self.add_flag("0"),
             CallOptionResp::Resp2 => (),
@@ -2103,6 +2121,72 @@ mod resp_text_tests {
     fn simple_reply_text_keeps_non_ascii_and_replaces_line_breaks_and_nul() {
         let text = Context::str_as_legal_resp_string("caf\u{e9} \u{65e5}\u{672c}\r\n+OK\0end");
         assert_eq!(text.to_str(), Ok("caf\u{e9} \u{65e5}\u{672c}  +OK end"));
+    }
+}
+
+#[cfg(test)]
+mod call_protocol_tests {
+    use super::{CallOptionResp, CallOptionsBuilder};
+
+    #[test]
+    fn last_protocol_selection_wins() {
+        let modes = [
+            (CallOptionResp::Resp2, "v"),
+            (CallOptionResp::Resp3, "v3"),
+            (CallOptionResp::Auto, "v0"),
+        ];
+        assert_eq!(CallOptionsBuilder::new().build().options.to_str(), Ok("v"));
+        for (first, _) in modes {
+            for (second, _) in modes {
+                for (last, expected) in modes {
+                    let options = CallOptionsBuilder::new()
+                        .resp(first)
+                        .resp(second)
+                        .resp(last)
+                        .build();
+                    assert_eq!(options.options.to_str(), Ok(expected));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn protocol_changes_preserve_other_options() {
+        let options = CallOptionsBuilder::new()
+            .no_writes()
+            .resp(CallOptionResp::Resp3)
+            .script_mode()
+            .verify_acl()
+            .verify_oom()
+            .resp(CallOptionResp::Auto)
+            .errors_as_replies()
+            .replicate_to_replicas_only()
+            .dry_run()
+            .resp(CallOptionResp::Resp2)
+            .build();
+        assert_eq!(options.options.to_str(), Ok("vWSCME!AD"));
+    }
+
+    #[cfg(any(
+        feature = "min-redis-compatibility-version-8-0",
+        feature = "min-redis-compatibility-version-7-4",
+        feature = "min-redis-compatibility-version-7-2"
+    ))]
+    #[test]
+    fn blocking_options_keep_the_last_protocol_and_blocking_permission() {
+        for (last, expected) in [
+            (CallOptionResp::Resp2, "vEK"),
+            (CallOptionResp::Resp3, "vE3K"),
+            (CallOptionResp::Auto, "vE0K"),
+        ] {
+            let options = CallOptionsBuilder::new()
+                .resp(CallOptionResp::Resp3)
+                .resp(CallOptionResp::Auto)
+                .errors_as_replies()
+                .resp(last)
+                .build_blocking();
+            assert_eq!(options.options.to_str(), Ok(expected));
+        }
     }
 }
 

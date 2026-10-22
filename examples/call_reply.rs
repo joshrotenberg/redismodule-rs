@@ -26,6 +26,28 @@ fn error_code(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     })
 }
 
+/// `call_reply.protocol key [2|3|auto ...]`: report HGETALL's native reply
+/// kind after applying protocol selections in order. The label is a simple
+/// string so both RESP2 and RESP3 clients can read it.
+fn protocol(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let key = args.get(1).ok_or(RedisError::WrongArity)?;
+    let mut options = CallOptionsBuilder::new();
+    for selection in &args[2..] {
+        options = options.resp(match selection.try_as_str()? {
+            "2" => CallOptionResp::Resp2,
+            "3" => CallOptionResp::Resp3,
+            "auto" => CallOptionResp::Auto,
+            _ => return Err(RedisError::Str("ERR expected 2, 3 or auto")),
+        });
+    }
+    let reply: CallResult = ctx.call_ext("HGETALL", &options.build(), &[key]);
+    match reply.map_err(RedisError::from)? {
+        CallReply::Array(_) => Ok(RedisValue::SimpleStringStatic("array")),
+        CallReply::Map(_) => Ok(RedisValue::SimpleStringStatic("map")),
+        _ => Err(RedisError::Str("ERR unexpected HGETALL reply kind")),
+    }
+}
+
 fn get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     forward(ctx, args, "GET")
 }
@@ -113,6 +135,7 @@ redis_module! {
     commands: [
         ["call_reply.echo", echo, "readonly", 0, 0, 0, ""],
         ["call_reply.error_code", error_code, "", 0, 0, 0, ""],
+        ["call_reply.protocol", protocol, "readonly", 1, 1, 1, ""],
         ["call_reply.get", get, "readonly", 1, 1, 1, ""],
         ["call_reply.mget", mget, "readonly", 1, -1, 1, ""],
         ["call_reply.dump", dump, "readonly", 1, 1, 1, ""],
