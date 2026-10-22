@@ -75,6 +75,56 @@ has already loaded its settings before init. The
 [manual registration example](../examples/configuration_registration.rs)
 shows the sequence.
 
+## Registration ownership and unload
+
+For modules loaded through `redis_module!`, the SDK owns accepted
+configuration private data for that load. This includes captured observers
+and the string getter's final cached native reply. The storage passed by
+`&'static` reference remains caller-owned: cleanup does not destroy or reset
+the application's statics. Rejected registrations release their private data
+immediately.
+
+During loading, SDK getters and setters run only on the thread executing
+`OnLoad`. Access from other threads cannot invoke user configuration callbacks
+until loading finishes. Initialization must quiesce any background module work
+before it fails; ownership cleanup does not make native unloading safe while
+background module code still runs.
+
+The macro releases accepted private data after a caught registration, loading
+or init failure, and after a successful deinit. Configuration reads and writes
+remain available throughout deinit. If deinit refuses unload or panics, the SDK
+retains the registrations and their captures so the loaded module can continue
+using them. Cleanup closes callback access before destroying private data and
+releases cached native strings while holding the Redis lock. It catches a
+captured destructor's panic separately for each allocation and continues
+cleanup; after destruction begins, unload success cannot be reversed.
+
+Native `CONFIG` processing can retain registration pointers after a Rust
+getter, setter or observer returns, including across rollback and nested
+callbacks. The SDK therefore refuses unload while those native frames may
+still use a registration. Returning from an observer alone is not a safe
+point to unload its module. Request unload through normal module controls
+after the configuration operation and its deferred completion have finished.
+
+Where available, the SDK uses Redis's regular post-notification job mechanism
+(Redis 7.2+) to track completion of the enclosing execution unit. If that API
+is absent or rejects a job, a main-thread configuration invocation uses a
+timer completion barrier instead on Linux and macOS. Other platforms refuse
+unload when that completion signal is unavailable. A worker invocation cannot
+use that timer fallback safely: if its completion job is unavailable or rejected, the SDK
+refuses unload for the rest of that load generation, retaining the registration
+data. This conservative behavior also applies when an otherwise supported
+server rejects job submission. Join workers before ordinary unload, and do
+not assume that joining clears this generation's refusal. A server restart
+can be required to replace such a module.
+
+These ownership hooks are internal to `redis_module!`, including manual
+registrations made from its init hook. They are not a supported lifecycle API
+for custom native loaders. Without that binding, accepted registrations retain
+their previous allocation lifetime; rejected registrations are still released.
+The mechanism does not provide general native-handle storage or change the
+public thread bounds of `RedisString`.
+
 ## Defaults and load precedence
 
 The value used to construct Rust storage is an initial seed, not the

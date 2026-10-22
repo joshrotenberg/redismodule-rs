@@ -41,6 +41,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 mod parsed_string;
 pub use parsed_string::ParsedStringConfig;
 
+pub(crate) mod lifecycle;
 mod registration;
 use registration::PendingRegistration;
 
@@ -289,6 +290,9 @@ extern "C" fn i64_configuration_set<T: ConfigurationValue<i64> + 'static>(
     err: *mut *mut raw::RedisModuleString,
 ) -> c_int {
     crate::panic::run_config_set(err, || {
+        let Some(_callback) = lifecycle::CallbackGuard::enter() else {
+            return raw::REDISMODULE_ERR as c_int;
+        };
         let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<i64, T>) };
         private_data.set_val(name, val, err)
     })
@@ -301,6 +305,9 @@ extern "C" fn i64_configuration_get<T: ConfigurationValue<i64> + 'static>(
     crate::panic::run_callback(
         "configuration getter",
         || {
+            let Some(_callback) = lifecycle::CallbackGuard::enter() else {
+                return 0;
+            };
             let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<i64, T>) };
             private_data.get_val()
         },
@@ -459,6 +466,9 @@ extern "C" fn string_configuration_set<T: ConfigurationValue<RedisString> + 'sta
     err: *mut *mut raw::RedisModuleString,
 ) -> c_int {
     crate::panic::run_config_set(err, || {
+        let Some(_callback) = lifecycle::CallbackGuard::enter() else {
+            return raw::REDISMODULE_ERR as c_int;
+        };
         let new_val = unsafe {
             RedisString::retain_from_ptr(
                 std::ptr::NonNull::new(val).expect("non-null configuration input"),
@@ -486,6 +496,9 @@ extern "C" fn string_configuration_get<T: ConfigurationValue<RedisString> + 'sta
     crate::panic::run_callback(
         "configuration getter",
         || {
+            let Some(_callback) = lifecycle::CallbackGuard::enter() else {
+                return std::ptr::null_mut();
+            };
             let private_data = unsafe { &*(privdata as *const StringConfigurationPrivateData<T>) };
             // we know the GIL is held so it is safe to use Context::dummy().
             let reply = private_data.data.get_val();
@@ -562,6 +575,9 @@ extern "C" fn bool_configuration_set<T: ConfigurationValue<bool> + 'static>(
     err: *mut *mut raw::RedisModuleString,
 ) -> c_int {
     crate::panic::run_config_set(err, || {
+        let Some(_callback) = lifecycle::CallbackGuard::enter() else {
+            return raw::REDISMODULE_ERR as c_int;
+        };
         let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<bool, T>) };
         private_data.set_val(name, val != 0, err)
     })
@@ -574,6 +590,9 @@ extern "C" fn bool_configuration_get<T: ConfigurationValue<bool> + 'static>(
     crate::panic::run_callback(
         "configuration getter",
         || {
+            let Some(_callback) = lifecycle::CallbackGuard::enter() else {
+                return 0;
+            };
             let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<bool, T>) };
             private_data.get_val() as i32
         },
@@ -657,6 +676,9 @@ extern "C" fn enum_configuration_set<
     err: *mut *mut raw::RedisModuleString,
 ) -> c_int {
     crate::panic::run_config_set(err, || {
+        let Some(_callback) = lifecycle::CallbackGuard::enter() else {
+            return raw::REDISMODULE_ERR as c_int;
+        };
         let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<G, T>) };
         let val: Result<G, _> = val.try_into();
         match val {
@@ -681,6 +703,9 @@ extern "C" fn enum_configuration_get<
     crate::panic::run_callback(
         "configuration getter",
         || {
+            let Some(_callback) = lifecycle::CallbackGuard::enter() else {
+                return -1;
+            };
             let private_data = unsafe { &*(privdata as *const ConfigrationPrivateData<G, T>) };
             private_data.get_val().into()
         },

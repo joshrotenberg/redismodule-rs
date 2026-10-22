@@ -4,6 +4,7 @@ pub use crate::context::InfoContext;
 // SDK's registration implementation dependencies themselves.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::configuration::lifecycle::{ConfigurationLoad, ConfigurationUnload};
     pub use crate::context::timer::{TimerLoadGuard, TimerUnloadGuard};
     pub use ::libc::EBUSY;
     pub use ::linkme;

@@ -1,10 +1,11 @@
-//! Owns a configuration's private data until Redis accepts its registration.
+//! Transfers accepted configuration private data to its load-generation owner.
 //!
 //! Redis's Register*Config functions validate before storing the private data
 //! pointer and call no callback during registration. A rejected registration
 //! leaves the data with this guard, which drops it; an accepted one leaves it
-//! with Redis for the life of the module.
+//! with the macro-managed load generation (or retained for custom loaders).
 
+use super::lifecycle::{self, Owner};
 use crate::{RedisError, raw};
 use std::os::raw::c_int;
 use std::ptr::NonNull;
@@ -12,6 +13,7 @@ use std::ptr::NonNull;
 pub(super) struct PendingRegistration<T> {
     data: NonNull<T>,
     accepted: bool,
+    managed: bool,
     kind: &'static str,
 }
 
@@ -26,6 +28,7 @@ impl<T> PendingRegistration<T> {
         let api = api.ok_or_else(|| {
             RedisError::String(format!("{kind} configuration API is unavailable"))
         })?;
+        let managed = lifecycle::reserve()?;
         Ok((
             api,
             Self {
@@ -33,6 +36,7 @@ impl<T> PendingRegistration<T> {
                 // not a Box, so nothing moves the data after Redis stores it.
                 data: NonNull::new(Box::into_raw(Box::new(data))).unwrap(),
                 accepted: false,
+                managed,
                 kind,
             },
         ))
@@ -52,8 +56,12 @@ impl<T> PendingRegistration<T> {
                 self.kind
             )));
         }
-        // Redis keeps this pointer for the life of the module and has no free
-        // callback for it, so the allocation stays.
+        if self.managed {
+            // SAFETY: Only the four registration functions construct production
+            // private data. They own Send captures, borrowed Sync storage and a
+            // GIL-confined native getter cache, as documented by Owner.
+            lifecycle::accept(unsafe { Owner::new(self.data.as_ptr()) });
+        }
         self.accepted = true;
         Ok(())
     }
@@ -74,6 +82,12 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::rc::Rc;
+    use std::sync::Mutex;
+
+    // Pure guard probes share the unbound registry but have no native Redis
+    // lock. Serialize them so its GIL-confined Cell/Vec are never accessed by
+    // concurrent test threads. Native lifecycle coverage uses isolated servers.
+    static REGISTRY_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     struct Probe(Rc<Cell<usize>>);
     impl Drop for Probe {
@@ -91,6 +105,7 @@ mod tests {
 
     #[test]
     fn unavailable_api_drops_captured_callback_once() {
+        let _serial = REGISTRY_TEST_LOCK.lock().unwrap();
         let drops = Rc::new(Cell::new(0));
         let result = PendingRegistration::prepare::<()>(None, captured_callback(&drops), "Numeric");
         assert!(
@@ -101,6 +116,7 @@ mod tests {
 
     #[test]
     fn rejected_registration_drops_captured_callback_once() {
+        let _serial = REGISTRY_TEST_LOCK.lock().unwrap();
         let drops = Rc::new(Cell::new(0));
         let (_, pending) =
             PendingRegistration::prepare(Some(()), captured_callback(&drops), "Boolean").unwrap();
@@ -116,6 +132,7 @@ mod tests {
 
     #[test]
     fn unsubmitted_registration_drops_captured_callback_once() {
+        let _serial = REGISTRY_TEST_LOCK.lock().unwrap();
         let drops = Rc::new(Cell::new(0));
         let (_, pending) =
             PendingRegistration::prepare(Some(()), captured_callback(&drops), "Enum").unwrap();
@@ -125,6 +142,7 @@ mod tests {
 
     #[test]
     fn accepted_data_keeps_its_stable_pointer_and_owner() {
+        let _serial = REGISTRY_TEST_LOCK.lock().unwrap();
         let drops = Rc::new(Cell::new(0));
         let (_, pending) =
             PendingRegistration::prepare(Some(()), captured_callback(&drops), "Enum").unwrap();

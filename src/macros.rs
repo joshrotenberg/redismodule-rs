@@ -470,9 +470,17 @@ macro_rules! redis_module {
                 return raw::Status::Err as c_int;
             }
 
+            // SAFETY: Init succeeded and this is the module's native OnLoad.
+            let configuration_load = match unsafe { $crate::__private::ConfigurationLoad::begin(ctx) } {
+                Ok(load) => load,
+                Err(error) => {
+                    unsafe { raw::redis_log(ctx, &error.to_string()) };
+                    return raw::Status::Err as c_int;
+                }
+            };
             // Panics before Init cannot be caught: the Redis allocator, which a
             // panic needs, is not available until then.
-            $crate::panic::run_callback(
+            let status = $crate::panic::run_callback(
                 "module load",
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
@@ -671,7 +679,11 @@ macro_rules! redis_module {
                     raw::Status::Ok as c_int
                 },
                 || raw::Status::Err as c_int,
-            )
+            );
+            // Captured destructors run after init panic containment, never while
+            // unwinding the load callback.
+            configuration_load.finish(status);
+            status
         }
 
         #[unsafe(no_mangle)]
@@ -686,6 +698,15 @@ macro_rules! redis_module {
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
                     let context = unsafe { $crate::EventContext::new(ctx) };
+                    // Check native CONFIG quiescence before user deinit.
+                    // SAFETY: This is the module's native OnUnload callback.
+                    let configuration_unload = match unsafe { $crate::__private::ConfigurationUnload::begin(&context) } {
+                        Ok(guard) => guard,
+                        Err(error) => {
+                            context.log_warning(&format!("{error}"));
+                            return $crate::Status::Err as c_int;
+                        }
+                    };
                     // SAFETY: This is the module's native OnUnload callback.
                     let timer_unload = match unsafe { $crate::__private::TimerUnloadGuard::begin(&context) } {
                         Ok(guard) => guard,
@@ -700,6 +721,10 @@ macro_rules! redis_module {
                         }
                     )*
 
+                    if let Err(error) = configuration_unload.commit() {
+                        context.log_warning(&format!("{error}"));
+                        return $crate::Status::Err as c_int;
+                    }
                     timer_unload.commit();
                     $crate::raw::Status::Ok as c_int
                 },

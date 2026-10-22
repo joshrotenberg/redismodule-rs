@@ -225,6 +225,16 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- `redis_module!` now owns accepted configuration private data per load and
+  releases captured observers and final string getter replies after caught
+  load failures or successful deinit. Refused or panicking deinit retains
+  registrations. Unload is blocked while native configuration frames may
+  retain pointers; worker invocations without a usable deferred completion
+  mechanism conservatively block unload for that load generation. Caller
+  statics remain caller-owned, and custom loaders retain the previous accepted
+  allocation behavior. See the
+  [configuration lifecycle notes](docs/CONFIGURATION.md#registration-ownership-and-unload).
+
 - Timer cancellation now releases the complete callback allocation, including
   captured closure state. Typed handles prevent caller-selected payload casts,
   and timer queries no longer expose references that cancellation can invalidate.

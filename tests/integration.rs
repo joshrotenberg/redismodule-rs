@@ -9,6 +9,7 @@ use anyhow::Result;
 use redis::{RedisError, RedisResult, Value};
 use redis_module::RedisValue;
 
+mod configuration_ownership;
 mod utils;
 
 #[cfg(feature = "redis-7-2-examples")]
@@ -4106,6 +4107,48 @@ fn test_string_configuration_getter_releases_replies() -> Result<()> {
         "{live} of {returned} getter strings still allocated"
     );
 
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_string_configuration_unload_releases_final_cached_reply() -> Result<()> {
+    let mut con = TestConnection::new("configuration_getter");
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "configuration_getter"])
+        .query::<()>(&mut con)?;
+    let marker = std::env::temp_dir().join(format!(
+        "sdk-config-cache-{}-{}",
+        std::process::id(),
+        con.port()
+    ));
+    let _ = std::fs::remove_file(&marker);
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("configuration_getter")?)
+        .arg(marker.to_string_lossy().as_ref())
+        .query::<()>(&mut con)?;
+    for _ in 0..3 {
+        let values: Vec<String> = redis::cmd("CONFIG")
+            .arg(&["GET", "configuration_getter.text"])
+            .query(&mut con)?;
+        assert_eq!(values, ["configuration_getter.text", "default"]);
+    }
+    let counts: Vec<i64> = redis::cmd("configuration_getter.strings").query(&mut con)?;
+    assert_eq!(
+        counts[1], 1,
+        "the last getter reply must stay alive through native consumption"
+    );
+    let before = std::fs::read(&marker)?.len();
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "configuration_getter"])
+        .query::<()>(&mut con)?;
+    assert_eq!(
+        std::fs::read(&marker)?.len(),
+        before + 1,
+        "successful unload must release the final cached native string"
+    );
+    std::fs::remove_file(marker)?;
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }

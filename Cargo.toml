@@ -77,6 +77,10 @@ name = "string"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "configuration_ownership"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "configuration"
 crate-type = ["cdylib"]
 

@@ -164,6 +164,88 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  configuration-floor:
+    # Native configuration APIs start at 7.0. This focused job also exercises
+    # lifecycle fallbacks without the post-notification API added in 7.2.
+    name: Configuration ownership (Redis 7.0.15)
+    runs-on: ubuntu-latest
+    env:
+      RUST_TEST_THREADS: "4"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Read runner image
+        id: runner-image
+        run: echo "image=${ImageOS:?}-${ImageVersion:?}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache server binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sdk-server
+          key: sdk-server-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-image.outputs.image }}-redis-7.0.15-${{ hashFiles('.github/servers.json', '.github/scripts/build-server.py') }}
+
+      - name: Build or verify server
+        run: |
+          python3 .github/scripts/build-server.py redis-7.0.15 "$RUNNER_TEMP/sdk-server"
+          echo "TEST_REDIS_SERVER_BIN=$RUNNER_TEMP/sdk-server/redis-server" >> "$GITHUB_ENV"
+
+      - name: Install toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Build configuration examples
+        run: |
+          cargo build --no-default-features --features min-redis-compatibility-version-7-0 \
+            --example configuration_ownership --example configuration \
+            --example configuration_getter --example configuration_registration \
+            --example parsed_configuration --example hello
+
+      - name: Test configuration ownership
+        run: |
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --lib configuration::
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration configuration_ownership:: -- --list | tee "$RUNNER_TEMP/configuration-ownership-tests.txt"
+          grep -E '^configuration_ownership::[^ ]+: test$' "$RUNNER_TEMP/configuration-ownership-tests.txt"
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration configuration_ownership::
+
+      - name: Test configuration behavior at the native API floor
+        # Worker success/reload coverage needs the newer completion API. The
+        # ownership tests above check fail-closed worker unload on this server.
+        run: |
+          for test_name in \
+            test_configuration \
+            test_string_configuration_getter_releases_replies \
+            test_string_configuration_unload_releases_final_cached_reply \
+            test_memory_configuration_takes_units \
+            test_configuration_string_storage_utf8_and_binary_values \
+            test_configuration_loadex_precedence_and_registration_validation \
+            test_configuration_module_args_validate_numeric_range \
+            test_configuration_module_args_bool_is_case_insensitive \
+            test_configuration_module_args_reject_invalid_bool \
+            test_configuration_module_args_keep_names_and_values_paired \
+            test_configuration_module_args_validate_memory_range_after_units \
+            test_configuration_registration_errors_fail_the_load \
+            test_configuration_load_errors_fail_the_load \
+            parsed_configuration_tests::test_parsed_configuration_multi_set_rollback_is_visible_to_observers \
+            parsed_configuration_tests::test_parsed_configuration_updates_keep_raw_parsed_and_observers_consistent \
+            parsed_configuration_tests::test_parsed_configuration_module_arguments_are_validated_before_init \
+            parsed_configuration_tests::test_parsed_configuration_failed_load_and_in_place_reload
+          do
+            cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/configuration-floor-tests.txt"
+            grep -Fx -- "$test_name: test" "$RUNNER_TEMP/configuration-floor-tests.txt"
+            cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact
+          done
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-configuration-floor
+          path: |
+            target/**/integration-test/**
+            ${{ runner.temp }}/sdk-server-build.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   bindings:
     # Generates the bindings with bindgen and fails if they differ from the
     # committed ones. One runner, so the result does not depend on each
