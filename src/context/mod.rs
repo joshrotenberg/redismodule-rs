@@ -77,9 +77,10 @@ pub struct BlockingCallOptions {
 pub enum CallOptionResp {
     /// RESP2 replies, the default for module calls.
     Resp2,
-    /// RESP3 replies, such as a map for `HGETALL`.
+    /// RESP3 replies, such as a map for `HGETALL` (Redis 7.0 and later).
     Resp3,
-    /// Match the protocol of the client attached to the call's context.
+    /// Match the protocol of the client attached to the call's context
+    /// (Redis 7.0 and later).
     Auto,
 }
 
@@ -238,6 +239,8 @@ impl CallOptionsBuilder {
     /// Selects the protocol of the command's call reply. The default is RESP2.
     /// Each selection replaces the previous one, including when switching back
     /// to RESP2. Auto follows the client attached to the call's context.
+    /// Redis before 7.0 rejects the RESP3 and Auto call flags; selecting RESP2
+    /// removes those flags even if an earlier selection requested them.
     ///
     /// ```
     /// use redis_module::{CallOptionResp, CallOptionsBuilder};

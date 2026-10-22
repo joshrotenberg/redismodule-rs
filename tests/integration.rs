@@ -746,6 +746,24 @@ fn test_command_builder_panics_are_caught() -> Result<()> {
 }
 
 #[test]
+fn test_call_protocol_resets_to_resp2_without_newer_format_flags() -> Result<()> {
+    let mut con = TestConnection::new("call_reply");
+    redis::cmd("HSET")
+        .arg(&["protocol:hash", "field", "value"])
+        .query::<()>(&mut con)?;
+    // Redis 6.0 rejects RESP3/Auto call flags. Resetting to RESP2 must remove
+    // them before the native call, so these also run against 6.0 unchanged.
+    for first in ["2", "3", "auto"] {
+        let actual: String = redis::cmd("call_reply.protocol")
+            .arg(&["protocol:hash", first, "2"])
+            .query(&mut con)?;
+        assert_eq!(actual, "array", "{first} -> 2");
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_call_protocol_selection_uses_the_last_setting() -> Result<()> {
     use redis::ConnectionLike;
 
