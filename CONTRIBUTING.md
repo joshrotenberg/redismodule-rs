@@ -101,6 +101,19 @@ lockfile with the pinned toolchain, review its diff, update its snapshot and
 rerun `check.sh`. Record the sync in
 `wasm/TRACKING.md`, push, and confirm the experiment push CI passes.
 
+## Tracking upstream
+
+The [upstream watch workflow](.github/workflows/upstream-watch.yml) runs
+weekly. It compares upstream `master` with the last reviewed commit in
+`.github/upstream.json` and keeps one open issue, labelled `upstream`, that
+lists new upstream commits and open upstream pull requests updated since that
+review. Reviewing it is ordinary backlog work: assess each item against the
+fork, record relevant ones in CHANGES-FROM-UPSTREAM.md and file issues for work
+to port, then set `reviewed` and `reviewed_at` in the same pull request. The
+next run closes the issue when nothing new remains. To run it now, use
+`gh workflow run upstream-watch.yml`; to preview it locally, run
+`python3 .github/scripts/upstream-watch.py --repo joshrotenberg/redismodule-rs --dry-run`.
+
 ## Validation
 
 Use the toolchain in `rust-toolchain.toml` (1.94.0); the MSRV is 1.87.0. If

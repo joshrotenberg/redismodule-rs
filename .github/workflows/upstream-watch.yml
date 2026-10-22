@@ -1,0 +1,38 @@
+name: Upstream watch
+
+# Lists upstream commits and open upstream pull requests that changed since
+# the review recorded in .github/upstream.json, in one issue labelled
+# `upstream`. Assessing them is backlog work; see CONTRIBUTING.md.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/upstream.json
+      - .github/scripts/upstream-watch.py
+      - .github/workflows/upstream-watch.yml
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    if: github.repository == 'joshrotenberg/redismodule-rs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Report upstream changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Pull requests only print the planned issue.
+          DRY_RUN: ${{ github.event_name == 'pull_request' && '--dry-run' || '' }}
+        run: python3 .github/scripts/upstream-watch.py $DRY_RUN
