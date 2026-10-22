@@ -13,6 +13,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- [INFO handler state-access guidance](docs/INFO-HANDLERS.md) documents the
+  output-only context, native callback paths and crash-report limitations.
+  A tested atomic-counter example supports ordinary INFO and nested native
+  server-info queries without adding a Redis lock capability.
+
 - A [compatibility-floor workspace guide](docs/COMPATIBILITY-FLOORS.md) and
   isolated multi-consumer compile controls show separate-package and aligned
   builds, including rejection of conflicting floors and dependency defaults.
@@ -253,6 +258,20 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - The dependencies `nix`, `strum_macros`, `regex`, `backtrace`, `enum-primitive-derive` and `num-traits`.
 
 ### Fixed
+
+- `RedisKeyWritable::trim_stream_by_id` returns `Ok(0)` when a successful
+  exact or approximate trim removes no entries, including an empty stream.
+  Missing keys, wrong types and unavailable native APIs still return errors.
+
+- **Breaking:** read/write key handles and owning key scan cursors borrow their
+  opening runtime context. Safe code can no longer close or use them after a
+  callback ends or a worker guard unlocks. DMA and stream views retain that
+  context through their key borrow; copy results into Rust-owned data first.
+
+- **Breaking:** server INFO snapshots borrow their producing runtime context,
+  preventing cleanup after a worker guard frees that native context or a
+  callback's AutoMemory reclaims the snapshot. Copy fields into Rust-owned
+  data before leaving the context or unlocking the worker.
 
 - The SDK build script now rejects zero or multiple compatibility-floor features
   before C compilation and API wrapper expansion. Mixed floors previously could

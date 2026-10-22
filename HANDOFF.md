@@ -3,7 +3,7 @@
 How to pick up work on this fork: the `redis-module` SDK on `master`, and the
 wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 
-## What is where
+## What is where (baseline before the INFO guide)
 
 | | where | state |
 |---|---|---|
@@ -13,6 +13,15 @@ wasm host on the `experiment/wasm-host` branch. State as of 2026-10-22.
 | Changes by version, migration | [CHANGELOG.md](CHANGELOG.md), [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) | current |
 | wasm host work list | [wasm/TRACKING.md](wasm/TRACKING.md) (this branch) | H, S, G, Q items and a dated log |
 | wasm host usage | [wasm/README.md](wasm/README.md) (this branch) | current |
+
+Latest SDK checkpoint: `29d046c` accepts successful zero-deletion stream trims.
+Open key/context lifetimes (`01b37b5`), server INFO snapshot lifetimes (`d0bba7d`)
+and earlier INFO guidance (`a14b71b`, `084cd23`) are included. Each SDK change
+received independent native review and all 20 latest exact-head CI checks passed
+before merge. CHANGES-FROM-UPSTREAM and the migration guide cover the relevant
+changes. The layout table retains the shared baseline while experiment CI
+proposal PR 79 awaits approval; its source is not included on this branch.
+The checkpoints below have validation details.
 
 The fork branches from upstream master at `a808377`. Upstream has two commits
 since: `cca5360` (the `ServerInfo::field` leak fix; the fork has its own fix) and
@@ -296,6 +305,39 @@ package builds can use different floors; a combined build must agree on one.
 Issue 59 stays open for the parked feature-design decision. No host adaptation
 needed; the existing alternate-floor host exclusion remains required.
 
+The [INFO handler guide](docs/INFO-HANDLERS.md) merged in `a14b71b`, with
+release-note indexes in `084cd23`. It documents the existing output-only view,
+callback lifetime and native crash/thread paths across Redis 6.0 through 8.10.
+An atomic telemetry example and native test cover ordinary INFO and nested
+`GetServerInfo`; compile controls reject lock-proof or runtime promotion. This
+adds no context capability and makes no async-signal-safety promise. Issue 61
+stays open for the parked API design. The host requires no adaptation.
+
+The server INFO snapshot lifetime fix merged in `d0bba7d`. Its handle now
+borrows the producing runtime context, preventing cleanup after a worker guard
+has freed that context or AutoMemory has reclaimed the allocation. Copy needed
+fields into Rust-owned values before leaving the context/lock scope. The field
+string remains an independent native owner with its existing requirements.
+Compiler controls reject scope escape and early unlock; native workers pass
+with AutoMemory off and on. This is separate from the general storage API in
+issue 51, and the host needs no source adaptation.
+
+The open key lifetime fix merged in `01b37b5`. All four safe key opens now
+borrow the runtime context; an owning scan cursor keeps the same borrow. Native
+key close needs the original context even with AutoMemory disabled. DMA and
+stream views preserve that borrow through their key. Compiler controls reject
+scope escape and early unlock, while native workers copy binary data and scan
+results into Rust storage before unlocking, with AutoMemory off and on. Raw
+constructors remain unsafe with explicit lifetime and lock obligations. This
+adds no general storage API and requires no host/guest source adaptation.
+
+The stream trim result fix merged in `29d046c`. `trim_stream_by_id` now returns
+`Ok(0)` for successful no-op and empty-stream trims instead of treating zero as
+failure. Negative native results still report errors, including missing and
+wrong-type keys; native API availability and the public signature are unchanged.
+The example and native regression compare exact/approximate deletion counts and
+retained entries with `XTRIM MINID`. No host/guest source adaptation is needed.
+
 Open SDK design and maintenance work is recorded in
 [priority 1 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A1+sort%3Acreated-asc).
 The [priority 2 issues](https://github.com/joshrotenberg/redismodule-rs/issues?q=is%3Aissue+is%3Aopen+label%3Apriority%3A2+sort%3Acreated-asc)
@@ -385,6 +427,11 @@ git rebase fork/master
 # adapt wasm/ to any SDK change, run the gates, update wasm/TRACKING.md
 git push --force-with-lease fork experiment/wasm-host
 ```
+
+While an experiment PR awaits review, preserve its base ancestry by merging
+merged SDK changes instead of rebasing the experiment branch. Recent SDK
+syncs use this approach to keep PR 79's reviewed diff intact. That PR remains
+unmerged; do not include its proposed workflow in an SDK sync.
 
 Refer to the branch's commits by subject in notes, since a rebase changes
 their hashes.

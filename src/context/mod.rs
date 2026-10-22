@@ -779,33 +779,111 @@ impl RuntimeContext {
         R::from(res)
     }
 
+    /// Opens a read-only key within this runtime context's scope.
+    ///
+    /// Close it before leaving a callback or unlocking a worker. Copy any data
+    /// needed later into Rust storage while the context is still locked:
+    ///
+    /// ```
+    /// # use redis_module::{DetachedFromClient, RedisError, RedisString, ThreadSafeContext};
+    /// # fn read(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString)
+    /// #     -> Result<Option<Vec<u8>>, RedisError> {
+    /// let bytes = {
+    ///     let guard = owner.lock();
+    ///     let key = guard.open_key(name);
+    ///     key.read()?.map(<[u8]>::to_vec)
+    /// };
+    /// # Ok(bytes) }
+    /// ```
+    ///
+    /// A key cannot escape the opening guard, even if it names a missing key:
+    ///
+    /// ```compile_fail,E0597
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let key = { let guard = owner.lock(); guard.open_key(name) };
+    /// drop(key);
+    /// # }
+    /// ```
+    ///
+    /// ```compile_fail,E0505
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let guard = owner.lock();
+    /// let key = guard.open_key(name);
+    /// drop(guard);
+    /// drop(key);
+    /// # }
+    /// ```
     #[must_use]
-    pub fn open_key(&self, key: &RedisString) -> RedisKey {
+    pub fn open_key(&self, key: &RedisString) -> RedisKey<'_> {
         // SAFETY: RuntimeContext construction requires a valid context and lock, so
-        // self.ctx is valid and the lock is held now. The key's type does not
-        // tie it to the Context or the lock; callers must not keep it past
-        // them; borrowing native resources for their full lifetime is separate work.
+        // self.ctx is valid and the lock is held now. The returned key borrows
+        // self, so it must be closed before this context or guard is dropped.
         unsafe { RedisKey::open(self.ctx, key) }
     }
 
+    /// Opens a read-only key with flags, borrowing this context as in [`Self::open_key`].
+    ///
+    /// ```compile_fail,E0597
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext, key::KeyFlags};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let key = {
+    ///     let guard = owner.lock();
+    ///     guard.open_key_with_flags(name, KeyFlags::empty())
+    /// };
+    /// drop(key);
+    /// # }
+    /// ```
     #[must_use]
-    pub fn open_key_with_flags(&self, key: &RedisString, flags: KeyFlags) -> RedisKey {
+    pub fn open_key_with_flags(&self, key: &RedisString, flags: KeyFlags) -> RedisKey<'_> {
         // SAFETY: as for open_key.
         unsafe { RedisKey::open_with_flags(self.ctx, key, flags) }
     }
 
+    /// Opens a writable key, borrowing this context until the key is closed.
+    ///
+    /// ```compile_fail,E0597
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let key = { let guard = owner.lock(); guard.open_key_writable(name) };
+    /// drop(key);
+    /// # }
+    /// ```
+    ///
+    /// ```compile_fail,E0505
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let guard = owner.lock();
+    /// let key = guard.open_key_writable(name);
+    /// drop(guard);
+    /// drop(key);
+    /// # }
+    /// ```
     #[must_use]
-    pub fn open_key_writable(&self, key: &RedisString) -> RedisKeyWritable {
+    pub fn open_key_writable(&self, key: &RedisString) -> RedisKeyWritable<'_> {
         // SAFETY: as for open_key.
         unsafe { RedisKeyWritable::open(self.ctx, key) }
     }
 
+    /// Opens a writable key with flags, borrowing this context as in [`Self::open_key_writable`].
+    ///
+    /// ```compile_fail,E0597
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext, key::KeyFlags};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let key = {
+    ///     let guard = owner.lock();
+    ///     guard.open_key_writable_with_flags(name, KeyFlags::empty())
+    /// };
+    /// drop(key);
+    /// # }
+    /// ```
     #[must_use]
     pub fn open_key_writable_with_flags(
         &self,
         key: &RedisString,
         flags: KeyFlags,
-    ) -> RedisKeyWritable {
+    ) -> RedisKeyWritable<'_> {
         // SAFETY: as for open_key.
         unsafe { RedisKeyWritable::open_with_flags(self.ctx, key, flags) }
     }
@@ -1975,6 +2053,49 @@ impl<'a> From<&'a InfoContext> for InfoContextBuilder<'a> {
     }
 }
 
+/// Output for one module INFO callback, including callbacks for crash reports.
+///
+/// This view only supports INFO fields. It does not implement
+/// [`RedisLockIndicator`] or provide a [`RuntimeContext`]: the same callback
+/// also runs during crash reporting, without a general Redis lock guarantee.
+/// Keep the callback's `for_crash_report` argument and return early before
+/// reading ordinary module state when it is true. This does not make the
+/// entire SDK crash-report path async-signal-safe.
+///
+/// For ordinary INFO requests, independently synchronized Rust snapshots,
+/// such as atomic counters, do not need a Redis lock capability:
+///
+/// ```no_run
+/// use redis_module::{InfoContext, RedisResult};
+/// use std::sync::atomic::{AtomicU64, Ordering};
+/// static COMPLETED: AtomicU64 = AtomicU64::new(0);
+/// fn info(ctx: &InfoContext, for_crash_report: bool) -> RedisResult<()> {
+///     if for_crash_report { return Ok(()); }
+///     ctx.builder().add_section("stats")
+///         .field("completed", COMPLETED.load(Ordering::Relaxed))?
+///         .build_section()?.build_info()?;
+///     Ok(())
+/// }
+/// ```
+///
+/// Testing the crash-report flag does not grant access to Redis-protected data:
+///
+/// ```compile_fail,E0277
+/// use redis_module::{InfoContext, RedisGILGuard};
+/// static STATE: RedisGILGuard<u64> = RedisGILGuard::new(0);
+/// fn info(ctx: &InfoContext, for_crash_report: bool) {
+///     if for_crash_report { return; }
+///     let _state = STATE.lock(ctx);
+/// }
+/// ```
+///
+/// Nor can an INFO view be passed to helpers that require a runtime context:
+///
+/// ```compile_fail,E0308
+/// use redis_module::{InfoContext, RuntimeContext};
+/// fn needs_runtime(_: &RuntimeContext) {}
+/// fn info(ctx: &InfoContext) { needs_runtime(ctx); }
+/// ```
 #[derive(Debug)]
 pub struct InfoContext {
     pub(crate) ctx: *mut raw::RedisModuleInfoCtx,
@@ -1986,7 +2107,9 @@ impl InfoContext {
     /// # Safety
     ///
     /// `ctx` must be the context of the running info callback, and the
-    /// `InfoContext` must not outlive the callback.
+    /// `InfoContext` must not outlive the callback. This is a native INFO
+    /// output context, not a `RedisModuleCtx`; it cannot establish that the
+    /// Redis lock is held or be cast to a runtime context.
     pub const unsafe fn new(ctx: *mut raw::RedisModuleInfoCtx) -> Self {
         Self { ctx }
     }

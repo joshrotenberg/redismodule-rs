@@ -11,6 +11,44 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Stream trim results
+
+`RedisKeyWritable::trim_stream_by_id` accepts zero as a successful deletion
+count; only a negative native result is an error. Exact and approximate native
+regressions compare deletion counts and retained entries with `XTRIM MINID`,
+including no-op and empty-stream trims. Missing keys and wrong types still
+return errors; API availability and the public method signature are unchanged.
+
+## Open key context lifetimes
+
+Safe key opens now return `RedisKey<'ctx>` and `RedisKeyWritable<'ctx>` tied to
+`RuntimeContext`; an owning `ScanKeyCursor<'ctx>` preserves that borrow. Native
+key close uses the opening context even without AutoMemory, so previously a
+worker could unlock and free that context before dropping its key. Compiler
+regressions reject guard escape and early unlock across all four open methods,
+DMA/stream views and owning key scans. Native worker coverage exercises reads,
+writes, binary DMA data and scanning with AutoMemory disabled and enabled.
+Unsafe raw constructors retain their context, lifetime and lock obligations;
+no general native-handle storage API is introduced.
+
+## Server INFO snapshot lifetime
+
+`RuntimeContext::server_info` returns a snapshot tied to its runtime borrow.
+Previously safe code could keep the snapshot after a worker guard unlocked
+and freed its native context; snapshot cleanup then used that stale context.
+Compile controls now reject both scope escape and early guard drop. Native
+tests cover valid worker use with AutoMemory off and on, and copying fields
+into owned Rust values before unlocking. General native-handle storage is separate.
+
+## INFO handler state access
+
+The [INFO handler guide](docs/INFO-HANDLERS.md) traces ordinary, nested and crash
+callbacks across tagged Redis releases. `InfoContext` remains an output-only
+view without a Redis lock proof or runtime operations. Compile-fail controls
+preserve that boundary; a native-tested atomic snapshot example supports
+ordinary INFO while skipping custom output for crash reports. This does not
+promise an async-signal-safe SDK crash-report path or introduce a new capability.
+
 ## Compatibility-floor workspace controls
 
 A [workspace guide](docs/COMPATIBILITY-FLOORS.md) and isolated compile fixture

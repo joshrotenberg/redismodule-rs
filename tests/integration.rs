@@ -963,6 +963,54 @@ fn test_worker_runtime_call_and_blocked_client_reply() -> Result<()> {
 }
 
 #[test]
+fn test_worker_server_info_is_scoped_and_returns_owned_rust_data() -> Result<()> {
+    let mut con = TestConnection::new("runtime_events");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let expected = info
+        .lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .context("native INFO has redis_version")?;
+    for mode in ["manual", "auto"] {
+        let version: String = redis::cmd("runtime.worker_info")
+            .arg(mode)
+            .query(&mut con)?;
+        assert_eq!(version, expected);
+        utils::wait_until(Duration::from_secs(2), "server INFO worker exit", || {
+            Ok(redis::cmd("runtime.finish_worker").query::<i64>(&mut con)? == 1)
+        })?;
+    }
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "runtime_events"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_worker_keys_close_before_unlock_and_return_owned_rust_data() -> Result<()> {
+    let mut con = TestConnection::new("runtime_events");
+    for mode in ["manual", "auto"] {
+        let (bytes, flagged_bytes, entries): (Vec<u8>, Vec<u8>, Vec<String>) =
+            redis::cmd("runtime.worker_keys")
+                .arg(mode)
+                .query(&mut con)?;
+        assert_eq!(bytes, b"\0\xffvalue!");
+        assert_eq!(flagged_bytes, bytes);
+        assert_eq!(entries, ["field", "value"]);
+        utils::wait_until(Duration::from_secs(2), "key worker exit", || {
+            Ok(redis::cmd("runtime.finish_worker").query::<i64>(&mut con)? == 1)
+        })?;
+        let stored: Vec<u8> = redis::cmd("GET").arg("worker:scoped:key").query(&mut con)?;
+        assert_eq!(stored, bytes);
+    }
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "runtime_events"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_command_builders_mix_with_legacy_and_preserve_metadata() -> Result<()> {
     let mut con = TestConnection::new("command_builder");
     for command in [
@@ -2773,6 +2821,41 @@ fn test_helper_info() -> Result<()> {
 }
 
 #[test]
+fn test_info_handler_atomic_snapshot() -> Result<()> {
+    let mut con = TestConnection::new("info_handler_builder");
+    let info: String = redis::cmd("INFO")
+        .arg("info_handler_builder")
+        .query(&mut con)?;
+    assert!(
+        info.lines()
+            .any(|line| line == "info_handler_builder_recorded:0")
+    );
+
+    for _ in 0..3 {
+        let reply: String = redis::cmd("info_handler_builder.record").query(&mut con)?;
+        assert_eq!(reply, "OK");
+    }
+    assert!(
+        redis::cmd("info_handler_builder.record")
+            .arg("extra")
+            .query::<String>(&mut con)
+            .is_err()
+    );
+
+    // Both the protocol INFO path and a nested native GetServerInfo callback
+    // see the independently synchronized scalar. No runtime context is added
+    // to the INFO callback, and this does not simulate crash reporting.
+    let info: String = redis::cmd("INFO").arg("modules").query(&mut con)?;
+    assert!(
+        info.lines()
+            .any(|line| line == "info_handler_builder_recorded:3")
+    );
+    let snapshot: String = redis::cmd("info_handler_builder.snapshot").query(&mut con)?;
+    assert_eq!(snapshot, "3");
+    Ok(())
+}
+
+#[test]
 fn test_info_handler_multiple_sections() -> Result<()> {
     const MODULES: [&str; 1] = ["info_handler_multiple_sections"];
 
@@ -3435,6 +3518,94 @@ fn test_stream_reader() -> Result<()> {
 
     assert_eq!(res, 0);
 
+    Ok(())
+}
+
+#[test]
+fn test_stream_trim_by_id_accepts_zero_and_matches_native_counts() -> Result<()> {
+    let mut con = TestConnection::new("stream");
+    for mode in ["exact", "approx"] {
+        redis::cmd("DEL")
+            .arg(&["module", "native", "empty"])
+            .query::<()>(&mut con)?;
+        for key in ["module", "native"] {
+            for id in ["10-1", "10-2", "20-0"] {
+                redis::cmd("XADD")
+                    .arg(&[key, id, "field", "value"])
+                    .query::<String>(&mut con)?;
+            }
+        }
+        for (id, exact_count) in [
+            ("0-0", 0),
+            ("10-1", 0),
+            ("10-2", 1),
+            ("20-0", 1),
+            ("18446744073709551615-18446744073709551615", 1),
+            ("18446744073709551615-18446744073709551615", 0),
+        ] {
+            let removed: i64 = redis::cmd("STREAM_TRIM_BEFORE")
+                .arg(&["module", id, mode])
+                .query(&mut con)?;
+            let native: i64 = redis::cmd("XTRIM")
+                .arg(&[
+                    "native",
+                    "MINID",
+                    if mode == "exact" { "=" } else { "~" },
+                    id,
+                ])
+                .query(&mut con)?;
+            assert_eq!(removed, native, "{mode} trim before {id}");
+            if mode == "exact" {
+                assert_eq!(removed, exact_count, "exact trim before {id}");
+            }
+            let module_entries: redis::Value = redis::cmd("XRANGE")
+                .arg(&["module", "-", "+"])
+                .query(&mut con)?;
+            let native_entries: redis::Value = redis::cmd("XRANGE")
+                .arg(&["native", "-", "+"])
+                .query(&mut con)?;
+            assert_eq!(
+                module_entries, native_entries,
+                "entries after {mode} trim before {id}"
+            );
+        }
+        // A stream with no entries still exists and has a successful zero trim.
+        redis::cmd("XADD")
+            .arg(&["empty", "1-0", "field", "value"])
+            .query::<String>(&mut con)?;
+        redis::cmd("XDEL")
+            .arg(&["empty", "1-0"])
+            .query::<i64>(&mut con)?;
+        assert_eq!(
+            redis::cmd("STREAM_TRIM_BEFORE")
+                .arg(&["empty", "10-0", mode])
+                .query::<i64>(&mut con)?,
+            0
+        );
+        assert_eq!(redis::cmd("EXISTS").arg("empty").query::<i64>(&mut con)?, 1);
+
+        // The module API rejects missing/wrong-type keys; these are not no-op successes.
+        redis::cmd("SET")
+            .arg(&["wrong-type", "unchanged"])
+            .query::<()>(&mut con)?;
+        for key in ["missing", "wrong-type"] {
+            let error = redis::cmd("STREAM_TRIM_BEFORE")
+                .arg(&[key, "10-0", mode])
+                .query::<i64>(&mut con)
+                .unwrap_err();
+            assert_eq!(error.detail(), Some("trimming the stream"));
+        }
+        assert_eq!(
+            redis::cmd("EXISTS").arg("missing").query::<i64>(&mut con)?,
+            0
+        );
+        assert_eq!(
+            redis::cmd("GET")
+                .arg("wrong-type")
+                .query::<String>(&mut con)?,
+            "unchanged"
+        );
+    }
     Ok(())
 }
 

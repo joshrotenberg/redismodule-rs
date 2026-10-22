@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -22,14 +23,7 @@ pub use crate::redisraw::bindings::*;
 use crate::stream::StreamIterator;
 use bitflags::bitflags;
 
-/// `RedisKey` is an abstraction over a Redis key that allows readonly
-/// operations.
-///
-/// Its primary function is to ensure the proper deallocation of resources when
-/// it goes out of scope. Redis normally requires that keys be managed manually
-/// by explicitly freeing them when you're done. This can be a risky prospect,
-/// especially with mechanics like Rust's `?` operator, so we ensure fault-free
-/// operation through the use of the Drop trait.
+/// Access requested when opening a native Redis key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyMode {
     Read,
@@ -55,24 +49,34 @@ bitflags! {
     }
 }
 
+/// A read-only open key, borrowing the runtime context that opened it.
+///
+/// Dropping the handle closes the native key. It must close before its opening
+/// callback ends or its worker lock guard is released, even with AutoMemory off.
 #[derive(Debug)]
-pub struct RedisKey {
+pub struct RedisKey<'ctx> {
     pub(crate) ctx: *mut raw::RedisModuleCtx,
     pub(crate) key_inner: *mut raw::RedisModuleKey,
+    _context: PhantomData<&'ctx ()>,
 }
 
-impl RedisKey {
+impl<'ctx> RedisKey<'ctx> {
     /// Opens `key` for reading.
     ///
     /// # Safety
     ///
     /// `ctx` must be a context Redis passed to the module, and this thread must
     /// hold the Redis lock, from this call until the key is dropped (closing
-    /// the key uses the context). Prefer
+    /// the key uses the context). The chosen `'ctx` lifetime must stay within
+    /// that scope; raw pointers cannot establish this borrow. Prefer
     /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     pub unsafe fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
         let key_inner = raw::open_key(ctx, key.as_ptr(), to_raw_mode(KeyMode::Read));
-        Self { ctx, key_inner }
+        Self {
+            ctx,
+            key_inner,
+            _context: PhantomData,
+        }
     }
 
     /// Opens `key` for reading with `flags`.
@@ -81,7 +85,8 @@ impl RedisKey {
     ///
     /// `ctx` must be a context Redis passed to the module, and this thread must
     /// hold the Redis lock, from this call until the key is dropped (closing
-    /// the key uses the context). Prefer
+    /// the key uses the context). The chosen `'ctx` lifetime must stay within
+    /// that scope; raw pointers cannot establish this borrow. Prefer
     /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     pub unsafe fn open_with_flags(
         ctx: *mut raw::RedisModuleCtx,
@@ -90,7 +95,11 @@ impl RedisKey {
     ) -> Self {
         let key_inner =
             raw::open_key_with_flags(ctx, key.as_ptr(), to_raw_mode(KeyMode::Read), flags.bits());
-        Self { ctx, key_inner }
+        Self {
+            ctx,
+            key_inner,
+            _context: PhantomData,
+        }
     }
 
     /// Construct a new `RedisKey` from a pointer to a redismodule context and a key.
@@ -107,11 +116,18 @@ impl RedisKey {
     ///    no other owner that will close it.
     /// 3. `ctx` is the actual native opening/producer context for this key; string
     ///    getters use it to resolve any AutoMemory registrations.
+    /// 4. The Redis lock remains held until the key is dropped. The chosen
+    ///    `'ctx` lifetime must stay within that context and lock scope; these raw
+    ///    pointers cannot establish a borrow.
     pub const unsafe fn from_raw_parts(
         ctx: *mut raw::RedisModuleCtx,
         key_inner: *mut raw::RedisModuleKey,
     ) -> Self {
-        Self { ctx, key_inner }
+        Self {
+            ctx,
+            key_inner,
+            _context: PhantomData,
+        }
     }
 
     /// Decomposes a `RedisKey` into its raw components: `(redismodule context pointer, key pointer)`.
@@ -237,6 +253,18 @@ impl RedisKey {
         StreamIterator::new(self, None, None, false, reverse)
     }
 
+    /// Iterates a stream while borrowing this key and its opening context.
+    ///
+    /// ```compile_fail,E0505
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let guard = owner.lock();
+    /// let key = guard.open_key(name);
+    /// let mut records = key.get_stream_range_iterator(None, None, false, false).unwrap();
+    /// drop(guard);
+    /// records.next();
+    /// # }
+    /// ```
     pub fn get_stream_range_iterator(
         &self,
         from: Option<raw::RedisModuleStreamID>,
@@ -248,7 +276,7 @@ impl RedisKey {
     }
 }
 
-impl Drop for RedisKey {
+impl Drop for RedisKey<'_> {
     // Frees resources appropriately as a RedisKey goes out of scope.
     fn drop(&mut self) {
         if !self.key_inner.is_null() {
@@ -258,24 +286,33 @@ impl Drop for RedisKey {
 }
 
 /// `RedisKeyWritable` is an abstraction over a Redis key that allows read and
-/// write operations.
-pub struct RedisKeyWritable {
+/// write operations, borrowing the runtime context that opened it.
+///
+/// Dropping the handle closes the native key while that context and its lock
+/// are still live. Copy results into Rust-owned data before leaving that scope.
+pub struct RedisKeyWritable<'ctx> {
     ctx: *mut raw::RedisModuleCtx,
     key_inner: *mut raw::RedisModuleKey,
+    _context: PhantomData<&'ctx ()>,
 }
 
-impl RedisKeyWritable {
+impl<'ctx> RedisKeyWritable<'ctx> {
     /// Opens `key` for reading and writing.
     ///
     /// # Safety
     ///
     /// `ctx` must be a context Redis passed to the module, and this thread must
     /// hold the Redis lock, from this call until the key is dropped (closing
-    /// the key uses the context). Prefer
+    /// the key uses the context). The chosen `'ctx` lifetime must stay within
+    /// that scope; raw pointers cannot establish this borrow. Prefer
     /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     pub unsafe fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
         let key_inner = raw::open_key(ctx, key.as_ptr(), to_raw_mode(KeyMode::ReadWrite));
-        Self { ctx, key_inner }
+        Self {
+            ctx,
+            key_inner,
+            _context: PhantomData,
+        }
     }
 
     /// Opens `key` for reading and writing with `flags`.
@@ -284,7 +321,8 @@ impl RedisKeyWritable {
     ///
     /// `ctx` must be a context Redis passed to the module, and this thread must
     /// hold the Redis lock, from this call until the key is dropped (closing
-    /// the key uses the context). Prefer
+    /// the key uses the context). The chosen `'ctx` lifetime must stay within
+    /// that scope; raw pointers cannot establish this borrow. Prefer
     /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     pub unsafe fn open_with_flags(
         ctx: *mut raw::RedisModuleCtx,
@@ -297,7 +335,11 @@ impl RedisKeyWritable {
             to_raw_mode(KeyMode::ReadWrite),
             flags.bits(),
         );
-        Self { ctx, key_inner }
+        Self {
+            ctx,
+            key_inner,
+            _context: PhantomData,
+        }
     }
 
     /// Returns `true` if the key is of type [KeyType::Empty].
@@ -327,7 +369,18 @@ impl RedisKeyWritable {
 
     /// Direct access to the string value's buffer. The view borrows the key
     /// mutably, so no other call on this handle can resize or delete the value
-    /// while it is live.
+    /// while it is live. The borrow also keeps the opening context locked:
+    ///
+    /// ```compile_fail,E0505
+    /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
+    /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
+    /// let guard = owner.lock();
+    /// let mut key = guard.open_key_writable(name);
+    /// let mut data = key.as_string_dma().unwrap();
+    /// drop(guard);
+    /// data.write(b"value").unwrap();
+    /// # }
+    /// ```
     pub fn as_string_dma(&mut self) -> Result<StringDMA<'_>, RedisError> {
         StringDMA::new(self)
     }
@@ -551,7 +604,8 @@ impl RedisKeyWritable {
     ///
     /// `ctx` must be a context Redis passed to the module, and this thread must
     /// hold the Redis lock, from this call until the key is dropped (closing
-    /// the key uses the context). Prefer
+    /// the key uses the context). The chosen `'ctx` lifetime must stay within
+    /// that scope; raw pointers cannot establish this borrow. Prefer
     /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     /// `key` must be a live Redis string.
     pub unsafe fn open_with_redis_string(
@@ -559,7 +613,11 @@ impl RedisKeyWritable {
         key: *mut raw::RedisModuleString,
     ) -> Self {
         let key_inner = raw::open_key(ctx, key, to_raw_mode(KeyMode::ReadWrite));
-        Self { ctx, key_inner }
+        Self {
+            ctx,
+            key_inner,
+            _context: PhantomData,
+        }
     }
 
     /// # Errors
@@ -620,6 +678,16 @@ impl RedisKeyWritable {
         status.into()
     }
 
+    /// Removes stream entries with IDs less than `id`, returning the count.
+    ///
+    /// With `approx`, Redis may remove fewer entries to preserve whole internal
+    /// blocks. A successful trim can remove zero entries, including on an empty
+    /// stream or when no entries are older than the threshold.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server does not provide `RedisModule_StreamTrimByID`
+    /// or the native trim fails, including a missing key or a non-stream value.
     pub fn trim_stream_by_id(
         &self,
         mut id: raw::RedisModuleStreamID,
@@ -637,7 +705,7 @@ impl RedisKeyWritable {
                 &mut id,
             )
         };
-        if res <= 0 {
+        if res < 0 {
             Err(RedisError::Str("Failed trimming the stream"))
         } else {
             Ok(res as usize)
@@ -756,7 +824,7 @@ where
 }
 
 pub struct StringDMA<'a> {
-    key: &'a RedisKeyWritable,
+    key: &'a RedisKeyWritable<'a>,
     buffer: &'a mut [u8],
 }
 
@@ -775,7 +843,7 @@ impl<'a> DerefMut for StringDMA<'a> {
 }
 
 impl<'a> StringDMA<'a> {
-    fn new(key: &'a RedisKeyWritable) -> Result<StringDMA<'a>, RedisError> {
+    fn new(key: &'a RedisKeyWritable<'a>) -> Result<StringDMA<'a>, RedisError> {
         let mut length: size_t = 0;
         let dma = raw::string_dma(key.key_inner, &mut length, raw::KeyMode::WRITE);
         if dma.is_null() {
@@ -815,7 +883,7 @@ impl<'a> StringDMA<'a> {
     }
 }
 
-impl Drop for RedisKeyWritable {
+impl Drop for RedisKeyWritable<'_> {
     // Frees resources appropriately as a RedisKey goes out of scope.
     fn drop(&mut self) {
         raw::close_key(self.key_inner);

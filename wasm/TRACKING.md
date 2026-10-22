@@ -60,6 +60,84 @@ Built on wasmtime 36 (the long-term support release; current wasmtime needs
 Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 `wit-bindgen` 0.44.
 
+### Latest SDK sync
+
+- 2026-10-22: synced merged SDK master `29d046c`, fixing successful stream
+  trims that remove zero entries. SDK PR 84 received independent native review
+  at `a0c28fd`; all 20 exact-head CI checks passed before merge and the squash
+  tree matches that head. Exact/approximate native regressions compare deletion
+  counts and retained entries with `XTRIM MINID`, including zero/positive
+  counts, repeated maximum-ID thresholds and empty streams. Native errors for
+  missing/wrong-type keys and API availability are unchanged. No public API,
+  host/guest source or dependency graph changes were needed. This sync preserves
+  PR 79's ancestry and reviewed diff without importing its unmerged workflow.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy, strict default workspace and host-excluded 7.2 docs pass.
+  Guest formatting/wasm32 linting pass. Tests pass: 69 SDK units, 158 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 9 macro parser tests,
+  7 host units, 21 host integrations including JavaScript, 100 SDK doctests
+  and 4 guest helper tests. The focused native trim regression also passed on
+  Redis 7.0.15 before syncing. Local JavaScript validation used Node 26.12.0.
+
+- 2026-10-22: synced merged SDK master `01b37b5`, binding read/write key
+  handles and owning key scan cursors to their opening runtime context. SDK
+  PR 83 received independent native review at `203077d`; all 20 latest
+  exact-head CI checks passed before merge and the squash tree matches that
+  head. A real retry resolved one unfinished check after its original job
+  steps had completed successfully; the full expected check set was verified.
+  All four safe opens, owning scans and DMA/stream views now prevent key use
+  or cleanup after worker unlock. Native worker coverage copies binary data
+  and scan results into Rust storage, with AutoMemory off/on. Raw constructor
+  obligations remain explicit; general native-handle storage stays separate.
+  No host/guest source adaptation or dependency graph changes were needed.
+  This sync preserves PR 79's ancestry and reviewed diff without importing
+  its unmerged workflow. On Rust 1.94 and Redis 8.10.2: examples, workspace
+  formatting/Clippy, exclusive 7.2 SDK Clippy, strict default workspace and
+  host-excluded 7.2 docs pass. Guest formatting/wasm32 linting pass. Tests
+  pass: 69 SDK units, 157 SDK integrations, 1 allocator fallback, 6 harness
+  helpers, 9 macro parser tests, 7 host units, 21 host integrations including
+  JavaScript, 100 SDK doctests and 4 guest helper tests. The focused native
+  worker regression also passed on Redis 7.0.15; all 100 SDK doctests passed
+  with Rust 1.87 before syncing. Local JavaScript validation used Node 26.12.0.
+
+- 2026-10-22: synced merged SDK master `d0bba7d`, binding server INFO snapshots
+  to the runtime context used by native cleanup. SDK PR 82 received independent
+  native review at `51d7dde` and all 20 latest exact-head CI checks passed before
+  merge; the squash tree matches that reviewed head. The legacy Redis CI job
+  was retried after its completed steps left an unfinished check, and the retry
+  passed at the same commit. Full check-attempt evidence is retained locally.
+  The snapshot cannot escape a worker lock or survive early guard drop. Field
+  ownership is unchanged; native tests copy Rust-owned data before unlocking,
+  with AutoMemory off and on. General native-handle storage remains separate.
+  No host/guest source adaptation is needed. This sync preserves experiment
+  ancestry and PR 79's reviewed diff; its unmerged CI workflow is not included.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy, strict default workspace and host-excluded 7.2 docs pass.
+  Guest formatting/wasm32 linting pass. Tests pass: 69 SDK units, 156 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 9 macro parser tests,
+  7 host units, 21 host integrations including JavaScript, 90 SDK doctests and
+  4 guest helper tests. The focused worker snapshot regression also passed on
+  Redis 7.0.15, and all 90 SDK doctests passed with Rust 1.87 before syncing.
+
+- 2026-10-22: synced merged SDK master `084cd23`, including INFO callback
+  state-access guidance (`a14b71b`) and its release-note indexes. Both SDK PRs
+  received independent native review and all 20 exact-head CI checks passed;
+  both squash trees match their reviewed heads. INFO remains output-only,
+  without a lock proof; the ordinary atomic snapshot and nested `GetServerInfo`
+  regression pass. Issue 61's capability API decision remains parked.
+  This sync preserves the prior experiment ancestry with SDK merges while
+  PR 79 awaits approval. The proposed wasm CI workflow is not included, and
+  the host and guest sources are unchanged. PR 79's three-dot diff and reviewed
+  head remain intact; no approval or merge is implied by this sync.
+  On Rust 1.94 and Redis 8.10.2: examples, workspace formatting/Clippy, exclusive
+  7.2 SDK Clippy, strict default workspace and host-excluded 7.2 docs pass.
+  Guest formatting/wasm32 linting pass. Tests pass: 69 SDK units, 155 SDK
+  integrations, 1 allocator fallback, 6 harness helpers, 9 macro parser tests,
+  7 host units, 21 host integrations including JavaScript, 87 SDK doctests and
+  4 guest helper tests. The focused snapshot also passed on Redis 6.0.20 and
+  7.0.15; all 87 SDK doctests passed with Rust 1.87 before syncing. These
+  ordinary-callback tests do not certify crash-report or signal safety.
+
 ### Numbers
 
 `wasm/bench/run.sh` (see `wasm/bench/README.md`), two runs, Apple M4 Pro,
@@ -218,7 +296,7 @@ evidence as the host meets them.
 
 | ID | question |
 |---|---|
-| Q1 | Where the crate lives so others can use it. Answered: the fork's `experiment/wasm-host` branch, kept rebased on master. |
+| Q1 | Where the crate lives so others can use it. Answered: the fork's `experiment/wasm-host` branch, kept in sync with master. |
 
 ## Log
 

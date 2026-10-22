@@ -126,6 +126,55 @@ result would produce a second reply. Worker errors must be sent through the
 blocked client's thread-safe context. Dropping the handle unblocks the client,
 but does not synthesize a reply. See [block.rs](../examples/block.rs).
 
+### Open keys stay inside their opening context scope
+
+All four `RuntimeContext::open_key*` methods now return handles borrowing the
+opening context. Close keys before returning from a callback or releasing its
+worker lock guard; `CloseKey` needs the live context even with AutoMemory off.
+`ScanKeyCursor` owns a key and keeps the same context borrow. DMA and stream
+views borrow a key and therefore also keep its opening context in scope.
+
+Code that stores these handles must carry the context lifetime explicitly:
+`RedisKey<'ctx>`, `RedisKeyWritable<'ctx>` and `ScanKeyCursor<'ctx>`. Function
+parameters can usually use `RedisKey<'_>` or `RedisKeyWritable<'_>`. Helpers
+returning keys must tie the result to their runtime input, for example:
+
+```rust
+use redis_module::{RuntimeContext, RedisString, key::RedisKey};
+
+fn open<'ctx>(ctx: &'ctx RuntimeContext, name: &RedisString) -> RedisKey<'ctx> {
+    ctx.open_key(name)
+}
+```
+
+To retain data after a worker unlocks, copy it to `Vec<u8>` or another Rust-owned
+value while locked. Closing a key early does not release the guard borrow of
+other keys or views still in use. Native `RedisString` results keep their
+existing thread and lock requirements; this change adds no storage API.
+Unsafe raw constructors cannot infer lifetimes from pointers: callers must
+still guarantee the opening context and Redis lock through the handle's drop.
+Raw parts transfer the close obligation and do not extend native validity.
+
+### Server INFO snapshots stay inside the context scope
+
+`RuntimeContext::server_info` now borrows its producing context. Drop the
+snapshot before returning from a callback or releasing a worker lock guard.
+Its destructor needs the live native context even with AutoMemory disabled;
+AutoMemory can also reclaim its allocation at callback cleanup. Code that kept
+a snapshot after the context ended must copy the needed fields into owned
+Rust data such as `String` or `Vec<u8>` inside the locked scope. A field's
+`RedisString` owns its result independently of the snapshot, but still has
+the existing native-string thread and lock requirements.
+
+```rust,ignore
+let version: String = {
+    let guard = owner.lock();
+    let info = guard.server_info("server");
+    let value = info.field("redis_version").unwrap();
+    value.try_as_str().unwrap().to_owned()
+}; // snapshot and native string are dropped before guard unlocks
+```
+
 ### Shared Redis guards require `Send` values
 
 `RedisGILGuard<T>` is now `Send` and `Sync` only when `T: Send`. The Redis lock
@@ -245,6 +294,7 @@ Ordinary command handlers and blocked-client reply/timeout handlers keep
 | Keyspace/server/timer/post-notification/event-loop callback, module unload, blocking-call unblock handler | `&EventContext` | Module-owned timers/subscriptions/shared APIs, shared runtime operations |
 | `ThreadSafeContext::lock` or `DetachedContext::lock` | Guard dereferencing to `WorkerContext` | Shared runtime operations; blocking calls only for module-owned detached workers |
 | Database scan callback or helper shared across these scopes | `&RuntimeContext` | Calls, keys, database selection, logging, server info, explicit replication |
+| Module INFO callback, including crash reports | `&InfoContext` | INFO output only; no Redis lock proof or runtime operations |
 
 Change callback parameters from `&Context` to the type in this table. A helper
 that calls Redis without needing a client or module ownership should accept
