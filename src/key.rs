@@ -678,6 +678,16 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         status.into()
     }
 
+    /// Removes stream entries with IDs less than `id`, returning the count.
+    ///
+    /// With `approx`, Redis may remove fewer entries to preserve whole internal
+    /// blocks. A successful trim can remove zero entries, including on an empty
+    /// stream or when no entries are older than the threshold.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the server does not provide `RedisModule_StreamTrimByID`
+    /// or the native trim fails, including a missing key or a non-stream value.
     pub fn trim_stream_by_id(
         &self,
         mut id: raw::RedisModuleStreamID,
@@ -695,7 +705,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
                 &mut id,
             )
         };
-        if res <= 0 {
+        if res < 0 {
             Err(RedisError::Str("Failed trimming the stream"))
         } else {
             Ok(res as usize)

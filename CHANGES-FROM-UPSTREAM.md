@@ -11,6 +11,14 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Stream trim results
+
+`RedisKeyWritable::trim_stream_by_id` accepts zero as a successful deletion
+count; only a negative native result is an error. Exact and approximate native
+regressions compare deletion counts and retained entries with `XTRIM MINID`,
+including no-op and empty-stream trims. Missing keys and wrong types still
+return errors; API availability and the public method signature are unchanged.
+
 ## Open key context lifetimes
 
 Safe key opens now return `RedisKey<'ctx>` and `RedisKeyWritable<'ctx>` tied to
