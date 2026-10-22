@@ -110,6 +110,13 @@ these in October 2026.
 
 ## Additions
 
+Module initialization now constructs its NUL-terminated name buffer in constant
+evaluation. The old unchecked 64-byte copy could overrun the buffer or leave
+it without a terminator. **Breaking:** `name:` must be a constant `&str` without
+NUL bytes; long and UTF-8 names are preserved. See the
+[migration guide](docs/MIGRATING-3.0.md#module-names-are-constant-strings) and
+[module-name example](examples/module_name.rs).
+
 | change | addition |
 |---|---|
 | [Notification writes](docs/KEYSPACE-NOTIFICATIONS.md) | A runnable Redis 7.2+ notification-to-stream example demonstrates deferred writes, owned callback data, database scopes, role/loading gates, propagation and teardown. Rejected post-notification jobs now drop their captures instead of leaking. |

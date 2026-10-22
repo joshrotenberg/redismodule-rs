@@ -280,6 +280,31 @@ macro_rules! redis_event_handler {
 /// `version:` accepts an integer expression. Use [`module_version!`](crate::module_version!)
 /// to derive it from the calling crate's Cargo package version at compile time.
 ///
+/// `name:` must be a constant `&str` expression without NUL bytes. Literals,
+/// constants, `concat!` and `env!` are supported. Its C-string representation
+/// is built at compile time, without a fixed length limit or an allocation
+/// before the Redis allocator is initialized.
+///
+/// ```compile_fail,E0080
+/// # macro_rules! assert { ($($tokens:tt)*) => {}; }
+/// redis_module::redis_module! {
+///     name: "truncated\0name", version: 1,
+///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+///     data_types: [],
+/// }
+/// ```
+///
+/// Runtime name expressions are rejected even if they return `&str`:
+///
+/// ```compile_fail,E0015
+/// fn module_name() -> &'static str { "runtime_name" }
+/// redis_module::redis_module! {
+///     name: module_name(), version: 1,
+///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+///     data_types: [],
+/// }
+/// ```
+///
 /// Custom `acl_categories` are shared across modules and remain registered
 /// after unload. Existing categories are reused; other registration errors
 /// fail the module load.
@@ -384,8 +409,8 @@ macro_rules! redis_module {
             argv: *mut *mut $crate::raw::RedisModuleString,
             argc: std::os::raw::c_int,
         ) -> std::os::raw::c_int {
-            use std::os::raw::{c_int, c_char};
-            use std::ffi::{CString, CStr};
+            use std::os::raw::c_int;
+            use std::ffi::CString;
 
             use $crate::raw;
             use $crate::RedisString;
@@ -401,23 +426,36 @@ macro_rules! redis_module {
             use $crate::configuration::get_bool_default_config_value;
             use $crate::configuration::get_enum_default_config_value;
 
-            // We use a statically sized buffer to avoid allocating.
-            // This is needed since we use a custom allocator that relies on the Redis allocator,
-            // which isn't yet ready at this point.
-            let mut name_buffer = [0; 64];
-            unsafe {
-                std::ptr::copy(
-                    $module_name.as_ptr(),
-                    name_buffer.as_mut_ptr(),
-                    $module_name.len(),
-                );
-            }
+            // Init sets up the allocator, so prepare the C string entirely in
+            // constant evaluation. Keep its final zero byte even for long names.
+            // An anonymous const also reports bad inputs during cargo check.
+            // Local let bindings stay hygienic with caller-defined constants.
+            const _: () = {
+                let source: &::core::primitive::str = $module_name;
+                let mut index = 0;
+                while index < source.len() {
+                    ::core::assert!(source.as_bytes()[index] != 0, "module name must not contain NUL bytes");
+                    index += 1;
+                }
+            };
+            let __redis_module_name_bytes = &const {
+                let source: &::core::primitive::str = $module_name;
+                let mut buffer = [0; ($module_name).len() + 1];
+                let mut index = 0;
+                while index < source.len() {
+                    buffer[index] = source.as_bytes()[index];
+                    index += 1;
+                }
+                buffer
+            };
 
             let module_version = $module_version as c_int;
 
+            // SAFETY: the checked name has no interior zero, its extra byte
+            // terminates it, and the buffer outlives Init, which copies it.
             if unsafe { raw::Export_RedisModule_Init(
                 ctx,
-                name_buffer.as_ptr().cast::<c_char>(),
+                __redis_module_name_bytes.as_ptr().cast::<::core::ffi::c_char>(),
                 module_version,
                 raw::REDISMODULE_APIVER_1 as c_int,
             ) } == raw::Status::Err as c_int { return raw::Status::Err as c_int; }
@@ -596,13 +634,13 @@ macro_rules! redis_module {
 
                         $(
                             $crate::redis_command!(&context, $module_config_get_command, |ctx, args: Vec<RedisString>| {
-                                module_config_get(ctx, args, $module_name)
+                                module_config_get(ctx, args, const { $module_name })
                             }, "", 0, 0, 0, "");
                         )?
 
                         $(
                             $crate::redis_command!(&context, $module_config_set_command, |ctx, args: Vec<RedisString>| {
-                                module_config_set(ctx, args, $module_name)
+                                module_config_set(ctx, args, const { $module_name })
                             }, "", 0, 0, 0, "");
                         )?
                     )?

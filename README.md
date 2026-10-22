@@ -167,6 +167,12 @@ See [examples/hello.rs](examples/hello.rs).
 
 ### Module initialization
 
+`name:` is a constant `&str` expression without NUL bytes. String literals,
+named constants, `concat!` and `env!` work. The macro builds its terminated
+C string at compile time, before the Redis allocator is available, and
+supports names longer than 63 bytes without truncation. See
+[examples/module_name.rs](examples/module_name.rs).
+
 Use `RegistrationContext` in `init` hooks that register commands, native data
 types, or configurations, or set module options. `redis_module!` supplies a
 borrowed context for its load invocation. Runtime helpers remain available,
