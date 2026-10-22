@@ -64,15 +64,21 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 The shared [development handoff](../HANDOFF.md) records completed SDK work,
 all open issues and the account-independent review/merge workflow. SDK functional
-changes through `29d046c` are integrated. PR 79 is merged as `b787fef`;
+changes through `41f4f1a` are integrated. PR 79 is merged as `b787fef`;
 its [PR CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39809579615)
 and actual [experiment push CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39811561168)
 passed. H14 / issue 69 is complete. S6 / issue 70 was rechecked on the pinned
 Rust 1.94 toolchain; retain `strip = "none"` on the host.
 
-The source-level callback audit is tracked in
-[issue 85](https://github.com/joshrotenberg/redismodule-rs/issues/85), without
-claiming a confirmed defect. Refreshing the exploratory sidecar versus Redis core
+The blocking-call callback audit ([issue 85](https://github.com/joshrotenberg/redismodule-rs/issues/85))
+is complete: [PR 91](https://github.com/joshrotenberg/redismodule-rs/pull/91),
+merged as `41f4f1a`, requires `Send + 'static` unblock handlers and fixes
+the zero-sized handler free on abort. The host makes no blocking calls. Its
+follow-ups are SDK audits: module unload with a pending blocking call
+([issue 92](https://github.com/joshrotenberg/redismodule-rs/issues/92)) and
+call replies kept past AutoMemory collection
+([issue 93](https://github.com/joshrotenberg/redismodule-rs/issues/93)).
+The host does not enable AutoMemory. Refreshing the exploratory sidecar versus Redis core
 comparison is tracked in [issue 86](https://github.com/joshrotenberg/redismodule-rs/issues/86);
 existing benchmark results below are historical, not fresh measurements. Issue 86
 is the first wasm item and gates the allocator policy (68), external-runtime
@@ -88,6 +94,17 @@ remains linked in Git history. No runtime source or dependency graph changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-10-22: merged SDK master `41f4f1a` into the branch as `3c1489d`. The
+  SDK change requires owned `Send` blocking-call unblock handlers and releases
+  aborted zero-sized handlers with `Box::from_raw`; `FutureHandler` is exported.
+  SDK PR 91 passed three rounds of independent review and all 20 exact-head CI
+  checks at `54a0791`; the squash tree equals that head plus the PR 87 docs.
+  No host/guest source, dependency graph or lock snapshot changed. With
+  `wasm/ci/check.sh` on Rust 1.94.0, Redis 8.10.2 and Node 26.10.0 (CI pins
+  24.22.1), ARM64 macOS: every stage passes, 376 workspace tests including the
+  required JavaScript guest, 1 allocator fallback and 4 guest SDK tests; all
+  four lockfiles stayed identical to their snapshots.
 
 - 2026-10-22: synced merged SDK master `29d046c`, fixing successful stream
   trims that remove zero entries. SDK PR 84 received independent native review
