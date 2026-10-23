@@ -35,6 +35,10 @@ name = "lifecycle"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "detached_reload"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "parsed_configuration"
 crate-type = ["cdylib"]
 
