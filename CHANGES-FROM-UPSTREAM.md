@@ -159,7 +159,9 @@ metadata still fails compilation; diagnostic wording may differ.
   - [4ab88e7](https://github.com/RedisLabsModules/redismodule-rs/commit/4ab88e7)
     (2026-10-20, [upstream PR 489][p489]): adds
     `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` to `redismodule.h`. This
-    fork's header and committed bindings do not have it.
+    fork's header now matches upstream's at this commit, its committed bindings
+    include the define, and `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM` exposes
+    it. Redis OSS 6.0 to 8.10 stores the option and ignores it.
 
 ## Upstream issues this fork fixes
 
@@ -208,6 +210,7 @@ Redis's errors and frees the private data Redis rejects ([c3432c5]).
 | [477][p477] | Add example and support for shutdown server event | open | Ported ([b0135e0]). |
 | [483][p483] | [MOD-17680] Honour layouts requiring more than 16-byte alignment | open | The same bug is fixed here ([e81393d]). |
 | [487][p487], [488][p488] | Fix ServerInfo::field leak with a null context.; Fix ServerInfo field string leaks with and without auto-memory | closed; 488 merged | The same fix ([813cfa0]), and 488's `None` for a field name with a NUL byte ([9ea85f4]); see Base. |
+| [489][p489] | Add `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` to redismodule.h | closed; merged | Included in the header and bindings, and exposed as `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`; see Base. |
 | [85][p85], [348][p348], [360][p360], [361][p361] | dependency updates | open | Superseded: `enum-primitive-derive` removed ([5dbf237]), `nix` and `strum_macros` removed ([86b8113]), bindgen at 0.73 ([0e1d8f2]). |
 
 ## Fixes with no upstream issue or pull request

@@ -47,6 +47,10 @@ bitflags! {
         const HANDLE_IO_ERRORS = REDISMODULE_OPTIONS_HANDLE_IO_ERRORS as c_int;
         const NO_IMPLICIT_SIGNAL_MODIFIED = REDISMODULE_OPTION_NO_IMPLICIT_SIGNAL_MODIFIED as c_int;
         const HANDLE_REPL_ASYNC_LOAD = REDISMODULE_OPTIONS_HANDLE_REPL_ASYNC_LOAD as c_int;
+        /// Prevents direct-to-disk writes of keys loaded from RDB or by
+        /// `RESTORE` in BigRedis mode, a Redis Enterprise extension. Redis OSS
+        /// stores the option and ignores it.
+        const REQUIRE_LOADED_KEYS_IN_RAM = REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM as c_int;
     }
 }
 
@@ -1214,6 +1218,16 @@ mod api_availability_tests {
             payload.downcast_ref::<String>().map(String::as_str),
             Some("RedisModule_CreateString is not available in this Redis server")
         );
+    }
+}
+
+#[cfg(test)]
+mod module_options_tests {
+    use super::ModuleOptions;
+
+    #[test]
+    fn loaded_keys_in_ram_is_the_header_bit() {
+        assert_eq!(ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM.bits(), 1 << 30);
     }
 }
 
