@@ -1,0 +1,66 @@
+name: Upstream watch
+
+# Lists upstream commits and open upstream pull requests that changed since
+# the review recorded in .github/upstream.json, in the issue titled "Review
+# upstream changes". Assessing them is backlog work; see CONTRIBUTING.md.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  # A merged review closes the issue at once.
+  push:
+    branches: [master]
+    paths:
+      - .github/upstream.json
+  pull_request:
+    paths:
+      - .github/upstream.json
+      - .github/scripts/upstream-watch.py
+      - .github/workflows/upstream-watch.yml
+
+permissions:
+  contents: read
+
+jobs:
+  # Pull requests only print the planned issue, with a read-only token.
+  preview:
+    if: github.event_name == 'pull_request' && github.repository == 'joshrotenberg/redismodule-rs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+    concurrency:
+      group: upstream-watch-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Preview the upstream report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/upstream-watch.py --dry-run
+
+  watch:
+    if: github.event_name != 'pull_request' && github.repository == 'joshrotenberg/redismodule-rs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: upstream-watch-issue
+      cancel-in-progress: false
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Report upstream changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/upstream-watch.py
