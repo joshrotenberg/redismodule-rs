@@ -148,7 +148,7 @@ pub fn log_warning<T: AsRef<str>>(message: T) {
 
 /// The [`log` crate](mod@log) implementation of logging.
 pub mod standard_log_implementation {
-    use std::sync::atomic::{AtomicPtr, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
     use crate::RedisError;
 
@@ -156,6 +156,9 @@ pub mod standard_log_implementation {
     use log::{Metadata, Record, SetLoggerError};
 
     static LOGGER: RedisGlobalLogger = RedisGlobalLogger(AtomicPtr::new(ptr::null_mut()));
+    // Whether LOGGER is the global logger. Both statics survive a reload when
+    // the module's image stays mapped, as does the `log` crate's logger.
+    static INSTALLED: AtomicBool = AtomicBool::new(false);
 
     /// The struct which has an implementation of the [log] crate's
     /// logging interface.
@@ -209,18 +212,37 @@ pub mod standard_log_implementation {
     /// `context` must be null or a context that stays valid for as long as
     /// the logger is used, such as a detached context.
     ///
+    /// Calling it again, as when a reloaded module sets up logging in a
+    /// retained image, replaces this logger's context.
+    ///
     /// # Errors
     ///
-    /// Fails when a logger is already set, by this function or another; the
-    /// logger's context is then left as it was.
+    /// Fails when another logger is already set; this logger's context is
+    /// then left as it was.
     pub unsafe fn setup_for_context(
         context: *mut raw::RedisModuleCtx,
     ) -> Result<(), SetLoggerError> {
-        log::set_logger(&LOGGER)?;
+        if !INSTALLED.load(Ordering::Acquire) {
+            log::set_logger(&LOGGER)?;
+            INSTALLED.store(true, Ordering::Release);
+        }
         // Records logged before this store use no context, which Redis allows.
         LOGGER.0.store(context, Ordering::Release);
         log::set_max_level(log::LevelFilter::Trace);
         Ok(())
+    }
+
+    /// Moves this logger off a detached context the SDK replaces or frees.
+    pub(crate) fn replace_detached_context(
+        previous: *mut raw::RedisModuleCtx,
+        current: *mut raw::RedisModuleCtx,
+    ) {
+        if !previous.is_null() {
+            let _ =
+                LOGGER
+                    .0
+                    .compare_exchange(previous, current, Ordering::AcqRel, Ordering::Acquire);
+        }
     }
 
     impl log::Log for RedisGlobalLogger {

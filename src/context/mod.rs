@@ -285,6 +285,10 @@ impl CallOptionsBuilder {
 /// This struct allows logging when the Redis GIL is not acquired.
 /// It is implemented `Send` and `Sync` so it can safely be used
 /// from within different threads.
+///
+/// `redis_module!` stores a fresh context in [`MODULE_CONTEXT`](crate::MODULE_CONTEXT)
+/// on every load and frees it when the module unloads or its load fails, so
+/// workers must stop using it before the module unloads.
 pub struct DetachedContext {
     pub(crate) ctx: AtomicPtr<raw::RedisModuleCtx>,
 }
@@ -370,14 +374,54 @@ impl DetachedContext {
         Ok(())
     }
 
+    /// Internal binding for `redis_module!`; not a custom-loader lifecycle API.
+    /// Stores a fresh detached context for the loading module. A context left
+    /// by an earlier load of this image is replaced and not freed, since its
+    /// module may be gone; returns whether one was. Requires the Redis lock.
+    #[doc(hidden)]
+    pub fn __replace_for_load(&self, ctx: &EventContext) -> Result<bool, RedisError> {
+        let fresh =
+            unsafe { crate::__available_api!(RedisModule_GetDetachedThreadSafeContext)(ctx.ctx) };
+        let previous = self.ctx.swap(fresh, Ordering::AcqRel);
+        crate::logging::replace_detached_context(previous, fresh);
+        Ok(!previous.is_null())
+    }
+
+    /// Internal binding for `redis_module!`; not a custom-loader lifecycle API.
+    /// Frees and clears the stored context when an unload commits or a load
+    /// fails, so a later load of the same image starts fresh.
+    ///
+    /// # Safety
+    ///
+    /// The Redis lock must be held, and the stored context, if any, must
+    /// belong to the module that is still loaded or loading.
+    #[doc(hidden)]
+    pub unsafe fn __release(&self) {
+        let previous = self.ctx.swap(ptr::null_mut(), Ordering::AcqRel);
+        if !previous.is_null() {
+            crate::logging::replace_detached_context(previous, ptr::null_mut());
+            unsafe { crate::__required_api!(RedisModule_FreeThreadSafeContext)(previous) };
+        }
+    }
+
     /// Lock Redis for command invocation. Returns [DetachedContextGuard] which will unlock Redis when dispose.
     /// The guard dereferences to [`WorkerContext`], then [`RuntimeContext`].
     /// Locking Redis when Redis is already locked by the current thread is left unspecified.
     /// However, this function will not return on the second call (it might panic or deadlock, for example)..
+    ///
+    /// Panics if no context is set, as after the module unloads, including when
+    /// an unload released the context while this call waited for the lock.
     pub fn lock(&self) -> DetachedContextGuard<'_> {
-        let c = self.ctx.load(Ordering::Relaxed);
+        let c = self.ctx.load(Ordering::Acquire);
         assert!(!c.is_null(), "Detached context has not been initialized");
+        // Redis only takes the lock here; it does not read the context.
         unsafe { crate::__required_api!(RedisModule_ThreadSafeContextLock)(c) };
+        // Unload and reload replace the context under the lock, so a context
+        // still stored now stays valid until the guard unlocks.
+        if self.ctx.load(Ordering::Acquire) != c {
+            unsafe { crate::__required_api!(RedisModule_ThreadSafeContextUnlock)(c) };
+            panic!("Detached context was released while waiting for the Redis lock");
+        }
         let ctx = unsafe { WorkerContext::from_module_context(c) };
         DetachedContextGuard {
             ctx,

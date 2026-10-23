@@ -372,6 +372,45 @@ fn test_context_user_registry_survives_module_unload_and_reload() -> Result<()> 
 }
 
 #[test]
+fn test_detached_context_is_fresh_after_unload_and_reload() -> Result<()> {
+    let mut con = TestConnection::new("detached_reload");
+    let module = utils::module_path("detached_reload")?;
+    for round in 0..3 {
+        let _: String = redis::cmd("detached.log")
+            .arg(format!("round {round}"))
+            .query(&mut con)?;
+        let pong: String = redis::cmd("detached.worker").query(&mut con)?;
+        assert_eq!(pong, "PONG", "round {round}");
+        utils::wait_until(Duration::from_secs(5), "detached worker exit", || {
+            Ok(redis::cmd("detached.finish").query::<i64>(&mut con)? == 1)
+        })?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "detached_reload"])
+            .query::<()>(&mut con)?;
+        // init installs the SDK logger again on the reloaded module's context.
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(&module)
+            .query::<()>(&mut con)
+            .with_context(|| format!("reload after round {round}"))?;
+    }
+    let log = con.server_log()?;
+    for round in 0..3 {
+        assert!(
+            log.contains(&format!("detached.log round {round}")),
+            "round {round} log line"
+        );
+    }
+    // A load that found the earlier load's context would have replaced it.
+    assert!(
+        !log.contains("replaced a detached module context"),
+        "a reload found a stale detached context"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_timer_event_context_uses_its_selected_database() -> Result<()> {
     let mut con = TestConnection::new("timer");
     redis::cmd("SELECT").arg(3).query::<()>(&mut con)?;
