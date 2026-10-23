@@ -741,13 +741,15 @@ impl<'root> Display for VerbatimStringCallReply<'root> {
     }
 }
 
-/// A reply from a call, which borrows the context that made it.
+/// A reply from a call. It is tied to the context that made it, or, for a
+/// nested reply, to its parent; an unblock handler's reply is parsed without a
+/// context.
 ///
-/// A reply is not [`Send`]. Freeing it can read the context it was made
-/// through, which the owning thread may change meanwhile: on Redis 6.0 and 6.2,
-/// replicating from the same command writes the field that a reply freed on
-/// another thread reads. Copy what is needed into owned Rust data, and drop
-/// the reply on the thread that made it:
+/// A reply is neither [`Send`] nor [`Sync`]. Freeing it can read the context
+/// it was made through, which the owning thread may change meanwhile: on Redis
+/// 6.0 and 6.2, replicating from the same command writes the field that a reply
+/// freed on another thread reads. Copy what is needed into owned Rust data, and
+/// drop the reply on the thread that made it:
 ///
 /// ```no_run
 /// use redis_module::{CallOptionsBuilder, CallReply, CallResult, Context};
@@ -767,11 +769,7 @@ impl<'root> Display for VerbatimStringCallReply<'root> {
 /// Moving the reply itself is rejected, also into a scoped thread:
 ///
 /// ```compile_fail,E0277
-/// use redis_module::{CallOptionsBuilder, CallResult, Context};
-///
-/// fn hand_off(ctx: &Context) {
-///     let reply: CallResult<'_> =
-///         ctx.call_ext("ECHO", &CallOptionsBuilder::new().build(), &["borrowed"]);
+/// fn hand_off(reply: redis_module::CallResult<'_>) {
 ///     std::thread::scope(|scope| {
 ///         scope.spawn(move || drop(reply));
 ///     });
@@ -781,6 +779,15 @@ impl<'root> Display for VerbatimStringCallReply<'root> {
 /// ```compile_fail,E0277
 /// fn assert_send<T: Send>() {}
 /// assert_send::<redis_module::CallReply<'static>>();
+/// ```
+///
+/// Sharing one is rejected too: reading a nested element creates a reply that
+/// is freed on the reading thread, and on Redis 6.0 and 6.2 the first read
+/// parses the reply in place.
+///
+/// ```compile_fail,E0277
+/// fn assert_sync<T: Sync>() {}
+/// assert_sync::<redis_module::CallReply<'static>>();
 /// ```
 #[derive(Debug)]
 pub enum CallReply<'root> {

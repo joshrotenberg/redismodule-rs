@@ -15,18 +15,19 @@ For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
 `CallReply` and `ErrorCallReply`, and through them `ErrorReply` and
 `CallResult`, are no longer `Send`. Upstream PR 349, which added the cron server
-event, added both impls without a stated reason, and nothing in the SDK, its
-examples or the wasm host uses them. Freeing a reply reads the context that made
-it in `autoMemoryFreed`: on Redis 6.0 to 7.0 every reply carries it, and on 7.2
-and later error replies created before the command runs and replies under
-AutoMemory do. On 6.0 and 6.2, `RM_Replicate` and `RM_Call` with `!` write the
-field it reads on the owning thread, so safe code that dropped a reply in a
-scoped thread while its command replicated raced on it. With ThreadSanitizer
-Redis 6.0.20 a probe reported a data race between `moduleReplicateMultiIfNeeded`
-and `autoMemoryFreed`, and a control that dropped the reply on the owning thread
-reported none. From 7.0 only AutoMemory writes the field, and `auto_memory` is
-already unsafe. Compile-fail controls reject moving each type to another thread.
-Upstream has the same impls; no upstream issue or pull request reports the race.
+event, added both impls without a use or a soundness argument, and nothing in
+the SDK, its examples or the wasm host uses them. Freeing a reply reads the
+context that made it in `autoMemoryFreed`: on Redis 6.0 to 7.0 every reply
+carries it, and on 7.2 and later error replies created before the command runs
+and replies under AutoMemory do. On 6.0 and 6.2, `RM_Replicate` and `RM_Call`
+with `!` write the field it reads on the owning thread, so safe code that
+dropped a reply in a scoped thread while its command replicated raced on it.
+With ThreadSanitizer Redis 6.0.20 a probe reported a data race between
+`moduleReplicateMultiIfNeeded` and `autoMemoryFreed`, and a control that dropped
+the reply on the owning thread reported none. From 7.0 only AutoMemory writes
+the field, and `auto_memory` is already unsafe. Compile-fail controls reject
+moving each type to another thread. Upstream has the same impls; no upstream
+issue or pull request reports the race.
 
 ## Detached context across reload
 
