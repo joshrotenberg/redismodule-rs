@@ -49,7 +49,9 @@ def cell(text):
 
 def changes(record, reviewed, reviewed_at):
     upstream, branch = record["repository"], record["branch"]
-    compare = api(f"repos/{upstream}/compare/{reviewed}...{branch}")
+    # A paged comparison starts at the oldest commit; unpaged, it returns the
+    # newest 250. Either way it reports the full total_commits.
+    compare = api(f"repos/{upstream}/compare/{reviewed}...{branch}?per_page={MAX_ROWS}")
     commits = [
         (c["sha"], c["commit"]["committer"]["date"], (c["commit"]["message"].splitlines() or [""])[0])
         for c in compare["commits"]
