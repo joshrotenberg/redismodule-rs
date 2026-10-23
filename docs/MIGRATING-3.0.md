@@ -633,6 +633,13 @@ These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
 
+- **Detached context after unload.** `MODULE_CONTEXT` is released when
+  `redis_module!` unloads the module or its load fails, and the next load stores
+  a fresh one. Until then `MODULE_CONTEXT.lock()` panics instead of using the
+  freed module's context, and event loop callbacks that Redis still runs are
+  skipped; a worker that outlives a reload uses the new load's context. Stop
+  workers, including ones that log, before unloading. Calling `logging::setup()`
+  again, as on a reload, succeeds instead of returning an error.
 - **Unload with pending blocking calls.** `MODULE UNLOAD` now fails while an
   unblock handler installed with `set_unblock_handler` has neither run nor been
   aborted. Previously the unload succeeded and Redis later called the handler

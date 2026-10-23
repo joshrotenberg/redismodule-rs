@@ -478,6 +478,8 @@ macro_rules! redis_module {
                     return raw::Status::Err as c_int;
                 }
             };
+            // Whether this load stored MODULE_CONTEXT, which a failed load frees.
+            let mut detached_stored = false;
             // Panics before Init cannot be caught: the Redis allocator, which a
             // panic needs, is not available until then.
             let status = $crate::panic::run_callback(
@@ -497,8 +499,17 @@ macro_rules! redis_module {
                     };
                     // SAFETY: Init succeeded and this scope is inside OnLoad.
                     let context = unsafe { $crate::RegistrationContext::from_context(&runtime_context) };
-                    unsafe {
-                        let _ = $crate::MODULE_CONTEXT.set_context(&context);
+                    // A context left by an earlier load of a retained image
+                    // refers to a module Redis has freed.
+                    match $crate::MODULE_CONTEXT.__replace_for_load(&context) {
+                        Ok(replaced) => {
+                            detached_stored = true;
+                            if replaced {
+                                context.log_warning("replaced a detached module context left by an earlier load");
+                            }
+                        }
+                        // Without the API the module has no detached context, as before.
+                        Err(_) => (),
                     }
                     // SAFETY: Redis supplies live callback argv/count with legal retention.
                     let args = unsafe { $crate::decode_args(ctx, argv, argc) };
@@ -685,6 +696,11 @@ macro_rules! redis_module {
             // Captured destructors run after init panic containment, never while
             // unwinding the load callback.
             configuration_load.finish(status);
+            if detached_stored && status != raw::Status::Ok as c_int {
+                // Redis frees a module whose load fails without calling OnUnload.
+                // SAFETY: OnLoad holds the Redis lock and the module still exists.
+                unsafe { $crate::MODULE_CONTEXT.__release() };
+            }
             status
         }
 
@@ -738,6 +754,9 @@ macro_rules! redis_module {
                         return $crate::Status::Err as c_int;
                     }
                     timer_unload.commit();
+                    // A later load of a retained image needs a fresh context.
+                    // SAFETY: OnUnload holds the Redis lock and the module still exists.
+                    unsafe { $crate::MODULE_CONTEXT.__release() };
                     $crate::raw::Status::Ok as c_int
                 },
                 || $crate::raw::Status::Err as c_int,
