@@ -64,7 +64,7 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 The repository's [contributing rules](../CONTRIBUTING.md) record the review,
 merge and sync workflow, and the issue backlog is the work list. SDK functional
-changes through `48fafa4` are integrated. PR 79 is merged as `b787fef`;
+changes through `2dd8549` are integrated. PR 79 is merged as `b787fef`;
 its [PR CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39809579615)
 and actual [experiment push CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39811561168)
 passed. H14 / issue 69 is complete. S6 / issue 70 was rechecked on the pinned
@@ -79,9 +79,11 @@ is complete: [PR 97](https://github.com/joshrotenberg/redismodule-rs/pull/97),
 merged as `48fafa4`, refuses `MODULE UNLOAD` while an unblock handler is
 pending and refuses blocking calls while the module loads or unloads. The host
 installs no handlers, so its unload with `wasm.persist no` is unaffected. The
-stale `MODULE_CONTEXT` after a reload found while validating it is
-[issue 98](https://github.com/joshrotenberg/redismodule-rs/issues/98); the host
-uses `MODULE_CONTEXT` neither directly nor through the SDK logger.
+stale `MODULE_CONTEXT` after a reload found while validating it
+([issue 98](https://github.com/joshrotenberg/redismodule-rs/issues/98)) is
+fixed by [PR 102](https://github.com/joshrotenberg/redismodule-rs/pull/102),
+merged as `2dd8549`; the host uses `MODULE_CONTEXT` neither directly nor
+through the SDK logger, and registers no event loop callbacks.
 
 The call reply audit ([issue 93](https://github.com/joshrotenberg/redismodule-rs/issues/93))
 is complete: [PR 95](https://github.com/joshrotenberg/redismodule-rs/pull/95),
@@ -105,6 +107,22 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-10-22: merged SDK master `2dd8549` into the branch as `c137caa`. The SDK
+  change frees and clears `MODULE_CONTEXT` when `redis_module!` unloads the
+  module or its load fails, stores a fresh detached context on every load, lets
+  `logging::setup()` adopt the current context on a reload and skips event loop
+  callbacks that run while no context is stored. The host uses none of
+  `MODULE_CONTEXT`, the SDK's `log` crate logger or the event loop API, and
+  needed no adaptation. SDK PR 102's independent review found no blocking
+  issues, its non-blocking findings were addressed at `f9e45f5`, all 20
+  exact-head CI checks passed there, and the squash tree equals that head. No
+  host or guest source, dependency graph or lock snapshot changed. With
+  `wasm/ci/check.sh` on Rust 1.94.0, Redis 8.10.2 and Node 26.12.1 (CI pins
+  24.22.1), ARM64 macOS: every stage passes, 383 workspace tests including the
+  required JavaScript guest and the host's unload and reload, 1 allocator
+  fallback and 4 guest SDK tests; all four lockfiles stayed identical to their
+  snapshots.
 
 - 2026-10-22: merged SDK master `8ec2dad` into the branch as `c53b957`. It adds
   the weekly upstream watch: `.github/upstream.json`, its script and workflow,
