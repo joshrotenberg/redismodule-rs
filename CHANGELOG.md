@@ -267,10 +267,11 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
   `redis_module!` unloads the module or its load fails, and the next load stores
   a fresh one. Previously a reload of a retained image kept the first load's
   context, whose module Redis had freed, so detached workers, event loop
-  callbacks and the SDK logger used freed memory. `logging::setup()` now
-  succeeds on a reload and adopts the new context, and `MODULE_CONTEXT.lock()`
-  panics once the context is released, also when an unload releases it while
-  the call waits for the lock.
+  callbacks and the SDK logger used freed memory. `logging::setup()` can now be
+  called again, as on a reload, and adopts the current context.
+  `MODULE_CONTEXT.lock()` panics while no context is stored, also when an unload
+  releases it while the call waits for the lock, and event loop callbacks that
+  run while no context is stored are skipped.
 
 - `MODULE UNLOAD` is refused while an unblock handler from `call_blocking` is
   pending. Redis does not count the call's temporary client as blocked, and

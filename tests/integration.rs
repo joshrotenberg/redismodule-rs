@@ -375,33 +375,64 @@ fn test_context_user_registry_survives_module_unload_and_reload() -> Result<()> 
 fn test_detached_context_is_fresh_after_unload_and_reload() -> Result<()> {
     let mut con = TestConnection::new("detached_reload");
     let module = utils::module_path("detached_reload")?;
-    for round in 0..3 {
+    let exercise = |con: &mut TestConnection, round: i64| -> Result<()> {
         let _: String = redis::cmd("detached.log")
             .arg(format!("round {round}"))
-            .query(&mut con)?;
-        let pong: String = redis::cmd("detached.worker").query(&mut con)?;
+            .query(con)?;
+        let pong: String = redis::cmd("detached.worker").query(con)?;
         assert_eq!(pong, "PONG", "round {round}");
         utils::wait_until(Duration::from_secs(5), "detached worker exit", || {
-            Ok(redis::cmd("detached.finish").query::<i64>(&mut con)? == 1)
-        })?;
-        redis::cmd("MODULE")
+            Ok(redis::cmd("detached.finish").query::<i64>(con)? == 1)
+        })
+    };
+    let unload = |con: &mut TestConnection| -> Result<()> {
+        Ok(redis::cmd("MODULE")
             .arg(&["UNLOAD", "detached_reload"])
-            .query::<()>(&mut con)?;
+            .query::<()>(con)?)
+    };
+    let assert_loads = |con: &mut TestConnection, expected: i64| -> Result<()> {
+        let loads: i64 = redis::cmd("detached.loads").query(con)?;
+        assert_eq!(
+            loads, expected,
+            "the image was unmapped at unload, so a reload did not reuse it"
+        );
+        Ok(())
+    };
+    for round in 0..3 {
+        exercise(&mut con, round)?;
+        unload(&mut con)?;
         // init installs the SDK logger again on the reloaded module's context.
         redis::cmd("MODULE")
             .arg("LOAD")
             .arg(&module)
             .query::<()>(&mut con)
             .with_context(|| format!("reload after round {round}"))?;
+        assert_loads(&mut con, round + 2)?;
     }
+    // A load that fails after storing its context releases it.
+    unload(&mut con)?;
+    assert!(
+        redis::cmd("MODULE")
+            .arg(&["LOAD", &module, "fail"])
+            .query::<()>(&mut con)
+            .is_err()
+    );
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(&module)
+        .query::<()>(&mut con)
+        .context("reload after the failed load")?;
+    assert_loads(&mut con, 6)?;
+    exercise(&mut con, 3)?;
     let log = con.server_log()?;
-    for round in 0..3 {
+    for round in 0..4 {
+        // The module name prefix shows the logger used a module context.
         assert!(
-            log.contains(&format!("detached.log round {round}")),
+            log.contains(&format!("<detached_reload> detached.log round {round}")),
             "round {round} log line"
         );
     }
-    // A load that found the earlier load's context would have replaced it.
+    // A load that found an earlier load's context would have replaced it.
     assert!(
         !log.contains("replaced a detached module context"),
         "a reload found a stale detached context"
@@ -2508,6 +2539,12 @@ fn test_module_lifecycle_reload_and_failed_load_recovery() -> Result<()> {
             .arg("lifecycle:kept")
             .query::<String>(&mut con)?,
         "value"
+    );
+    // The failed load released the detached context it stored, so no later
+    // load found it.
+    assert!(
+        !con.server_log()?
+            .contains("replaced a detached module context")
     );
     Ok(())
 }

@@ -154,7 +154,10 @@ unloads the module or its load fails, it frees and clears the detached context
 points the installed SDK logger at that context again, since a process can
 install a logger only once. Stop workers that use `MODULE_CONTEXT` before
 unloading: once it is released, `MODULE_CONTEXT.lock()` panics rather than use a
-context whose module Redis has freed.
+context whose module Redis has freed. Threads must also stop logging through
+the SDK logger or `MODULE_CONTEXT.log`, which do not take the lock. Remove
+event loop watches in `deinit`; a callback Redis runs after the unload is
+skipped.
 
 Using a different artifact path avoids replacing a mapped file, but it is not
 a portable guarantee that the loader selected new code. Verify the actual

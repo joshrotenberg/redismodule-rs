@@ -19,15 +19,17 @@ macro ignored `set_context` refusing a second context, so when the module's
 image stayed mapped a reload kept the first load's context, whose `RedisModule`
 `moduleUnload` had freed. On AddressSanitizer Redis 8.10.2 a detached worker's
 `RM_Call` after a reload was a heap-use-after-free. The SDK logger kept the same
-stale context, because `log::set_logger` succeeds once per process; `logging::setup()`
-now adopts the current context when the SDK logger is already installed, and
-the logger leaves a context the SDK frees. `DetachedContext::lock` re-checks the
-context after taking the lock, which Redis takes without reading the context,
-and panics if an unload released it meanwhile. A native regression unloads and
-reloads three times with the logger and a detached worker; without the unload
-release it reports a replaced stale context, and without the logger change the
-reload fails. Upstream has the same code; no upstream issue or pull request
-reports it.
+stale context, because `log::set_logger` succeeds once per process;
+`logging::setup()` now adopts the current context when the SDK logger is
+already installed, and the logger leaves a context the SDK frees.
+`DetachedContext::lock` re-checks the context after taking the lock, which Redis
+takes without reading the context, and panics if an unload released it
+meanwhile. Event loop callbacks that Redis runs while no context is stored are
+skipped. A native regression unloads and reloads three times and fails one
+load, with the logger and a detached worker, and checks that the image stayed
+mapped; without the unload release it reports a replaced stale context, and
+without the logger change the reload fails. Upstream has the same code; no
+upstream issue or pull request reports it.
 
 ## Unload with pending blocking calls
 

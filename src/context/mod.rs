@@ -288,7 +288,8 @@ impl CallOptionsBuilder {
 ///
 /// `redis_module!` stores a fresh context in [`MODULE_CONTEXT`](crate::MODULE_CONTEXT)
 /// on every load and frees it when the module unloads or its load fails, so
-/// workers must stop using it before the module unloads.
+/// workers must stop using it before the module unloads. That includes logging:
+/// [`Self::log`] and the SDK logger do not take the Redis lock.
 pub struct DetachedContext {
     pub(crate) ctx: AtomicPtr<raw::RedisModuleCtx>,
 }
@@ -363,6 +364,10 @@ impl DetachedContext {
         self.log(RedisLogLevel::Warning, message);
     }
 
+    /// Stores a detached context for `ctx`'s module, or fails if one is
+    /// already stored. `redis_module!` manages [`MODULE_CONTEXT`](crate::MODULE_CONTEXT)
+    /// itself; a module with its own `RedisModule_OnLoad` that calls this has
+    /// no SDK call that releases the context when the module unloads.
     pub fn set_context(&self, ctx: &EventContext) -> Result<(), RedisError> {
         let c = self.ctx.load(Ordering::Relaxed);
         if !c.is_null() {
@@ -409,8 +414,10 @@ impl DetachedContext {
     /// Locking Redis when Redis is already locked by the current thread is left unspecified.
     /// However, this function will not return on the second call (it might panic or deadlock, for example)..
     ///
-    /// Panics if no context is set, as after the module unloads, including when
-    /// an unload released the context while this call waited for the lock.
+    /// Panics if no context is stored: after the module unloads and until it
+    /// loads again, including when an unload released the context while this
+    /// call waited for the lock. A worker that outlives a reload locks the new
+    /// load's context, so stop workers before the module unloads.
     pub fn lock(&self) -> DetachedContextGuard<'_> {
         let c = self.ctx.load(Ordering::Acquire);
         assert!(!c.is_null(), "Detached context has not been initialized");

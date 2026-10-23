@@ -3,6 +3,11 @@
 //!
 //! Callbacks run on the main thread with the Redis lock held, through the
 //! panic guard, and receive a [`EventContext`] for the module's detached context.
+//!
+//! Redis keeps pending one-shots and watched descriptors across `MODULE UNLOAD`.
+//! A callback that runs while no module context is stored is skipped, and a
+//! one-shot is then dropped without being called; after a reload it receives the
+//! new load's context. Remove watches and let one-shots run before unloading.
 
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -45,14 +50,16 @@ fn fd_callbacks() -> std::sync::MutexGuard<'static, BTreeMap<RawFd, FdCallbacks>
     FD_CALLBACKS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The context passed to event loop callbacks.
-fn callback_context() -> EventContext {
+/// The context passed to event loop callbacks, or `None` while no module
+/// context is stored, as after an unload: Redis keeps pending callbacks then.
+fn callback_context() -> Option<EventContext> {
     let ctx = MODULE_CONTEXT
         .ctx
         .load(std::sync::atomic::Ordering::Relaxed);
-    // SAFETY: Redis runs event loop callbacks on the main thread, and the
-    // module's detached context lives as long as the module.
-    unsafe { EventContext::new(ctx) }
+    // SAFETY: Redis runs event loop callbacks on the main thread with its lock
+    // held, and a stored context stays valid until an unload or a failed load,
+    // which also hold the lock, releases it.
+    (!ctx.is_null()).then(|| unsafe { EventContext::new(ctx) })
 }
 
 /// The error for a failed call, with the `errno` it left.
@@ -218,7 +225,9 @@ fn run_fd_callback(fd: RawFd, direction: EventLoopMask) {
                 // EventContext::yield_now, can be reached again while it runs;
                 // that nested call is skipped.
                 if let Ok(mut callback) = callback.try_lock() {
-                    callback(&callback_context(), fd, direction);
+                    if let Some(ctx) = callback_context() {
+                        callback(&ctx, fd, direction);
+                    }
                 }
             },
             || (),
@@ -252,9 +261,14 @@ extern "C" fn one_shot_trampoline(user_data: *mut c_void) {
     // SAFETY: user_data came from Box::into_raw in add_one_shot, and Redis
     // calls each one-shot once.
     let callback = unsafe { Box::from_raw(user_data.cast::<OneShot>()) };
+    // Without a context the one-shot is dropped uncalled, inside the guard.
     crate::panic::run_callback(
         "event loop one-shot",
-        || callback(&callback_context()),
+        || {
+            if let Some(ctx) = callback_context() {
+                callback(&ctx);
+            }
+        },
         || (),
     );
 }

@@ -186,6 +186,12 @@ pub mod standard_log_implementation {
     /// so without the redis module context, no context will be used for
     /// the logging, however, the logger will be set.
     ///
+    /// It can be called again, as `init` does when a retained image is loaded
+    /// again, and then points the SDK logger at the current context. Call it on
+    /// the main thread, from `init` or a command: it reads `MODULE_CONTEXT`
+    /// without the Redis lock. Threads must stop logging before the module
+    /// unloads, since the logger does not take the lock either.
+    ///
     /// # Example
     ///
     /// This function may be called on a module startup, within the
