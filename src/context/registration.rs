@@ -112,7 +112,9 @@ impl<'load> RegistrationContext<'load> {
     /// Sets module behavior options during initialization.
     ///
     /// For example, `HANDLE_IO_ERRORS` enables handling persistence read errors
-    /// instead of terminating the server. Redis replaces the option mask.
+    /// instead of terminating the server. Redis replaces the option mask, and
+    /// keeps options it does not act on, such as `REQUIRE_LOADED_KEYS_IN_RAM`
+    /// on Redis OSS, without an error.
     pub fn set_module_options(&self, options: ModuleOptions) {
         unsafe {
             crate::__required_api!(RedisModule_SetModuleOptions)(
