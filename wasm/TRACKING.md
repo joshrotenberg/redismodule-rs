@@ -106,6 +106,17 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-10-22: merged SDK master `8ec2dad` into the branch as `c53b957`. It adds
+  the weekly upstream watch: `.github/upstream.json`, its script and workflow,
+  a "Tracking upstream" section in CONTRIBUTING.md and a `.gitignore` entry.
+  SDK PR 99 passed two rounds of independent review and all exact-head checks
+  at `290a4d0`, including the workflow's preview job, and its first push and
+  manual runs on master reported upstream up to date. The workflow's push
+  trigger is limited to `master` and schedules run only from the default
+  branch, so it does not run on this branch. CI and documentation only: no
+  SDK, host or guest source, dependency graph or lock snapshot changed, so
+  the experiment push CI is the validation for this sync.
+
 - 2026-10-22: merged SDK master `48fafa4` into the branch as `7400448`. The SDK
   change refuses `MODULE UNLOAD` while a blocking call's unblock handler is
   pending and refuses blocking calls while `redis_module!` loads or unloads the
