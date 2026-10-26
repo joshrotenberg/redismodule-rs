@@ -263,6 +263,13 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Fixed
 
+- **Breaking:** `CallReply`, `ErrorReply` and `CallResult` are no longer `Send`.
+  Freeing a reply can read the context that made it, and on Redis 6.0 and 6.2 a
+  reply dropped on another thread while its command replicated was a data race
+  on that context. Copy what another thread needs into owned data, and convert
+  errors with `RedisError::from`. See the
+  [migration notes](docs/MIGRATING-3.0.md#call-replies-are-not-send).
+
 - `MODULE_CONTEXT`, the detached module context, is freed and cleared when
   `redis_module!` unloads the module or its load fails, and the next load stores
   a fresh one. Previously a reload of a retained image kept the first load's
