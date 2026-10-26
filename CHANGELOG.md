@@ -13,6 +13,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- [Module API coverage](docs/API-COVERAGE.md) lists each module API function
+  in the vendored header with the SDK's wrapper status, the Redis version that
+  added it, its compatibility floor and the context a wrapper would fit, and
+  ranks the gaps by evidence of need. `.github/scripts/api-coverage.py`
+  generates the table and checks that it is current.
+
 - `FutureHandler`, the handle `FutureCallReply::set_unblock_handler` returns,
   is exported at the crate root, so modules can name a kept handle and its
   `dispose` and `abort_and_dispose` documentation renders.
