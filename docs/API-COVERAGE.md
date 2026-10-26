@@ -67,7 +67,9 @@ operations are also available as commands through `RuntimeContext::call`.
   API's floor and requires it at or above; `direct` reads the `Option` itself,
   checked or expected by hand.
 - **reached through**: for safe and unsafe APIs, the nearest public entry
-  points; for internal ones, the referencing items. At most two are shown.
+  points; for internal ones, the referencing items, except that a
+  hand-classified row keeps the automatic analysis's nearest public entry
+  points. At most two are shown.
 - **fit**: for an API that is not safe, the context view a wrapper would extend
   in the SDK's capability model (see
   [MIGRATING-3.0.md](MIGRATING-3.0.md#events-and-locked-workers-have-separate-context-views)),
@@ -122,8 +124,9 @@ Evidence, strongest first:
 3. Another upstream issue or pull request, or a design issue here.
 4. No request found: not ranked.
 
-Within a tier, gaps with more separate requesters rank higher, then more
-recent requests.
+Within a tier, gaps with more separate requesters rank higher, then more recent
+requests. Tier 2 is one requester's series, ranked in its own order: upstream
+PRs 442 and 444 build on the command filters of upstream PR 437.
 
 | rank | gap | fit | evidence |
 |---|---|---|---|
@@ -139,10 +142,9 @@ recent requests.
 | 10 | `GetExpire`, `GetAbsExpire` | key | upstream PR 391. |
 | 11 | `RdbLoad`, `RdbSave` and the RDB streams | runtime | upstream issue 382. Its reply points to data-type RDB callbacks, which this SDK supports, not to these APIs. |
 | 12 | Sorted sets | key | upstream issue 235. |
-| 13 | `StreamIteratorDelete` | key | upstream PR 229, a 2022 umbrella pull request whose description links most of its parts to separate pull requests. |
-| 14 | Dictionaries | context-free | upstream PRs 169 and 228, both drafts by one author. With `RedisAlloc` as the global allocator, Rust maps already count toward Redis's memory. |
-| 15 | `EmitAOF` | callback (I/O) | upstream issue 74. |
-| 16 | Server configuration reads | runtime | #60, a design issue that first needs a read use case. |
+| 13 | Dictionaries | context-free | upstream PRs 169 and 228, both drafts by one author. With `RedisAlloc` as the global allocator, Rust maps already count toward Redis's memory. |
+| 14 | `EmitAOF` | callback (I/O) | upstream issue 74. |
+| 15 | Server configuration reads | runtime | #60, a design issue that first needs a read use case. |
 
 Ranks 1 to 3 are tier 1, 4 to 6 tier 2 and the rest tier 3, with this
 repository's design issue last.
@@ -185,13 +187,14 @@ it; they are what #89 would record as remaining raw-API workarounds.
 ## Requests upstream
 
 The same analysis, run on upstream master `4ab88e7`, finds every gap here
-missing upstream too, except two that upstream covers unsoundly.
-`raw::reply_with_attribute` is a safe function that takes a raw context
-pointer; this fork removed it with the other raw-pointer helpers in
-`3de40d8` (upstream issue 205). Upstream's stream iterator calls
-`StreamIteratorDelete` when dropped, deleting the current entry, which
-`a83e6d3` fixed here. Upstream also reaches `AutoMemory`, `SaveString` and
-`LogIOError` through safe items that this fork made `unsafe`.
+missing upstream too, except two that upstream covers unsoundly or incorrectly.
+`raw::reply_with_attribute` is a safe function that takes a raw context pointer;
+this fork removed it with the other raw-pointer helpers in `3de40d8` (upstream
+issue 205). Upstream's stream iterator calls `StreamIteratorDelete` when
+dropped, deleting the current entry, which `a83e6d3` fixed here; upstream PR 229
+adds that call, so it is not a request for the API. Upstream also reaches
+`AutoMemory`, `SaveString` and `LogIOError` through safe items that this fork
+made `unsafe`.
 
 The upstream issues and pull requests that ask for a gap:
 
@@ -209,7 +212,6 @@ The upstream issues and pull requests that ask for a gap:
 | upstream PR 354 | open | `CreateModuleUser`, `SetModuleUserACLString`, `GetModuleUserACLString`, `AuthenticateClientWithUser` | none; its `FreeModuleUser`, `GetModuleUserFromUserName` and `ACLCheckKeyPermissions` are safe here |
 | upstream issue 236 | open | the cluster API | none |
 | upstream issue 235 | open | `ZsetAdd`, `ZsetFirstInScoreRange` and four range iterator functions | none |
-| upstream PR 229 | open | among other parts, `StreamIteratorDelete` | none |
 | upstream PR 228, upstream PR 169 | open drafts | dictionaries | none |
 | upstream PR 168 | open | six command filter APIs | none |
 | upstream issue 74 | open | `EmitAOF` | none |
@@ -228,6 +230,8 @@ pointer:
   has from upstream PR 468.
 - upstream PR 100 adds a multi-field `hash_get` macro; `HashGet` is safe here,
   including `hash_get_multi`.
+- upstream PR 397 adds `DbSize` and upstream PR 477 the shutdown server event;
+  both are safe here.
 - upstream PRs 405, 336, 245 and 240 change argument decoding, initialization
   checks, `RedisKey` field visibility and error prefixes, not API coverage.
 
@@ -258,18 +262,18 @@ Missing: `CreateSubcommand`, the flag-carrying key and channel position APIs
 and `RedactClientCommandArgument`. Subcommands fit registration; the others
 fit command, next to `Context::key_at_pos`.
 
-Replies cover the RESP2 and RESP3 types through `RedisValue`. Missing are
-RESP3 attributes (`ReplyWithAttribute`, `ReplySetAttributeLength`), postponed
-aggregate lengths (`ReplySet*Length`, which #55 discusses as streaming
-replies) and `ReplyWithNullArray`. Several others have an equivalent
-`RedisValue`, which the table names. `ReplySetPushLength` is in the header but
-in no examined Redis source; where it came from was not checked.
+Replies cover the RESP2 and RESP3 types through `RedisValue`. Missing are RESP3
+attributes (`ReplyWithAttribute`, `ReplySetAttributeLength`), postponed
+aggregate lengths (`ReplySet*Length`, which #55 discusses as streaming replies)
+and `ReplyWithNullArray`. Several others have an equivalent `RedisValue`, which
+the table names. `ReplySetPushLength` is in the header but in no examined Redis
+source; it came into the header with upstream PR 253 (`70960fc`).
 
-The generated list of APIs required above the lowest floor is for review, not
-a list of defects. At the 6.0 floor, replying with `RedisValue::Bool`,
-`BigNumber` or `VerbatimString`, or calling `Context::get_current_user`,
-panics on a Redis 6 server, naming the missing API. Whether the RESP3
-`CallReply*` accessors can run on Redis 6 was not checked.
+The generated list of APIs required above the lowest floor is for review, not a
+list of defects. At the 6.0 floor, replying with `RedisValue::Bool`, `BigNumber`
+or `VerbatimString`, or calling `Context::get_current_user`, panics on a Redis 6
+server, naming the missing API (#109). Whether the RESP3 `CallReply*` accessors
+can run on Redis 6 was not checked.
 
 ### Calls and strings
 
@@ -293,10 +297,11 @@ module has no safe way to signal a change. `RedisKey::to_raw_parts` gives
 ### Lists, hashes, sorted sets and streams
 
 Lists have push and pop; `ListGet`, `ListSet`, `ListInsert` and `ListDelete`
-(7.0) are missing. Hashes lack `HashFieldMinExpire` (8.0). No sorted-set API
-is wrapped. Streams have iteration and `StreamTrimByID`; `StreamAdd`,
+(7.0) are missing. Hashes lack `HashFieldMinExpire` (8.0). No sorted-set API is
+wrapped. Streams have iteration and `StreamTrimByID`; `StreamAdd`,
 `StreamDelete`, `StreamIteratorDelete`, `StreamTrimByLength` and the stream ID
-string conversions are missing. All fit `RedisKey` or `RedisKeyWritable`.
+string conversions are missing. The key operations fit `RedisKey` or
+`RedisKeyWritable`; the stream ID conversions are context-free.
 
 ### Native data types
 
@@ -322,8 +327,8 @@ fits runtime.
 
 No wrapper returns a client's id, name, user name, information or TLS
 certificate; `GetClientId` and `GetClientInfoById` serve only internal checks.
-The client's own id fits command; lookups by id fit runtime. `PublishMessage` and
-`PublishMessageShard` fit runtime; `PUBLISH` through `call` is the current
+The client's own id fits command; lookups by id fit runtime. `PublishMessage`
+and `PublishMessageShard` fit runtime; `PUBLISH` through `call` is the current
 path. `LatencyAddSample` is context-free.
 
 ### Time and randomness
@@ -694,7 +699,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `StreamIteratorStop` | 6.2 | 6.2 | available | safe | `RedisKey::get_stream_iterator`, `RedisKey::get_stream_range_iterator` |  |  |
 | `StreamIteratorNextID` | 6.2 | 6.2 | available | safe | `RedisKey::get_stream_iterator`, `RedisKey::get_stream_range_iterator` |  |  |
 | `StreamIteratorNextField` | 6.2 | 6.2 | available | safe | `RedisKey::get_stream_iterator`, `RedisKey::get_stream_range_iterator` |  |  |
-| `StreamIteratorDelete` | 6.2 | 6.2 |  | none |  | key | upstream PR 229 |
+| `StreamIteratorDelete` | 6.2 | 6.2 |  | none |  | key |  |
 | `StreamTrimByLength` | 6.2 | 6.2 |  | none |  | key |  |
 | `StreamTrimByID` | 6.2 | 6.2 | available | safe | `RedisKeyWritable::trim_stream_by_id` |  |  |
 
@@ -1081,8 +1086,9 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
   `redis_module!` calls through `src/redismodule.c`, calls it.
 - `IsModuleNameBusy`, internal: the header's inline `RedisModule_Init`, which
   `redis_module!` calls through `src/redismodule.c`, calls it.
-- `GetClientId`, internal: `Context::acl_add_log_entry` only checks that the
-  context has a client; no wrapper returns the id.
+- `GetClientId`, internal: `Context::acl_add_log_entry` and the blocking checks
+  behind `block_client` and `block_client_on_reply` only test that the context
+  has a client; no wrapper returns the id.
 - `GetClientInfoById`, internal: `Context::block_client` only checks, before
   Redis 6.2, that the client is in the client index; no wrapper returns client
   data.

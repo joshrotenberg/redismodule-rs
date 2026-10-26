@@ -45,8 +45,9 @@ OVERRIDES = {
                          "`redis_module!` calls through `src/redismodule.c`, calls it."),
     "IsModuleNameBusy": ("internal", "the header's inline `RedisModule_Init`, which "
                          "`redis_module!` calls through `src/redismodule.c`, calls it."),
-    "GetClientId": ("internal", "`Context::acl_add_log_entry` only checks that the context has a "
-                    "client; no wrapper returns the id."),
+    "GetClientId": ("internal", "`Context::acl_add_log_entry` and the blocking checks behind "
+                    "`block_client` and `block_client_on_reply` only test that the context has "
+                    "a client; no wrapper returns the id."),
     "GetClientInfoById": ("internal", "`Context::block_client` only checks, before Redis 6.2, that "
                           "the client is in the client index; no wrapper returns client data."),
     "GetContextUser": ("internal", "`RuntimeContext::scoped_call_user` reads it to restore the "
@@ -220,7 +221,6 @@ REQUESTS = {}
 for _refs, _names in [
     (["upstream issue 235"], "ZsetAdd ZsetFirstInScoreRange ZsetRangeCurrentElement "
                              "ZsetRangeEndReached ZsetRangeNext ZsetRangeStop"),
-    (["upstream PR 229"], "StreamIteratorDelete"),
     (["upstream issue 445", "upstream PR 446"], "RandomKey"),
     (["upstream issue 443", "upstream PR 444"], "SetLRU GetLRU SetLFU GetLFU"),
     (["upstream PR 437"], "UnregisterCommandFilter CommandFilterGetClientId"),
@@ -798,6 +798,8 @@ def analyse(apis):
 
 def header_apis():
     """The API pointers the header declares, and those it has commented out."""
+    if not HEADER.exists():
+        sys.exit(f"{HEADER.relative_to(ROOT)} not found")
     text = HEADER.read_text()
     declared = r"REDISMODULE_API\b[^;]*?\(\s*\*\s*" + PREFIX + r"(\w+)\s*\)"
     return (re.findall("^" + declared, text, re.M | re.S),
@@ -812,21 +814,22 @@ def redis_versions(directory):
     """API name -> the first minor version, among module-<version>.c files,
     whose source defines it; the versions examined; and the APIs the newest
     source registers."""
-    files = sorted(Path(directory).glob("module-*.c"),
+    files = sorted((p for p in Path(directory).glob("module-*.c")
+                    if re.fullmatch(r"module-\d+(\.\d+)+", p.stem)),
                    key=lambda p: version_key(p.stem[len("module-"):]))
     if not files:
         sys.exit(f"no module-<version>.c files in {directory}")
-    first = {}
+    first, registered = {}, set()
     for path in files:
         text = path.read_text(errors="replace")
         version = path.stem[len("module-"):]
         # REGISTER_API(X) exports RM_X as RedisModule_X. RM_GetApi is not
         # registered: Redis passes it to modules in the context.
-        names = set(re.findall(r"^\s*REGISTER_API\((\w+)\)", text, re.M))
-        names |= set(re.findall(r"^[A-Za-z_][\w \t*]*?\bRM_(\w+)\s*\(", text, re.M))
+        registered = set(re.findall(r"^\s*REGISTER_API\((\w+)\)", text, re.M))
+        names = registered | set(re.findall(r"^[A-Za-z_][\w \t*]*?\bRM_(\w+)\s*\(", text, re.M))
         for name in names:
             first.setdefault(name, ".".join(version.split(".")[:2]))
-    registered = set(re.findall(r"^\s*REGISTER_API\((\w+)\)", text, re.M))
+    # The files are sorted, so this is what the newest source registers.
     return first, [p.stem[len("module-"):] for p in files], registered
 
 
@@ -867,7 +870,14 @@ def stored_versions():
         return {}, [], []
     section = text.split(BEGIN, 1)[1].split(END, 1)[0]
     sources, undeclared = SOURCES.search(section), UNDECLARED.search(section)
-    return (dict(ROW.findall(section)),
+    if not sources:
+        sys.exit(f"{DOC.relative_to(ROOT)} lacks the list of Redis sources examined; "
+                 "run with --redis-src")
+    stored = dict(ROW.findall(section))
+    for name, version in stored.items():
+        if not re.fullmatch(r"\d+\.\d+|Enterprise|not in OSS|unknown", version):
+            sys.exit(f"{DOC.relative_to(ROOT)} records an invalid version for {name}: {version!r}")
+    return (stored,
             re.split(r",\s+", sources.group(1)) if sources else [],
             re.findall(r"`(\w+)`", undeclared.group(1)) if undeclared else [])
 
@@ -1000,10 +1010,11 @@ def main():
     parser.add_argument("--redis-src", metavar="DIR",
                         help="directory of Redis module-<version>.c files; without it, the "
                              "introduced versions recorded in the document are reused")
-    parser.add_argument("--check", action="store_true",
-                        help="exit non-zero if the document is out of date; write nothing")
-    parser.add_argument("--report", action="store_true",
-                        help="print each API's automatic and final classification")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true",
+                      help="exit non-zero if the document is out of date; write nothing")
+    mode.add_argument("--report", action="store_true",
+                      help="print each API's automatic and final classification")
     args = parser.parse_args()
 
     apis, commented = header_apis()
