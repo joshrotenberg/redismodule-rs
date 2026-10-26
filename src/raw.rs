@@ -48,8 +48,9 @@ bitflags! {
         const NO_IMPLICIT_SIGNAL_MODIFIED = REDISMODULE_OPTION_NO_IMPLICIT_SIGNAL_MODIFIED as c_int;
         const HANDLE_REPL_ASYNC_LOAD = REDISMODULE_OPTIONS_HANDLE_REPL_ASYNC_LOAD as c_int;
         /// Prevents direct-to-disk writes of keys loaded from RDB or by
-        /// `RESTORE` in BigRedis mode, a Redis Enterprise extension. Redis OSS
-        /// stores the option and ignores it.
+        /// `RESTORE` in BigRedis (Redis Flex) mode, a Redis Enterprise
+        /// extension. Redis OSS stores the option and ignores it. It is part of
+        /// `ModuleOptions::all()`, so name the options a module wants.
         const REQUIRE_LOADED_KEYS_IN_RAM = REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM as c_int;
     }
 }

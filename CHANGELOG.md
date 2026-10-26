@@ -14,10 +14,13 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 ### Added
 
 - `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`, from upstream's header: in
-  BigRedis mode, a Redis Enterprise extension, it prevents direct-to-disk
-  writes of keys loaded from RDB or by `RESTORE`. Redis OSS 6.0 to 8.10 stores
-  the option and ignores it. `src/include/redismodule.h` now matches upstream
-  master, and the committed bindings include the define.
+  BigRedis (Redis Flex) mode, a Redis Enterprise extension, it prevents
+  direct-to-disk writes of keys loaded from RDB or by `RESTORE`. Redis OSS 6.0
+  to 8.10 stores the option and ignores it. `ModuleOptions::all()` and
+  complements such as `!ModuleOptions::HANDLE_IO_ERRORS` now include it, so
+  name the options a module wants. `src/include/redismodule.h` now matches
+  upstream's at `4ab88e7` (upstream PR 489), and the committed bindings include
+  the define.
 
 - `FutureHandler`, the handle `FutureCallReply::set_unblock_handler` returns,
   is exported at the crate root, so modules can name a kept handle and its
