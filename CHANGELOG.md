@@ -13,6 +13,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- [Module API coverage](docs/API-COVERAGE.md) lists each module API function
+  in the vendored header with the SDK's wrapper status, the Redis version that
+  added it, its compatibility floor and the context a wrapper would fit, and
+  ranks the gaps by evidence of need. `.github/scripts/api-coverage.py`
+  generates the table and checks that it is current.
+
 - `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`, from upstream's header: in
   BigRedis (Redis Flex) mode, a Redis Enterprise extension, it prevents
   direct-to-disk writes of keys loaded from RDB or by `RESTORE`. Redis OSS 6.0
