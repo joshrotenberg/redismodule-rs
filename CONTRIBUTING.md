@@ -122,6 +122,35 @@ issue N", and the merge closes it. To run the report now, use
 `gh workflow run upstream-watch.yml`; to preview it locally, run
 `python3 .github/scripts/upstream-watch.py --repo joshrotenberg/redismodule-rs --dry-run`.
 
+## Pre-releases
+
+3.0.0 reaches modules as pre-release tags on `master`; nothing is published to
+crates.io.
+
+- Tags are annotated and named `v3.0.0-alpha.N` while breaking changes still
+  land, then `v3.0.0-beta.N` once none is planned. Upstream's tags are `v2.x`
+  and `redis-module-v2.x`, so these cannot collide with them.
+- The crates keep version `3.0.0` until the final release. `module_version!`
+  rejects pre-release versions, and the `hello`, `lifecycle` and `module_name`
+  examples encode the SDK's own package version with it.
+- Cut a pre-release when changes that git consumers should pin have landed, or
+  when the owner asks. One pull request updates the tag in the README.md and
+  docs/MIGRATING-3.0.md dependency snippets, and moves the CHANGELOG's
+  Unreleased entries into a section named for the tag, with its date and a
+  compare link from the previous tag.
+- After that pull request merges and every expected check passes on the merge
+  commit, tag the commit and push the tag:
+
+  ```bash
+  git tag -a v3.0.0-alpha.N -m "redis-module v3.0.0-alpha.N" <commit>
+  git push origin v3.0.0-alpha.N
+  ```
+
+- Tagging is manual; the upstream release workflows do not run in this
+  repository.
+- The final `v3.0.0`, its CHANGELOG section and any crates.io publishing are the
+  owner's decisions.
+
 ## Validation
 
 Use the toolchain in `rust-toolchain.toml` (1.94.0); the MSRV is 1.87.0. If

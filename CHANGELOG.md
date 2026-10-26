@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.0.0] - unreleased
+## [3.0.0-alpha.1](https://github.com/joshrotenberg/redismodule-rs/compare/a808377...v3.0.0-alpha.1) - 2026-10-26
 
-The release date and comparison link are added when 3.0.0 ships. Entries marked **Breaking** need a change in modules; [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) describes each one.
+The first pre-release of 3.0.0, tagged for git consumers; the crates keep version `3.0.0` (see [CONTRIBUTING.md](CONTRIBUTING.md#pre-releases)). The comparison starts at `a808377`, the upstream commit this fork branches from. Entries marked **Breaking** need a change in modules; [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) describes each one.
 
 ### Added
 
