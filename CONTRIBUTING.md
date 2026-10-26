@@ -130,29 +130,32 @@ crates.io.
 - Tags are annotated and named `v3.0.0-alpha.N` while breaking changes still
   land, then `v3.0.0-beta.N` once none is planned. Upstream has no `v3` tags;
   its tags include `v2.x` and `redis-module-v2.x`.
-- The crates keep version `3.0.0` until the final release, for two reasons.
+- The crates keep version `3.0.0` until the final release, for two reasons:
   `module_version!` rejects pre-release versions, and the `hello`, `lifecycle`
-  and `module_name` examples encode the SDK's own package version with it. And
-  the workspace's internal path dependencies require `version = "3.0.0"`, which
-  a `3.0.0-alpha.N` package does not satisfy. The per-crate changelogs under
-  `common/` and the two macro crates stay `unreleased` until then.
+  and `module_name` examples encode the SDK's own package version with it; and
+  `redis-module`'s dependency on `redis-module-macros-internals` requires
+  `version = "3.0.0"`, which a `3.0.0-alpha.N` package does not satisfy. The
+  per-crate changelogs under `common/` and the two macro crates stay
+  `unreleased` until then.
 - Propose a pre-release when changes that git consumers should pin have landed.
   Preparing its pull request is ordinary work; creating and pushing the tag
-  needs the owner's explicit authorization, as the branch rules above say.
+  needs the owner's explicit authorization, as the branch rules above say. Get
+  it before the pull request merges, because its snippets name a tag that does
+  not exist until it is pushed.
 - The pull request updates the tag in the dependency snippets of README.md,
   docs/MIGRATING-3.0.md and docs/COMPATIBILITY-FLOORS.md, and moves the
   CHANGELOG's Unreleased entries into a section named for the tag, with a
   compare link from the previous tag and the date the tag will be pushed. Before
   tagging, check that the section lists exactly the changes the tagged commit
   contains, and fix the date if the tag goes out on a later day.
-- After it merges and every expected check passes on the merge commit, tag that
+- After it merges and every expected check passes on its squash commit, tag that
   commit on this repository's `master` and push the tag here (`fork` in the
   setup above). `ci.yml` does not run on tag pushes, which is why the checks on
-  the merge commit are required:
+  the squash commit are required:
 
   ```bash
   git fetch fork
-  git tag -a v3.0.0-alpha.N -m "redis-module v3.0.0-alpha.N" <merge commit>
+  git tag -a v3.0.0-alpha.N -m "redis-module v3.0.0-alpha.N" <squash commit>
   git push fork v3.0.0-alpha.N
   ```
 
