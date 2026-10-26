@@ -128,28 +128,42 @@ issue N", and the merge closes it. To run the report now, use
 crates.io.
 
 - Tags are annotated and named `v3.0.0-alpha.N` while breaking changes still
-  land, then `v3.0.0-beta.N` once none is planned. Upstream's tags are `v2.x`
-  and `redis-module-v2.x`, so these cannot collide with them.
-- The crates keep version `3.0.0` until the final release. `module_version!`
-  rejects pre-release versions, and the `hello`, `lifecycle` and `module_name`
-  examples encode the SDK's own package version with it.
-- Cut a pre-release when changes that git consumers should pin have landed, or
-  when the owner asks. One pull request updates the tag in the README.md and
-  docs/MIGRATING-3.0.md dependency snippets, and moves the CHANGELOG's
-  Unreleased entries into a section named for the tag, with its date and a
-  compare link from the previous tag.
-- After that pull request merges and every expected check passes on the merge
-  commit, tag the commit and push the tag:
+  land, then `v3.0.0-beta.N` once none is planned. Upstream has no `v3` tags;
+  its tags include `v2.x` and `redis-module-v2.x`.
+- The crates keep version `3.0.0` until the final release, for two reasons.
+  `module_version!` rejects pre-release versions, and the `hello`, `lifecycle`
+  and `module_name` examples encode the SDK's own package version with it. And
+  the workspace's internal path dependencies require `version = "3.0.0"`, which
+  a `3.0.0-alpha.N` package does not satisfy. The per-crate changelogs under
+  `common/` and the two macro crates stay `unreleased` until then.
+- Propose a pre-release when changes that git consumers should pin have landed.
+  Preparing its pull request is ordinary work; creating and pushing the tag
+  needs the owner's explicit authorization, as the branch rules above say.
+- The pull request updates the tag in the dependency snippets of README.md,
+  docs/MIGRATING-3.0.md and docs/COMPATIBILITY-FLOORS.md, and moves the
+  CHANGELOG's Unreleased entries into a section named for the tag, with a
+  compare link from the previous tag and the date the tag will be pushed. Before
+  tagging, check that the section lists exactly the changes the tagged commit
+  contains, and fix the date if the tag goes out on a later day.
+- After it merges and every expected check passes on the merge commit, tag that
+  commit on this repository's `master` and push the tag here (`fork` in the
+  setup above). `ci.yml` does not run on tag pushes, which is why the checks on
+  the merge commit are required:
 
   ```bash
-  git tag -a v3.0.0-alpha.N -m "redis-module v3.0.0-alpha.N" <commit>
-  git push origin v3.0.0-alpha.N
+  git fetch fork
+  git tag -a v3.0.0-alpha.N -m "redis-module v3.0.0-alpha.N" <merge commit>
+  git push fork v3.0.0-alpha.N
   ```
 
+- Then build a throwaway module that depends on the tag exactly as the README
+  snippet shows, to check that it resolves.
+- A pushed tag is never moved or deleted; a fix ships in the next pre-release.
 - Tagging is manual; the upstream release workflows do not run in this
   repository.
-- The final `v3.0.0`, its CHANGELOG section and any crates.io publishing are the
-  owner's decisions.
+- The final release is the owner's decision, as is any crates.io publishing. It
+  tags `v3.0.0` the same way, points the snippets at it, gives the CHANGELOG a
+  `3.0.0` section, and dates the per-crate changelogs.
 
 ## Validation
 
