@@ -283,6 +283,10 @@ Entries marked **Breaking** need a change in modules;
 
 ### Fixed
 
+- Modules that use the registration attributes (`#[command]`, the event
+  handler, INFO and defrag attributes) no longer need their own `linkme`
+  dependency: the attributes expand through the SDK's re-export of it.
+
 - **Breaking:** `CallReply`, `ErrorReply` and `CallResult` are no longer `Send`.
   Freeing a reply can read the context that made it, and on Redis 6.0 and 6.2 a
   reply dropped on another thread while its command replicated was a data race

@@ -10,16 +10,26 @@ new.
 For replacing an already running module, see the separate
 [module upgrade guide](UPGRADING-MODULES.md).
 
-Most modules meet only a few of these. The common ones are imports of raw items
-from the crate root, `NextArg::next_str`, `try_as_str` lifetimes, the return
-types of `delete`, `unlink`, `hash_set` and `hash_del`, and `?` on error types
-without a `From` conversion.
+Most modules meet only a few of these. The common ones are the parameter types
+of `init`, `deinit`, event and job callbacks and shared helpers, which now take
+a context view (`RegistrationContext`, `EventContext` or `RuntimeContext`); the
+private native context field; `Context::new` becoming `unsafe`; imports of raw
+items from the crate root; `NextArg::next_str`; `try_as_str` lifetimes; the
+return types of `delete`, `unlink`, `hash_set` and `hash_del`; and `?` on error
+types without a `From` conversion.
 
 ## Before you start
 
 - Rust 1.87 or later.
-- Update `redis-module`, `redis-module-macros` and `redis-module-macros-internals`
-  together to 3.0. `redis-module-common` is 0.1.2.
+- Depend on `redis-module`, and on `redis-module-macros` if the module uses the
+  attribute or derive macros, both from the same `git` and `tag` (or `rev`), as
+  the [README](../README.md) shows. `redis-module-macros-internals` and
+  `redis-module-common` come with them; do not list them. A dependency policy
+  that allow-lists sources, such as cargo-deny's `allow-git`, needs this
+  repository.
+- The attribute macros (`#[command]`, the event handler, INFO and defrag
+  attributes) expand through the SDK's own re-export of `linkme`. Remove the
+  module's `linkme` dependency unless the module uses `linkme` directly.
 - The crate no longer needs libclang. The bindings are pregenerated in
   `src/redisraw/bindings.rs`, and `bindgen-runtime` is no longer a default
   feature. A manifest that enables `bindgen-runtime` or `bindgen-static` can drop
@@ -365,7 +375,11 @@ The registration wrapper dereferences to `EventContext`, then `RuntimeContext`.
 Helpers shared with commands or workers should take `&RuntimeContext` (see below).
 It also implements `RedisLockIndicator`, so configuration guards still accept it.
 Runtime-only init hooks must change their `&Context` parameter to
-`&RuntimeContext`, `&EventContext`, or `&RegistrationContext<'_>`.
+`&RuntimeContext`, `&EventContext`, or `&RegistrationContext<'_>`. `deinit`
+takes `&EventContext`. A hook that still takes `&Context` is reported at the
+`redis_module!` invocation, as `expected &Context, found
+&RegistrationContext<'_>` for `init` or `found &EventContext` for `deinit`, not
+at the hook.
 
 There is no safe conversion from runtime `Context` to `RegistrationContext`.
 Move late command/type/configuration registration into initialization. Custom
@@ -392,6 +406,11 @@ Ordinary command handlers and blocked-client reply/timeout handlers keep
 | `ThreadSafeContext::lock` or `DetachedContext::lock` | Guard dereferencing to `WorkerContext` | Shared runtime operations; blocking calls only for module-owned detached workers |
 | Database scan callback or helper shared across these scopes | `&RuntimeContext` | Calls, keys, database selection, logging, server info, explicit replication |
 | Module INFO callback, including crash reports | `&InfoContext` | INFO output only; no Redis lock proof or runtime operations |
+
+`add_post_notification_job` and the event subscriptions are `EventContext`
+methods. A keyspace handler that defers writes keeps `&EventContext` down to the
+function that schedules the job; the job receives a fresh `&EventContext`, and
+the write helpers it calls can take `&RuntimeContext`.
 
 Change callback parameters from `&Context` to the type in this table. A helper
 that calls Redis without needing a client or module ownership should accept
@@ -437,6 +456,11 @@ module association and a client reply target or key-position request.
 requires only a live context and the Redis lock. All require valid invocation and
 lock scope throughout use. Replace `Context::dummy` with `RuntimeContext::dummy`
 for APIs that explicitly accept a null context, such as logging.
+
+A view built over a lock the module took itself, for example after
+`RedisModule_ThreadSafeContextTryLock`, must be dropped before the module
+unlocks, because dropping a runtime view ends its call-user scopes through the
+native context. Hold it in `ManuallyDrop` or drop it explicitly, then unlock.
 
 This split limits capabilities. Keys, server INFO snapshots and call replies
 also borrow the context they came from, as the sections above describe. Release
@@ -495,6 +519,28 @@ use redis_module::{RedisModuleString, REDISMODULE_OK};
 use redis_module::raw::{RedisModuleString, REDISMODULE_OK};
 ```
 
+### Raw calls with wrappers in 3.0
+
+2.x modules called raw bindings where 2.x had no wrapper. These now have one:
+
+- `RedisModule_GetSelectedDb` and `RedisModule_SelectDb`:
+  `RuntimeContext::get_selected_db`, `select_db` and `with_db`.
+- `RedisModule_Milliseconds`: `redis_module::milliseconds()`.
+- `RedisModule_SubscribeToKeyspaceEvents` with a mask chosen at runtime:
+  `EventContext::subscribe_to_keyspace_events` with a `redis_event_handler!`
+  handler. Event names are decoded lossily, and panics are caught and logged.
+- `RedisModule_NotifyKeyspaceEvent` with an event name that is not UTF-8:
+  `RuntimeContext::notify_keyspace_event_bytes`.
+- Flush payloads and SWAPDB: `#[flush_info_event_handler]` and
+  `#[swapdb_event_handler]`.
+- An ACL category kept from an earlier load: `redis_module!`'s `acl_categories`,
+  which accepts the `EBUSY` Redis returns for it.
+
+Limits: the server event attributes subscribe on every load, before `init`, and
+fail the load if a subscription fails, so a subscription that depends on
+configuration stays raw. Per-command ACL categories cannot be skipped where
+`RedisModule_AddACLCategory` is missing (Redis 7.2 and 7.3).
+
 ### Functions that take raw pointers are unsafe or private
 
 A safe function must not accept a pointer it dereferences or passes to Redis,
@@ -528,8 +574,11 @@ lists, strings, info fields, replication) are no longer public. The methods on
 `InfoContext` cover them, and the bindings in `raw` remain for anything else.
 `key::verify_type` is no longer public either.
 
-The `ctx` fields of `Context` and `InfoContext` are private. `get_raw()` returns
-the pointer.
+The native context pointer is private on every context view and on
+`InfoContext`. For `Context`, `EventContext`, `RegistrationContext` and
+`WorkerContext` the compiler names the field on `RuntimeContext`, which they
+dereference to. `get_raw()` returns the pointer; first check [Raw calls with
+wrappers in 3.0](#raw-calls-with-wrappers-in-30).
 
 `raw::export_shared_api` and `Context::export_shared_api` return the `Status`
 Redis reports (`Err` when the name is taken), and the name must stay valid for
@@ -719,15 +768,25 @@ text.
   check replies `NOPERM User does not have permissions on the key`, and an
   unknown or disabled user `ERR the user does not exist or is disabled`.
 - **Load failures.** `redis_module!` fails the load when a configuration
-  registration fails, where 2.x loaded without that configuration. It also
-  fails the load, before `init` runs, when `LoadConfigs` rejects a value given
-  at load time; 2.x ran `init` with the default values, and then Redis
-  unloaded the module.
+  registration fails, where 2.x loaded without that configuration. It also fails
+  the load, before `init` runs, when `LoadConfigs` rejects a value given at load
+  time; 2.x ran `init` with the default values, and then Redis unloaded the
+  module. 2.x then ran `deinit` as Redis unloaded the module; 3.0 runs neither
+  hook.
 - **Numeric configuration defaults.** `register_i64_configuration` rejects a
   default outside its inclusive `min` and `max`, before registering it with
   Redis. This applies to hard-coded defaults and values supplied through
   `module_args_as_configuration`; memory values are checked after unit
-  conversion. Use a valid default even if `LOADEX CONFIG` will override it.
+  conversion. Use a valid default even if `LOADEX CONFIG` will override it. The
+  load fails with `Numeric configuration '<name>' default must be between <min>
+  and <max>` before the module's `ConfigurationValue::set` runs, so a module
+  that rejected out-of-range module arguments in `set` reports this message
+  instead, and tests that match the module's own text need updating.
+- **Older servers.** A module built for a compatibility floor and loaded on an
+  older server fails the load with a logged reason instead of aborting the
+  server: an API that is missing during registration panics inside the SDK's
+  load guard, which logs the API's name. `init` runs only when registration
+  needed no missing API, so a version check in `init` refuses cleanly only then.
 - **Module arguments as configuration.** Configuration names are read only
   from the name positions in name/value pairs, so a string value matching
   another configuration's name no longer overrides it. Boolean values must
