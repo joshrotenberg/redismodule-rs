@@ -5894,6 +5894,46 @@ fn test_call_reply_status_and_collections() -> Result<()> {
 }
 
 #[test]
+fn test_key_type_names_each_server_type() -> Result<()> {
+    let mut con = TestConnection::new("key_type");
+    let key_type = |con: &mut TestConnection, key: &str| -> Result<String> {
+        Ok(redis::cmd("keytype.of").arg(key).query(con)?)
+    };
+    for args in [
+        &["SET", "string", "v"][..],
+        &["RPUSH", "list", "v"],
+        &["HSET", "hash", "f", "v"],
+        &["SADD", "set", "v"],
+        &["ZADD", "zset", "1", "v"],
+        &["XADD", "stream", "*", "f", "v"],
+    ] {
+        redis::cmd(args[0]).arg(&args[1..]).query::<()>(&mut con)?;
+    }
+    for (key, expected) in [
+        ("missing", "Empty"),
+        ("string", "String"),
+        ("list", "List"),
+        ("hash", "Hash"),
+        ("set", "Set"),
+        ("zset", "ZSet"),
+        ("stream", "Stream"),
+    ] {
+        assert_eq!(key_type(&mut con, key)?, expected, "{key}");
+    }
+    // Redis 8.8 added arrays, which RedisModule_KeyType reports as 8.
+    let arset: Vec<Value> = redis::cmd("COMMAND")
+        .arg(&["INFO", "ARSET"])
+        .query(&mut con)?;
+    if arset != vec![Value::Nil] {
+        redis::cmd("ARSET")
+            .arg(&["array", "0", "v"])
+            .query::<()>(&mut con)?;
+        assert_eq!(key_type(&mut con, "array")?, "Array");
+    }
+    Ok(())
+}
+
+#[test]
 fn test_open_key_with_flags() -> Result<()> {
     let mut con = TestConnection::new("open_key_with_flags");
 
