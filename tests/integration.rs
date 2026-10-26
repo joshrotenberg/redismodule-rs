@@ -5894,7 +5894,7 @@ fn test_call_reply_status_and_collections() -> Result<()> {
 }
 
 #[test]
-fn test_key_type_names_each_server_type() -> Result<()> {
+fn test_key_type_names_each_built_in_type() -> Result<()> {
     let mut con = TestConnection::new("key_type");
     let key_type = |con: &mut TestConnection, key: &str| -> Result<String> {
         Ok(redis::cmd("keytype.of").arg(key).query(con)?)
