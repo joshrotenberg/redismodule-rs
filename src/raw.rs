@@ -84,6 +84,12 @@ macro_rules! c_enum {
     };
 }
 
+/// The key type value Redis 8.8 and later return for arrays. The vendored
+/// header names this value `REDISMODULE_KEYTYPE_GCRA`, from a Redis unstable
+/// snapshot; released Redis declares it as `REDISMODULE_KEYTYPE_ARRAY` and
+/// builds GCRA only with `ENABLE_GCRA`.
+const KEYTYPE_ARRAY: c_int = 8;
+
 c_enum! {
     /// The type of a key, from `RedisModule_KeyType`.
     KeyType {
@@ -95,8 +101,8 @@ c_enum! {
         ZSet = REDISMODULE_KEYTYPE_ZSET,
         Module = REDISMODULE_KEYTYPE_MODULE,
         Stream = REDISMODULE_KEYTYPE_STREAM,
-        /// The GCRA rate limiter type of recent Redis versions.
-        Gcra = REDISMODULE_KEYTYPE_GCRA,
+        /// An array, the type `ARSET` creates, from Redis 8.8.
+        Array = KEYTYPE_ARRAY,
         /// A key type this crate does not know yet. Not a value Redis uses.
         Unknown = -1,
     }
@@ -1261,10 +1267,7 @@ mod c_enum_tests {
             KeyType::from(REDISMODULE_KEYTYPE_HASH as c_int),
             KeyType::Hash
         );
-        assert_eq!(
-            KeyType::from(REDISMODULE_KEYTYPE_GCRA as c_int),
-            KeyType::Gcra
-        );
+        assert_eq!(KeyType::from(8), KeyType::Array);
         assert_eq!(KeyType::from(99), KeyType::Unknown);
         assert_eq!(
             ReplyType::from(REDISMODULE_REPLY_ATTRIBUTE as c_int),

@@ -13,6 +13,12 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- [Module API coverage](docs/API-COVERAGE.md) lists each module API function
+  in the vendored header with the SDK's wrapper status, the Redis version that
+  added it, its compatibility floor and the context a wrapper would fit, and
+  ranks the gaps by evidence of need. `.github/scripts/api-coverage.py`
+  generates the table and checks that it is current.
+
 - `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`, from upstream's header: in
   BigRedis (Redis Flex) mode, a Redis Enterprise extension, it prevents
   direct-to-disk writes of keys loaded from RDB or by `RESTORE`. Redis OSS 6.0
@@ -140,7 +146,8 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - The `system-allocator-fallback` feature, which lets a module's `cargo test` allocate without a Redis server.
 - `panic::catch_panic`, which the crate uses at every callback it hands to Redis.
 - `RedisError::from_error` and `InfoContext::get_raw`.
-- New variants `KeyType::Gcra`, `ReplyType::Attribute` and `ReplyType::Promise`.
+- New variants `KeyType::Array`, for the array keys of Redis 8.8 and later, and
+  `ReplyType::Attribute` and `ReplyType::Promise`.
 - `KeyFlags::ACCESS_TRIMMED` (upstream PR 468), and the swap-prefetch and `RedisModule_SetOpenFilesReservation` declarations in the vendored header (upstream PRs 478 and 486).
 - docs/MIGRATING-3.0.md.
 - The fork's integration harness supports module arguments, fallible startup

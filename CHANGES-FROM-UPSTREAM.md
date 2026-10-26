@@ -11,6 +11,20 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Array key type
+
+`KeyType` maps value 8 to `KeyType::Array`. Redis 8.8 and later return 8 from
+`RM_KeyType` for array keys, the type `ARSET` creates, and declare it as
+`REDISMODULE_KEYTYPE_ARRAY`; GCRA is compiled only with `ENABLE_GCRA`. The
+vendored header, like upstream's, still names 8 `REDISMODULE_KEYTYPE_GCRA`, from
+a Redis unstable snapshot. Upstream's `KeyType` has no variant for 8, and its
+`From<c_int>` unwraps `from_i32`, so `key_type` on an array key panics there.
+Before this change the fork reported such keys as a `KeyType::Gcra` it had
+added. An integration test checks every built-in key type the server has, arrays
+included where the server provides `ARSET`; on Redis 8.10.2 it reported `Gcra`
+for an array key before the change. No upstream issue or pull request reports
+it.
+
 ## Call replies are not Send
 
 `CallReply` and `ErrorCallReply`, and through them `ErrorReply` and
