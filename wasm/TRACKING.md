@@ -90,8 +90,9 @@ is complete: [PR 95](https://github.com/joshrotenberg/redismodule-rs/pull/95),
 merged as `a751b2c`, ties `call_ext` replies to their context and makes
 `auto_memory` unsafe. The host's `run_command` now returns `CallResult<'_>`;
 its callers already converted each reply into guest nodes before the guest
-call returned, and the host does not enable AutoMemory. Whether call replies
-should be `Send` is [issue 96](https://github.com/joshrotenberg/redismodule-rs/issues/96).
+call returned, and the host does not enable AutoMemory. Call replies are no
+longer `Send` ([issue 96](https://github.com/joshrotenberg/redismodule-rs/issues/96),
+merged as `b67ca39`); the host never moved one off its thread.
 Refreshing the exploratory sidecar versus Redis core
 comparison is tracked in [issue 86](https://github.com/joshrotenberg/redismodule-rs/issues/86);
 existing benchmark results below are historical, not fresh measurements. Issue 86
