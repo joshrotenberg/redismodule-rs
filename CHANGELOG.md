@@ -140,7 +140,8 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - The `system-allocator-fallback` feature, which lets a module's `cargo test` allocate without a Redis server.
 - `panic::catch_panic`, which the crate uses at every callback it hands to Redis.
 - `RedisError::from_error` and `InfoContext::get_raw`.
-- New variants `KeyType::Gcra`, `ReplyType::Attribute` and `ReplyType::Promise`.
+- New variants `KeyType::Array`, for the array keys of Redis 8.8 and later, and
+  `ReplyType::Attribute` and `ReplyType::Promise`.
 - `KeyFlags::ACCESS_TRIMMED` (upstream PR 468), and the swap-prefetch and `RedisModule_SetOpenFilesReservation` declarations in the vendored header (upstream PRs 478 and 486).
 - docs/MIGRATING-3.0.md.
 - The fork's integration harness supports module arguments, fallible startup
