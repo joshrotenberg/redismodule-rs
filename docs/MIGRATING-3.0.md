@@ -225,6 +225,34 @@ Functions that return a reply must tie it to their context input, for example
 `CallResult<'static>` an unblock handler receives: Redis parses that reply
 without a context.
 
+### Call replies are not `Send`
+
+`CallReply` and `ErrorReply`, and so `CallResult`, no longer implement `Send`.
+Freeing a reply can read the context that made it. On Redis 6.0 and 6.2,
+replicating from the same command writes that context, so a reply moved into a
+scoped thread and dropped there while the command replicated was a data race,
+which ThreadSanitizer reports. Copy what another thread needs into owned Rust
+data and drop the reply on the thread that made it:
+
+```rust,ignore
+let bytes = match &reply {
+    Ok(CallReply::String(value)) => Some(value.as_bytes().to_vec()),
+    _ => None,
+};
+drop(reply);
+std::thread::spawn(move || process(bytes));
+```
+
+Errors convert to the owned `RedisError` with `RedisError::from`. The SDK has no
+owned `Send` form of an arbitrary reply: `RedisValue` can hold a `RedisString`
+and is not `Send` either, so copy into a type of your own. The same applies to
+the `CallResult<'static>` an unblock handler receives; Redis parses that reply
+without a context, but it now shares the type's rules. A reply also can no
+longer be a timer or `block_client_on_reply` payload, a capture of a `Send`
+callback such as an unblock handler, an event loop callback or a configuration
+observer, or the value of a shared `RedisGILGuard`, which is `Sync` only for
+`Send` values.
+
 ### `auto_memory` is unsafe
 
 `RuntimeContext::auto_memory` is now an `unsafe fn`. The SDK releases its own

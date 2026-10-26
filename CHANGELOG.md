@@ -13,6 +13,15 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 
 ### Added
 
+- `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`, from upstream's header: in
+  BigRedis (Redis Flex) mode, a Redis Enterprise extension, it prevents
+  direct-to-disk writes of keys loaded from RDB or by `RESTORE`. Redis OSS 6.0
+  to 8.10 stores the option and ignores it. `ModuleOptions::all()` and
+  complements such as `!ModuleOptions::HANDLE_IO_ERRORS` now include it, so
+  name the options a module wants. `src/include/redismodule.h` now matches
+  upstream's at `4ab88e7` (upstream PR 489), and the committed bindings include
+  the define.
+
 - `FutureHandler`, the handle `FutureCallReply::set_unblock_handler` returns,
   is exported at the crate root, so modules can name a kept handle and its
   `dispose` and `abort_and_dispose` documentation renders.
@@ -262,6 +271,13 @@ The release date and comparison link are added when 3.0.0 ships. Entries marked 
 - The dependencies `nix`, `strum_macros`, `regex`, `backtrace`, `enum-primitive-derive` and `num-traits`.
 
 ### Fixed
+
+- **Breaking:** `CallReply`, `ErrorReply` and `CallResult` are no longer `Send`.
+  Freeing a reply can read the context that made it, and on Redis 6.0 and 6.2 a
+  reply dropped on another thread while its command replicated was a data race
+  on that context. Copy what another thread needs into owned data, and convert
+  errors with `RedisError::from`. See the
+  [migration notes](docs/MIGRATING-3.0.md#call-replies-are-not-send).
 
 - `MODULE_CONTEXT`, the detached module context, is freed and cleared when
   `redis_module!` unloads the module or its load fails, and the next load stores

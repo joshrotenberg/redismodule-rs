@@ -138,18 +138,20 @@ impl<'root> Display for ErrorCallReply<'root> {
     }
 }
 
+/// An error from a call: a message, or an error reply from Redis.
+///
+/// Like [`CallReply`], an error reply is not [`Send`]; convert it, for example
+/// with `RedisError::from`, to move it to another thread:
+///
+/// ```compile_fail,E0277
+/// fn assert_send<T: Send>() {}
+/// assert_send::<redis_module::ErrorReply<'static>>();
+/// ```
 #[derive(Debug)]
 pub enum ErrorReply<'root> {
     Message(String),
     RedisError(ErrorCallReply<'root>),
 }
-
-/// Send implementation to [ErrorCallReply].
-/// We need to implements this trait because [ErrorCallReply] hold
-/// raw pointers to C data which does not auto implement the [Send] trait.
-/// By implementing [Send] on [ErrorCallReply] we basically tells the compiler
-/// that it is safe to send the underline C data between threads.
-unsafe impl<'root> Send for ErrorCallReply<'root> {}
 
 impl<'root> ErrorReply<'root> {
     /// Borrows the error prefix from either a native error reply or a message.
@@ -739,6 +741,54 @@ impl<'root> Display for VerbatimStringCallReply<'root> {
     }
 }
 
+/// A reply from a call. It is tied to the context that made it, or, for a
+/// nested reply, to its parent; an unblock handler's reply is parsed without a
+/// context.
+///
+/// A reply is neither [`Send`] nor [`Sync`]. Freeing it can read the context
+/// it was made through, which the owning thread may change meanwhile: on Redis
+/// 6.0 and 6.2, replicating from the same command writes the field that a reply
+/// freed on another thread reads. Copy what is needed into owned Rust data, and
+/// drop the reply on the thread that made it:
+///
+/// ```no_run
+/// use redis_module::{CallOptionsBuilder, CallReply, CallResult, Context};
+///
+/// fn hand_off(ctx: &Context) {
+///     let reply: CallResult<'_> =
+///         ctx.call_ext("ECHO", &CallOptionsBuilder::new().build(), &["owned"]);
+///     let bytes = match &reply {
+///         Ok(CallReply::String(value)) => Some(value.as_bytes().to_vec()),
+///         _ => None,
+///     };
+///     drop(reply);
+///     std::thread::spawn(move || drop(bytes));
+/// }
+/// ```
+///
+/// Moving the reply itself is rejected, also into a scoped thread:
+///
+/// ```compile_fail,E0277
+/// fn hand_off(reply: redis_module::CallResult<'_>) {
+///     std::thread::scope(|scope| {
+///         scope.spawn(move || drop(reply));
+///     });
+/// }
+/// ```
+///
+/// ```compile_fail,E0277
+/// fn assert_send<T: Send>() {}
+/// assert_send::<redis_module::CallReply<'static>>();
+/// ```
+///
+/// Sharing one is rejected too: reading a nested element creates a reply that
+/// is freed on the reading thread, and on Redis 6.0 and 6.2 the first read
+/// parses the reply in place.
+///
+/// ```compile_fail,E0277
+/// fn assert_sync<T: Sync>() {}
+/// assert_sync::<redis_module::CallReply<'static>>();
+/// ```
 #[derive(Debug)]
 pub enum CallReply<'root> {
     Unknown,
@@ -772,13 +822,6 @@ impl<'root> CallReply<'root> {
         }
     }
 }
-
-/// Send implementation to [CallReply].
-/// We need to implements this trait because [CallReply] hold
-/// raw pointers to C data which does not auto implement the [Send] trait.
-/// By implementing [Send] on [CallReply] we basically tells the compiler
-/// that it is safe to send the underline C data between threads.
-unsafe impl<'root> Send for CallReply<'root> {}
 
 impl<'root> Display for CallReply<'root> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -861,6 +904,13 @@ fn fmt_call_result(res: CallResult<'_>, f: &mut Formatter<'_>) -> fmt::Result {
     }
 }
 
+/// The result of a call: a [`CallReply`], or an [`ErrorReply`]. Neither is
+/// [`Send`].
+///
+/// ```compile_fail,E0277
+/// fn assert_send<T: Send>() {}
+/// assert_send::<redis_module::CallResult<'static>>();
+/// ```
 pub type CallResult<'root> = Result<CallReply<'root>, ErrorReply<'root>>;
 
 // Unblock handlers Redis holds: installed and neither run nor aborted. When a
@@ -1067,6 +1117,9 @@ impl<'ctx> FutureCallReply<'ctx> {
     ///     std::mem::forget(future.set_unblock_handler(move |_, _| drop(owned)));
     /// }
     /// ```
+    ///
+    /// The reply the handler receives is not `Send`; copy what is needed into
+    /// owned Rust data to hand it to another thread.
     ///
     /// The handler runs with the Redis lock held, so it must not lock a
     /// thread-safe context or the module context itself. A pending handler
