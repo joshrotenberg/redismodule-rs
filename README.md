@@ -18,18 +18,23 @@ For branches, the review and merge workflow and validation, see
 
 ## Using it
 
-3.0.0 is not published to crates.io. Depend on it from git, pinned to a commit:
+3.0.0 is not published to crates.io. Depend on it from git, pinned to a
+pre-release tag:
 
 ```toml
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", rev = "<commit>" }
+redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1" }
 # Only for the attribute and derive macros: #[command], the event handler, INFO
 # and defrag attributes, and #[derive(RedisValue)] and #[derive(InfoSection)].
-redis-module-macros = { git = "https://github.com/joshrotenberg/redismodule-rs", rev = "<commit>" }
+redis-module-macros = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1" }
 ```
+
+The tag is a pre-release; the crates inside it are version `3.0.0`. To build
+against a later commit, use `rev = "<commit>"` instead of `tag`, the same in
+both lines.
 
 A module that used 2.x: [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) lists
 what to change. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version.

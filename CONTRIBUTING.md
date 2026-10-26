@@ -122,6 +122,52 @@ issue N", and the merge closes it. To run the report now, use
 `gh workflow run upstream-watch.yml`; to preview it locally, run
 `python3 .github/scripts/upstream-watch.py --repo joshrotenberg/redismodule-rs --dry-run`.
 
+## Pre-releases
+
+3.0.0 reaches modules as pre-release tags on `master`; nothing is published to
+crates.io.
+
+- Tags are annotated and named `v3.0.0-alpha.N` while breaking changes still
+  land, then `v3.0.0-beta.N` once none is planned. Upstream has no `v3` tags;
+  its tags include `v2.x` and `redis-module-v2.x`.
+- The crates keep version `3.0.0` until the final release, for two reasons:
+  `module_version!` rejects pre-release versions, and the `hello`, `lifecycle`
+  and `module_name` examples encode the SDK's own package version with it; and
+  `redis-module`'s dependency on `redis-module-macros-internals` requires
+  `version = "3.0.0"`, which a `3.0.0-alpha.N` package does not satisfy. The
+  per-crate changelogs under `common/` and the two macro crates stay
+  `unreleased` until then.
+- Propose a pre-release when changes that git consumers should pin have landed.
+  Preparing its pull request is ordinary work; creating and pushing the tag
+  needs the owner's explicit authorization, as the branch rules above say. Get
+  it before the pull request merges, because its snippets name a tag that does
+  not exist until it is pushed.
+- The pull request updates the tag in the dependency snippets of README.md,
+  docs/MIGRATING-3.0.md and docs/COMPATIBILITY-FLOORS.md, and moves the
+  CHANGELOG's Unreleased entries into a section named for the tag, with a
+  compare link from the previous tag and the date the tag will be pushed. Before
+  tagging, check that the section lists exactly the changes the tagged commit
+  contains, and fix the date if the tag goes out on a later day.
+- After it merges and every expected check passes on its squash commit, tag that
+  commit on this repository's `master` and push the tag here (`fork` in the
+  setup above). `ci.yml` does not run on tag pushes, which is why the checks on
+  the squash commit are required:
+
+  ```bash
+  git fetch fork
+  git tag -a v3.0.0-alpha.N -m "redis-module v3.0.0-alpha.N" <squash commit>
+  git push fork v3.0.0-alpha.N
+  ```
+
+- Then build a throwaway module that depends on the tag exactly as the README
+  snippet shows, to check that it resolves.
+- A pushed tag is never moved or deleted; a fix ships in the next pre-release.
+- Tagging is manual; the upstream release workflows do not run in this
+  repository.
+- The final release is the owner's decision, as is any crates.io publishing. It
+  tags `v3.0.0` the same way, points the snippets at it, gives the CHANGELOG a
+  `3.0.0` section, and dates the per-crate changelogs.
+
 ## Validation
 
 Use the toolchain in `rust-toolchain.toml` (1.94.0); the MSRV is 1.87.0. If
