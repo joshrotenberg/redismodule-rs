@@ -118,6 +118,10 @@ For companion-module input checks and pure parser fuzzing outside Redis, see
 For shared state in INFO callbacks and the crash-report boundary, see
 [INFO handler state access](docs/INFO-HANDLERS.md) and its atomic counter example.
 
+For which module API functions have safe wrappers, which Redis version added
+each, and the missing ones ranked by evidence of need, see
+[Module API coverage](docs/API-COVERAGE.md).
+
 ## Features
 
 ### Optional command builders

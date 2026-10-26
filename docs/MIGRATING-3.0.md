@@ -646,8 +646,9 @@ take `&Context` instead of a raw pointer.
 ### Raw enums
 
 - `KeyType` and `ReplyType` are `#[non_exhaustive]`, so a `match` on them
-  needs a wildcard arm. `KeyType` gains `Gcra` and `Unknown` (for values a newer
-  Redis may return), and `ReplyType` gains `Attribute` and `Promise`. Both
+  needs a wildcard arm. `KeyType` gains `Array`, for Redis 8.8 arrays, and
+  `Unknown` (for values a newer Redis may return), and `ReplyType` gains
+  `Attribute` and `Promise`. Both
   convert from an `i32` with `From` instead of panicking.
 - The raw enums are `#[repr(i32)]` and no longer have the `FromPrimitive`
   methods; the `enum-primitive-derive` and `num-traits` dependencies are gone.
