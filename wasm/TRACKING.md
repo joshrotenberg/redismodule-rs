@@ -64,7 +64,7 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 The repository's [contributing rules](../CONTRIBUTING.md) record the review,
 merge and sync workflow, and the issue backlog is the work list. SDK functional
-changes through `2dd8549` are integrated. PR 79 is merged as `b787fef`;
+changes through `6654ad2` are integrated. PR 79 is merged as `b787fef`;
 its [PR CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39809579615)
 and actual [experiment push CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39811561168)
 passed. H14 / issue 69 is complete. S6 / issue 70 was rechecked on the pinned
@@ -107,6 +107,27 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-10-26: merged SDK master `6654ad2` into the branch as `ccb6ec6`, bringing
+  two SDK merges:
+  - `b67ca39` (SDK PR 103, #96) removes `Send` from `CallReply`, `ErrorReply`
+    and `CallResult`. The host only borrows `&CallResult` on the calling thread
+    to build guest nodes.
+  - `6654ad2` (SDK PR 104, #62) adds `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`
+    and its define and binding. The host sets no module options.
+  Neither needed host adaptation. Each passed independent review with no
+  blocking findings and all 20 exact-head CI checks, and each squash tree
+  equals its reviewed head. No host or guest source, dependency graph or lock
+  snapshot changed.
+  With `wasm/ci/check.sh` on Rust 1.94.0, Redis 8.10.2 and Node 26.12.1 (CI pins
+  24.22.1), ARM64 macOS:
+  - The first run failed `a_slow_load_does_not_block_other_clients`, with a
+    777 ms PING against its 500 ms bound, while two SDK gate runs loaded the
+    machine.
+  - The rerun on an idle machine passed every stage: 390 workspace tests,
+    including the required JavaScript guest and the host's unload and reload,
+    1 allocator fallback test and 4 guest SDK tests. All four lockfiles stayed
+    identical to their snapshots.
 
 - 2026-10-22: merged SDK master `2dd8549` into the branch as `c137caa`. The SDK
   change frees and clears `MODULE_CONTEXT` when `redis_module!` unloads the
