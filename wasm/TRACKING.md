@@ -64,7 +64,7 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 The repository's [contributing rules](../CONTRIBUTING.md) record the review,
 merge and sync workflow, and the issue backlog is the work list. SDK functional
-changes through `6654ad2` are integrated. PR 79 is merged as `b787fef`;
+changes through `0538802` are integrated. PR 79 is merged as `b787fef`;
 its [PR CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39809579615)
 and actual [experiment push CI](https://github.com/joshrotenberg/redismodule-rs/actions/runs/39811561168)
 passed. H14 / issue 69 is complete. S6 / issue 70 was rechecked on the pinned
@@ -108,6 +108,23 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-10-26: merged SDK master `0538802` into the branch as `ce5b4e2`, bringing
+  two SDK merges:
+  - `0b0dd6e` (SDK PR 108, #107) maps key type 8 to `KeyType::Array`, for Redis
+    8.8 array keys, and removes `KeyType::Gcra`. It adds a `key_type` example.
+    The host uses no `KeyType`.
+  - `0538802` (SDK PR 105, #90) adds `docs/API-COVERAGE.md` and its generator
+    script, and changes no source.
+  Neither needed host adaptation. Each passed independent review with its
+  blocking findings fixed and all 20 exact-head CI checks, and each squash tree
+  equals its reviewed head. No host or guest source, dependency graph or lock
+  snapshot changed.
+  With `wasm/ci/check.sh` on Rust 1.94.0, Redis 8.10.2 and Node 26.12.1 (CI pins
+  24.22.1), ARM64 macOS, every stage passes: 391 workspace tests, including the
+  new key type test, the required JavaScript guest and the host's unload and
+  reload; 1 allocator fallback test; and 4 guest SDK tests. All four lockfiles
+  stayed identical to their snapshots.
 
 - 2026-10-26: merged SDK master `6654ad2` into the branch as `ccb6ec6`, bringing
   two SDK merges:
