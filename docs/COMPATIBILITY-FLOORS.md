@@ -25,7 +25,7 @@ default-members = ["legacy"]
 resolver = "3"
 
 [workspace.dependencies]
-redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", rev = "<sdk commit>", default-features = false }
+redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1", default-features = false }
 ```
 
 Both module manifests inherit that dependency and expose explicit floor choices:
@@ -40,7 +40,7 @@ redis-6 = ["redis-module/min-redis-compatibility-version-6-0"]
 redis-7-2 = ["redis-module/min-redis-compatibility-version-7-2"]
 ```
 
-Replace `<sdk commit>` with the same pinned SDK revision for all members. The
+All members share that one pin, a pre-release tag or `rev = "<commit>"`. The
 [compile fixture](../examples/compatibility-floors/Cargo.toml) uses a local path
 instead and requires no network SDK clone. Its two consumers are compile-only
 libraries, not Redis-loadable modules; their shared source checks the concrete
