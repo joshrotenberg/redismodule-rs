@@ -140,6 +140,15 @@ wasm_instance_memory_bytes            their linear memory
 wasm_max_memory                       the limit
 ```
 
+The opposite holds for the runtime's own heap. Compilation and wasmtime's caches
+allocate through the module's global allocator, which is Redis's, so
+`used_memory` counts them. Loading the 11 MB JavaScript component raised
+`used_memory` by about 650 to 800 MiB while it compiled (Redis 8.10.2 on macOS),
+enough for `maxmemory` to refuse other clients' writes during the load, and
+about 35 to 65 MiB stayed counted afterwards as compiler caches that later loads
+reuse. [TRACKING.md](TRACKING.md) has the measurements and the open policy
+question (issue 68).
+
 As for a Lua function without flags, a function does not start while Redis is
 over `maxmemory`, and the commands it calls follow `deny-oom`.
 
