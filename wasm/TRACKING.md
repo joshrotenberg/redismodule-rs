@@ -109,6 +109,14 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-10-27: merged SDK master `532f7fc` into the branch as `fd1dfbf`. It is
+  SDK PR 118 (#63), the porting walkthrough `docs/PORTING-EXAMPLE.md`, with
+  pointers from the README and the migration guide. Only Markdown files
+  changed; the local `wasm/ci/check.sh` run was skipped, so the experiment push
+  CI validates this sync. Before it, PR 119 (`79bf81d`) landed on this branch:
+  the memory measurement script, results and policy options for issue 68,
+  which stays open for the owner's decision.
+
 - 2026-10-27: merged SDK master `bb78f42` into the branch as `b56321d`, bringing
   two documentation merges:
   - `4d473c3` (SDK PR 111, #88) prepares the `v3.0.0-alpha.1` pre-release,
