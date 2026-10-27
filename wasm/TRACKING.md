@@ -109,6 +109,16 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-10-27: merged SDK master `bb78f42` into the branch as `b56321d`, bringing
+  two documentation merges:
+  - `4d473c3` (SDK PR 111, #88) prepares the `v3.0.0-alpha.1` pre-release,
+    which is tagged on that commit.
+  - `bb78f42` (SDK PR 112, #89) corrects the migration guide from the
+    redis-event-stream-module port.
+  Only Markdown files changed; no source, dependency graph or lock snapshot
+  changed. The local `wasm/ci/check.sh` run was skipped, so the experiment push
+  CI is the validation for this sync.
+
 - 2026-10-26: merged SDK master `0538802` into the branch as `ce5b4e2`, bringing
   two SDK merges:
   - `0b0dd6e` (SDK PR 108, #107) maps key type 8 to `KeyType::Array`, for Redis
