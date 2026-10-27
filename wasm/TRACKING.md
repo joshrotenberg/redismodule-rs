@@ -7,7 +7,7 @@ scope and readiness. Historical H/S/G IDs remain useful for the evidence below.
 
 Status: `done`, `next` (being worked on or first in line), `todo`, `blocked`.
 
-Last updated 2026-10-22.
+Last updated 2026-10-27.
 
 ## Where it stands
 
@@ -387,18 +387,144 @@ avoids both instantiating and tearing down, and was adopted.
 |---|---|---|---|
 | H6 | done | **Key specs for `WASM.CALL`.** Declared with the `#[command]` macro and a key spec like `FCALL`'s: `numkeys` at argument 2, the keys after it, flags `RW`, `access` and `update`; `no-mandatory-keys`, arity -3. `COMMAND GETKEYS`, ACL key patterns and cluster routing (`MOVED`, `CROSSSLOT`) see the keys. Redis before 8.4 routes a module command by the getkeys API or its first, last and step, not by its key spec, so the commands also have `getkeys-api` and answer key-position requests (G8). | `COMMAND GETKEYS WASM.CALL f 2 a b x` returns `a b`. |
 | H7 | done | **Compile off the main thread.** `WASM.LOAD` blocks the client and compiles on a thread; the main thread instantiates and adds the library. Precompiled components (`Engine::precompile_component`) would skip the compile entirely, but loading one is `unsafe`: only for trusted input. | The server answers other clients while a large component compiles. |
-| H8 | done | **Memory.** `wasm.max-memory` (default 64 MiB) limits each instance's linear memory through a wasmtime `ResourceLimiter`; a guest that grows past it traps and its call fails, which drops the instance. A function does not start while Redis is over `maxmemory`, and its calls use `RedisModule_Call`'s `M` flag. `INFO wasm` reports libraries, functions, component and compiled code bytes, live instances and their linear memory, and the limit. Not done: replacing a kept instance that grew large but stays under the limit; a failed call already drops it. | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
+| H8 | done | **Memory.** `wasm.max-memory` (default 64 MiB) limits each instance's linear memory through a wasmtime `ResourceLimiter`; a guest that grows past it traps and its call fails, which drops the instance. A function does not start while Redis is over `maxmemory`, and its calls use `RedisModule_Call`'s `M` flag. `INFO wasm` reports libraries, functions, component and compiled code bytes, live instances and their linear memory, and the limit. Not done: replacing a kept instance that grew large but stays under the limit; a failed call already drops it. Issue 68 measured what it keeps: the guest's linear memory high-water mark, freed when the instance drops (Memory accounting). | Tests for the limit, the replacement, the refusal and the `INFO` fields. |
 | H9 | done | **Script parity.** Function flags (`no-writes`, `allow-oom`, `allow-stale`, `no-cluster`, `allow-cross-slot-keys`) in the WIT, `WASM.CALL_RO`, Lua's checks before a function starts, read-only calls that refuse write and may-replicate commands, one slot per call on a cluster node, no calls while a library loads, flags in `WASM.LIST` and the RDB (H9a); `call`, which fails the function on an error reply, next to `pcall`, and `acl-check-command` and `set-resp` imports (H9b). Differences left: G5, G6, and RESP3 as the default. | Each has a test matching what Lua does. |
 | H10 | done | **Guest helper library.** `wasm/guest-sdk`, crate `redis-wasm-guest`: a `Value` type that converts to and from pre-order node lists and flat replies, `From` conversions, and `call`, `pcall` and `log` that take and return `Value`s. It generates bindings for a `guest-imports` world (the host's interface alone), and a library's own bindings share its types through wit-bindgen's `with`. | The example guest uses it. |
 | H11 | done | **Bounds check cost.** Decided: keep signal-based traps off, so guests get explicit bounds checks. With H3's benchmark, turning them on made `primes` 18% faster (185 against 226 µs, old sieve loop) and `median` 6%. On Linux they are not safe in a module: wasmtime installs `SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE` handlers that chain to Redis's crash handler, but `CONFIG SET crash-log-enabled` (either value) reinstalls Redis's handlers or the defaults over them, and the next out-of-bounds guest access kills the server: silently after `no`, with a crash report after `yes` (G7). On macOS wasmtime takes faults through Mach exception ports, so the same steps are safe there. A crash outside wasm (`DEBUG SEGFAULT`) still produced Redis's crash report with wasmtime's handlers installed. | A decision, with a crash report checked with handlers on. |
 | H12 | done | **Context in the store.** The store holds a raw pointer to the command's `Context`. The safety argument is written down in `host.rs` ("The context pointer"): set and cleared around each guest run, re-entrant calls use their own instance, a panic drops the instance with the stale pointer, and instances stay on the main thread. No SDK pattern replaces it yet (S3). | Reviewed and documented, or replaced. |
-| H13 | todo ([issue 68](https://github.com/joshrotenberg/redismodule-rs/issues/68)) | **Footprint.** The release dylib is 12.4 MB (macOS). Loading the JavaScript component (release build, macOS): `INFO wasm` accounts for 95 MB of compiled code and 7.7 MB of linear memory, and RSS reached 0.97 GB, then 1.35 GB after a delete and two more loads. The compiler allocates through the module's global allocator, Redis's, so `used_memory_peak` reached 1.05 GB during the load, and 57.7 MB stayed counted after `WASM.DELETE` (not growing on later loads: caches, not a leak). With `std::alloc::System` as the module's allocator, `used_memory` stayed near 1 MB (peak 25 MB, the argument itself) and RSS behaved the same. Decision needed: count wasmtime's heap in `used_memory`, so a load's transient 1 GB counts against `maxmemory`, or not, so 70 MB of lasting heap per JavaScript library is invisible to it. | Sizes recorded before and after. |
+| H13 | todo ([issue 68](https://github.com/joshrotenberg/redismodule-rs/issues/68)) | **Footprint.** Remeasured 2026-10-27 with `wasm/bench/memory.sh`, two runs per allocator (wasmtime 36.0.19, Homebrew Redis 8.10.2 with libc malloc, macOS 26.7.1 on an Apple M3, release build; see Memory accounting below). The release dylib is 12.0 MiB. The JavaScript component (10.7 MiB) compiles to 90.2 MiB of code and runs in 7.3 MiB of linear memory, both outside the Redis allocator. With Redis's allocator as the module's global allocator, the compiler's transient heap counts: `used_memory` reached 656 to 795 MiB and `used_memory_peak` 767 to 811 MiB during one load, and 16 of 17 `SET`s against a `maxmemory` 64 MiB above `used_memory` got `OOM` during it. 44 to 47 MiB stayed counted while the library was loaded, 33 to 35 MiB after `WASM.DELETE`, and 50 to 66 MiB after repeated loads: mostly the compiler's context pool, which shrank to 6 MiB with one compile thread; not a leak. With `std::alloc::System`, `used_memory` stayed at 1.0 to 1.1 MiB (peak 22 to 25 MiB, the `WASM.LOAD` argument), no `SET` was refused, and RSS behaved the same: 0.8 to 0.9 GB during the load, then 0.3 to 1.2 GB, mostly freed pages that macOS's malloc keeps. Decision needed. | Sizes recorded before and after. |
 | H14 | done ([issue 69](https://github.com/joshrotenberg/redismodule-rs/issues/69)) | **CI.** A [branch-scoped Ubuntu job](CI.md) pins Rust 1.94, Node 24.22.1, Redis 8.10.2 and Rust/JS dependency inputs, checks the default workspace and host-excluded SDK 7.2, builds/lints Rust guests and requires JavaScript tests. Commands are bounded, cached and logged. SDK master retains its separate server matrix. | Successful experiment push and PR validation. |
-| H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30); not investigated. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
+| H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30). Remeasured for issue 68 (Memory accounting): reloads with no library leave RSS flat; with a library loaded each time `used_memory` stays flat while RSS grows mostly at first use, which is allocator retention, not a leak. macOS keeps the dylib mapped after `MODULE UNLOAD`. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
 | H17 | done | **Load time.** Loading an RDB compiled each library's component on the main thread before the server served: 1.56 to 1.67 s for the JavaScript library (release build), 15 ms of it reading. Now the libraries are added at once with their code compiling on a thread (`code.rs`): a call to a library still compiling blocks its client until the code is ready (or waits in place inside `MULTI` or a script), `INFO wasm` counts the libraries compiling, and the server was ready in 0.11 to 0.12 s. | Load time with the JavaScript library, before and after. |
 | H18 | done | **Dump, restore, flush.** `WASM.DUMP`, `WASM.RESTORE <payload> [FLUSH\|APPEND\|REPLACE]` and `WASM.FLUSH`, as `FUNCTION DUMP`, `RESTORE` and `FLUSH` work. The payload (`dump.rs`) holds names and components with an FNV-1a checksum; a restore compiles on a thread, lists every library's functions, checks every conflict, then adds all or none. | Tests restore into another server under each policy, refuse a conflicting or damaged payload without changing anything, and replicate `WASM.FLUSH` and `WASM.RESTORE`. |
 | H19 | done | **Stats.** `WASM.STATS`, `allow-busy` like `FUNCTION STATS`: the running function's name and duration, and the counts of libraries and functions (nil while a library loads and holds the host). | The busy test reads it while a function spins and after it is killed. |
 | H15 | done | **Large replies into the guest.** `lrange` (the LRANGE of `median`, count only) took 139 µs in wasm against 58 µs in Lua; a profile showed the time spread over allocating and copying each string on both sides. `call-flat` and `pcall-flat` return the reply as nodes whose strings are spans of one buffer: `lrange_flat` takes 77 µs (1.4 times Lua) and `median_flat` 126 µs (0.50 of Lua's 253). The typed `call` and `pcall` stay for small replies. | `median`'s time split, and a lower number. |
+
+### Memory accounting (issue 68)
+
+Measured 2026-10-27 with `wasm/bench/memory.sh`: macOS 26.7.1 on an Apple M3
+(8 cores, 16 GB), Homebrew Redis 8.10.2 (`mem_allocator` libc), Rust 1.94.0,
+wasmtime 36.0.19 from the `wasm/ci/locks` snapshots, and a release build of
+the host at `ece25d2` (12.0 MiB dylib). Guests: `guests/hello` rebuilt from
+that revision (37,686 bytes) and the JavaScript component prebuilt for it
+(10.7 MiB, sha256 `1963ca49...`). `wasm.max-memory` was the default 64 MiB,
+`maxmemory` 0 except in the probe. Two runs per allocator, in MiB. The System
+rows used a build whose `allocator:` line in `lib.rs` read
+`(std::alloc::System, std::alloc::System)`; that change is not committed.
+
+| phase | Redis allocator: `used_memory` | peak | RSS (ps) | System: `used_memory` | peak | RSS (ps) |
+|---|---|---|---|---|---|---|
+| idle, module loaded | 1.0 | 1.0 | 8.2 to 8.3 | 1.0 | 1.0 | 8.2 |
+| hello loaded; 10,000 calls of `counter` | 2.0 to 3.5 | 12.2 to 17.7 | 27.8 to 30.2 | 1.0 | 1.1 to 1.2 | 31.3 to 33.4 |
+| hello grown to 57.2 MiB of linear memory | 2.1 to 3.5 | | 67.9 to 70.2 | 1.0 | | 65.6 to 71.4 |
+| grow past `wasm.max-memory`; instance dropped | 2.1 to 3.5 | | 27.9 to 30.1 | 1.0 | | 25.6 to 31.3 |
+| JavaScript `WASM.LOAD`, sampled maximum | 656 to 795 | 767 to 811 | 820 to 857 | 22.4 | 22.4 | 855 to 867 |
+| JavaScript loaded; 10,000 calls | 46.5 to 50.1 | | 817 to 864 | 1.1 | | 342 to 849 |
+| after `WASM.DELETE js` | 34.6 to 38.2 | | 684 to 767 | 1.1 | | 336 to 739 |
+| a second load, then `WASM.FLUSH` | 42.4 to 53.9 | | 750 to 777 | 1.1 | 22.4 to 24.4 | 763 to 779 |
+| after 5, 10 and 20 load and delete cycles | 50 to 62, 59, 57 to 66 | 906 to 937 | 944 to 1152 | 1.1 | 24.4 to 24.6 | 1006 to 1134 |
+| 30 `MODULE UNLOAD` and `MODULE LOAD` cycles, hello each time (a second server, before; after) | 2.2 to 2.5; 2.3 to 2.5 | 18.4 to 20.8 | 28.8 to 29.3; 35.1 to 40.8 | 1.0; 1.1 | 1.1 | 31.6 to 31.7; 40.7 to 41.4 |
+
+`INFO wasm` read the same under both: 0.3 MiB of compiled code and 1.1 MiB of
+linear memory for hello, 90.2 MiB of code and 7.3 MiB of linear memory for the
+JavaScript library (9.1 MiB after the 10,000 calls). The load took 3.1 to
+4.4 s with sampling. The probe set `maxmemory` 64 MiB above `used_memory`:
+`SET` succeeded with hello grown by 48 MiB under both allocators, and during the
+JavaScript load 1 of 17 `SET`s succeeded with Redis's allocator (16 `OOM`),
+all 15 to 16 with the System allocator.
+
+With `RAYON_NUM_THREADS` limiting wasmtime's parallel compilation (Redis's
+allocator, `CYCLES=5`, one run each; the default row is the two runs above):
+
+| compile threads | `used_memory` before the load | after `WASM.DELETE js` | after 5 more cycles | peak | load |
+|---|---|---|---|---|---|
+| 1 | 1.3 | 7.3 | 7.3 | 610 to 612 | 13.5 s |
+| 2 | 1.5 | 11.3 | 13.2 | 610 to 622 | 7.5 s |
+| 4 | 1.7 | 22.3 | 25.7 | 619 to 733 | 4.7 s |
+| 8, the default | 2.0 to 3.4 | 34.6 to 38.2 | 50.3 to 62.0 | 767 to 916 | 3.1 to 3.8 s |
+
+With one thread the probe's `SET`s still failed during the load (8 of 107
+succeeded).
+
+RSS is not live memory here. `vmmap` on the server (an ad hoc run, Redis's
+allocator) put the default malloc zone's live allocations at 53 MiB and its
+resident pages at 609 MiB with the JavaScript library loaded, and the physical
+footprint at 448 MiB against 860 MiB of RSS; 20 s after the delete RSS was
+362 MiB and the footprint 58 MiB. The System build showed 59 MiB live in the
+same zone with `used_memory` at 1.0 MiB. macOS's malloc keeps pages the
+compiler freed, and returns them later, which is why RSS ranged from 342 to
+864 MiB for the same state.
+
+What lands where:
+
+- **Transient compiler allocation.** The compiler's working memory, freed
+  when the compile ends: 650 to 800 MiB for the JavaScript component (610 MiB
+  with one compile thread, so most of it does not scale with threads), 11 to
+  17 MiB for the 37 KB Rust one. It is Rust heap,
+  so it goes through the module's global allocator: `redis_module!` declares
+  `#[global_allocator] static REDIS_MODULE_ALLOCATOR` from its `allocator:`
+  argument (`src/macros.rs`), the host passes `RedisAlloc` (`wasm/src/lib.rs`),
+  and `RedisAlloc::alloc` calls `RedisModule_Alloc` (`src/alloc.rs`), which is
+  `zmalloc_usable` (`RM_Alloc` in `module.c`). With Redis's allocator it is in
+  `used_memory` and `used_memory_peak`, and `maxmemory` admission sees it,
+  since `getMaxmemoryState` compares `zmalloc_used_memory()` with the limit
+  (`evict.c`, read in the 7.2.16 source). The
+  compile runs on a thread while the server serves, so other clients' writes
+  are refused for a load they did not make; with an eviction policy keys
+  would be evicted instead (inferred, not measured). `WASM.LOAD` is `deny-oom`,
+  checked only before the compile. With the System allocator none of it counts.
+- **Lasting runtime heap.** What wasmtime keeps on the Rust heap: the compiled
+  component's metadata and type registrations, the store and instance (the
+  on-demand allocator allocates the instance with `alloc::alloc`,
+  `vm/instance.rs`), tables, and the compiler's reusable contexts.
+  `wasmtime_cranelift::Compiler` holds `contexts: Mutex<Vec<CompilerContext>>`;
+  `function_compiler` pops one and clears it without freeing, and
+  `finish_with_info` pushes it back (`compiler.rs`), so the engine keeps
+  one context per thread that compiled at once, sized by the largest functions
+  it compiled, until the engine drops at `MODULE UNLOAD`. The host adds its copy
+  of each component (`LoadedLibrary.component`, kept for the RDB). With Redis's
+  allocator it counts: 44 to 47 MiB above the pre-load figure while the
+  JavaScript library is loaded, 33 to 35 MiB after its delete, and between 50
+  and 66 MiB after 5 to 20 cycles, not rising steadily. Fewer compile threads
+  left less (above), which fits the context pool. The System build kept about
+  as much (the `vmmap` zones), only not counted.
+- **Guest linear memory.** `DefaultMemoryCreator::new_memory` returns an
+  `MmapMemory` whenever signals-based traps, a guard, a reservation or
+  copy-on-write initialization is configured (`vm/memory.rs`). The host turns
+  signals off but keeps the 64-bit defaults (`Tunables::default_u64` in
+  wasmtime-environ: a 4 GiB reservation and a 32 MiB guard), so each memory is
+  an `mmap` of 4 GiB plus guards with only its accessible pages committed
+  (`vm/memory/mmap.rs`; `vmmap` showed 4.1 GiB of `VM_ALLOCATE` with the hello
+  instance). It never passes through the global allocator, so neither allocator
+  counts it and it does not affect `maxmemory` admission (the probe). Only
+  `wasm.max-memory`, through the `ResourceLimiter` in `wasm/src/memory.rs`,
+  bounds it, per instance, and `INFO wasm` reports it.
+
+Compiled code is a fourth kind and also outside: the image is built in an
+`MmapVec` (`compile/runtime.rs`), which maps pages whenever the platform has
+virtual memory (`vm/mmap_vec.rs`). Deleting the JavaScript library returned 96
+to 133 MiB of RSS in three of the four runs, about its code and linear memory.
+
+H8, the oversized kept instance: what stays is the guest's linear memory,
+which wasm cannot shrink. The guest's allocator also did not reuse a freed
+16 MiB block for a 40 MiB request, so `memory.size` went from 17.2 to 57.2 MiB
+(and 16 MiB then 48 MiB needed 65.3 MiB and failed). RSS rose by 32 to
+40 MiB. The memory stays until a failed call, `REPLACE` or `WASM.DELETE` drops
+the instance; then RSS fell by 40 MiB. The JavaScript instance grew from 7.3 to
+9.1 MiB over 10,000 calls. It is a high-water mark bounded by
+`wasm.max-memory`, not a leak.
+
+H16, unload and reload: in an ad hoc run, 30 cycles with no library left RSS
+flat (8.2 to 7.6 MiB) and `used_memory` within 54 KB. With hello loaded and
+called each cycle (the table), RSS rose by 6 to 12 MiB over 30 cycles, most of
+it in the first five, and once fell by 7.7 MiB between cycles 20 and 30, while
+`used_memory` stayed within 1 MiB. Loading and deleting hello 30 times without
+reloading left RSS flat. `vmmap` put the growth from the first compile in the
+malloc zone (1.1 to 21.7 MiB resident) and in eight more thread stacks. `lsof`
+still listed the dylib after the last `MODULE UNLOAD`: macOS did not unmap it,
+so, inferred from that, its statics, thread-locals and threads survive a
+reload; why dyld keeps it is not established. The counted heap does not grow,
+so the RSS growth is first-use cost and allocator retention, not a leak.
 
 ## Repository
 
@@ -449,7 +575,7 @@ evidence as the host meets them.
 |---|---|---|
 | G1 | No module API registers an engine for `FUNCTION` or `EVAL` (checked in Redis 8.0.0 and unstable `module.c`). | The host needs its own `WASM.*` commands, which now cover `FUNCTION`'s (H9, H18); `FUNCTION LIST`, `FCALL`, `FUNCTION DUMP` and `SCRIPT KILL` do not see wasm libraries. |
 | G2 | `RedisModule_CreateCommand` works only while the module loads. | A function loaded later cannot be a command of its own; every call goes through `WASM.CALL`. |
-| G3 | No module API adds memory allocated outside the Redis allocator to `used_memory`. | `maxmemory` and `INFO memory` do not count guest memory or compiled code (confirmed: 1.3 MB used, 16 to 18 MB RSS). `INFO wasm` reports them instead: 7.7 MB of linear memory and 95 MB of compiled code for the JavaScript library. |
+| G3 | No module API adds memory allocated outside the Redis allocator to `used_memory`. | `maxmemory` and `INFO memory` do not count guest memory or compiled code (confirmed: 1.3 MB used, 16 to 18 MB RSS). `INFO wasm` reports them instead: 7.7 MB of linear memory and 95 MB of compiled code for the JavaScript library. Rechecked in 8.10.2 `module.c` for issue 68: its memory functions allocate, report sizes or return `RedisModule_GetUsedMemoryRatio`. |
 | G4 | Aux data reaches an AOF only inside its RDB preamble: no module API adds commands to a rewritten AOF without one (`aof_rewrite` is per key). Redis writes its own `FUNCTION` libraries into the rewrite (`rewriteFunctions` in `aof.c`). | With `aof-use-rdb-preamble no` (the default is `yes`), an AOF rewrite drops the libraries: `WASM.LIST` was empty after `BGREWRITEAOF` and a restart. |
 | G5 | No module API says whether writes are refused for a disk error (`MISCONF`) or for too few good replicas (`NOREPLICAS`). | Lua refuses a function that may write before it starts; here it starts, and its first write command fails with that error (`RedisModule_Call`'s script mode checks each write). |
 | G6 | `COMMAND INFO` hides the `may_replicate` flag ("Hidden on purpose" in `server.c`), and no module API returns a command's flags. | Lua's read-only functions refuse may-replicate commands. The host names them (`PUBLISH`, `SPUBLISH`, `PFCOUNT`; script mode refuses `EVAL`, `EVALSHA` and `FCALL`), so a module command with that flag is not refused. |
