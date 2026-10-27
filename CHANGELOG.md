@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.0.0-alpha.1](https://github.com/joshrotenberg/redismodule-rs/compare/a808377...v3.0.0-alpha.1) - 2026-10-26
+## [3.0.0-alpha.1](https://github.com/joshrotenberg/redismodule-rs/compare/a808377...v3.0.0-alpha.1) - 2026-10-27
 
 The first pre-release of 3.0.0, tagged for git consumers; the crates keep
 version `3.0.0` (see [CONTRIBUTING.md](CONTRIBUTING.md#pre-releases)). The
