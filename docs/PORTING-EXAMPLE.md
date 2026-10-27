@@ -11,7 +11,7 @@ for #89.
 
 | | SDK 2 | SDK 3 |
 |---|---|---|
-| Module revision | [`0cb93ba`](https://github.com/redis-developer/redis-event-stream-module/tree/0cb93ba), the module's `main` | [`3b09c5a`](https://github.com/redis-developer/redis-event-stream-module/tree/codex/sdk3-port), branch `codex/sdk3-port` |
+| Module revision | [`0cb93ba`](https://github.com/redis-developer/redis-event-stream-module/tree/0cb93ba), the module's `main` | [`3b09c5a`](https://github.com/redis-developer/redis-event-stream-module/tree/3b09c5a9ec14a5dac7d23055fdca1ff91b5ca39b), the head of branch `codex/sdk3-port` |
 | SDK | upstream `redis-module` tag `v2.1.3` | this repository's tag `v3.0.0-alpha.1` (`4d473c3`) |
 | SDK features | `default-features = false`, `min-redis-compatibility-version-7-2` | the same |
 
@@ -389,7 +389,12 @@ The tests named here pass unchanged under both revisions.
 - **Panic containment.** The handler and job guards still count into
   `handler_panics`. `tests/module_events.rs`, `tests/event_classes.rs` and
   `tests/async_dispatch.rs` assert that it stays 0. No test forces a panic, so
-  the suite does not exercise the unwind path itself.
+  the suite does not exercise the unwind path itself. The SDK's own regressions
+  cover it:
+  [`test_runtime_keyspace_callback_preserves_bytes_and_database_and_catches_panics`](../tests/integration.rs)
+  for a keyspace callback that panics, and
+  [`test_database_scopes_restore_after_errors_and_panics`](../tests/integration.rs)
+  for `with_db` restoring the database after an error or a panic.
 - **Database selection.** `tests/capture.rs`
   `cross_db_event_lands_in_db0_with_origin_field`; `tests/commands.rs`
   `streams_reads_db0_from_any_client_db` and
