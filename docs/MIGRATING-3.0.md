@@ -464,8 +464,9 @@ A view built over a lock the module took itself, for example after
 `RedisModule_ThreadSafeContextTryLock`, must be dropped before the module
 unlocks, because dropping a runtime view ends its call-user scopes through the
 native context. Drop it explicitly, then unlock. In a guard type whose own
-`Drop` unlocks, hold the view in `ManuallyDrop` and call `ManuallyDrop::drop` on
-it before the unlock, because fields drop only after the guard's `drop` body.
+`Drop` unlocks, hold the view in an `Option<RuntimeContext>` and `take()` it
+before the unlock, or in `ManuallyDrop` with an `unsafe` `ManuallyDrop::drop`
+before the unlock, because fields drop only after the guard's `drop` body.
 
 This split limits capabilities. Keys, server INFO snapshots and call replies
 also borrow the context they came from, as the sections above describe. Release
@@ -527,8 +528,8 @@ use redis_module::raw::{RedisModuleString, REDISMODULE_OK};
 ### Raw calls with wrappers in 3.0
 
 2.x modules called raw bindings where 2.x had no wrapper, or where its wrapper
-fell short. None of these changes is required; the raw calls still compile and
-work. These now have a wrapper:
+fell short. None of these changes is required; the raw calls still work, with
+the context pointer from `get_raw()` (see below). These now have a wrapper:
 
 - `RedisModule_GetSelectedDb` and `RedisModule_SelectDb`:
   `RuntimeContext::get_selected_db`, `select_db` and `with_db`.
@@ -547,9 +548,10 @@ Limits: the server event attributes subscribe on every load, before `init`, and
 fail the load if a subscription fails, so a subscription that depends on
 configuration stays raw. On Redis 7.2 and 7.3, which lack
 `RedisModule_AddACLCategory`, a module's own ACL category cannot be applied to
-its commands: a required one fails the load, and an optional one is dropped with
-a logged warning for each command. A module that wants to skip the attempt, or
-log a single notice, keeps the raw calls.
+its commands: a required one (`acl_categories`) fails the load, and an optional
+one (`optional_acl_categories`) is dropped with a logged warning for each
+command. A module that wants to skip the attempt, or log a single notice, keeps
+the raw calls.
 
 ### Functions that take raw pointers are unsafe or private
 
@@ -787,20 +789,21 @@ text.
   default outside its inclusive `min` and `max`, before registering it with
   Redis. This applies to hard-coded defaults and values supplied through
   `module_args_as_configuration`; memory values are checked after unit
-  conversion. Use a valid default even if `LOADEX CONFIG` will override it. The
-  load fails, and the server log has `Numeric configuration '<name>' default
-  must be between <min> and <max>`, before the module's
-  `ConfigurationValue::set` runs. So a module argument outside the registered
-  `min` and `max`, which `set` used to reject, now gets this message instead of
-  the module's own, and tests that match the module's text need updating.
+  conversion. Use a valid default even if `LOADEX CONFIG` will override it. From
+  the `configurations` block, the load fails and the server log has `Numeric
+  configuration '<name>' default must be between <min> and <max>`, before the
+  module's `ConfigurationValue::set` runs. So a module argument outside the
+  registered `min` and `max`, which `set` used to reject, now gets this message
+  instead of the module's own, and tests that match the module's text need
+  updating.
 - **Older servers.** A module built for a compatibility floor and loaded on an
   older server fails the load with the missing API's name logged, instead of
   aborting the server: during registration an API the server lacks either
   returns an error naming it or panics inside the SDK's load guard. This holds
-  with the default `panic = "unwind"`; see the Panics bullet above for `panic =
-  "abort"`. `init` runs only if registration found every API it needed, so a
-  version check in `init` is reached only on servers new enough for
-  registration.
+  with the default `panic = "unwind"`; with `panic = "abort"` the panic aborts
+  the server, as in 2.x (see the Panics bullet above). `init` runs only if
+  registration found every API it needed, so a version check in `init` is
+  reached only on servers new enough for registration.
 - **Module arguments as configuration.** Configuration names are read only
   from the name positions in name/value pairs, so a string value matching
   another configuration's name no longer overrides it. Boolean values must
