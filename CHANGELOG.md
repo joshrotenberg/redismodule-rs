@@ -283,10 +283,6 @@ Entries marked **Breaking** need a change in modules;
 
 ### Fixed
 
-- Modules that use the registration attributes (`#[command]`, the event
-  handler, INFO and defrag attributes) no longer need their own `linkme`
-  dependency: the attributes expand through the SDK's re-export of it.
-
 - **Breaking:** `CallReply`, `ErrorReply` and `CallResult` are no longer `Send`.
   Freeing a reply can read the context that made it, and on Redis 6.0 and 6.2 a
   reply dropped on another thread while its command replicated was a data race
@@ -416,6 +412,7 @@ Entries marked **Breaking** need a change in modules;
 - `call_blocking` is available under the 8.0 floor.
 - Commands registered with `#[command]` load on Redis 7.0 when they declare no ACL categories; registration required Redis 7.2's `RedisModule_SetCommandACLCategories` for every command. Under the 7.0 floor, an error registering one of those commands was also ignored and the module loaded anyway; it now fails the load, as under the other floors.
 - `redis_module!` reuses an existing custom ACL category when Redis reports `EBUSY`, so modules declaring `acl_categories` can unload and reload in the same server. Invalid names and other category registration failures still fail the load.
+- Modules using the registration attributes (`#[command]`, the server event handler attributes, `#[info_command_handler]` and the defrag attributes) needed their own `linkme` dependency; the attributes now expand through the SDK's re-export of it.
 
 ## [2.0.8](https://github.com/RedisLabsModules/redismodule-rs/compare/redis-module-v2.0.7...redis-module-v2.0.8) - 2026-05-04
 

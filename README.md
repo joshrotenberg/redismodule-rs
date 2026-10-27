@@ -27,8 +27,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1" }
-# Only for the attribute and derive macros: #[command], the event handler, INFO
-# and defrag attributes, and #[derive(RedisValue)] and #[derive(InfoSection)].
+# Only for the attribute and derive macros: #[command], the server event handler,
+# INFO and defrag attributes, and #[derive(RedisValue)] and #[derive(InfoSection)].
 redis-module-macros = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1" }
 ```
 
