@@ -123,6 +123,10 @@ For which module API functions have safe wrappers, which Redis version added
 each, and the missing ones ranked by evidence of need, see
 [Module API coverage](docs/API-COVERAGE.md).
 
+For one real module's port from 2.x to 3.0, with its improvements, behavior
+changes and remaining raw calls annotated, see
+[Porting example: redis-event-stream-module](docs/PORTING-EXAMPLE.md).
+
 ## Features
 
 ### Optional command builders
