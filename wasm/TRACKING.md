@@ -402,15 +402,18 @@ avoids both instantiating and tearing down, and was adopted.
 
 ### Memory accounting (issue 68)
 
-Measured 2026-10-27 with `wasm/bench/memory.sh`: macOS 26.7.1 on an Apple M3
-(8 cores, 16 GB), Homebrew Redis 8.10.2 (`mem_allocator` libc), Rust 1.94.0,
-wasmtime 36.0.19 from the `wasm/ci/locks` snapshots, and a release build of
-the host at `ece25d2` (12.0 MiB dylib). Guests: `guests/hello` rebuilt from
-that revision (37,686 bytes) and the JavaScript component prebuilt for it
-(10.7 MiB, sha256 `1963ca49...`). `wasm.max-memory` was the default 64 MiB,
-`maxmemory` 0 except in the probe. Two runs per allocator, in MiB. The System
-rows used a build whose `allocator:` line in `lib.rs` read
-`(std::alloc::System, std::alloc::System)`; that change is not committed.
+Measured 2026-10-27 with `wasm/bench/memory.sh`: macOS 26.7.1 on an Apple M3 (8
+cores, 16 GB), Homebrew Redis 8.10.2 (`mem_allocator` libc), Rust 1.94.0,
+wasmtime 36.0.19 from the `wasm/ci/locks` snapshots, and a release build of the
+host at `ece25d2` (12.0 MiB dylib). Guests: `guests/hello` rebuilt from that
+revision (37,686 bytes, sha256
+`137e833cb8bf9ec16c7ada824be3f022484366355e4d7befca4286550dae4178`) and the
+JavaScript component prebuilt for it (10.7 MiB, sha256
+`1963ca49c65699f2d11c13a432ed5f7b742d999183b15e418545998cdf21a23f`).
+`wasm.max-memory` was the default 64 MiB, `maxmemory` 0 except in the probe. Two
+runs per allocator, in MiB. The System rows used a build whose `allocator:` line
+in `lib.rs` read `(std::alloc::System, std::alloc::System)`; that change is not
+committed. The per-run tables are in `wasm/bench/results/2026-10-27/`.
 
 | phase | Redis allocator: `used_memory` | peak | RSS (ps) | System: `used_memory` | peak | RSS (ps) |
 |---|---|---|---|---|---|---|
@@ -427,11 +430,20 @@ rows used a build whose `allocator:` line in `lib.rs` read
 
 `INFO wasm` read the same under both: 0.3 MiB of compiled code and 1.1 MiB of
 linear memory for hello, 90.2 MiB of code and 7.3 MiB of linear memory for the
-JavaScript library (9.1 MiB after the 10,000 calls). The load took 3.1 to
-4.4 s with sampling. The probe set `maxmemory` 64 MiB above `used_memory`:
-`SET` succeeded with hello grown by 48 MiB under both allocators, and during the
-JavaScript load 1 of 17 `SET`s succeeded with Redis's allocator (16 `OOM`),
-all 15 to 16 with the System allocator.
+JavaScript library (9.1 MiB after the 10,000 calls). The load took 3.1 to 4.4 s
+with sampling. The probe, revised after review, loads hello first and lets it
+settle, sets `maxmemory` 16 MiB above `used_memory`, then grows the guest by 48
+MiB: `SET` still succeeded under both allocators with 49.2 MiB of instance
+memory, so linear memory does not count against `maxmemory`. During the
+JavaScript load, with `maxmemory` 64 MiB above `used_memory`, 1 of 17 to 18
+`SET`s succeeded with Redis's allocator (16 to 17 `OOM`) and all 15 to 16 with
+the System allocator. The load peak is not compiler scratch alone: `WASM.LOAD`
+keeps its blocked client's argument until it replies (`lib.rs`), and the host
+keeps its own copy of the component (`lib.rs`, `host.rs`) before it instantiates
+the library and lists its functions on the main thread. `wasm_compiling` counts
+only libraries compiling after an RDB load, so it reads 0 during `WASM.LOAD`,
+and `wasm_code_bytes` is the component's whole compiled image, not only its
+instructions.
 
 With `RAYON_NUM_THREADS` limiting wasmtime's parallel compilation (Redis's
 allocator, `CYCLES=5`, one run each; the default row is the two runs above):
@@ -522,9 +534,12 @@ it in the first five, and once fell by 7.7 MiB between cycles 20 and 30, while
 reloading left RSS flat. `vmmap` put the growth from the first compile in the
 malloc zone (1.1 to 21.7 MiB resident) and in eight more thread stacks. `lsof`
 still listed the dylib after the last `MODULE UNLOAD`: macOS did not unmap it,
-so, inferred from that, its statics, thread-locals and threads survive a
-reload; why dyld keeps it is not established. The counted heap does not grow,
-so the RSS growth is first-use cost and allocator retention, not a leak.
+so its statics survive a reload; why dyld keeps it is not established. Threads
+differ: the host stops and joins its ticker thread at unload (`Host::shutdown`
+in `host.rs`, `Ticker::stop` in `busy.rs`), while Rayon's global compile pool
+lives as long as the process. These runs showed no unbounded growth of the
+counted heap, which fits first-use cost and allocator retention; a flat
+`used_memory` cannot rule out leaks outside Redis's accounting.
 
 #### Linear memory under the Redis allocator
 
@@ -547,7 +562,13 @@ Verified in the source:
   `LinearMemory` with `byte_size`, `byte_capacity`, `grow_to` and `as_ptr` in
   `runtime/memory.rs`) can do the same with exact sizes and real failures:
   `RedisModule_TryAlloc`, and `RedisModule_TryRealloc` on Redis 7.4 and later
-  (7.2 has only `TryAlloc`). `RedisModule_Alloc` panics the server when
+  (7.2 has only `TryAlloc`). The type takes on `LinearMemory`'s unsafe
+  contract: its base must be page-aligned, which `TryAlloc` and `TryRealloc`
+  do not promise, so it must over-allocate and align; the base must not move
+  while growth stays within `byte_capacity`; newly accessible bytes must be
+  zeroed; and a failed growth must keep the old allocation. What Redis counts
+  is then the requested size plus that padding and its allocator's rounding.
+  `RedisModule_Alloc` panics the server when
   allocation fails (`module.c` documents the `Try` functions as returning NULL
   "instead of panicking"), so `MallocMemory` under `RedisAlloc` cannot report
   it.
@@ -590,8 +611,10 @@ with jemalloc.
 Verdict: feasible on wasmtime 36 without patches, for linear memory only. The
 `MallocMemory` route is a few `Config` calls but counts up to twice the memory
 and panics the server on allocation failure; a `MemoryCreator` over
-`TryAlloc` and `TryRealloc` is a small unsafe type that counts exactly and
-fails cleanly.
+`TryAlloc` and `TryRealloc` is a small unsafe type that fails cleanly and
+counts the requested size plus alignment padding and allocator rounding, once
+it meets `LinearMemory`'s alignment, stability, zeroing and failure
+obligations.
 
 #### Policy options (a proposal for the owner, not decided)
 

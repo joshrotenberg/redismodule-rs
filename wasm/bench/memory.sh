@@ -12,8 +12,10 @@
 #      wasm.max-memory;
 #   5. WASM.DELETE and WASM.FLUSH;
 #   6. repeated loads and deletes of the JavaScript library;
-#   7. a maxmemory probe: SETs against a maxmemory 64 MiB above used_memory
-#      while a guest grows and while the JavaScript component compiles;
+#   7. a maxmemory probe: with the Rust guest loaded and settled, a SET after
+#      it grows 48 MiB against a maxmemory 16 MiB above used_memory, so the
+#      SET fails only if the growth counts; then SETs against a maxmemory
+#      64 MiB above used_memory while the JavaScript component compiles;
 #   8. MODULE UNLOAD and MODULE LOAD cycles with wasm.persist no, on a second
 #      server.
 #
@@ -300,17 +302,23 @@ if [ -n "$js" ]; then
   done
 fi
 
-# 7. The maxmemory probe.
-snap
-limit=$((used + (64 << 20)))
-ok "$(cli CONFIG SET maxmemory "$limit")"
+# 7. The maxmemory probe. The Rust guest loads first, so its compilation has
+# settled before the limit is set; 16 MiB of headroom against 48 MiB of growth
+# makes the SET fail only if linear memory counts.
 load hello "$hello"
+settle
+limit=$((used + (16 << 20)))
+ok "$(cli CONFIG SET maxmemory "$limit")"
 ok "$(cli WASM.CALL grow 0 $((48 << 20)))"
 reply=$(cli SET probe x)
 settle
-emit "7. maxmemory $(mib "$limit"): hello grown 48 MiB" "SET: $reply"
+emit "7. maxmemory $(mib "$limit"), 16 MiB headroom: hello grown 48 MiB" "SET: $reply"
 ok "$(cli WASM.DELETE hello)"
+ok "$(cli CONFIG SET maxmemory 0)"
 if [ -n "$js" ]; then
+  settle
+  limit=$((used + (64 << 20)))
+  ok "$(cli CONFIG SET maxmemory "$limit")"
   watch_load js "$js" probe
   emit "7. maxmemory $(mib "$limit"): during JavaScript WASM.LOAD" "$load_note"
   reply=$(cli SET probe x)
