@@ -8,7 +8,9 @@ reports, then the changes that compile unchanged but behave differently. The
 new.
 
 For replacing an already running module, see the separate
-[module upgrade guide](UPGRADING-MODULES.md).
+[module upgrade guide](UPGRADING-MODULES.md). For one real module's port,
+side by side and with its test results, see the
+[porting example](PORTING-EXAMPLE.md).
 
 Most modules meet only a few of these. The common ones are the parameter types
 of `init`, `deinit`, event and job callbacks and shared helpers, which now take
