@@ -11,7 +11,7 @@ for #89.
 
 | | SDK 2 | SDK 3 |
 |---|---|---|
-| Module revision | [`0cb93ba`](https://github.com/redis-developer/redis-event-stream-module/tree/0cb93ba), the module's `main` | [`473cc18`](https://github.com/redis-developer/redis-event-stream-module/tree/codex/sdk3-port), branch `codex/sdk3-port` |
+| Module revision | [`0cb93ba`](https://github.com/redis-developer/redis-event-stream-module/tree/0cb93ba), the module's `main` | [`3b09c5a`](https://github.com/redis-developer/redis-event-stream-module/tree/codex/sdk3-port), branch `codex/sdk3-port` |
 | SDK | upstream `redis-module` tag `v2.1.3` | this repository's tag `v3.0.0-alpha.1` (`4d473c3`) |
 | SDK features | `default-features = false`, `min-redis-compatibility-version-7-2` | the same |
 
@@ -21,7 +21,7 @@ appear. The excerpts below are copied from the two revisions and trimmed with
 
 ## How the port went
 
-The port is six commits on `codex/sdk3-port`:
+The port is seven commits on `codex/sdk3-port`:
 
 | Commit | Subject |
 |---|---|
@@ -31,6 +31,7 @@ The port is six commits on `codex/sdk3-port`:
 | `77beb95` | build: drop the direct linkme dependency |
 | `e44a353` | docs: update SPEC and comments for redis-module 3.0 |
 | `473cc18` | build: pin redis-module to the v3.0.0-alpha.1 tag |
+| `3b09c5a` | docs: refresh comments for the redis-module 3.0 tag pin |
 
 Building the 2.1.3 sources against 3.0 gave 31 errors, all predicted by the
 [migration guide](MIGRATING-3.0.md): 16 uses of the private `ctx` field, 8
@@ -61,7 +62,7 @@ pub(crate) fn defer_pending_event(ctx: &Context, event: PendingEvent) {
 pub(crate) fn on_keyspace_event(ctx: &Context, event_type: NotifyEvent, event: &str, key: &[u8]) {
 ```
 
-`src/capture.rs` at `473cc18`:
+`src/capture.rs` at `3b09c5a`:
 
 ```rust
 pub(crate) fn process_pending_event(ctx: &RuntimeContext, event: &PendingEvent) {
@@ -139,7 +140,7 @@ Database selection in `cmd_streams`, `src/commands.rs` at `0cb93ba`:
 }
 ```
 
-`src/commands.rs` at `473cc18`:
+`src/commands.rs` at `3b09c5a`:
 
 ```rust
     let registry = format!("{}{seg}#streams", PREFIX.value.lock(ctx).as_str());
@@ -180,7 +181,7 @@ pub(crate) extern "C" fn raw_keyspace_event(
 }
 ```
 
-`src/capture.rs` at `473cc18`:
+`src/capture.rs` at `3b09c5a`:
 
 ```rust
 pub(crate) fn keyspace_event_handler(
@@ -256,7 +257,7 @@ became the registered default without that check, so the module repeated it in
 
 3.0 checks the default against the registered range before registering the
 configuration, so `maxlen -1` fails the load before `set()` runs, with the
-SDK's message. `tests/capture.rs` at `473cc18`:
+SDK's message. `tests/capture.rs` at `3b09c5a`:
 
 ```rust
 fn negative_maxlen_module_arg_aborts_load() {
@@ -310,14 +311,14 @@ linkme = "0.3"
 lazy_static = "1"
 ```
 
-`Cargo.toml` at `473cc18`:
+`Cargo.toml` at `3b09c5a`:
 
 ```toml
 [dependencies]
 # redis-module 3.0 (the joshrotenberg/redismodule-rs fork) is not published to
 # crates.io, so both crates are pinned to one git pre-release tag, with the 7.2
 # compatibility floor from SPEC.md section 14. The macros crate comes from the
-# same git and rev: its expansions name `redis_module` items, including the
+# same git and tag: its expansions name `redis_module` items, including the
 # SDK's own re-export of linkme, so this crate needs no linkme dependency.
 redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1", default-features = false, features = [
     "min-redis-compatibility-version-7-2",
@@ -355,6 +356,9 @@ The module's own suite, run with `RUST_TEST_THREADS=4 cargo test
 | 2.1.3 at `0cb93ba` | 255 passed, 0 failed | 255 passed, 0 failed |
 | 3.0 with the tests unchanged | not run | 252 passed, 3 failed |
 | 3.0 at `473cc18` | 255 passed, 0 failed | 255 passed, 0 failed |
+
+`3b09c5a`, the branch head, changes only comments after `473cc18`, where these
+runs were made.
 
 With the tests unchanged, the same three tests also failed on Redis Stack
 7.4.7, the harness default described under
@@ -482,7 +486,7 @@ The worker try-locks so that it can see a stop request while `MODULE UNLOAD`
 holds the Redis lock; a blocking lock would deadlock there. Its hand-written
 guard now holds a `RuntimeContext` view and must drop it before unlocking,
 because dropping a runtime view can end call-user scopes through the native
-context. `src/dispatch.rs` at `473cc18`:
+context. `src/dispatch.rs` at `3b09c5a`:
 
 ```rust
 struct RawContextGuard {
@@ -538,7 +542,7 @@ git checkout 0cb93ba   # SDK 2: redis-module v2.1.3
 suite "$R810"
 suite "$R72"
 
-git checkout 473cc18   # SDK 3: codex/sdk3-port, tag v3.0.0-alpha.1
+git checkout 3b09c5a   # SDK 3: codex/sdk3-port, tag v3.0.0-alpha.1
 suite "$R810"
 suite "$R72"
 ```
