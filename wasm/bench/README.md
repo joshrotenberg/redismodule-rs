@@ -32,3 +32,20 @@ written with `(i * i..=n).step_by(i)` ran seven times slower than with the
 Needs `redis-server`, `redis-cli` and `redis-benchmark` on the `PATH`, and the
 `wasm32-unknown-unknown` target. The guest is turned into a component with the
 `componentize` example (`cargo run -p redis-module-wasm --example componentize`).
+
+## Memory
+
+`memory.sh` measures memory rather than time: `INFO memory`, the process RSS
+from `ps` and `INFO wasm` after each phase of loading, calling, growing,
+deleting and reloading guests on throwaway servers (the comment at its top
+lists the phases):
+
+```bash
+wasm/bench/memory.sh [module] [hello.wasm] [library.wasm]
+```
+
+Without arguments it builds the module and the Rust guest from this checkout
+and looks for the JavaScript guest at `wasm/guests/js/library.wasm`; without
+that file the JavaScript phases are skipped. `PORT`, `CYCLES` and `RELOADS`
+change the first port tried and the checkpoints. The latest numbers are in
+[TRACKING.md](../TRACKING.md) (H13).
