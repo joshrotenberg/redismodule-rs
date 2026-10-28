@@ -170,17 +170,19 @@ impl Server {
     }
 
     /// Whether the server accepts connections and has finished loading its
-    /// RDB or AOF.
+    /// RDB or AOF. Each check gives up after a second, so a server that stops
+    /// answering fails the caller's deadline instead of hanging it.
     fn loaded(&self) -> bool {
-        TcpStream::connect(("127.0.0.1", self.port)).is_ok()
-            && redis::Client::open(format!("redis://127.0.0.1:{}/", self.port))
-                .and_then(|client| client.get_connection())
-                .and_then(|mut con| {
-                    redis::cmd("INFO")
-                        .arg("persistence")
-                        .query::<String>(&mut con)
-                })
-                .is_ok_and(|info| info.lines().any(|line| line.trim_end() == "loading:0"))
+        let timeout = Duration::from_secs(1);
+        redis::Client::open(format!("redis://127.0.0.1:{}/", self.port))
+            .and_then(|client| client.get_connection_with_timeout(timeout))
+            .and_then(|mut con| {
+                con.set_read_timeout(Some(timeout))?;
+                redis::cmd("INFO")
+                    .arg("persistence")
+                    .query::<String>(&mut con)
+            })
+            .is_ok_and(|info| info.lines().any(|line| line.trim_end() == "loading:0"))
     }
 
     fn connection(&self) -> Connection {
@@ -1524,8 +1526,14 @@ fn a_restart_serves_while_saved_libraries_compile() {
     let serving = started.elapsed();
     let mut con = server.connection();
     let wasm = info(&mut con);
-    assert_eq!(wasm["compiling"], 1, "served after {serving:?}: {wasm:?}");
-    assert_eq!(list(&mut con).len(), 1);
+    let libraries = list(&mut con);
+    assert_eq!(
+        wasm["compiling"],
+        1,
+        "served after {serving:?}: {wasm:?}, WASM.LIST {libraries:?}; log:\n{}",
+        server.log()
+    );
+    assert_eq!(libraries.len(), 1);
 
     // A call waits for the library; other clients are answered meanwhile.
     let mut caller = server.connection();
