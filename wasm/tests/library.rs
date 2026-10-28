@@ -156,15 +156,27 @@ impl Server {
             .expect("start redis-server");
         let server = Self { child, log, port };
         let deadline = Instant::now() + Duration::from_secs(10);
-        while TcpStream::connect(("127.0.0.1", port)).is_err() {
+        // Redis accepts connections, and answers INFO, while it is still
+        // loading an RDB or AOF, so wait for the load to finish too.
+        while !server.loaded() {
             assert!(
                 Instant::now() < deadline,
-                "redis-server did not start; log:\n{}",
+                "redis-server did not start and load its data; log:\n{}",
                 server.log()
             );
             sleep(Duration::from_millis(50));
         }
         server
+    }
+
+    /// Whether the server accepts connections and has finished loading its
+    /// RDB or AOF.
+    fn loaded(&self) -> bool {
+        TcpStream::connect(("127.0.0.1", self.port)).is_ok()
+            && redis::Client::open(format!("redis://127.0.0.1:{}/", self.port))
+                .and_then(|client| client.get_connection())
+                .and_then(|mut con| redis::cmd("INFO").arg("persistence").query::<String>(&mut con))
+                .is_ok_and(|info| info.lines().any(|line| line.trim_end() == "loading:0"))
     }
 
     fn connection(&self) -> Connection {
@@ -1507,7 +1519,8 @@ fn a_restart_serves_while_saved_libraries_compile() {
     let server = Server::restart(6635, &[]);
     let serving = started.elapsed();
     let mut con = server.connection();
-    assert_eq!(info(&mut con)["compiling"], 1, "served after {serving:?}");
+    let wasm = info(&mut con);
+    assert_eq!(wasm["compiling"], 1, "served after {serving:?}: {wasm:?}");
     assert_eq!(list(&mut con).len(), 1);
 
     // A call waits for the library; other clients are answered meanwhile.

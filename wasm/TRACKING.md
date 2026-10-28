@@ -749,6 +749,16 @@ evidence as the host meets them.
 
 ## Log
 
+- 2026-10-28: issue 123. `a_restart_serves_while_saved_libraries_compile`
+  failed two of five full runs at `365c491`, on macOS and in CI on Linux, with
+  `compiling` 0 about 50 ms after a restart. The test harness's restart
+  returned once the port accepted, but Redis accepts connections and answers
+  `INFO` while it loads the RDB: a probe of that restart saw `loading:1` and no
+  libraries for the first 17 to 19 ms, then `loading:0` and the library
+  compiling. With the connect retry cut from 50 to 1 ms the test failed three
+  times of three. The harness now also waits for `loading:0`, which covers the
+  other restarts too; with it the test passed three times of three at the 1 ms
+  retry. The host was not at fault.
 - 2026-10-27: issue 86. [CORE-COMPARISON.md](CORE-COMPARISON.md) compares
   this host at `b10c51e` with the public `wasm-integration` branch of
   minchopaskal/redis at `0302b84`, a WAMR 2.4.5 interpreter built into Redis
