@@ -111,6 +111,18 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-10-28: merged SDK master `a6f128b` into the branch as `fdf33fb`. It is
+  SDK PR 122 (#116): defrag registration warns only about defrag code the
+  server cannot run, with a log-reading test in the Redis 6.0.20 CI job.
+  Before it, PR 120 (`a373ea8`) landed on this branch: the core comparison for
+  issue 86, which stays open. Nothing in `wasm/` changed. The first local
+  `wasm/ci/check.sh` run, at a load average near 9, failed one test:
+  `a_restart_serves_while_saved_libraries_compile` found no library compiling
+  57 ms after the restart. That test then passed three times on its own, and a
+  second full run passed with the snapshot lockfiles byte-identical: the
+  host's 7 unit and 21 library tests and the SDK's 70 unit, 163 integration and
+  116 doc tests.
+
 - 2026-10-28: merged SDK master `cf287ac` into the branch as `56991f1`. It is
   SDK PR 121 (#109): on Redis 6, `RedisValue::Bool`, `BigNumber` and
   `VerbatimString` replies and `Context::get_current_user` fall back instead of
