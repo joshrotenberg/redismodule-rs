@@ -28,9 +28,18 @@ pub enum RedisValue {
     BulkRedisString(RedisString),
     StringBuffer(Vec<u8>),
     Integer(i64),
+    /// A RESP3 boolean. A RESP2 client gets the integer 1 or 0, and so does
+    /// every client of Redis before 7.0.
     Bool(bool),
     Float(f64),
+    /// A RESP3 big number, given as its decimal digits. A RESP2 client gets
+    /// the digits as a bulk string, and so does every client of Redis before
+    /// 7.0.
     BigNumber(String),
+    /// RESP3 verbatim text with its three-letter format, such as `txt` or
+    /// `mkd`. A RESP2 client gets the text as a bulk string. Redis before 7.0
+    /// can only send the `txt` format, so there text in another format is a
+    /// bulk string for every client.
     VerbatimString((VerbatimStringFormat, Vec<u8>)),
     Array(Vec<RedisValue>),
     StaticError(&'static str),
@@ -38,7 +47,11 @@ pub enum RedisValue {
     /// Unlike returning `Err`, it can be an array element or a map value (a
     /// set element is a `RedisValueKey`).
     Error(String),
+    /// A RESP3 map, replied in hash order. A RESP2 client gets a flat array of
+    /// keys and values, and so does every client of Redis before 7.0.
     Map(HashMap<RedisValueKey, RedisValue>),
+    /// A RESP3 set, replied in hash order. A RESP2 client gets an array, and
+    /// so does every client of Redis before 7.0.
     Set(HashSet<RedisValueKey>),
     OrderedMap(BTreeMap<RedisValueKey, RedisValue>),
     OrderedSet(BTreeSet<RedisValueKey>),

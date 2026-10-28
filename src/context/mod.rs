@@ -676,8 +676,25 @@ impl Context {
     /// Redis 8.10 can return None when the native API reports no user. Older
     /// hosts require a client/user; Option does not make arbitrary constructed
     /// or missing-client contexts legal. A present string is independently owned.
+    ///
+    /// Redis 7.0 added `RedisModule_GetCurrentUserName`. On Redis 6.2 the name
+    /// comes from `RedisModule_GetClientUserNameById` with this context's
+    /// client ID, which finds only connected clients: it names the user of the
+    /// client that sent the command, and returns `None` for an internal client,
+    /// such as the one a call or a script runs on. Redis 6.0 has no way to read
+    /// the name, so this returns `None` there.
     pub fn get_current_user(&self) -> Option<RedisString> {
-        let user = unsafe { crate::__required_api!(RedisModule_GetCurrentUserName)(self.ctx) };
+        let user = match unsafe { raw::RedisModule_GetCurrentUserName } {
+            Some(current) => unsafe { current(self.ctx) },
+            None => {
+                let by_id = unsafe { raw::RedisModule_GetClientUserNameById }?;
+                let client_id = unsafe { raw::RedisModule_GetClientId?(self.ctx) };
+                if client_id == 0 {
+                    return None;
+                }
+                unsafe { by_id(self.ctx, client_id) }
+            }
+        };
         // SAFETY: native result is owned; self.ctx is its actual producer.
         unsafe { RedisString::from_owned_ptr_or_none(NonNull::new(self.ctx), user) }
     }
