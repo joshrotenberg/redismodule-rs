@@ -17,16 +17,39 @@ Registration logs a warning only for defrag code the server cannot run: a
 `#[defrag_function]` before Redis 6.2, which added
 `RedisModule_RegisterDefragFunc`, and a `#[defrag_start_function]` or
 `#[defrag_end_function]` before Redis 8.0, which added
-`RedisModule_RegisterDefragCallbacks`. Upstream checks each API
-before it checks whether the module registered any such code, so every module
-logs "Skip register defrag function" on Redis 6.0 and "Skip register defrag
-callbacks" on Redis 6.2 to 7.4. On Redis 6.0 it also returns after the first
-warning, so a module with start or end functions gets no warning about them.
-The #89 port of redis-event-stream-module, which has no defrag code, logged the
-callbacks warning on Redis 7.2.16 and 7.4.7. An integration test checks the
-server log for a module with no defrag code and one with all three kinds; before
-the change it failed on Redis 6.0.20 and 7.2.16. No upstream issue or pull
-request reports it.
+`RedisModule_RegisterDefragCallbacks`. Upstream checks each API before it checks
+whether the module registered any such code, so every module logs "Skip register
+defrag function" on Redis 6.0 and "Skip register defrag callbacks" on Redis 6.2
+to 7.4 and on Valkey 8.1 and 9.1, which have no
+`RedisModule_RegisterDefragCallbacks`. On Redis 6.0 it also returns after the
+first warning, so a module with start or end functions gets no warning about
+them. The #89 port of redis-event-stream-module, which has no defrag code,
+logged the callbacks warning on Redis 7.2.16 and Redis Stack 7.4.7. An
+integration test checks the server log for a module with no defrag code and one
+with all three kinds; before the change it failed on Redis 6.0.20 and 7.2.16. No
+upstream issue or pull request reports it.
+
+## Redis 6 replies
+
+`RedisValue::Bool`, `RedisValue::BigNumber` and `RedisValue::VerbatimString`
+replies and `Context::get_current_user` use module APIs that Redis 7.0 added.
+Upstream unwraps them, so they panic on Redis 6; in the fork the panic guard
+turned that into `ERR command panicked`, and a bool inside an array or a set
+left the client waiting for the rest of the reply. They now reply the way
+Redis 7 replies to a RESP2 client: a bool is the integer 1 or 0 and a big
+number a bulk string. Verbatim text keeps its type in the `txt` format, which
+Redis 6 can send, and is a bulk string in any other format. `get_current_user`
+reads the name with `RedisModule_GetClientUserNameById` on Redis 6.2 and
+returns `None` on Redis 6.0.
+
+A set reply on Redis 6, which has no `RedisModule_ReplyWithSet`, is an array.
+Upstream, like the fork before this change, announced twice as many elements as
+it sent, so the client waited for elements that never came.
+
+An integration test that runs in the Redis 6.0.20 CI job checks each reply over
+RESP2 and RESP3. No upstream issue or pull request reports these problems;
+[upstream issue 378][i378] and [upstream issue 404][i404] ask for tests and CI
+on Redis 6 in general.
 
 ## Array key type
 
@@ -616,6 +639,8 @@ These compile unchanged but behave differently:
 [i351]: https://github.com/RedisLabsModules/redismodule-rs/issues/351
 [i358]: https://github.com/RedisLabsModules/redismodule-rs/issues/358
 [i365]: https://github.com/RedisLabsModules/redismodule-rs/issues/365
+[i378]: https://github.com/RedisLabsModules/redismodule-rs/issues/378
+[i404]: https://github.com/RedisLabsModules/redismodule-rs/issues/404
 [i416]: https://github.com/RedisLabsModules/redismodule-rs/issues/416
 [i471]: https://github.com/RedisLabsModules/redismodule-rs/issues/471
 [i473]: https://github.com/RedisLabsModules/redismodule-rs/issues/473

@@ -9,9 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On Redis 6, `RedisValue::Bool`, `RedisValue::BigNumber` and
+  `RedisValue::VerbatimString` replies and `Context::get_current_user` no
+  longer panic into `ERR command panicked` (#109). A bool replies with the
+  integer 1 or 0 and a big number with a bulk string, as Redis 7 replies to a
+  RESP2 client. Verbatim text keeps its type in the `txt` format and is a bulk
+  string in any other format. `Context::get_current_user` reads the name with
+  `RedisModule_GetClientUserNameById` on Redis 6.2, which finds only
+  connected clients, and returns `None` on Redis 6.0.
+- On Redis 6, a `RedisValue::Set` or `RedisValue::OrderedSet` reply announced
+  twice as many array elements as it sent, so the client waited for elements
+  that never came. It now announces as many as it sends.
 - Loading a module no longer logs "Skip register defrag function" on Redis
-  6.0, or "Skip register defrag callbacks" on Redis 6.2 to 7.4, when the
-  module has no defrag code of that kind (#116). The warning now appears only
+  6.0, or "Skip register defrag callbacks" on Redis 6.2 to 7.4 and Valkey,
+  when the module has no defrag code of that kind (#116). The warning now appears only
   for `#[defrag_function]`, `#[defrag_start_function]` or
   `#[defrag_end_function]` code the server cannot run. On Redis 6.0, a module
   with start or end functions now also gets the callbacks warning, which an

@@ -47,7 +47,8 @@ OVERRIDES = {
                          "`redis_module!` calls through `src/redismodule.c`, calls it."),
     "GetClientId": ("internal", "`Context::acl_add_log_entry` and the blocking checks behind "
                     "`block_client` and `block_client_on_reply` only test that the context has "
-                    "a client; no wrapper returns the id."),
+                    "a client, and `Context::get_current_user` passes the id to "
+                    "`GetClientUserNameById` on Redis 6.2; no wrapper returns the id."),
     "GetClientInfoById": ("internal", "`Context::block_client` only checks, before Redis 6.2, that "
                           "the client is in the client index; no wrapper returns client data."),
     "GetContextUser": ("internal", "`RuntimeContext::scoped_call_user` reads it to restore the "
