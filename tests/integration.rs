@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use crate::utils::TestConnection;
 use anyhow::Context;
 use anyhow::Result;
-use redis::{RedisError, RedisResult, Value};
+use redis::{RedisError, RedisResult, Value, VerbatimFormat};
 use redis_module::RedisValue;
 
 mod configuration_ownership;
@@ -5890,6 +5890,90 @@ fn test_call_reply_status_and_collections() -> Result<()> {
     assert_eq!(reported[3], 0, "not an enterprise server");
 
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// Redis before 7.0 has no module API for the RESP3 reply types, so there
+/// every client gets what Redis 7 sends a RESP2 client, and a verbatim reply
+/// keeps its type only in the `txt` format.
+#[test]
+fn test_reply_types_fall_back_before_redis_7() -> Result<()> {
+    let mut con = TestConnection::new("reply_types");
+    // A reply that announces more elements than it sends fails the read
+    // instead of hanging the test.
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    con.set_write_timeout(Some(Duration::from_secs(5)))?;
+    let server: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version: Vec<u32> = server
+        .lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .context("INFO server reports redis_version")?
+        .trim()
+        .split('.')
+        .map(|part| part.parse().context("numeric version part"))
+        .collect::<Result<_>>()?;
+    let native = version[0] >= 7;
+    let digits = "1234567890123456789012345678901234567890";
+    let bulk = |s: &str| Value::BulkString(s.as_bytes().to_vec());
+
+    for protocol in [2, 3, 2] {
+        redis::cmd("HELLO").arg(protocol).query::<Value>(&mut con)?;
+        let resp3 = protocol == 3;
+        let typed = resp3 && native;
+
+        let bools: Value = redis::cmd("reply.bool").query(&mut con)?;
+        let expected = if typed {
+            vec![Value::Boolean(true), Value::Boolean(false)]
+        } else {
+            vec![Value::Int(1), Value::Int(0)]
+        };
+        assert_eq!(bools, Value::Array(expected), "RESP{protocol}");
+
+        let big: Value = redis::cmd("reply.big_number").query(&mut con)?;
+        let expected = if typed {
+            Value::BigNumber(digits.as_bytes().to_vec())
+        } else {
+            bulk(digits)
+        };
+        assert_eq!(big, expected, "RESP{protocol}");
+
+        for (format, verbatim_format) in [
+            ("txt", VerbatimFormat::Text),
+            ("mkd", VerbatimFormat::Markdown),
+        ] {
+            let text: Value = redis::cmd("reply.verbatim")
+                .arg(&[format, "some text"])
+                .query(&mut con)?;
+            let expected = if resp3 && (native || format == "txt") {
+                Value::VerbatimString {
+                    format: verbatim_format,
+                    text: "some text".to_owned(),
+                }
+            } else {
+                bulk("some text")
+            };
+            assert_eq!(text, expected, "RESP{protocol} {format}");
+        }
+
+        let set: Value = redis::cmd("reply.set").query(&mut con)?;
+        let expected = if typed {
+            Value::Set(vec![bulk("a"), bulk("b"), Value::Boolean(true)])
+        } else {
+            Value::Array(vec![bulk("a"), bulk("b"), Value::Int(1)])
+        };
+        assert_eq!(set, expected, "RESP{protocol}");
+
+        // Redis 6.0 has no API that names the calling client's user.
+        let user: Value = redis::cmd("reply.user").query(&mut con)?;
+        let expected = if version[..2] == [6, 0] {
+            Value::Nil
+        } else {
+            bulk("default")
+        };
+        assert_eq!(user, expected, "RESP{protocol}");
+
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
     Ok(())
 }
 

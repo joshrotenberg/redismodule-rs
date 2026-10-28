@@ -410,12 +410,14 @@ pub(crate) fn reply_with_map(ctx: *mut RedisModuleCtx, len: c_long) -> Status {
     }
 }
 
+/// Replies with a set header. Redis before 7.0 has no `RedisModule_ReplyWithSet`;
+/// there the `len` elements are an array, as Redis 7 sends a RESP2 client.
 #[inline]
 pub(crate) fn reply_with_set(ctx: *mut RedisModuleCtx, len: c_long) -> Status {
     unsafe {
         RedisModule_ReplyWithSet
             .map_or_else(
-                || crate::__required_api!(RedisModule_ReplyWithArray)(ctx, len * 2),
+                || crate::__required_api!(RedisModule_ReplyWithArray)(ctx, len),
                 |f| f(ctx, len),
             )
             .into()
@@ -427,9 +429,15 @@ pub(crate) fn reply_with_null(ctx: *mut RedisModuleCtx) -> Status {
     unsafe { crate::__required_api!(RedisModule_ReplyWithNull)(ctx).into() }
 }
 
+/// Replies with a boolean. Redis before 7.0 has no `RedisModule_ReplyWithBool`;
+/// there the reply is the integer 1 or 0, which is what Redis 7 sends a RESP2
+/// client for a boolean.
 #[inline]
 pub(crate) fn reply_with_bool(ctx: *mut RedisModuleCtx, b: c_int) -> Status {
-    unsafe { crate::__required_api!(RedisModule_ReplyWithBool)(ctx, b).into() }
+    match unsafe { RedisModule_ReplyWithBool } {
+        Some(reply) => unsafe { reply(ctx, b) }.into(),
+        None => reply_with_long_long(ctx, c_longlong::from(b != 0)),
+    }
 }
 
 #[inline]
@@ -461,15 +469,26 @@ pub(crate) fn reply_with_string_buffer(
     unsafe { crate::__required_api!(RedisModule_ReplyWithStringBuffer)(ctx, s, len).into() }
 }
 
+/// Replies with a big number. Redis before 7.0 has no
+/// `RedisModule_ReplyWithBigNumber`; there the digits are a bulk string, which
+/// is what Redis 7 sends a RESP2 client for a big number.
 #[inline]
 pub(crate) fn reply_with_big_number(
     ctx: *mut RedisModuleCtx,
     s: *const c_char,
     len: size_t,
 ) -> Status {
-    unsafe { crate::__required_api!(RedisModule_ReplyWithBigNumber)(ctx, s, len).into() }
+    match unsafe { RedisModule_ReplyWithBigNumber } {
+        Some(reply) => unsafe { reply(ctx, s, len) }.into(),
+        None => reply_with_string_buffer(ctx, s, len),
+    }
 }
 
+/// Replies with verbatim text; `format` points to the three format bytes.
+/// Redis before 7.0 has no `RedisModule_ReplyWithVerbatimStringType`. There,
+/// text in the `txt` format goes through `RedisModule_ReplyWithVerbatimString`,
+/// which can only send `txt`, and text in any other format is a bulk string,
+/// which is what Redis 7 sends a RESP2 client for verbatim text.
 #[inline]
 pub(crate) fn reply_with_verbatim_string(
     ctx: *mut RedisModuleCtx,
@@ -477,8 +496,15 @@ pub(crate) fn reply_with_verbatim_string(
     len: size_t,
     format: *const c_char,
 ) -> Status {
-    unsafe {
-        crate::__required_api!(RedisModule_ReplyWithVerbatimStringType)(ctx, s, len, format).into()
+    if let Some(reply) = unsafe { RedisModule_ReplyWithVerbatimStringType } {
+        return unsafe { reply(ctx, s, len, format) }.into();
+    }
+    // SAFETY: callers pass the three bytes of a `VerbatimStringFormat`.
+    let format = unsafe { std::slice::from_raw_parts(format.cast::<u8>(), 3) };
+    if format == b"txt" {
+        unsafe { crate::__required_api!(RedisModule_ReplyWithVerbatimString)(ctx, s, len).into() }
+    } else {
+        reply_with_string_buffer(ctx, s, len)
     }
 }
 
