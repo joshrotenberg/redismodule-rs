@@ -507,7 +507,8 @@ That build cannot yield, so a guest that spins holds the server and
 Method: `wasm/bench/run.sh` unchanged, `PORT=6700`, 50 clients, on the
 machine and versions in Pins, 2026-10-27. Runs were interleaved off, on, off,
 on, off, on, after one discarded warm-up run with epochs on, started at a load
-average of 16 (its `primes` took 39.52 µs). Each variant was rebuilt from
+average of 16 (its `primes` took 39.52 µs; that run's table is not committed).
+Each variant was rebuilt from
 source between runs and gave the same dylib each time: sha256 `efec9d1f...`
 with epochs, `4f8069d6...` without. Load averages at the start of runs were
 3.7 to 12.5, so the machine was not idle. The per-run tables are in
@@ -547,8 +548,9 @@ Cargo registry, `src/func_environ.rs`): with `epoch_interruption` on,
 and checks the deadline at each function entry, and `translate_loop_header`
 (lines 3270 to 3284) adds `epoch_check` (lines 648 to 660) at each loop
 header: a load of the current epoch and a compare with a deadline kept in a
-variable, branching to a cold block that reloads the deadline and calls the
-`new_epoch` builtin (lines 662 to 715).
+variable, branching to a cold block that reloads the deadline, compares
+again, and calls the `new_epoch` builtin only if the epoch is still past it
+(lines 662 to 715).
 
 Why the sieve pays so much (inferred; the generated code was not inspected):
 its inner loop is a store with an explicit bounds check, since
