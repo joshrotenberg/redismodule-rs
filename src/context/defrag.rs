@@ -231,39 +231,42 @@ extern "C" fn defrag_end_function(defrag_ctx: *mut raw::RedisModuleDefragCtx) {
     });
 }
 
-/// Register defrag functions if exists.
+/// Registers the module's defrag functions and its defrag start and end
+/// functions, if it has any. A warning is logged only for those the server
+/// cannot run: defrag functions before Redis 6.2, and start and end functions
+/// before Redis 8.0.
 pub fn register_defrag_functions(ctx: &EventContext) -> Result<(), RedisError> {
-    let register_defrag_function = match unsafe { raw::RedisModule_RegisterDefragFunc } {
-        Some(f) => f,
-        None => {
-            ctx.log_warning("Skip register defrag function as defrag is not supported on the current Redis server.");
-            return Ok(());
-        }
-    };
     if !DEFRAG_FUNCTIONS_LIST.is_empty() {
-        let res = unsafe { register_defrag_function(ctx.ctx, Some(defrag_function)) };
-        if res != raw::REDISMODULE_OK as i32 {
-            return Err(RedisError::Str("Failed register defrag function"));
+        match unsafe { raw::RedisModule_RegisterDefragFunc } {
+            Some(register) => {
+                let res = unsafe { register(ctx.ctx, Some(defrag_function)) };
+                if res != raw::REDISMODULE_OK as i32 {
+                    return Err(RedisError::Str("Failed register defrag function"));
+                }
+            }
+            None => ctx.log_warning(
+                "Skip register defrag function as defrag is not supported on the current Redis server.",
+            ),
         }
     }
 
-    let register_defrag_callbacks = match unsafe { raw::RedisModule_RegisterDefragCallbacks } {
-        Some(f) => f,
-        None => {
-            ctx.log_warning("Skip register defrag callbacks as defrag callbacks is not supported on the current Redis server.");
-            return Ok(());
-        }
-    };
     if !DEFRAG_START_FUNCTIONS_LIST.is_empty() || !DEFRAG_END_FUNCTIONS_LIST.is_empty() {
-        let res = unsafe {
-            register_defrag_callbacks(
-                ctx.ctx,
-                Some(defrag_start_function),
-                Some(defrag_end_function),
-            )
-        };
-        if res != raw::REDISMODULE_OK as i32 {
-            return Err(RedisError::Str("Failed register defrag callbacks"));
+        match unsafe { raw::RedisModule_RegisterDefragCallbacks } {
+            Some(register) => {
+                let res = unsafe {
+                    register(
+                        ctx.ctx,
+                        Some(defrag_start_function),
+                        Some(defrag_end_function),
+                    )
+                };
+                if res != raw::REDISMODULE_OK as i32 {
+                    return Err(RedisError::Str("Failed register defrag callbacks"));
+                }
+            }
+            None => ctx.log_warning(
+                "Skip register defrag callbacks as defrag callbacks is not supported on the current Redis server.",
+            ),
         }
     }
 
