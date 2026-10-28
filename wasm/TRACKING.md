@@ -109,6 +109,16 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-10-28: merged SDK master `cf287ac` into the branch as `56991f1`. It is
+  SDK PR 121 (#109): on Redis 6, `RedisValue::Bool`, `BigNumber` and
+  `VerbatimString` replies and `Context::get_current_user` fall back instead of
+  panicking, a set reply no longer announces twice its length, and the
+  `reply_types` example and its test join the Redis 6.0.20 CI job. Nothing in
+  `wasm/` changed. `wasm/ci/check.sh` passed locally with the four snapshot
+  lockfiles, which stayed byte-identical, on Redis 8.10.2 and Rust 1.94.0: the
+  host's 7 unit and 21 library tests, the JavaScript guest included, and the
+  SDK's 70 unit, 162 integration and 116 doc tests.
+
 - 2026-10-27: merged SDK master `532f7fc` into the branch as `fd1dfbf`. It is
   SDK PR 118 (#63), the porting walkthrough `docs/PORTING-EXAMPLE.md`, with
   pointers from the README and the migration guide. Only Markdown files
