@@ -11,6 +11,23 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Defrag registration warnings
+
+Registration logs a warning only for defrag code the server cannot run: a
+`#[defrag_function]` before Redis 6.2, which added
+`RedisModule_RegisterDefragFunc`, and a `#[defrag_start_function]` or
+`#[defrag_end_function]` before Redis 8.0, which added
+`RedisModule_RegisterDefragCallbacks`. Upstream checks each API
+before it checks whether the module registered any such code, so every module
+logs "Skip register defrag function" on Redis 6.0 and "Skip register defrag
+callbacks" on Redis 6.2 to 7.4. On Redis 6.0 it also returns after the first
+warning, so a module with start or end functions gets no warning about them.
+The #89 port of redis-event-stream-module, which has no defrag code, logged the
+callbacks warning on Redis 7.2.16 and 7.4.7. An integration test checks the
+server log for a module with no defrag code and one with all three kinds; before
+the change it failed on Redis 6.0.20 and 7.2.16. No upstream issue or pull
+request reports it.
+
 ## Array key type
 
 `KeyType` maps value 8 to `KeyType::Array`. Redis 8.8 and later return 8 from

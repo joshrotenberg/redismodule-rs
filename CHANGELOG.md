@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Loading a module no longer logs "Skip register defrag function" on Redis
+  6.0, or "Skip register defrag callbacks" on Redis 6.2 to 7.4, when the
+  module has no defrag code of that kind (#116). The warning now appears only
+  for `#[defrag_function]`, `#[defrag_start_function]` or
+  `#[defrag_end_function]` code the server cannot run. On Redis 6.0, a module
+  with start or end functions now also gets the callbacks warning, which an
+  early return used to skip.
+
 ## [3.0.0-alpha.1](https://github.com/joshrotenberg/redismodule-rs/compare/a808377...v3.0.0-alpha.1) - 2026-10-27
 
 The first pre-release of 3.0.0, tagged for git consumers; the crates keep

@@ -6079,6 +6079,39 @@ fn test_defrag() -> Result<()> {
     Ok(())
 }
 
+/// Loading warns only about defrag code the server cannot run: defrag functions
+/// need Redis 6.2 and defrag start and end functions Redis 8.0. `hello` has no
+/// defrag code, and `data_type` has all three kinds.
+#[test]
+fn test_defrag_registration_warns_only_for_unsupported_code() -> Result<()> {
+    for (module, has_defrag_code) in [("hello", false), ("data_type", true)] {
+        let mut con = TestConnection::new(module);
+        let server: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+        let version: Vec<u32> = server
+            .lines()
+            .find_map(|line| line.strip_prefix("redis_version:"))
+            .context("INFO server reports redis_version")?
+            .trim()
+            .split('.')
+            .map(|part| part.parse().context("numeric version part"))
+            .collect::<Result<_>>()?;
+        let version = (version[0], version[1]);
+        let log = con.server_log()?;
+        let warned = |what: &str| log.contains(&format!("Skip register defrag {what} as"));
+        assert_eq!(
+            warned("function"),
+            has_defrag_code && version < (6, 2),
+            "{module} on {version:?}: {log}"
+        );
+        assert_eq!(
+            warned("callbacks"),
+            has_defrag_code && version < (8, 0),
+            "{module} on {version:?}: {log}"
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn test_module_type_wrongtype() -> Result<()> {
     let mut con = TestConnection::new("data_type");

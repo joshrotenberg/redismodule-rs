@@ -491,8 +491,8 @@ pub fn info_section(item: TokenStream) -> TokenStream {
 
 /// Proc macro which is set on a function that need to be called whenever server performs defrag.
 /// The function must accept `&redis_module::defrag::DefragContext`.
-/// If defrag is not supported by the Redis version
-/// the function will never be called.
+/// Redis before 6.2 cannot register defrag functions; there the function is
+/// never called and loading the module logs a warning.
 ///
 /// Example:
 ///
@@ -510,8 +510,8 @@ pub fn defrag_function(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Proc macro which is set on a function that need to be called whenever server start performs defrag.
 /// The function must accept `&redis_module::defrag::DefragContext`.
-/// If the defrag start event is not supported by the Redis version
-/// the function will never be called.
+/// Redis before 8.0 cannot register defrag start and end functions; there the
+/// function is never called and loading the module logs a warning.
 ///
 /// Example:
 ///
@@ -529,8 +529,8 @@ pub fn defrag_start_function(_attr: TokenStream, item: TokenStream) -> TokenStre
 
 /// Proc macro which is set on a function that need to be called whenever server end performs defrag.
 /// The function must accept `&redis_module::defrag::DefragContext`.
-/// If the defrag end event is not supported by the Redis version
-/// the function will never be called.
+/// Redis before 8.0 cannot register defrag start and end functions; there the
+/// function is never called and loading the module logs a warning.
 ///
 /// Example:
 ///
