@@ -5899,6 +5899,10 @@ fn test_call_reply_status_and_collections() -> Result<()> {
 #[test]
 fn test_reply_types_fall_back_before_redis_7() -> Result<()> {
     let mut con = TestConnection::new("reply_types");
+    // A reply that announces more elements than it sends fails the read
+    // instead of hanging the test.
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    con.set_write_timeout(Some(Duration::from_secs(5)))?;
     let server: String = redis::cmd("INFO").arg("server").query(&mut con)?;
     let version: Vec<u32> = server
         .lines()

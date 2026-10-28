@@ -673,16 +673,20 @@ impl Context {
     }
 
     /// Return the current user name attached to a legal native user-query context.
-    /// Redis 8.10 can return None when the native API reports no user. Older
-    /// hosts require a client/user; Option does not make arbitrary constructed
-    /// or missing-client contexts legal. A present string is independently owned.
+    /// A present string is independently owned. `None` means the server reports
+    /// no user or has no way to read it:
     ///
-    /// Redis 7.0 added `RedisModule_GetCurrentUserName`. On Redis 6.2 the name
-    /// comes from `RedisModule_GetClientUserNameById` with this context's
-    /// client ID, which finds only connected clients: it names the user of the
-    /// client that sent the command, and returns `None` for an internal client,
-    /// such as the one a call or a script runs on. Redis 6.0 has no way to read
-    /// the name, so this returns `None` there.
+    /// - Redis 8.10 returns `None` when the context has no client or user.
+    ///   Redis 7.0 to 8.8 require both; `Option` does not make arbitrary
+    ///   constructed or missing-client contexts legal there.
+    /// - Redis 6.2 has no `RedisModule_GetCurrentUserName`. The name comes from
+    ///   `RedisModule_GetClientUserNameById` with this context's client ID,
+    ///   which finds only connected clients with an ACL user: it names the user
+    ///   of the client that sent the command, and gives `None` for a context
+    ///   with no client, an internal client such as the one a call or a script
+    ///   runs on, and a client with no user, such as a replica's link to its
+    ///   primary.
+    /// - Redis 6.0 has no way to read the name, so this returns `None`.
     pub fn get_current_user(&self) -> Option<RedisString> {
         let user = match unsafe { raw::RedisModule_GetCurrentUserName } {
             Some(current) => unsafe { current(self.ctx) },

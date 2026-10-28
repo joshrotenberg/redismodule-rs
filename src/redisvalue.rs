@@ -53,11 +53,13 @@ pub enum RedisValue {
     /// A RESP3 set, replied in hash order. A RESP2 client gets an array, and
     /// so does every client of Redis before 7.0.
     Set(HashSet<RedisValueKey>),
+    /// Like `Map`, replied sorted by key.
     OrderedMap(BTreeMap<RedisValueKey, RedisValue>),
+    /// Like `Set`, replied sorted.
     OrderedSet(BTreeSet<RedisValueKey>),
-    /// A map replied in the order of its entries: a RESP3 map, or for RESP2 a
-    /// flat array of keys and values. `Map` replies in hash order and
-    /// `OrderedMap` sorted by key.
+    /// A map replied in the order of its entries: a RESP3 map, or a flat array
+    /// of keys and values for a RESP2 client and for every client of Redis
+    /// before 7.0. `Map` replies in hash order and `OrderedMap` sorted by key.
     /// Duplicate keys are sent as they are.
     InsertionOrderedMap(Vec<(RedisValueKey, RedisValue)>),
     Null,

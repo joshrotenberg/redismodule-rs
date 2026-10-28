@@ -273,7 +273,9 @@ The generated list of APIs required above the lowest floor is for review, not a
 list of defects. The `CallReply*` accessors on it read RESP3 reply types, which a
 call cannot produce on Redis 6. Replying with `RedisValue::Bool`, `BigNumber` or
 `VerbatimString`, and calling `Context::get_current_user`, used to panic on a
-Redis 6 server (#109); they now fall back to what Redis 6 can send.
+Redis 6 server (#109). The replies now fall back to what Redis 6 can send, and
+`get_current_user` looks the user up by client ID on Redis 6.2 and returns
+`None` on Redis 6.0.
 
 ### Calls and strings
 
