@@ -148,7 +148,7 @@ jobs:
           TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
           RUST_TEST_THREADS: "4"
         run: |
-          cargo build --example hello --example call_reply --no-default-features --features min-redis-compatibility-version-6-0
+          cargo build --example hello --example call_reply --example reply_types --no-default-features --features min-redis-compatibility-version-6-0
           # Configuration APIs and bind-error diagnostics differ on 6.0;
           # retain those harness cases in the full server matrix above.
           for test_name in \
@@ -165,6 +165,7 @@ jobs:
             test_harness_nested_error_preserves_reply_alignment \
             test_harness_resp2_and_resp3_decoding \
             test_call_reply_strings_are_bulk \
+            test_reply_types_fall_back_before_redis_7 \
             test_call_protocol_resets_to_resp2_without_newer_format_flags
           do
             cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-client-tests.txt"

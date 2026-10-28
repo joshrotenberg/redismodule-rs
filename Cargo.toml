@@ -43,6 +43,10 @@ name = "key_type"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "reply_types"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "parsed_configuration"
 crate-type = ["cdylib"]
 

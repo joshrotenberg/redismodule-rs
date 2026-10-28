@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- On Redis 6, `RedisValue::Bool`, `RedisValue::BigNumber` and
+  `RedisValue::VerbatimString` replies and `Context::get_current_user` no
+  longer panic into `ERR command panicked` (#109). A bool replies with the
+  integer 1 or 0 and a big number with a bulk string, as Redis 7 replies to a
+  RESP2 client. Verbatim text keeps its type in the `txt` format and is a bulk
+  string in any other format. `Context::get_current_user` reads the name with
+  `RedisModule_GetClientUserNameById` on Redis 6.2, which finds only
+  connected clients, and returns `None` on Redis 6.0.
+- On Redis 6, a `RedisValue::Set` or `RedisValue::OrderedSet` reply announced
+  twice as many array elements as it sent, so the client waited for elements
+  that never came. It now announces as many as it sends.
+
 ## [3.0.0-alpha.1](https://github.com/joshrotenberg/redismodule-rs/compare/a808377...v3.0.0-alpha.1) - 2026-10-27
 
 The first pre-release of 3.0.0, tagged for git consumers; the crates keep
