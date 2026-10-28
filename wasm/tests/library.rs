@@ -170,8 +170,9 @@ impl Server {
     }
 
     /// Whether the server accepts connections and has finished loading its
-    /// RDB or AOF. Each check gives up after a second, so a server that stops
-    /// answering fails the caller's deadline instead of hanging it.
+    /// RDB or AOF. Connecting and reading the INFO reply each give up after a
+    /// second; the client's connection handshake has no read timeout, as for
+    /// every connection in these tests.
     fn loaded(&self) -> bool {
         let timeout = Duration::from_secs(1);
         redis::Client::open(format!("redis://127.0.0.1:{}/", self.port))
