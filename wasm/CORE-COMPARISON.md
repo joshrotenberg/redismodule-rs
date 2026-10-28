@@ -28,7 +28,8 @@ document and its code differ, the code is cited and the difference noted.
 
 ## Labels
 
-Each claim carries one label:
+Each claim carries a label, or two where a claim is read in code and then
+reasoned from:
 
 - **measured**: run on this host. Unmarked measurements are from this
   comparison, 2026-10-27; "issue 68" marks the memory runs of the same day
@@ -50,17 +51,17 @@ with the hello guest, one for the ACL log and one for reply protocols.
 | Area | This host | Core branch (not run) | Gap |
 |---|---|---|---|
 | Guest interface and SDK model | Components implementing the WIT world `library`; typed reply nodes (S). Rust SDK; JavaScript through componentize-js; both guests pass the same tests (M) | Core modules with `redis` imports taking `i32` pointers; raw RESP3 in and out, with a host tokenizer; C, C++, Rust `no_std`, TinyGo and AssemblyScript SDKs; a blob value type (S) | By design. A blob-like type is a module data type, which this module could add itself |
-| Loading, calling and management | `WASM.LOAD`, `WASM.CALL`, `WASM.CALL_RO`, `WASM.LIST`, `WASM.DELETE`, `WASM.DUMP`, `WASM.RESTORE`, `WASM.FLUSH`, `WASM.STATS`; compiles on a thread (M) | `FUNCTION LOAD` of `#!wasm`, `FCALL` and the `FUNCTION` management subcommands; a function can also be a command of its own; startup autoload (S). Loads on the main thread (S) | Using `FUNCTION` and `FCALL` needs an engine API (G1); commands per function need commands after load (G2) |
+| Loading, calling and management | `WASM.LOAD`, `WASM.CALL`, `WASM.CALL_RO`, `WASM.LIST`, `WASM.DELETE`, `WASM.DUMP`, `WASM.RESTORE`, `WASM.FLUSH`, `WASM.STATS`; compiles on a thread (M) | `FUNCTION LOAD` of `#!wasm`, `FCALL` and the `FUNCTION` management subcommands; a function can also be a command of its own; startup autoload (S). Loads on the main thread (S); startup exports are limited to 10 million instructions, a wasm `start` section is not (I) | Using `FUNCTION` and `FCALL` needs an engine API (G1); commands per function need commands after load (G2) |
 | Command and key metadata | Keynum key spec plus `getkeys-api`: `COMMAND GETKEYS`, ACL key patterns, `MOVED` and `CROSSSLOT` (M) | `FCALL`'s key spec; direct commands get a leading-keys spec and a legacy range (S); a cluster test exists (S) | None open for `WASM.CALL`; G8 is closed in the module. Direct commands need G2 |
 | Script flags | Lua's five flags and `WASM.CALL_RO` (M). `MISCONF` and `NOREPLICAS` surface at the first write; may-replicate commands are named in a list (S) | None. Functions register with flags 0, so they are treated as writing; `FCALL_RO` refuses them (S) | Core can add flags in tree. G5 and G6 need module API changes |
 | ACLs | Commands run as the caller's user; a denial fails the function and the ACL log says `module` (M); `acl-check-command` (M) | The script path checks ACLs and logs denials with the `lua` context (S, I); no check import; direct commands have their own ACL identity (S) | Neither side needs an API change |
-| Yielding, `BUSY` and kill | Yields every 10 ms; `-BUSY`, `WASM.KILL`, `UNKILLABLE` and `WASM.STATS` as for Lua (M). Costs 0 to 5% on call and reply work, 2.3 times on a tight loop (M) | Runs to completion or to 100 million instructions, then traps; nothing calls `scriptInterrupt`, so no `-BUSY` and no kill (S, I) | Core can close it in tree; its design document says WAMR would need a patch. Nothing open here |
+| Yielding, `BUSY` and kill | Yields every 10 ms; `-BUSY`, `WASM.KILL`, `UNKILLABLE` and `WASM.STATS` as for Lua (M). Costs 0 to 5% on call and reply work, 2.27 times on a tight loop (M) | Runs to completion or to 100 million instructions, then traps; nothing calls `scriptInterrupt`, so no `-BUSY` and no kill (S, I) | Core can close it in tree; its design document says WAMR would need a patch. Nothing open here |
 | Errors and traps | `call` and `pcall` as in Lua; a trap fails with `ERR function '<name>' failed: ...`; any failure drops the instance (M) | A trap or nonzero return becomes an error naming the function; `call` returns -1 or a staged reply; the instance stays after a trap (S, I) | By design on both sides |
-| Persistence, AOF and replication | RDB aux data through restart, `DEBUG RELOAD`, full sync and AOF (M); loading runs no guest code (S); a rewrite without the RDB preamble drops libraries (earlier) | RDB and every AOF rewrite keep libraries (S); effects replicate; blobs are an RDB type and replicate as `RESTORE` (S); loading runs guest startup code (I); every server loading them needs `BUILD_WASM` (I) | G4 needs a module API change |
+| Persistence, AOF and replication | RDB aux data through restart, `DEBUG RELOAD`, full sync and AOF (M); loading runs no guest code (S); a rewrite without the RDB preamble drops libraries (earlier) | RDB and AOF rewrites, with or without the preamble, keep libraries (S); effects replicate; blobs are an RDB type and replicate as `RESTORE` (S); loading runs guest startup code (I); every server loading them needs `BUILD_WASM` (I) | G4 needs a module API change |
 | Memory accounting | Issue 68 (M): with Redis's allocator the compiler's heap counts in `used_memory`; linear memory and compiled code do not; `wasm.max-memory` per instance | A 64 MiB pool allocated with `zmalloc` at startup holds the runtime's own data (S), counted from the start (I); linear memory is mapped outside it (S) and not counted (I); 8 MiB per library (S) | Counting outside memory needs G3 here; core can count it in tree |
-| Fault handling | Signal-based traps off, explicit bounds checks; an out-of-bounds access traps and the server serves on (M); 18% on the sieve (earlier) | WAMR's hardware bounds checks: no software check on guest loads and stores, `SIGSEGV`/`SIGBUS` handlers chained to Redis's (S); `CONFIG SET crash-log-enabled` replaces them (S), after which such an access would crash the server (I, U) | G7 needs a module API change; core can coordinate its handlers in tree |
+| Fault handling | Signal-based traps off, explicit bounds checks; an out-of-bounds access traps and the server serves on (M); 18% on an older sieve loop (earlier) | WAMR's hardware bounds checks: no software check on guest loads and stores, `SIGSEGV`/`SIGBUS` handlers chained to Redis's (S); changing `crash-log-enabled` (default `yes`) replaces them (S), after which such an access would crash the server (I, U) | G7 needs a module API change; core can coordinate its handlers in tree |
 | Supported versions and deployment | Loads into stock Redis 7.2 and later; 8.10.2 today (M), 7.2 to 8.10 earlier | A Redis 8.9.241 branch built with `BUILD_WASM=yes` and cmake, on Linux or macOS (S) | By design |
-| Toolchain and binary size | 12.0 MiB dylib; components of 37.7 KB (hello), 41.3 KB (bench) and 10.7 MiB (JavaScript) (M) | WAMR's classic interpreter linked into `redis-server`, size not measured; committed guests of 2.5 to 16 KB (S) | By design; relative speed untested |
+| Toolchain and binary size | 12.0 MiB dylib; components of 37.7 KB (hello), 41.3 KB (bench) and 10.7 MiB (JavaScript) (M) | WAMR's classic interpreter linked into `redis-server`, size not measured; committed example guests of 2.5 to 16 KB, test fixtures of 262 to 1,006 bytes (S) | By design; relative speed untested |
 
 ## Areas
 
@@ -82,8 +83,10 @@ Core branch:
 
 - A guest is a core module that exports `memory`, the marker
   `redis_wasm_abi_version_0_1_0`, `_initialize` (then an optional `main`) or
-  `_start`, and one `() -> i32` export per function
-  (`src/function_wasm.c` lines 477 to 536). Its imports, in the `redis`
+  `_start`, and one `() -> i32` export per function (`src/function_wasm.c`
+  lines 477 to 536 check the marker and startup exports, lines 1127 to 1131
+  the `memory` export, and lines 467 to 475 each function's type). Its
+  imports, in the `redis`
   namespace, take `i32` pointers into guest memory: `input_len`,
   `input_read`, `keys_count`, `call`, `reply_read`, `last_error_read`,
   `parse_resp`, `reply_raw`, `status_reply`, `error_reply`, `register_function`,
@@ -128,9 +131,18 @@ Core branch:
   path, naming each library `wasm_<sha256>` (`src/functions.c` lines 29 to
   130). (source)
 - `wasm_runtime_load`, instantiation and the guest's startup exports run
-  inside `FUNCTION LOAD` on the main thread, bounded by 10 million
-  instructions (`src/function_wasm.c` lines 1072 to 1162). The 500 ms
-  `timeout` the framework passes is unused (line 1076). (source)
+  inside `FUNCTION LOAD` on the main thread (`src/function_wasm.c` lines 1072
+  to 1162). Only the startup exports are bounded, by 10 million
+  instructions: `wasmCallStartup` sets the limit (line 559), after
+  instantiation (line 1121). The 500 ms `timeout` the framework passes is
+  unused (line 1076). (source)
+- Instantiation runs a module's wasm `start` section, if it has one, on an
+  execution environment created for it with no instruction limit
+  (`deps/wamr/core/iwasm/interpreter/wasm_runtime.c` lines 1724 to 1742,
+  `deps/wamr/core/iwasm/common/wasm_exec_env.c` line 89), and
+  `wasmValidateIntegration` (lines 496 to 536) does not refuse a `start`
+  section. So a loop in a `start` section would hold the server without bound
+  during `FUNCTION LOAD`, extension autoload or an RDB load. (inferred)
 - `FUNCTION FLUSH ASYNC` runs synchronously while a WASM library is loaded,
   because WAMR teardown is not thread-safe with loading (`src/functions.c`
   lines 391 to 406). (source)
@@ -183,12 +195,14 @@ This host:
 Core branch:
 
 - `register_function` passes flags 0 (`src/function_wasm.c` line 801), and
-  the design document lists flags as deferred. `scriptPrepareForRun` treats a
-  function without `no-writes` as writing: it is refused on a read-only
-  replica, under `MISCONF` or `NOREPLICAS`, on a stale replica, over
-  `maxmemory` and from `FCALL_RO` (`src/script.c` lines 192 to 275). Direct
-  commands are `write` and `denyoom`. The `FCALL_RO` refusal has a test.
-  (source)
+  the design document lists flags as deferred. In `scriptPrepareForRun`
+  (`src/script.c` lines 192 to 275), each missing flag refuses the function
+  somewhere: without `no-writes` it is treated as writing and refused on a
+  read-only replica, under `MISCONF` or `NOREPLICAS` and from `FCALL_RO`
+  (lines 219 to 255); without `allow-stale`, on a stale replica (line 212);
+  without `allow-oom` (or `no-writes`), over `maxmemory` (lines 259 to 265).
+  Direct commands are `write` and `denyoom`. The `FCALL_RO` refusal has a
+  test. (source)
 
 Gap: the core can add flags in tree; the framework already handles them. G5
 and G6 need module API changes for this host.
@@ -229,7 +243,8 @@ This host:
   `busy-reply-threshold` other clients get `-BUSY` and `WASM.KILL` can run.
   (source)
 - The busy, kill and `UNKILLABLE` tests passed. (measured)
-- The instrumentation's cost is measured below.
+- The instrumentation's cost is in Epoch interruption cost, below.
+  (measured)
 
 Core branch:
 
@@ -247,7 +262,8 @@ Core branch:
   it does not bound wall time. (inferred)
 - The design document (section 5) says neither WAMR nor wasmer can resume a
   call after its budget runs out, and that Lua's behaviour would need a local
-  patch to the interpreter loop.
+  patch to the interpreter loop. (source: the branch's design document; the
+  claim about wasmer was not checked)
 
 Gap: the core can close this in tree. Nothing is open for this host. The
 core's counterpart of the epoch cost is the per-instruction counter in the
@@ -299,20 +315,32 @@ This host:
 
 Core branch:
 
-- Libraries are function payloads in the RDB and in `FUNCTION DUMP`. Every
-  AOF rewrite writes a `FUNCTION LOAD` per library (`src/aof.c` lines 2837 to
-  2855), so a rewrite without the preamble keeps them; the branch tests that
-  with `aof-use-rdb-preamble no`. Effects replicate as for Lua. (source)
+- Libraries are function payloads in the RDB and in `FUNCTION DUMP`. With
+  the RDB preamble, the rewritten AOF's RDB base carries them; without it,
+  Redis's own `rewriteFunctions` writes a `FUNCTION LOAD` per library
+  (`src/aof.c` lines 2837 to 2855), from `rewriteAppendOnlyFileRio` (line
+  3044), which runs only when the preamble is off (lines 3156 to 3163). So
+  the libraries survive either way. This is stock Redis code, not the
+  branch's (G4 in TRACKING.md). The branch tests the rewrite with
+  `aof-use-rdb-preamble no`. Effects replicate as for Lua. (source)
 - Blobs are `RDB_TYPE_WASM_BLOB` values (`src/rdb.c`), rewritten into the AOF
   as `RESTORE` (`src/aof.c` lines 2967 to 3007), and a `blob_write`
   propagates as `RESTORE ... REPLACE` (`src/function_wasm.c` lines 987 to
   1034). (source)
 - Loading an RDB recreates each library through the engine, which
   instantiates it and runs its startup exports on the main thread before the
-  server serves. (inferred)
+  server serves; a `start` section runs there without an instruction limit
+  (see Loading). (inferred)
 - A server built without `BUILD_WASM` that receives a WASM library, by RDB,
-  sync or restore, fails with `Engine 'WASM' not found` (`src/functions.c`
-  line 1226); the design document says so for replicas. (inferred)
+  sync or restore, fails with `Engine 'wasm' not found`: the message repeats
+  the engine name from the `#!wasm` line (`src/functions.c` lines 1164 to 1165
+  and 1226). (inferred)
+- The design document contradicts itself here. Its proof-of-concept notes
+  (lines 40 to 41) say a replica loading such a library must also have
+  `BUILD_WASM=yes`; its section 4 (line 175) says a server without the engine
+  "can still replicate from a master that uses it". The code supports the
+  first for libraries; the second holds only for the effects of calls.
+  (source, inferred)
 
 Gap: G4 needs a module API change, or Redis asking modules for AOF rewrite
 commands outside keys. The data type rule for unloading is Redis's.
@@ -367,10 +395,12 @@ module can do itself. The core can count linear memory in tree.
 This host:
 
 - `config.signals_based_traps(false)` ([`wasm/src/host.rs`](src/host.rs) line
-  357) gives guests explicit bounds checks, because `CONFIG SET
-  crash-log-enabled` replaces a module's fault handlers on Linux (H11, G7).
+  357) gives guests explicit bounds checks, because changing
+  `crash-log-enabled` replaces a module's fault handlers on Linux (H11, G7).
   The out-of-bounds test traps and the server serves on. (measured) The checks
-  cost 18% on the sieve. (measured earlier)
+  cost 18% on the sieve as it was then written (185 against 226 µs with the
+  old loop, TRACKING.md H11), not on today's `primes`, which takes 39 to 42
+  µs with epochs and 17 to 18 µs without (below). (measured earlier)
 
 Core branch:
 
@@ -387,19 +417,22 @@ Core branch:
   the previous handler
   (`deps/wamr/core/shared/platform/common/posix/posix_thread.c` lines 597 to
   715). Its native stack guard uses the same signals. (source)
-- `CONFIG SET crash-log-enabled` calls `setupSigSegvHandler` or
-  `removeSigSegvHandlers` (`src/config.c` lines 2765 to 2771), which set
-  `SIGSEGV` and `SIGBUS` without passing anything on (`src/debug.c` lines
-  2641 to 2687). (source)
-- After that, a guest's out-of-bounds load or store would reach Redis's crash
-  handler or the default action instead of trapping, and the server would
-  exit: the problem H11 found for wasmtime here. WAMR uses these POSIX
-  handlers on macOS too (`deps/wamr/core/shared/platform/darwin/
+- A `CONFIG SET crash-log-enabled` that changes the value calls
+  `setupSigSegvHandler` or `removeSigSegvHandlers` (`src/config.c` lines 2765
+  to 2771), which set `SIGSEGV` and `SIGBUS` without passing anything on
+  (`src/debug.c` lines 2641 to 2687). Setting the current value does nothing:
+  a boolean config applies only when it changes (`src/config.c` lines 1906 to
+  1913 and 965). The default is `yes`, so the first change is to `no`; a later
+  `yes` installs Redis's handler, not WAMR's. (source)
+- After such a change, a guest's out-of-bounds load or store would reach
+  Redis's crash handler or the default action instead of trapping, and the
+  server would exit: the problem H11 found for wasmtime here. WAMR uses
+  these POSIX handlers on macOS too (`deps/wamr/core/shared/platform/darwin/
   shared_platform.cmake` includes the POSIX sources), so unlike this host the
-  problem would not be Linux only. (inferred) The branch's
-  `bad_ptr` test only passes a bad pointer to a host import, which WAMR checks
-  in software (`deps/wamr/core/iwasm/common/wasm_memory.c` lines 1003 to
-  1048); no test makes a guest-side access. (untested)
+  problem would not be Linux only. (inferred) The branch's `bad_ptr` test
+  only passes a bad pointer to a host import, which WAMR checks in software
+  (`deps/wamr/core/iwasm/common/wasm_memory.c` lines 1003 to 1048); no test
+  makes a guest-side access. (untested)
 
 Gap: G7 needs a module API change for this host. The core can coordinate its
 own handlers in tree.
@@ -411,7 +444,7 @@ This host:
 - A module for stock Redis 7.2 and later (not 7.0, S11). Today's runs used
   8.10.2; the full suite has also passed on 8.0.2 on Linux, and a smoke test
   on 7.2, 7.4, 8.0, 8.2 and 8.10 (measured earlier). CI runs Ubuntu with
-  8.10.2 ([CI.md](CI.md)). Replicas need the module too.
+  8.10.2 ([CI.md](CI.md)); replicas need the module too. (source)
 
 Core branch:
 
@@ -441,7 +474,9 @@ Core branch:
   types (`deps/Makefile` lines 156 to 175), linked into `redis-server`. Its
   size was not measured. (source)
 - Committed guest binaries: GCRA 3,674 bytes, the C example 2,733, C++ 2,524,
-  Rust 4,710, AssemblyScript 3,627 and TinyGo 16,057 (file sizes in the tree).
+  Rust 4,710, AssemblyScript 3,627 and TinyGo 16,057; the test fixtures in
+  `tests/assets/wasm` are 262 (`commands.wasm`), 614 (`integration.wasm`)
+  and 1,006 bytes (`functions-poc.wasm`) (file sizes in the tree).
   Extensions build with Clang and a wasm32 linker (`extensions/README.md`).
   (source)
 - How fast its interpreter runs these workloads against this host's compiled
@@ -471,7 +506,8 @@ That build cannot yield, so a guest that spins holds the server and
 
 Method: `wasm/bench/run.sh` unchanged, `PORT=6700`, 50 clients, on the
 machine and versions in Pins, 2026-10-27. Runs were interleaved off, on, off,
-on, off, on, after one discarded warm-up run. Each variant was rebuilt from
+on, off, on, after one discarded warm-up run with epochs on, started at a load
+average of 16 (its `primes` took 39.52 µs). Each variant was rebuilt from
 source between runs and gave the same dylib each time: sha256 `efec9d1f...`
 with epochs, `4f8069d6...` without. Load averages at the start of runs were
 3.7 to 12.5, so the machine was not idle. The per-run tables are in
@@ -492,19 +528,35 @@ Server time per call from `INFO commandstats`, three runs each, in µs:
 
 What it shows (measured):
 
-- `primes`, a sieve, runs 2.2 to 2.4 times as long with epochs; the checks are
-  56% of its time.
+- `primes`, a sieve, runs 2.27 times as long with epochs, by the ratio of the
+  means; the extremes of the runs give 2.16 to 2.45. The instrumentation
+  accounts for 56% of its mean time with epochs (the difference of the means,
+  40.14 against 17.72 µs), whether through the checks themselves or their
+  effect on the loop's code.
 - `median`, `median_flat` and `lrange` are 3 to 5% slower with epochs. The
-  ranges do not overlap for `median` and `median_flat`, but the Lua column
-  moved by 3 to 8% between runs, so this is near the noise.
+  ranges do not overlap for `median` and `median_flat`, but the same
+  functions' Lua times moved by 2.7 to 6.3% between runs (`median` 2.7%,
+  `lrange` 3.4%, `median_flat` 6.3%), so this is near the noise. Over all
+  eight functions the Lua spread was 2.7% (`median`) to 11.7% (`nested`).
 - `incr_twice`, `nested`, `adler32` and `lrange_flat` show no difference
   beyond their spread: calls into Redis and replies cost the same.
 
-Why (inferred, the generated code was not inspected): wasmtime adds a check of
-the engine's epoch against the store's deadline at function entries and loop
-back edges. The sieve's inner loop is a store, an add and a compare, so the
-check is a large share of it, and its out-of-line call may also cost the loop
-registers. `adler32`'s loop does two remainders per byte, which hide it.
+Where the checks go (source, wasmtime-internal-cranelift 36.0.19 from the
+Cargo registry, `src/func_environ.rs`): with `epoch_interruption` on,
+`epoch_function_entry` (lines 554 to 584) loads the engine's epoch pointer
+and checks the deadline at each function entry, and `translate_loop_header`
+(lines 3270 to 3284) adds `epoch_check` (lines 648 to 660) at each loop
+header: a load of the current epoch and a compare with a deadline kept in a
+variable, branching to a cold block that reloads the deadline and calls the
+`new_epoch` builtin (lines 662 to 715).
+
+Why the sieve pays so much (inferred; the generated code was not inspected):
+its inner loop is a store with an explicit bounds check, since
+`signals_based_traps(false)` ([`wasm/src/host.rs`](src/host.rs) line 357)
+rules out guard pages, then an add and a compare. The epoch load and compare
+are a large share of that; keeping the epoch pointer and deadline live across
+the loop, and the call in the cold block, may also cost it registers.
+`adler32`'s loop does two remainders per byte, which hide the check.
 
 The yields themselves are probably not in these numbers: every benchmark call
 is under 1 ms against a 10 ms tick, so few calls reach a deadline (inferred). A
@@ -512,10 +564,11 @@ function that runs longer pays one `RedisModule_Yield` per tick on top (not
 measured).
 
 So in this host the price of Lua's `BUSY` and kill behaviour is 0 to 5% on
-call and reply work and up to 2.3 times on a tight compute loop, on this
-machine. The core branch pays for its instruction limit with a counter on
-every interpreted instruction (source; the cost is not measured). Remedies,
-such as other wasmtime interruption mechanisms, are not chosen here.
+call and reply work and 2.27 times (2.16 to 2.45 across runs) on a tight
+compute loop, on this machine. The core branch pays for its instruction
+limit with a counter on every interpreted instruction (source; the cost is
+not measured). Remedies, such as other wasmtime interruption mechanisms, are
+not chosen here.
 
 ## Gaps by who can close them
 
@@ -527,8 +580,8 @@ Need a module API change, so a change to Redis core:
 - G2: creating commands after load, for commands per function as the branch's
   `create_command` provides.
 - G3: counting memory a module did not allocate through Redis.
-- G4: AOF rewrite commands outside keys, which the branch's
-  `rewriteFunctions` covers for its libraries.
+- G4: AOF rewrite commands outside keys. Redis's own `rewriteFunctions`
+  covers `FUNCTION` libraries, so the branch's libraries get it for free.
 - G5 and G6: `MISCONF` and `NOREPLICAS` state, and command flags such as
   `may_replicate`.
 - G7: fault handlers that Redis keeps, for signal-based bounds checks.
@@ -545,8 +598,9 @@ The module can close itself, or already has:
 
 The core branch can close in tree, for its own side: script flags, `BUSY` and
 kill (with an interpreter change, by its own document), an ACL check import
-and an ACL log context, keeping its fault handlers through `CONFIG SET
-crash-log-enabled`, and counting linear memory.
+and an ACL log context, keeping its fault handlers through changes of
+`crash-log-enabled`, bounding a module's `start` section, and counting linear
+memory.
 
 ## What a run of the core branch would add
 
@@ -566,6 +620,8 @@ source and inferred claims into measurements:
   a guest grows to 8 MiB (linear memory).
 - A guest out-of-bounds load before and after `CONFIG SET crash-log-enabled
   no` and `yes`.
+- `FUNCTION LOAD` of a module whose `start` section loops, to confirm it is
+  not bounded.
 - A trap followed by a call, to see the kept instance's state; `ACL LOG` after
   a denied guest command; RDB load time with a larger module; a replica built
   without `BUILD_WASM`; `FUNCTION FLUSH ASYNC` with a WASM library loaded.

@@ -739,7 +739,8 @@ evidence as the host meets them.
   SET crash-log-enabled` replaces (inferred). Epoch interruption measured
   with `wasm/bench/run.sh`, three interleaved runs per build (Apple M3, Redis
   8.10.2): `primes` took 38.96 to 41.77 µs with it and 17.08 to 18.06 µs
-  without, reply-heavy functions 3 to 5% longer, calls into Redis the same.
+  without; `median`, `median_flat` and `lrange` 3 to 5% longer, near the
+  noise; `lrange_flat` and calls into Redis the same.
   The build without it was a local edit, not committed; the runs are in
   `wasm/bench/results/2026-10-27/epoch-*.md`. The host's 7 unit and 21
   integration tests passed, the JavaScript guest included.
