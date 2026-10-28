@@ -175,7 +175,11 @@ impl Server {
         TcpStream::connect(("127.0.0.1", self.port)).is_ok()
             && redis::Client::open(format!("redis://127.0.0.1:{}/", self.port))
                 .and_then(|client| client.get_connection())
-                .and_then(|mut con| redis::cmd("INFO").arg("persistence").query::<String>(&mut con))
+                .and_then(|mut con| {
+                    redis::cmd("INFO")
+                        .arg("persistence")
+                        .query::<String>(&mut con)
+                })
                 .is_ok_and(|info| info.lines().any(|line| line.trim_end() == "loading:0"))
     }
 
