@@ -97,7 +97,9 @@ Refreshing the exploratory sidecar versus Redis core
 comparison is tracked in [issue 86](https://github.com/joshrotenberg/redismodule-rs/issues/86);
 existing benchmark results below are historical, not fresh measurements. Issue 86
 is the first wasm item and gates the allocator policy (68), external-runtime
-access (54) and streaming replies (55).
+access (54) and streaming replies (55). The comparison with the public core
+branch, pinned at `0302b84`, and the cost of epoch interruption are in
+[CORE-COMPARISON.md](CORE-COMPARISON.md).
 
 SDK master `e99779e` ([PR 94](https://github.com/joshrotenberg/redismodule-rs/pull/94))
 replaced the shared handoff from PR 87 with those contributing rules; both
@@ -724,6 +726,23 @@ evidence as the host meets them.
 | Q1 | Where the crate lives so others can use it. Answered: the fork's `experiment/wasm-host` branch, kept in sync with master. |
 
 ## Log
+
+- 2026-10-27: issue 86. [CORE-COMPARISON.md](CORE-COMPARISON.md) compares
+  this host at `b10c51e` with the public `wasm-integration` branch of
+  minchopaskal/redis at `0302b84`, a WAMR 2.4.5 interpreter built into Redis
+  8.9.241, from that branch's source alone: nothing on it was built or run.
+  The branch is an engine of `FUNCTION` and `FCALL`, with commands per
+  function, which G1 and G2 rule out here; its functions have no flags and
+  no `BUSY` or kill, and stop at 100 million instructions; its AOF rewrite
+  keeps libraries (G4 here); its linear memory is outside `used_memory`, as
+  here; and its hardware bounds checks rely on signal handlers that `CONFIG
+  SET crash-log-enabled` replaces (inferred). Epoch interruption measured
+  with `wasm/bench/run.sh`, three interleaved runs per build (Apple M3, Redis
+  8.10.2): `primes` took 38.96 to 41.77 µs with it and 17.08 to 18.06 µs
+  without, reply-heavy functions 3 to 5% longer, calls into Redis the same.
+  The build without it was a local edit, not committed; the runs are in
+  `wasm/bench/results/2026-10-27/epoch-*.md`. The host's 7 unit and 21
+  integration tests passed, the JavaScript guest included.
 
 - 2026-10-27: H13 remeasured for issue 68 with the new `wasm/bench/memory.sh`
   (see Memory accounting), on wasmtime 36.0.19 and Homebrew Redis 8.10.2 on
