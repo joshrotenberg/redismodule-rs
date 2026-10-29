@@ -46,6 +46,13 @@ The `_NEXT` sentinels for notification flags, events and slot migration
 sub-events take OSS's values, and the topology change event's is added.
 Bindgen skips names that start with an underscore, so they have no binding.
 
+`RedisModule_GetUserUsername` now takes the context first, as `module.c` of
+Redis 8.8.3 and 8.10.2 defines it and OSS's header declares it. Upstream's
+header declares it with only the user, from the same unstable snapshot, so a
+call through upstream's binding passes the user where Redis reads the context
+and reads the user from an unset argument. The SDK does not call it. No
+upstream issue or pull request reports it.
+
 The header still differs from OSS 8.10.2's:
 
 - It keeps upstream's Redis Enterprise declarations: the `Big*` entries,

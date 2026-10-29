@@ -3873,7 +3873,10 @@ unsafe extern "C" {
 }
 unsafe extern "C" {
     pub static mut RedisModule_GetUserUsername: ::std::option::Option<
-        unsafe extern "C" fn(user: *const RedisModuleUser) -> *mut RedisModuleString,
+        unsafe extern "C" fn(
+            ctx: *mut RedisModuleCtx,
+            user: *const RedisModuleUser,
+        ) -> *mut RedisModuleString,
     >;
 }
 unsafe extern "C" {

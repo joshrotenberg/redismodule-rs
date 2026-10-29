@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `raw::RedisModule_GetUserUsername` takes the context as its first argument,
+  as Redis 8.8 and later define it. The vendored header, like upstream's,
+  declared it without one, from a Redis unstable snapshot, so a call through
+  the binding passed the user where Redis reads the context. A call with the
+  old signature no longer compiles; the SDK does not call it.
 - On Redis 6, `RedisValue::Bool`, `RedisValue::BigNumber` and
   `RedisValue::VerbatimString` replies and `Context::get_current_user` no
   longer panic into `ERR command panicked` (#109). A bool replies with the
