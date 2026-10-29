@@ -13,7 +13,7 @@ For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
 ## Redis OSS 8.x header declarations
 
-`src/include/redismodule.h` is upstream's header at `4ab88e7` plus what Redis
+`src/include/redismodule.h` is upstream's header at `1c84d3d` plus what Redis
 OSS 8.10.2's `src/redismodule.h` declares and upstream's lacks, in OSS's text
 and at OSS's positions, so a later refresh from either header stays a small
 diff (#106). The committed bindings include the additions; the SDK adds no
@@ -60,6 +60,11 @@ The header still differs from OSS 8.10.2's:
   `IsKeyInRam`, `SetOpenFilesReservation`, `SwapPrefetchKey` and its flags,
   `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` and
   `REDISMODULE_NOTIFY_TRIMMED`.
+- It includes upstream's persistence-event payload
+  `RedisModulePersistenceInfoV1` and its `RedisModulePersistenceInfo` alias,
+  `REDISMODULE_PERSISTENCEINFO_VERSION` and
+  `REDISMODULE_PERSISTENCE_FLAG_SYNCER` from [upstream PR 490][p490]. OSS
+  8.10.2's header has none of these declarations. They add no API pointers.
 - Value 8 has two key type names: upstream's `REDISMODULE_KEYTYPE_GCRA`, from
   a Redis unstable snapshot, and OSS's `REDISMODULE_KEYTYPE_ARRAY`. OSS
   returns a GCRA type only when built with `ENABLE_GCRA`. `KeyType::Array`
@@ -299,9 +304,15 @@ metadata still fails compilation; diagnostic wording may differ.
   - [4ab88e7](https://github.com/RedisLabsModules/redismodule-rs/commit/4ab88e7)
     (2026-10-20, [upstream PR 489][p489]): adds
     `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` to `redismodule.h`. This
-    fork's header now matches upstream's at this commit, its committed bindings
-    include the define, and `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM` exposes
+    fork's header and committed bindings include the define, and
+    `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM` exposes
     it. Redis OSS 6.0 to 8.10 stores the option and ignores it.
+  - [1c84d3d](https://github.com/RedisLabsModules/redismodule-rs/commit/1c84d3d2f4597421f196f1110f80bfe48be178c9)
+    (2026-10-26, [upstream PR 490][p490]): adds the persistence-event payload
+    and syncer flag. Included in the header and committed bindings; see the
+    header differences above. The upstream review checked all 42 open pull
+    requests on 2026-10-29; none had been updated since the previous review
+    at 2026-10-22T20:45:00Z. The older pull request assessment stays in #101.
 
 ## Upstream issues this fork fixes
 
@@ -351,6 +362,7 @@ Redis's errors and frees the private data Redis rejects ([c3432c5]).
 | [483][p483] | [MOD-17680] Honour layouts requiring more than 16-byte alignment | open | The same bug is fixed here ([e81393d]). |
 | [487][p487], [488][p488] | Fix ServerInfo::field leak with a null context.; Fix ServerInfo field string leaks with and without auto-memory | closed; 488 merged | The same fix ([813cfa0]), and 488's `None` for a field name with a NUL byte ([9ea85f4]); see Base. |
 | [489][p489] | Add `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` to redismodule.h | closed; merged | Included in the header and bindings, and exposed as `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`; see Base. |
+| [490][p490] | update redismodule.h with RedisModulePersistenceInfo | closed; merged | Included in the header and bindings: the persistence-event payload, version and syncer flag; see Base. |
 | [85][p85], [348][p348], [360][p360], [361][p361] | dependency updates | open | Superseded: `enum-primitive-derive` removed ([5dbf237]), `nix` and `strum_macros` removed ([86b8113]), bindgen at 0.73 ([0e1d8f2]). |
 
 ## Fixes with no upstream issue or pull request
@@ -737,3 +749,4 @@ These compile unchanged but behave differently:
 [p487]: https://github.com/RedisLabsModules/redismodule-rs/pull/487
 [p488]: https://github.com/RedisLabsModules/redismodule-rs/pull/488
 [p489]: https://github.com/RedisLabsModules/redismodule-rs/pull/489
+[p490]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/490
