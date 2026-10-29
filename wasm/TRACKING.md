@@ -111,6 +111,14 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-10-29: merged SDK master `d710daf` into the branch as `bb15d52`.
+  SDK PR 129 (#113) adds nonblocking `try_lock` methods on both thread-safe
+  context owners, reusing their existing guards. The host needs no adaptation.
+  `cj run wasm-sync` fetched with `--locked` and ran `wasm/ci/check.sh` on
+  Rust 1.94.0 and Redis 8.10.2: 403 tests passed, including the new worker
+  contention, stop, unload and reload regression and lifetime/thread-affinity
+  doctests. All four lockfiles remained byte-identical to their snapshots.
+
 - 2026-10-29: merged SDK master `f4df0dd` into the branch as `016e421`.
   SDK PR 128 (#110) imports upstream's persistence-event payload, its alias,
   version constant and syncer flag, with regenerated bindings and the upstream
