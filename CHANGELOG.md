@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The vendored header and committed bindings include upstream's
+  `RedisModulePersistenceInfoV1`, its `RedisModulePersistenceInfo` alias,
+  `REDISMODULE_PERSISTENCEINFO_VERSION` and
+  `REDISMODULE_PERSISTENCE_FLAG_SYNCER` (#110). These persistence-event
+  declarations are absent from Redis OSS 8.10.2's header; no API pointers,
+  safe wrappers or compatibility floors change.
 - `src/include/redismodule.h` and the committed bindings declare the module API
   that Redis OSS 8.10.2's header has and upstream's lacks (#106):
   `RedisModule_SubscribeToKeyspaceEventsWithSubkeys`,

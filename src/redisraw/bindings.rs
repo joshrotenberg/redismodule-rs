@@ -297,6 +297,8 @@ pub const REDISMODULE_CLIENTINFO_FLAG_MULTI: u32 = 32;
 pub const REDISMODULE_CLIENTINFO_VERSION: u32 = 1;
 pub const REDISMODULE_REPLICATIONINFO_VERSION: u32 = 1;
 pub const REDISMODULE_FLUSHINFO_VERSION: u32 = 1;
+pub const REDISMODULE_PERSISTENCE_FLAG_SYNCER: u32 = 1;
+pub const REDISMODULE_PERSISTENCEINFO_VERSION: u32 = 1;
 pub const REDISMODULE_MODULE_CHANGE_VERSION: u32 = 1;
 pub const REDISMODULE_CONFIGCHANGE_VERSION: u32 = 1;
 pub const REDISMODULE_CRON_LOOP_VERSION: u32 = 1;
@@ -849,6 +851,24 @@ const _: () = {
         [::std::mem::offset_of!(RedisModuleFlushInfo, dbnum) - 12usize];
 };
 pub type RedisModuleFlushInfoV1 = RedisModuleFlushInfo;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct RedisModulePersistenceInfo {
+    pub version: u64,
+    pub flags: u64,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of RedisModulePersistenceInfo"]
+        [::std::mem::size_of::<RedisModulePersistenceInfo>() - 16usize];
+    ["Alignment of RedisModulePersistenceInfo"]
+        [::std::mem::align_of::<RedisModulePersistenceInfo>() - 8usize];
+    ["Offset of field: RedisModulePersistenceInfo::version"]
+        [::std::mem::offset_of!(RedisModulePersistenceInfo, version) - 0usize];
+    ["Offset of field: RedisModulePersistenceInfo::flags"]
+        [::std::mem::offset_of!(RedisModulePersistenceInfo, flags) - 8usize];
+};
+pub type RedisModulePersistenceInfoV1 = RedisModulePersistenceInfo;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct RedisModuleModuleChange {
