@@ -49,3 +49,34 @@ and looks for the JavaScript guest at `wasm/guests/js/library.wasm`; without
 that file the JavaScript phases are skipped. `PORT`, `CYCLES` and `RELOADS`
 change the first port tried and the checkpoints. The latest numbers are in
 [TRACKING.md](../TRACKING.md) (H13).
+
+`policy.py` adds controlled admission and eviction probes, an RDB restart with
+`maxmemory` set, and 30 unload/reload cycles without a guest:
+
+```bash
+RAYON_NUM_THREADS=8 python3 wasm/bench/policy.py \
+  /absolute/module /absolute/hello.wasm /absolute/javascript.wasm \
+  --output /tmp/memory-policy.json
+```
+
+It uses only Python's standard library and `ps`. `REDIS_SERVER` selects the
+server binary. Each case starts its own loopback-only server and verifies its
+PID. Connections, compilation and startup have timeouts; cleanup terminates
+and reaps only the server it started. The eviction cases create 16 disposable
+1 MiB keys, then test whether compiler allocation or 48 MiB of guest growth
+evicts them. The JSON records Redis accounting, process RSS, native allocator,
+component/module hashes, write replies and retained keys. It also records
+memory after library deletion and `MEMORY PURGE`.
+
+Use the same components across variants, pin the compilation thread count,
+and run the variants sequentially. These are memory/admission experiments,
+not throughput benchmarks. Preserve a failed run as a failure; a missing
+sample or error reply must not become a zero-memory measurement. The
+allocator policy and reproducibility instructions are in
+[MEMORY-POLICY.md](../MEMORY-POLICY.md).
+
+`memory-variants.py` builds the baseline, System and heap-backed experiments
+from a pinned Git archive into a new output directory. It records the exact
+patches, binary hashes and snapshot-lock checks. `--source-archive` with
+`--archive-sha256` supports container builds without Git access to the checkout.
+The policy document gives the macOS and Linux/jemalloc commands.
