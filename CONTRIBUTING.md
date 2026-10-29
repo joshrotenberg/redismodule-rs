@@ -101,6 +101,11 @@ lockfile with the pinned toolchain, review its diff, update its snapshot and
 rerun `check.sh`. Record the sync in
 `wasm/TRACKING.md`, push, and confirm the experiment push CI passes.
 
+With [clajent](https://github.com/joshrotenberg/clajent)'s `cj`,
+`cj run wasm-sync /abs/path --message "chore: sync wasm host with ..."` does
+the merge, the lockfiles and `check.sh` in a new worktree and prints the
+results; the `wasm/TRACKING.md` entry and the push stay manual.
+
 ## Tracking upstream
 
 The [upstream watch workflow](.github/workflows/upstream-watch.yml) runs
@@ -184,6 +189,11 @@ RUST_TEST_THREADS=4 cargo test --workspace --no-fail-fast
 cargo test --features system-allocator-fallback --test system_allocator_fallback
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --features all-features-but-xor
 ```
+
+`cj run gates` runs this list, the 7.2-floor repeats below and the
+`RUSTC_BOOTSTRAP=1` doctests, and prints each step's result, test counts and
+log path. The project recipes and their shared code are in `.cj/`;
+`cj doc gates` lists the options.
 
 - `call_blocking`, `BlockingCallOptions` and the `call` and
   `keyspace_to_stream` examples compile only at the Redis 7.2 or later API
