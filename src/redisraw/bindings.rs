@@ -64,6 +64,7 @@ pub const REDISMODULE_KEYTYPE_ZSET: isize = 5;
 pub const REDISMODULE_KEYTYPE_MODULE: isize = 6;
 pub const REDISMODULE_KEYTYPE_STREAM: isize = 7;
 pub const REDISMODULE_KEYTYPE_GCRA: isize = 8;
+pub const REDISMODULE_KEYTYPE_ARRAY: isize = 8;
 pub const REDISMODULE_REPLY_UNKNOWN: isize = -1;
 pub const REDISMODULE_REPLY_STRING: isize = 0;
 pub const REDISMODULE_REPLY_ERROR: isize = 1;
@@ -155,6 +156,13 @@ pub const REDISMODULE_NOTIFY_TYPE_CHANGED: ::std::os::raw::c_int = 65536;
 pub const REDISMODULE_NOTIFY_KEY_TRIMMED: ::std::os::raw::c_int = 131072;
 pub const REDISMODULE_NOTIFY_RATE_LIMIT: ::std::os::raw::c_int = 262144;
 pub const REDISMODULE_NOTIFY_TRIMMED: ::std::os::raw::c_int = 1073741824;
+pub const REDISMODULE_NOTIFY_SUBKEYSPACE: ::std::os::raw::c_int = 524288;
+pub const REDISMODULE_NOTIFY_SUBKEYEVENT: ::std::os::raw::c_int = 1048576;
+pub const REDISMODULE_NOTIFY_SUBKEYSPACEITEM: ::std::os::raw::c_int = 2097152;
+pub const REDISMODULE_NOTIFY_SUBKEYSPACEEVENT: ::std::os::raw::c_int = 4194304;
+pub const REDISMODULE_NOTIFY_ARRAY: ::std::os::raw::c_int = 8388608;
+pub const REDISMODULE_NOTIFY_FLAG_NONE: ::std::os::raw::c_int = 0;
+pub const REDISMODULE_NOTIFY_FLAG_SUBKEYS_REQUIRED: ::std::os::raw::c_int = 1;
 pub const REDISMODULE_NOTIFY_ALL: ::std::os::raw::c_int = 10236;
 pub const REDISMODULE_ERRORMSG_WRONGTYPE: &[u8; 66] =
     b"WRONGTYPE Operation against a key holding the wrong kind of value\0";
@@ -227,6 +235,7 @@ pub const REDISMODULE_EVENT_CONFIG: u64 = 16;
 pub const REDISMODULE_EVENT_KEY: u64 = 17;
 pub const REDISMODULE_EVENT_CLUSTER_SLOT_MIGRATION: u64 = 18;
 pub const REDISMODULE_EVENT_CLUSTER_SLOT_MIGRATION_TRIM: u64 = 19;
+pub const REDISMODULE_EVENT_CLUSTER_TOPOLOGY_CHANGE: u64 = 20;
 pub const REDISMODULE_BIG_CALLBACKS_VERSION: u32 = 1;
 pub const REDISMODULE_SUBEVENT_PERSISTENCE_RDB_START: u64 = 0;
 pub const REDISMODULE_SUBEVENT_PERSISTENCE_AOF_START: u64 = 1;
@@ -275,6 +284,7 @@ pub const REDISMODULE_SUBEVENT_CLUSTER_SLOT_MIGRATION_MIGRATE_STARTED: u64 = 3;
 pub const REDISMODULE_SUBEVENT_CLUSTER_SLOT_MIGRATION_MIGRATE_FAILED: u64 = 4;
 pub const REDISMODULE_SUBEVENT_CLUSTER_SLOT_MIGRATION_MIGRATE_COMPLETED: u64 = 5;
 pub const REDISMODULE_SUBEVENT_CLUSTER_SLOT_MIGRATION_MIGRATE_MODULE_PROPAGATE: u64 = 6;
+pub const REDISMODULE_SUBEVENT_CLUSTER_SLOT_MIGRATION_MIGRATE_MODULE_PROPAGATE_END: u64 = 7;
 pub const REDISMODULE_SUBEVENT_CLUSTER_SLOT_MIGRATION_TRIM_STARTED: u64 = 0;
 pub const REDISMODULE_SUBEVENT_CLUSTER_SLOT_MIGRATION_TRIM_COMPLETED: u64 = 1;
 pub const REDISMODULE_SUBEVENT_CLUSTER_SLOT_MIGRATION_TRIM_BACKGROUND: u64 = 2;
@@ -295,6 +305,11 @@ pub const REDISMODULE_SWAPDBINFO_VERSION: u32 = 1;
 pub const REDISMODULE_KEYINFO_VERSION: u32 = 1;
 pub const REDISMODULE_CLUSTER_SLOT_MIGRATION_INFO_VERSION: u32 = 1;
 pub const REDISMODULE_CLUSTER_SLOT_MIGRATION_TRIMINFO_VERSION: u32 = 1;
+pub const REDISMODULE_CLUSTER_TOPOLOGY_CHANGE_FLAG_SLOT: u32 = 1;
+pub const REDISMODULE_CLUSTER_TOPOLOGY_CHANGE_FLAG_ROLE: u32 = 2;
+pub const REDISMODULE_CLUSTER_TOPOLOGY_CHANGE_FLAG_STATE: u32 = 4;
+pub const REDISMODULE_CLUSTER_TOPOLOGY_CHANGE_FLAG_NODE: u32 = 8;
+pub const REDISMODULE_CLUSTER_TOPOLOGY_CHANGE_INFO_VERSION: u32 = 1;
 pub const REDISMODULE_META_ALLOW_IGNORE: u32 = 0;
 #[repr(C)]
 #[derive(Debug)]
@@ -747,6 +762,9 @@ unsafe extern "C" {
 unsafe extern "C" {
     pub static RedisModuleEvent_ClusterSlotMigrationTrim: RedisModuleEvent;
 }
+unsafe extern "C" {
+    pub static RedisModuleEvent_ClusterTopologyChange: RedisModuleEvent;
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct RedisModuleClientInfo {
@@ -1024,6 +1042,24 @@ const _: () = {
         [::std::mem::offset_of!(RedisModuleClusterSlotMigrationTrimInfo, slots) - 8usize];
 };
 pub type RedisModuleClusterSlotMigrationTrimInfoV1 = RedisModuleClusterSlotMigrationTrimInfo;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct RedisModuleClusterTopologyChangeInfo {
+    pub version: u64,
+    pub change_flags: u64,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of RedisModuleClusterTopologyChangeInfo"]
+        [::std::mem::size_of::<RedisModuleClusterTopologyChangeInfo>() - 16usize];
+    ["Alignment of RedisModuleClusterTopologyChangeInfo"]
+        [::std::mem::align_of::<RedisModuleClusterTopologyChangeInfo>() - 8usize];
+    ["Offset of field: RedisModuleClusterTopologyChangeInfo::version"]
+        [::std::mem::offset_of!(RedisModuleClusterTopologyChangeInfo, version) - 0usize];
+    ["Offset of field: RedisModuleClusterTopologyChangeInfo::change_flags"]
+        [::std::mem::offset_of!(RedisModuleClusterTopologyChangeInfo, change_flags) - 8usize];
+};
+pub type RedisModuleClusterTopologyChangeInfoV1 = RedisModuleClusterTopologyChangeInfo;
 pub const RedisModuleACLLogEntryReason_REDISMODULE_ACL_LOG_AUTH: RedisModuleACLLogEntryReason = 0;
 pub const RedisModuleACLLogEntryReason_REDISMODULE_ACL_LOG_CMD: RedisModuleACLLogEntryReason = 1;
 pub const RedisModuleACLLogEntryReason_REDISMODULE_ACL_LOG_KEY: RedisModuleACLLogEntryReason = 2;
@@ -1163,8 +1199,28 @@ pub type RedisModuleNotificationFunc = ::std::option::Option<
         key: *mut RedisModuleString,
     ) -> ::std::os::raw::c_int,
 >;
+pub type RedisModuleNotificationWithSubkeysFunc = ::std::option::Option<
+    unsafe extern "C" fn(
+        ctx: *mut RedisModuleCtx,
+        type_: ::std::os::raw::c_int,
+        event: *const ::std::os::raw::c_char,
+        key: *mut RedisModuleString,
+        subkeys: *mut *mut RedisModuleString,
+        count: ::std::os::raw::c_int,
+    ),
+>;
 pub type RedisModulePostNotificationJobFunc = ::std::option::Option<
     unsafe extern "C" fn(ctx: *mut RedisModuleCtx, pd: *mut ::std::os::raw::c_void),
+>;
+pub type RedisModulePostNotifyJobFunc = ::std::option::Option<
+    unsafe extern "C" fn(ctx: *mut RedisModuleCtx, pd: *mut ::std::os::raw::c_void),
+>;
+pub type RedisModulePostNotifyJobPerKeyFunc = ::std::option::Option<
+    unsafe extern "C" fn(
+        ctx: *mut RedisModuleCtx,
+        key: *mut RedisModuleString,
+        pd: *mut ::std::os::raw::c_void,
+    ),
 >;
 pub type RedisModuleTypeLoadFunc = ::std::option::Option<
     unsafe extern "C" fn(
@@ -3443,10 +3499,41 @@ unsafe extern "C" {
     >;
 }
 unsafe extern "C" {
+    pub static mut RedisModule_SubscribeToKeyspaceEventsWithSubkeys: ::std::option::Option<
+        unsafe extern "C" fn(
+            ctx: *mut RedisModuleCtx,
+            types: ::std::os::raw::c_int,
+            flags: ::std::os::raw::c_int,
+            cb: RedisModuleNotificationWithSubkeysFunc,
+        ) -> ::std::os::raw::c_int,
+    >;
+}
+unsafe extern "C" {
+    pub static mut RedisModule_UnsubscribeFromKeyspaceEventsWithSubkeys: ::std::option::Option<
+        unsafe extern "C" fn(
+            ctx: *mut RedisModuleCtx,
+            types: ::std::os::raw::c_int,
+            flags: ::std::os::raw::c_int,
+            cb: RedisModuleNotificationWithSubkeysFunc,
+        ) -> ::std::os::raw::c_int,
+    >;
+}
+unsafe extern "C" {
     pub static mut RedisModule_AddPostNotificationJob: ::std::option::Option<
         unsafe extern "C" fn(
             ctx: *mut RedisModuleCtx,
             callback: RedisModulePostNotificationJobFunc,
+            pd: *mut ::std::os::raw::c_void,
+            free_pd: ::std::option::Option<unsafe extern "C" fn(arg1: *mut ::std::os::raw::c_void)>,
+        ) -> ::std::os::raw::c_int,
+    >;
+}
+unsafe extern "C" {
+    pub static mut RedisModule_AddPostNotificationJobForKey: ::std::option::Option<
+        unsafe extern "C" fn(
+            ctx: *mut RedisModuleCtx,
+            callback: RedisModulePostNotifyJobPerKeyFunc,
+            key: *mut RedisModuleString,
             pd: *mut ::std::os::raw::c_void,
             free_pd: ::std::option::Option<unsafe extern "C" fn(arg1: *mut ::std::os::raw::c_void)>,
         ) -> ::std::os::raw::c_int,
@@ -3459,6 +3546,18 @@ unsafe extern "C" {
             type_: ::std::os::raw::c_int,
             event: *const ::std::os::raw::c_char,
             key: *mut RedisModuleString,
+        ) -> ::std::os::raw::c_int,
+    >;
+}
+unsafe extern "C" {
+    pub static mut RedisModule_NotifyKeyspaceEventWithSubkeys: ::std::option::Option<
+        unsafe extern "C" fn(
+            ctx: *mut RedisModuleCtx,
+            type_: ::std::os::raw::c_int,
+            event: *const ::std::os::raw::c_char,
+            key: *mut RedisModuleString,
+            subkeys: *mut *mut RedisModuleString,
+            count: ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int,
     >;
 }
@@ -3501,6 +3600,14 @@ unsafe extern "C" {
             port: *mut ::std::os::raw::c_int,
             flags: *mut ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int,
+    >;
+}
+unsafe extern "C" {
+    pub static mut RedisModule_GetClusterNodeSlotRanges: ::std::option::Option<
+        unsafe extern "C" fn(
+            ctx: *mut RedisModuleCtx,
+            nodeid: *const ::std::os::raw::c_char,
+        ) -> *mut RedisModuleSlotRangeArray,
     >;
 }
 unsafe extern "C" {

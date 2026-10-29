@@ -11,6 +11,65 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Redis OSS 8.x header declarations
+
+`src/include/redismodule.h` is upstream's header at `4ab88e7` plus what Redis
+OSS 8.10.2's `src/redismodule.h` declares and upstream's lacks, in OSS's text
+and at OSS's positions, so a later refresh from either header stays a small
+diff (#106). The committed bindings include the additions; the SDK adds no
+wrappers for them (#90). Each API gets its `REDISMODULE_GET_API` line in
+`RedisModule_InitAPI`, so a server without it leaves the `raw` pointer `None`
+and the module still loads, and no compatibility floor changes. The first
+release is the first examined `module.c` that registers the API or uses the
+name:
+
+- 8.8.3, absent from 8.6.7: `SubscribeToKeyspaceEventsWithSubkeys`,
+  `UnsubscribeFromKeyspaceEventsWithSubkeys` and
+  `NotifyKeyspaceEventWithSubkeys`, with the callback type
+  `RedisModuleNotificationWithSubkeysFunc`; `REDISMODULE_KEYTYPE_ARRAY`; and
+  the delivery flags `REDISMODULE_NOTIFY_FLAG_NONE` and
+  `REDISMODULE_NOTIFY_FLAG_SUBKEYS_REQUIRED`.
+- 8.10.2, absent from 8.8.3: `AddPostNotificationJobForKey`, with
+  `RedisModulePostNotifyJobPerKeyFunc`; `GetClusterNodeSlotRanges`;
+  `RedisModulePostNotifyJobFunc`; the cluster topology change event
+  (`REDISMODULE_EVENT_CLUSTER_TOPOLOGY_CHANGE`,
+  `RedisModuleEvent_ClusterTopologyChange`,
+  `RedisModuleClusterTopologyChangeInfo`,
+  `REDISMODULE_CLUSTER_TOPOLOGY_CHANGE_INFO_VERSION` and the four
+  `REDISMODULE_CLUSTER_TOPOLOGY_CHANGE_FLAG_*` reasons); and
+  `REDISMODULE_SUBEVENT_CLUSTER_SLOT_MIGRATION_MIGRATE_MODULE_PROPAGATE_END`.
+- Not checked: `REDISMODULE_NOTIFY_ARRAY` and the four
+  `REDISMODULE_NOTIFY_SUBKEY*` flags. No examined `module.c` uses those
+  names; 8.8.3's is the first to use the server's own subkey flags.
+
+The `_NEXT` sentinels for notification flags, events and slot migration
+sub-events take OSS's values, and the topology change event's is added.
+Bindgen skips names that start with an underscore, so they have no binding.
+
+The header still differs from OSS 8.10.2's:
+
+- It keeps upstream's Redis Enterprise declarations: the `Big*` entries,
+  `IsKeyInRam`, `SetOpenFilesReservation`, `SwapPrefetchKey` and its flags,
+  `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` and
+  `REDISMODULE_NOTIFY_TRIMMED`.
+- Value 8 has two key type names: upstream's `REDISMODULE_KEYTYPE_GCRA`, from
+  a Redis unstable snapshot, and OSS's `REDISMODULE_KEYTYPE_ARRAY`. OSS
+  returns a GCRA type only when built with `ENABLE_GCRA`. `KeyType::Array`
+  now uses `REDISMODULE_KEYTYPE_ARRAY` instead of a constant of its own.
+- `REDISMODULE_NOTIFY_RATE_LIMIT` keeps upstream's `1<<18`. OSS defines it as
+  `1<<24`, only with `ENABLE_GCRA`, and leaves bit 18 unused; the header takes
+  neither that nor the `ENABLE_GCRA` value of `_REDISMODULE_NOTIFY_NEXT`.
+- `REDISMODULE_NOTIFY_ALL` keeps upstream's value. OSS adds
+  `REDISMODULE_NOTIFY_ARRAY` to it; taking that would add array events to
+  `NotifyEvent::ALL`, and before Redis 8.8 every subscription with it would
+  log the bit as unsupported.
+- `RedisModulePostNotificationJobFunc` stays upstream's typedef, which
+  `AddPostNotificationJob` still names; OSS makes it an alias of
+  `RedisModulePostNotifyJobFunc`, the same function type.
+- The five long-double declarations stay commented out, and
+  `RedisModule_InitAPI` stays separate from `RedisModule_Init`, as upstream
+  has them.
+
 ## Defrag registration warnings
 
 Registration logs a warning only for defrag code the server cannot run: a
@@ -55,15 +114,16 @@ on Redis 6 in general.
 
 `KeyType` maps value 8 to `KeyType::Array`. Redis 8.8 and later return 8 from
 `RM_KeyType` for array keys, the type `ARSET` creates, and declare it as
-`REDISMODULE_KEYTYPE_ARRAY`; GCRA is compiled only with `ENABLE_GCRA`. The
-vendored header, like upstream's, still names 8 `REDISMODULE_KEYTYPE_GCRA`, from
-a Redis unstable snapshot. Upstream's `KeyType` has no variant for 8, and its
-`From<c_int>` unwraps `from_i32`, so `key_type` on an array key panics there.
-Before this change the fork reported such keys as a `KeyType::Gcra` it had
-added. An integration test checks every built-in key type the server has, arrays
-included where the server provides `ARSET`; on Redis 8.10.2 it reported `Gcra`
-for an array key before the change. No upstream issue or pull request reports
-it.
+`REDISMODULE_KEYTYPE_ARRAY`; GCRA is compiled only with `ENABLE_GCRA`.
+Upstream's header names 8 only `REDISMODULE_KEYTYPE_GCRA`, from a Redis
+unstable snapshot; the fork's header also declares `REDISMODULE_KEYTYPE_ARRAY`,
+as the Redis OSS 8.x header declarations section above describes. Upstream's
+`KeyType` has no variant for 8, and its `From<c_int>` unwraps `from_i32`, so
+`key_type` on an array key panics there. Before this change the fork reported
+such keys as a `KeyType::Gcra` it had added. An integration test checks every
+built-in key type the server has, arrays included where the server provides
+`ARSET`; on Redis 8.10.2 it reported `Gcra` for an array key before the change.
+No upstream issue or pull request reports it.
 
 ## Call replies are not Send
 

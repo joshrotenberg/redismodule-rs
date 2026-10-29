@@ -136,10 +136,10 @@ AREAS = [
     ("Server events", [(r"SubscribeToServerEvent", "event"), (r"IsSubEventSupported",
                                                               "context-free")]),
     ("Keyspace notifications", [
-        (r"SubscribeToKeyspaceEvents|UnsubscribeFromKeyspaceEvents|AddPostNotificationJob",
-         "event"),
-        (r"NotifyKeyspaceEvent|GetNotifyKeyspaceEvents|GetKeyspaceNotificationFlagsAll",
-         "runtime"),
+        (r"(SubscribeToKeyspaceEvents|UnsubscribeFromKeyspaceEvents)(WithSubkeys)?"
+         r"|AddPostNotificationJob(ForKey)?", "event"),
+        (r"NotifyKeyspaceEvent(WithSubkeys)?|GetNotifyKeyspaceEvents"
+         r"|GetKeyspaceNotificationFlagsAll", "runtime"),
     ]),
     ("Blocked clients", [
         (r"BlockClient(OnKeys(WithFlags)?)?|IsBlocked(Reply|Timeout)Request"
@@ -159,7 +159,8 @@ AREAS = [
         (r"RegisterClusterMessageReceiver|SetClusterFlags", "registration"),
         (r"GetMyClusterID|GetClusterSize|FreeClusterNodesList|ClusterKeySlotC?"
          r"|ClusterCanonicalKeyNameInSlot|ClusterCanAccessKeysInSlot", "context-free"),
-        (r"SendClusterMessage|GetClusterNodeInfo|GetClusterNodesList|Cluster\w+", "runtime"),
+        (r"SendClusterMessage|GetClusterNode(Info|SlotRanges)|GetClusterNodesList|Cluster\w+",
+         "runtime"),
     ]),
     ("Shared APIs", [(r"ExportSharedAPI", "registration"), (r"GetSharedAPI", "runtime")]),
     ("Command filters", [
