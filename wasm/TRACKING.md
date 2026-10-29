@@ -111,6 +111,17 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-10-29: merged SDK master `fc5e0e1` into the branch as `4e8f234`. It is
+  SDK PR 125 (#106): the vendored header gains the Redis OSS 8.8 and 8.10
+  module API declarations and fixes `GetUserUsername`'s signature, with
+  regenerated bindings; and PR 126, the project `cj` recipes in `.cj/`.
+  Nothing in `wasm/` changed. This sync is the first run of the new
+  `cj run wasm-sync` recipe, which merged, fetched with `--locked`, and ran
+  `wasm/ci/check.sh` with the four snapshot lockfiles, byte-identical
+  afterwards, on Redis 8.10.2 and Rust 1.94.0. It passed: the host's 7 unit
+  and 21 library tests and the SDK's 70 unit, 163 integration and 116 doc
+  tests.
+
 - 2026-10-28: merged SDK master `a6f128b` into the branch as `fdf33fb`. It is
   SDK PR 122 (#116): defrag registration warns only about defrag code the
   server cannot run, with a log-reading test in the Redis 6.0.20 CI job.
