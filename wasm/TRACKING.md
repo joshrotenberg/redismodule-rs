@@ -111,6 +111,13 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-10-29: merged SDK master `a4caff5` into the branch as `76dd1b4`.
+  SDK PR 127 adds `AGENTS.md` and a `CLAUDE.md` that imports it, pointing
+  agent sessions at `CONTRIBUTING.md` and the project `cj` recipes. No runtime
+  source or dependencies changed. The `cj run wasm-sync` recipe ran with
+  `--skip-check` for this documentation-only sync; experiment push CI runs
+  `wasm/ci/check.sh`.
+
 - 2026-10-29: merged SDK master `fc5e0e1` into the branch as `4e8f234`. It is
   SDK PR 125 (#106): the vendored header gains the Redis OSS 8.8 and 8.10
   module API declarations and fixes `GetUserUsername`'s signature, with
