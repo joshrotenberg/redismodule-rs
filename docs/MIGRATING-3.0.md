@@ -527,6 +527,21 @@ use redis_module::{RedisModuleString, REDISMODULE_OK};
 use redis_module::raw::{RedisModuleString, REDISMODULE_OK};
 ```
 
+### `raw::RedisModule_GetUserUsername` takes the context (3.0.0-alpha.1 only)
+
+No 2.x release declares it. 3.0.0-alpha.1 declared it with the user alone,
+from a Redis unstable snapshot; Redis 8.8 and later define it with the
+context first, so a call through the old declaration passed the user where
+Redis reads the context and could not have worked.
+
+```rust
+// 3.0.0-alpha.1
+let name = unsafe { raw::RedisModule_GetUserUsername.unwrap()(user) };
+
+// 3.0
+let name = unsafe { raw::RedisModule_GetUserUsername.unwrap()(ctx, user) };
+```
+
 ### Raw calls with wrappers in 3.0
 
 2.x modules called raw bindings where 2.x had no wrapper, or where its wrapper
