@@ -8,16 +8,18 @@
 (def ^:private output-limit (* 16 1024 1024))
 
 (defn env
-  "Environment overlay for cargo and the integration tests. PATH puts the
-  directory of `server` (when given) and `~/.cargo/bin` (when it exists) first,
-  so the child processes cargo and check.sh start find that redis-server and
-  the toolchain rust-toolchain.toml pins; TEST_REDIS_SERVER_BIN names
-  `server`."
+  "Environment overlay for cargo and the integration tests. PATH puts
+  `~/.cargo/bin` (when it exists) first, so the toolchain rust-toolchain.toml
+  pins wins, then the directory of `server` when it is a path, so the
+  processes cargo and check.sh start find that redis-server.
+  TEST_REDIS_SERVER_BIN names `server`, made absolute when it is a path; a bare
+  name is left to PATH."
   [server]
   (let [cargo-bin (str (fs/path (fs/home) ".cargo" "bin"))
+        server (if (and server (str/includes? server "/")) (str (fs/absolutize server)) server)
         dirs (cond-> []
-               server (conj (str (fs/parent (fs/absolutize server))))
-               (fs/directory? cargo-bin) (conj cargo-bin))]
+               (fs/directory? cargo-bin) (conj cargo-bin)
+               (and server (str/includes? server "/")) (conj (str (fs/parent server))))]
     (cond-> {}
       (seq dirs) (assoc "PATH" (str/join ":" (conj dirs (System/getenv "PATH"))))
       server (assoc "TEST_REDIS_SERVER_BIN" server))))

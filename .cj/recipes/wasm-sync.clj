@@ -117,8 +117,9 @@
                                                                "--diff-filter=U")))))]
                   (fail merged {:step :merge :worktree worktree :base base :master master
                                 :conflicts conflicts
-                                :next [(str "resolve the conflicts in " worktree " and commit")
-                                       "copy the snapshot lockfiles and run wasm/ci/check.sh there, as CONTRIBUTING.md describes"]}))
+                                :next [(str "finish the merge in " worktree
+                                            " (git status there shows its state) and commit")
+                                       "copy the snapshot lockfiles, run cargo fetch --locked and wasm/ci/check.sh there, as wasm/CI.md describes"]}))
                 (let [head (steps/text (git worktree "rev-parse" "--short" "HEAD"))
                       up-to-date? (= head base)
                       _ (doseq [[snapshot target] lockfiles]
