@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `ThreadSafeContext::try_lock` and `DetachedContext::try_lock` return their
+  existing borrowed guards on success and `None` when the Redis lock cannot
+  be acquired immediately (#113). Workers can check a stop flag between
+  attempts so module unload can join them while holding the Redis lock.
+  Both methods support every compatibility floor; `examples/try_lock.rs`
+  demonstrates acquisition, contention and worker teardown.
 - The vendored header and committed bindings include upstream's
   `RedisModulePersistenceInfoV1`, its `RedisModulePersistenceInfo` alias,
   `REDISMODULE_PERSISTENCEINFO_VERSION` and

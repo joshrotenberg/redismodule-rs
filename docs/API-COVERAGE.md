@@ -133,23 +133,22 @@ PRs 442 and 444 build on the command filters of upstream PR 437.
 
 | rank | gap | fit | evidence |
 |---|---|---|---|
-| 1 | `ThreadSafeContextTryLock` | worker: `try_lock` on `ThreadSafeContext` and `DetachedContext`, returning the existing guard type | #89: the writer thread of the downstream's experimental asynchronous write modes tries the lock, because `MODULE UNLOAD` holds the Redis lock while it stops that thread and a blocking lock would deadlock. The SDK has only the blocking `lock`. |
-| 2 | `GetRandomHexChars`, and `GetRandomBytes` with it | context-free | #89: the downstream takes its per-load generation id from it, to avoid another dependency. A Rust random-number crate can replace it. |
-| 3 | `ClusterCanonicalKeyNameInSlot` | context-free | #89: the downstream picks a hash tag owned by the node with it on 7.4 and later, and with its own table on 7.2. `cluster::key_for_slot` works on every version but generates different names, which changes the downstream's stream names. Whether the port can accept that was not checked. |
-| 4 | Command filters, all eight APIs | registration for the filter; the callback needs a view of its own | upstream PR 437, opened from FalkorDB's fork; also upstream PR 168. |
-| 5 | `SetLRU`, `GetLRU`, `SetLFU`, `GetLFU` | key | upstream issue 443; upstream PR 444, opened from FalkorDB's fork. |
-| 6 | `RandomKey` | runtime | upstream issue 445; upstream PR 446, opened from FalkorDB's fork. |
-| 7 | Cluster messages and topology | registration, runtime and context-free | upstream issue 236; upstream issue 438, by the author of the FalkorDB pull requests. |
-| 8 | Module users and authentication | registration, command and context-free | upstream PR 354 (users and authentication); upstream issue 381 (`RegisterAuthCallback`). |
-| 9 | `GetKeyNameFromModuleKey` | key | upstream PR 469 and the closed upstream PR 436, which state no consumer. Their author also opened upstream PR 459, which says RediSearch needs its flag. |
-| 10 | `GetExpire`, `GetAbsExpire` | key | upstream PR 391. |
-| 11 | `RdbLoad`, `RdbSave` and the RDB streams | runtime | upstream issue 382. Its reply points to data-type RDB callbacks, which this SDK supports, not to these APIs. |
-| 12 | Sorted sets | key | upstream issue 235. |
-| 13 | Dictionaries | context-free | upstream PRs 169 and 228, both drafts by one author. With `RedisAlloc` as the global allocator, Rust maps already count toward Redis's memory. |
-| 14 | `EmitAOF` | callback (I/O) | upstream issue 74. |
-| 15 | Server configuration reads | runtime | #60, a design issue that first needs a read use case. |
+| 1 | `GetRandomHexChars`, and `GetRandomBytes` with it | context-free | #89: the downstream takes its per-load generation id from it, to avoid another dependency. A Rust random-number crate can replace it. |
+| 2 | `ClusterCanonicalKeyNameInSlot` | context-free | #89: the downstream picks a hash tag owned by the node with it on 7.4 and later, and with its own table on 7.2. `cluster::key_for_slot` works on every version but generates different names, which changes the downstream's stream names. Whether the port can accept that was not checked. |
+| 3 | Command filters, all eight APIs | registration for the filter; the callback needs a view of its own | upstream PR 437, opened from FalkorDB's fork; also upstream PR 168. |
+| 4 | `SetLRU`, `GetLRU`, `SetLFU`, `GetLFU` | key | upstream issue 443; upstream PR 444, opened from FalkorDB's fork. |
+| 5 | `RandomKey` | runtime | upstream issue 445; upstream PR 446, opened from FalkorDB's fork. |
+| 6 | Cluster messages and topology | registration, runtime and context-free | upstream issue 236; upstream issue 438, by the author of the FalkorDB pull requests. |
+| 7 | Module users and authentication | registration, command and context-free | upstream PR 354 (users and authentication); upstream issue 381 (`RegisterAuthCallback`). |
+| 8 | `GetKeyNameFromModuleKey` | key | upstream PR 469 and the closed upstream PR 436, which state no consumer. Their author also opened upstream PR 459, which says RediSearch needs its flag. |
+| 9 | `GetExpire`, `GetAbsExpire` | key | upstream PR 391. |
+| 10 | `RdbLoad`, `RdbSave` and the RDB streams | runtime | upstream issue 382. Its reply points to data-type RDB callbacks, which this SDK supports, not to these APIs. |
+| 11 | Sorted sets | key | upstream issue 235. |
+| 12 | Dictionaries | context-free | upstream PRs 169 and 228, both drafts by one author. With `RedisAlloc` as the global allocator, Rust maps already count toward Redis's memory. |
+| 13 | `EmitAOF` | callback (I/O) | upstream issue 74. |
+| 14 | Server configuration reads | runtime | #60, a design issue that first needs a read use case. |
 
-Ranks 1 to 3 are tier 1, 4 to 6 tier 2 and the rest tier 3, with this
+Ranks 1 to 2 are tier 1, 3 to 5 tier 2 and the rest tier 3, with this
 repository's design issue last.
 
 #90 files implementation issues only for gaps with a concrete consumer. Tier 1
@@ -179,12 +178,12 @@ API pointers the downstream calls through `redis_module::raw`:
 | `GetSelectedDb`, `SelectDb` | `src/capture.rs`, `src/commands.rs`, `src/config.rs` and `src/markers.rs` write to database 0 and restore the selection | safe: `RuntimeContext::get_selected_db`, `select_db` and `with_db` |
 | `Milliseconds` | `src/capture.rs` reads the server clock for stream trimming | safe: `redis_module::milliseconds` |
 | `GetThreadSafeContext`, `ThreadSafeContextUnlock`, `FreeThreadSafeContext` | `src/dispatch.rs` creates the writer thread's context and releases it | safe: `ThreadSafeContext` and its guard |
-| `ThreadSafeContextTryLock` | `src/dispatch.rs` locks without blocking in the experimental asynchronous write modes, so unload cannot deadlock | none |
+| `ThreadSafeContextTryLock` | `src/dispatch.rs` locks without blocking in the experimental asynchronous write modes, so unload cannot deadlock | safe: `ThreadSafeContext::try_lock` and `DetachedContext::try_lock` (#113) |
 | `GetRandomHexChars` | `src/markers.rs` makes the generation id | none |
-| `ClusterCanonicalKeyNameInSlot` | `src/cluster.rs` picks a hash tag per slot on 7.4 and later | none; `cluster::key_for_slot` is a substitute that generates different names (rank 3) |
+| `ClusterCanonicalKeyNameInSlot` | `src/cluster.rs` picks a hash tag per slot on 7.4 and later | none; `cluster::key_for_slot` is a substitute that generates different names (rank 2) |
 | `NotifyKeyspaceEvent` | `examples/notifytest.rs`, a test module, sends event names that are not UTF-8 | safe: `RuntimeContext::notify_keyspace_event_bytes` |
 
-Three of these are gaps. The port can keep raw calls for them, so none blocks
+Two of these are gaps. The port can keep raw calls for them, so none blocks
 it; they are what #89 would record as remaining raw-API workarounds.
 
 ## Requests upstream
@@ -386,7 +385,9 @@ runtime.
 
 ### Thread-safe contexts
 
-`ThreadSafeContextTryLock` is the only gap, ranked first above.
+No gaps. `ThreadSafeContext::try_lock` and `DetachedContext::try_lock` wrap
+`ThreadSafeContextTryLock` with the same guards as their blocking `lock`
+methods (#113).
 
 ### Event loop
 
@@ -445,8 +446,8 @@ Redis OSS implementation to test against.
 <!-- api-coverage:begin -->
 <!-- Generated by .github/scripts/api-coverage.py; edit the script instead. -->
 
-`src/include/redismodule.h` declares 404 API pointers: 155 safe, 9 unsafe, 8
-internal, 232 none.
+`src/include/redismodule.h` declares 404 API pointers: 156 safe, 9 unsafe, 8
+internal, 231 none.
 
 It also has 5 declarations commented out, which have no binding and are not in
 the table: `CreateStringFromLongDouble`, `ReplyWithLongDouble`,
@@ -463,12 +464,12 @@ floor, or not in the Redis OSS sources.
 
 | floor | APIs | safe | unsafe | internal | none |
 |---|---|---|---|---|---|
-| 6.0 | 233 | 107 | 5 | 7 | 114 |
-| 6.2 | 258 | 119 | 6 | 7 | 126 |
-| 7.0 | 328 | 147 | 9 | 7 | 165 |
-| 7.2 | 348 | 153 | 9 | 7 | 179 |
-| 7.4 | 353 | 154 | 9 | 7 | 183 |
-| 8.0 | 362 | 155 | 9 | 7 | 191 |
+| 6.0 | 233 | 108 | 5 | 7 | 113 |
+| 6.2 | 258 | 120 | 6 | 7 | 125 |
+| 7.0 | 328 | 148 | 9 | 7 | 164 |
+| 7.2 | 348 | 154 | 9 | 7 | 178 |
+| 7.4 | 353 | 155 | 9 | 7 | 182 |
+| 8.0 | 362 | 156 | 9 | 7 | 190 |
 | no floor | 42 | 0 | 0 | 1 | 41 |
 
 ### Required above the lowest floor
@@ -907,12 +908,12 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
-| `GetThreadSafeContext` | 6.0 | 6.0 | required | safe | `ThreadSafeContext::lock`, `ThreadSafeContext::new` and 1 more |  |  |
+| `GetThreadSafeContext` | 6.0 | 6.0 | required | safe | `ThreadSafeContext::new`, `ThreadSafeContext::with_blocked_client` |  |  |
 | `GetDetachedThreadSafeContext` | 6.0 | 6.0 | available, direct | safe | `DetachedContext::set_context` |  |  |
 | `FreeThreadSafeContext` | 6.0 | 6.0 | required, direct | safe | `ContextGuard::drop (Drop)`, `ThreadSafeContext::drop (Drop)` |  |  |
 | `ThreadSafeContextLock` | 6.0 | 6.0 | required | safe | `DetachedContext::lock`, `ThreadSafeContext::lock` |  |  |
-| `ThreadSafeContextTryLock` | 6.0 | 6.0 |  | none |  | worker | #89 |
-| `ThreadSafeContextUnlock` | 6.0 | 6.0 | required | safe | `ContextGuard::drop (Drop)`, `DetachedContext::lock` and 1 more |  |  |
+| `ThreadSafeContextTryLock` | 6.0 | 6.0 | required | safe | `DetachedContext::try_lock`, `ThreadSafeContext::try_lock` |  | #89 |
+| `ThreadSafeContextUnlock` | 6.0 | 6.0 | required | safe | `ContextGuard::drop (Drop)`, `DetachedContextGuard::drop (Drop)` |  |  |
 
 #### Timers
 

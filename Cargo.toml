@@ -39,6 +39,10 @@ name = "detached_reload"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "try_lock"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "key_type"
 crate-type = ["cdylib"]
 

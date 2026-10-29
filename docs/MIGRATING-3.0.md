@@ -408,7 +408,7 @@ Ordinary command handlers and blocked-client reply/timeout handlers keep
 | Module init | `&RegistrationContext<'_>` | Registration, event operations, shared runtime operations |
 | Client command or blocked-client reply/timeout | `&Context` | Client replies/blocking/key positions, event operations, shared runtime operations |
 | Keyspace/server/timer/post-notification/event-loop callback, module unload, blocking-call unblock handler | `&EventContext` | Module-owned timers/subscriptions/shared APIs, shared runtime operations |
-| `ThreadSafeContext::lock` or `DetachedContext::lock` | Guard dereferencing to `WorkerContext` | Shared runtime operations; blocking calls only for module-owned detached workers |
+| `ThreadSafeContext::lock` / `try_lock` or `DetachedContext::lock` / `try_lock` | Guard dereferencing to `WorkerContext` | Shared runtime operations; blocking calls only for module-owned detached workers |
 | Database scan callback or helper shared across these scopes | `&RuntimeContext` | Calls, keys, database selection, logging, server info, explicit replication |
 | Module INFO callback, including crash reports | `&InfoContext` | INFO output only; no Redis lock proof or runtime operations |
 
@@ -461,6 +461,11 @@ module association and a client reply target or key-position request.
 requires only a live context and the Redis lock. All require valid invocation and
 lock scope throughout use. Replace `Context::dummy` with `RuntimeContext::dummy`
 for APIs that explicitly accept a null context, such as logging.
+
+Prefer `ThreadSafeContext::try_lock` or `MODULE_CONTEXT.try_lock()` when a
+worker must check a stop flag instead of waiting for the Redis lock. They
+return the existing guard on success and `None` on contention; the guard
+handles view cleanup and unlocking. Stop and join workers before unload.
 
 A view built over a lock the module took itself, for example after
 `RedisModule_ThreadSafeContextTryLock`, must be dropped before the module

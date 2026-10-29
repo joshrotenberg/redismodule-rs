@@ -372,6 +372,62 @@ fn test_context_user_registry_survives_module_unload_and_reload() -> Result<()> 
 }
 
 #[test]
+fn test_context_try_lock_contention_release_and_unload() -> Result<()> {
+    let mut con = TestConnection::new("try_lock");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let module = utils::module_path("try_lock")?;
+    for mode in ["thread", "detached"] {
+        let contended: Vec<i64> = redis::cmd("try_lock.contended").query(&mut con)?;
+        assert_eq!(contended, [1, 1], "both attempts must return on contention");
+        redis::cmd("DEL")
+            .arg("try_lock:count")
+            .query::<()>(&mut con)?;
+        redis::cmd("try_lock.start")
+            .arg(mode)
+            .query::<()>(&mut con)?;
+        utils::wait_until(
+            Duration::from_secs(5),
+            "worker repeatedly acquires and releases Redis",
+            || {
+                Ok(redis::cmd("GET")
+                    .arg("try_lock:count")
+                    .query::<Option<i64>>(&mut con)?
+                    .unwrap_or(0)
+                    >= 2)
+            },
+        )?;
+        // Stopping a worker while the command holds Redis's lock must finish.
+        redis::cmd("try_lock.stop").query::<()>(&mut con)?;
+        let stopped: i64 = redis::cmd("GET").arg("try_lock:count").query(&mut con)?;
+        assert!(stopped >= 2, "{mode} worker used its guard for Redis calls");
+
+        redis::cmd("try_lock.start")
+            .arg(mode)
+            .query::<()>(&mut con)?;
+        utils::wait_until(
+            Duration::from_secs(5),
+            "restarted worker acquires Redis",
+            || {
+                Ok(redis::cmd("GET")
+                    .arg("try_lock:count")
+                    .query::<i64>(&mut con)?
+                    > stopped)
+            },
+        )?;
+        // deinit also stops and joins the live worker under Redis's lock.
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "try_lock"])
+            .query::<()>(&mut con)?;
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(&module)
+            .query::<()>(&mut con)?;
+    }
+    Ok(())
+}
+
+#[test]
 fn test_detached_context_is_fresh_after_unload_and_reload() -> Result<()> {
     let mut con = TestConnection::new("detached_reload");
     let module = utils::module_path("detached_reload")?;
