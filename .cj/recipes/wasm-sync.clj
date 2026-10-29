@@ -85,6 +85,9 @@
                       ok? (or skip-check (and (= :pass (:status checked)) (:lockfiles-unchanged? checked)))]
                   (cond-> (assoc result :status (if ok? :completed :failed))
                     checked (assoc :check checked)
-                    ok? (assoc :next [(str "record the sync in " worktree "/wasm/TRACKING.md and commit it")
-                                      (str "git -C " worktree " push " remote " HEAD:experiment/wasm-host")
-                                      "confirm the experiment push CI"])))))))))))
+                    (and ok? up-to-date?)
+                    (assoc :next [(str "nothing to sync; git -C " repo " worktree remove " worktree)])
+                    (and ok? (not up-to-date?))
+                    (assoc :next [(str "record the sync in " worktree "/wasm/TRACKING.md and commit it")
+                                  (str "git -C " worktree " push " remote " HEAD:experiment/wasm-host")
+                                  "confirm the experiment push CI"])))))))))))
