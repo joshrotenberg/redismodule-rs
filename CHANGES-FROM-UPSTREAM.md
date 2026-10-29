@@ -44,7 +44,8 @@ name:
 
 The `_NEXT` sentinels for notification flags, events and slot migration
 sub-events take OSS's values, and the topology change event's is added.
-Bindgen skips names that start with an underscore, so they have no binding.
+They have no binding: `build.rs` allowlists variables matching
+`(REDIS|Redis).*`, which a name starting with an underscore cannot match.
 
 `RedisModule_GetUserUsername` now takes the context first, as `module.c` of
 Redis 8.8.3 and 8.10.2 defines it and OSS's header declares it. Upstream's

@@ -11,8 +11,10 @@ issues are filed only for gaps with a concrete consumer.
 
 The script reads every `REDISMODULE_API ... (*RedisModule_X)(...)` declaration
 in the header. It skips the five long-double declarations that the header has
-commented out, which have no binding; the count of 404 in #90 includes them,
-and predates the five subkey notification and cluster APIs of #106.
+commented out, which have no binding. The count of 404 in #90 included those
+five; since #106 added five others (three subkey notification APIs,
+`AddPostNotificationJobForKey` and `GetClusterNodeSlotRanges`), the header
+again declares 404, none of them commented out.
 It then tokenizes the Rust sources under `src/`, except the generated bindings
 in `src/redisraw/`, drops comments and string literals, and records each
 `RedisModule_X` name with the function, method or `macro_rules!` definition
@@ -366,9 +368,9 @@ Each would be a handler list like the existing ones.
 
 `UnsubscribeFromKeyspaceEvents` (8.2) fits event. The subkey notification
 APIs are unwrapped: `SubscribeToKeyspaceEventsWithSubkeys` and
-`UnsubscribeFromKeyspaceEventsWithSubkeys` (8.8) and
-`AddPostNotificationJobForKey` (8.10) fit event, and
-`NotifyKeyspaceEventWithSubkeys` (8.8) fits runtime. `NotifyEvent` lacks the
+`UnsubscribeFromKeyspaceEventsWithSubkeys` (8.8) fit event, and
+`NotifyKeyspaceEventWithSubkeys` (8.8) fits runtime. So is the per-key
+`AddPostNotificationJobForKey` (8.10), which fits event. `NotifyEvent` lacks the
 `OVERWRITTEN`, `TYPE_CHANGED`, `KEY_TRIMMED`, `RATE_LIMIT`, `ARRAY` and four
 subkey flags the header defines; the event handler drops bits it does not
 know.
@@ -990,9 +992,9 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `FreeModuleUser` | 6.0 | 6.0 | available | safe | `RuntimeContext::scoped_call_user` |  |  |
 | `SetContextUser` | 7.0 | 7.0 | available | safe | `RuntimeContext::scoped_call_user` |  |  |
 | `GetContextUser` | 8.8 | none | direct | internal (hand) | `RuntimeContext::scoped_call_user` | runtime |  |
-| `GetUserUsername` | 8.8 | none |  | none |  | context-free |  |
+| `GetUserUsername` | 8.8 | none |  | none |  | runtime |  |
 | `SetModuleUserACL` | 6.0 | 6.0 |  | none |  | context-free |  |
-| `SetModuleUserACLString` | 7.0 | 7.0 |  | none |  | context-free | upstream PR 354 |
+| `SetModuleUserACLString` | 7.0 | 7.0 |  | none |  | runtime | upstream PR 354 |
 | `GetModuleUserACLString` | 7.0 | 7.0 |  | none |  | context-free | upstream PR 354 |
 | `GetCurrentUserName` | 7.0 | 7.0 | direct | safe | `Context::get_current_user` |  |  |
 | `GetModuleUserFromUserName` | 7.0 | 7.0 | available | safe | `RuntimeContext::scoped_call_user` |  |  |

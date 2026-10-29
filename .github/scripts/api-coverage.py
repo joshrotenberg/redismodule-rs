@@ -171,9 +171,10 @@ AREAS = [
     ("ACL, users and authentication", [
         (r"RegisterAuthCallback", "registration"),
         (r"BlockClientOnAuth", "callback (auth)"),
-        (r"CreateModuleUser|FreeModuleUser|GetUserUsername|SetModuleUserACL(String)?"
+        (r"CreateModuleUser|FreeModuleUser|SetModuleUserACL"
          r"|GetModuleUserACLString|GetModuleUserFromUserName|ACLCheck\w+", "context-free"),
-        (r"SetContextUser|GetContextUser|GetCurrentUserName|GetInternalSecret", "runtime"),
+        (r"SetContextUser|GetContextUser|GetCurrentUserName|GetInternalSecret"
+         r"|GetUserUsername|SetModuleUserACLString", "runtime"),
         (r"ACLAddLogEntry(ByUserName)?|AuthenticateClientWith(ACL)?User", "command"),
         (r"DeauthenticateAndCloseClient", "runtime"),
     ]),

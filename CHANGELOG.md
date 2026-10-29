@@ -9,30 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `src/include/redismodule.h` and the committed bindings declare the module
-  API that Redis OSS 8.10.2's header has and upstream's lacks (#106):
+- `src/include/redismodule.h` and the committed bindings declare the module API
+  that Redis OSS 8.10.2's header has and upstream's lacks (#106):
   `RedisModule_SubscribeToKeyspaceEventsWithSubkeys`,
   `RedisModule_UnsubscribeFromKeyspaceEventsWithSubkeys` and
   `RedisModule_NotifyKeyspaceEventWithSubkeys` (Redis 8.8),
   `RedisModule_AddPostNotificationJobForKey` and
   `RedisModule_GetClusterNodeSlotRanges` (Redis 8.10), with their callback
-  types; `REDISMODULE_KEYTYPE_ARRAY`; the subkey, array and delivery
-  notification flags; and the cluster topology change event with its data
-  and flags, and the slot migration `MIGRATE_MODULE_PROPAGATE_END` sub-event
-  (Redis 8.10). A server without one of the APIs leaves its `raw` pointer
-  `None`, so no compatibility floor changes; the SDK adds no wrappers. The
-  Redis Enterprise declarations stay. `REDISMODULE_NOTIFY_ALL` keeps upstream's
-  value, without `REDISMODULE_NOTIFY_ARRAY`, so `NotifyEvent::ALL` is
-  unchanged. [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) lists how
-  the header differs from upstream's and from Redis OSS 8.10.2's.
+  types; `REDISMODULE_KEYTYPE_ARRAY` and the subkey delivery flags (Redis 8.8);
+  the array and subkey notification flags; and the cluster topology change event
+  with its data and flags, and the slot migration `MIGRATE_MODULE_PROPAGATE_END`
+  sub-event (Redis 8.10). A server without one of the APIs leaves its `raw`
+  pointer `None`, so no compatibility floor changes; the SDK adds no wrappers.
+  The Redis Enterprise declarations stay. `REDISMODULE_NOTIFY_ALL` keeps
+  upstream's value, without `REDISMODULE_NOTIFY_ARRAY`, so `NotifyEvent::ALL` is
+  unchanged. [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) lists how the
+  header differs from upstream's and from Redis OSS 8.10.2's.
 
 ### Fixed
 
-- `raw::RedisModule_GetUserUsername` takes the context as its first argument,
-  as Redis 8.8 and later define it. The vendored header, like upstream's,
-  declared it without one, from a Redis unstable snapshot, so a call through
-  the binding passed the user where Redis reads the context. A call with the
-  old signature no longer compiles; the SDK does not call it.
+- **Breaking:** `raw::RedisModule_GetUserUsername` takes the context as its
+  first argument, as Redis 8.8 and later define it. The vendored header, like
+  upstream's, declared it without one, from a Redis unstable snapshot, so a
+  call through the binding passed the user where Redis reads the context. A
+  call with the old signature no longer compiles; the SDK does not call it.
+  No 2.x release declared it, so only code written against 3.0.0-alpha.1 or
+  upstream's unreleased master is affected.
 - On Redis 6, `RedisValue::Bool`, `RedisValue::BigNumber` and
   `RedisValue::VerbatimString` replies and `Context::get_current_user` no
   longer panic into `ERR command panicked` (#109). A bool replies with the
