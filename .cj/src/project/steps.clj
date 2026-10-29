@@ -8,15 +8,32 @@
 (def ^:private output-limit (* 16 1024 1024))
 
 (defn env
-  "Environment overlay for cargo and the integration tests: `~/.cargo/bin`
-  first on PATH when it exists, so the toolchain rust-toolchain.toml pins wins
-  over another rustc, and TEST_REDIS_SERVER_BIN when `server` is given."
+  "Environment overlay for cargo and the integration tests. PATH puts the
+  directory of `server` (when given) and `~/.cargo/bin` (when it exists) first,
+  so the child processes cargo and check.sh start find that redis-server and
+  the toolchain rust-toolchain.toml pins; TEST_REDIS_SERVER_BIN names
+  `server`."
   [server]
   (let [cargo-bin (str (fs/path (fs/home) ".cargo" "bin"))
-        path (System/getenv "PATH")]
+        dirs (cond-> []
+               server (conj (str (fs/parent (fs/absolutize server))))
+               (fs/directory? cargo-bin) (conj cargo-bin))]
     (cond-> {}
-      (fs/directory? cargo-bin) (assoc "PATH" (str cargo-bin ":" path))
+      (seq dirs) (assoc "PATH" (str/join ":" (conj dirs (System/getenv "PATH"))))
       server (assoc "TEST_REDIS_SERVER_BIN" server))))
+
+(defn- resolve-program
+  "`program` as found on the overlay's PATH. clajent.proc starts argv[0] from
+  the recipe's own PATH, so a bare name is resolved here first."
+  [program env]
+  (if (or (str/includes? program "/") (nil? (get env "PATH")))
+    program
+    (or (some (fn [dir]
+                (let [candidate (fs/path dir program)]
+                  (when (and (fs/regular-file? candidate) (fs/executable? candidate))
+                    (str candidate))))
+              (str/split (get env "PATH") #":"))
+        program)))
 
 (defn exit-code [result]
   (get-in result [:process :exit-code]))
@@ -30,11 +47,13 @@
   (str/trim (get-in result [:stdout :text] "")))
 
 (defn run
-  "Runs `argv` in `cwd` and returns the proc/run! result."
+  "Runs `argv` in `cwd` with `env` over the inherited environment and returns
+  the proc/run! result."
   ([cwd argv] (run cwd argv {}))
   ([cwd argv env]
-   (proc/run! {:argv (vec argv) :cwd cwd :env env
-               :stdout-limit-bytes output-limit :stderr-limit-bytes output-limit})))
+   (let [[program & args] argv]
+     (proc/run! {:argv (into [(resolve-program program env)] args) :cwd cwd :env env
+                 :stdout-limit-bytes output-limit :stderr-limit-bytes output-limit}))))
 
 (defn test-counts
   "Sums the `test result:` lines cargo test prints; nil when there are none."
@@ -54,21 +73,27 @@
     (str/join "\n" (drop (max 0 (- (count lines) n)) lines))))
 
 (defn step
-  "Runs one named step in `cwd`, writes its stdout and stderr to
+  "Runs one named step in `cwd`, writes its stdout then its stderr to
   `log-dir/NAME.log`, and returns its name, :pass or :fail, duration, log path,
-  test counts when it ran tests, and on failure the exit code and the last
-  lines of output."
+  test counts when it ran tests, :truncated? when a stream outgrew the
+  capture, and on failure the exit code and the last lines of each stream
+  (cargo test writes failures to stdout and its summary to stderr)."
   [cwd log-dir env {:keys [name argv] :as spec}]
   (let [result (run cwd argv (merge env (:env spec)))
-        output (str (get-in result [:stdout :text] "") (get-in result [:stderr :text] ""))
+        stdout (get-in result [:stdout :text] "")
+        stderr (get-in result [:stderr :text] "")
         log (str (fs/path log-dir (str name ".log")))
-        counts (test-counts output)]
-    (spit log output)
+        counts (test-counts stdout)
+        truncated? (boolean (or (get-in result [:stdout :truncated?])
+                                (get-in result [:stderr :truncated?])))]
+    (spit log (str stdout stderr))
     (cond-> {:name name
              :status (if (ok? result) :pass :fail)
              :seconds (quot (or (:duration-ms result) 0) 1000)
              :log log}
       counts (assoc :tests counts)
+      truncated? (assoc :truncated? true)
       (not (ok? result)) (assoc :exit-code (exit-code result)
                                 :error (:error result)
-                                :tail (tail output 30)))))
+                                :stdout-tail (tail stdout 25)
+                                :stderr-tail (tail stderr 15)))))

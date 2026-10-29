@@ -21,11 +21,13 @@ project recipes fit in.
   confirm the push CI.
 - `cj run review-pr N` is a read-only provider review. It does not replace the
   independent review `CONTRIBUTING.md` asks for, and its findings need
-  checking against the code.
+  checking against the code. Its Codex turn fails until clajent issue 75 is
+  fixed.
 
 ## Stays with the owner
 
-- Merges, which need the owner's approval for each PR.
+- Merging: `CONTRIBUTING.md` step 8 says when a PR may be squash-merged; ask
+  the owner before merging.
 - Publishing to crates.io, tags and releases.
 - Anything on upstream RedisLabsModules, which is read-only.
 

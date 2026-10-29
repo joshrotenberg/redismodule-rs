@@ -1,5 +1,5 @@
 (ns gates
-  "Run CONTRIBUTING.md's validation list in a checkout; print each step's result and the test counts. Writes only target/.
+  "Run CONTRIBUTING.md's validation list in a checkout; print each step's result and the test counts. Writes only build output: target/ and the ignored Cargo.lock.
 
   Runs every step even after one fails, in this order: fmt, Clippy at the
   default and 7.2 floors, examples, workspace tests, the allocator fallback
@@ -11,8 +11,10 @@
 
   Each step's full output goes to target/gates/NAME.log in the checkout. The
   result lists every step with :pass or :fail, its duration, its log, test
-  counts for steps that ran tests, and for a failed step its exit code and
-  last 30 lines. :status is :failed when any step failed, so cj run exits 1.
+  counts for steps that ran tests, :truncated? when its output outgrew the
+  16 MiB capture (test counts may then be short), and for a failed step its
+  exit code and the last lines of stdout and stderr. :status is :failed when
+  any step failed, so cj run exits 1.
 
   The integration tests start redis-server from PATH, or --server. They bind
   local ports, so in a sandbox that forbids that the test steps fail."
@@ -53,7 +55,10 @@
       :argv (concat ["cargo" "test" "--workspace" "--no-fail-fast"] exclude floor-7-2)
       :env threads}
      {:name "doc-7.2"
-      :argv (concat ["cargo" "doc" "--workspace" "--no-deps"] exclude floor-7-2)
+      ;; As CI's floor jobs build it: the floor plus all-features-but-xor.
+      :argv (concat ["cargo" "doc" "--workspace" "--no-deps"] exclude
+                    ["--no-default-features" "--features"
+                     "all-features-but-xor min-redis-compatibility-version-7-2"])
       :env strict-doc}
      {:name "doctest-bootstrap" :argv ["cargo" "test" "--doc"] :env {"RUSTC_BOOTSTRAP" "1"}}]))
 
