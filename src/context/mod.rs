@@ -423,6 +423,49 @@ impl DetachedContext {
         assert!(!c.is_null(), "Detached context has not been initialized");
         // Redis only takes the lock here; it does not read the context.
         unsafe { crate::__required_api!(RedisModule_ThreadSafeContextLock)(c) };
+        // SAFETY: the native call acquired the Redis lock on this thread.
+        unsafe { self.guard_after_lock(c) }
+    }
+
+    /// Attempts to acquire the Redis lock without waiting.
+    ///
+    /// Returns `None` if the lock cannot be acquired immediately. On success,
+    /// returns the same borrowed worker guard as [`Self::lock`]; dropping it
+    /// releases the lock. Workers can check a stop flag between attempts so
+    /// `MODULE UNLOAD` can join them while holding the Redis lock. Stop workers
+    /// before unloading the module, as with [`Self::lock`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the context is uninitialized, or if it was released or replaced
+    /// before this call acquired the lock, just like [`Self::lock`].
+    ///
+    /// ```compile_fail,E0515
+    /// fn escape() -> Option<redis_module::DetachedContextGuard<'static>> {
+    ///     let owner = redis_module::DetachedContext::new();
+    ///     owner.try_lock()
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0277
+    /// fn move_guard(guard: redis_module::DetachedContextGuard<'_>) {
+    ///     std::thread::scope(|scope| { scope.spawn(move || drop(guard)); });
+    /// }
+    /// ```
+    pub fn try_lock(&self) -> Option<DetachedContextGuard<'_>> {
+        let c = self.ctx.load(Ordering::Acquire);
+        assert!(!c.is_null(), "Detached context has not been initialized");
+        // Like Lock, TryLock does not read the context in supported servers.
+        let status = unsafe { crate::__required_api!(RedisModule_ThreadSafeContextTryLock)(c) };
+        if raw::Status::from(status) != raw::Status::Ok {
+            return None;
+        }
+        // SAFETY: TryLock returned OK, so this thread holds the Redis lock.
+        Some(unsafe { self.guard_after_lock(c) })
+    }
+
+    /// The caller must hold the Redis lock on the current thread.
+    unsafe fn guard_after_lock(&self, c: *mut raw::RedisModuleCtx) -> DetachedContextGuard<'_> {
         // Unload and reload replace the context under the lock, so a context
         // still stored now stays valid until the guard unlocks.
         if self.ctx.load(Ordering::Acquire) != c {
