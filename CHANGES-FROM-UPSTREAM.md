@@ -400,6 +400,17 @@ these in October 2026.
 
 ## Additions
 
+`ThreadSafeContext::try_lock` and `DetachedContext::try_lock` wrap
+`RedisModule_ThreadSafeContextTryLock`, returning the same borrowed guards as
+`lock` or `None` when the native lock attempt fails (#113). Guards keep the
+existing call-user cleanup and unlock behavior; the detached path also checks
+that unload or reload did not replace its context before acquisition. This
+lets a worker check its stop flag rather than block on the Redis lock while
+module unload joins it. The API exists in Redis 6.0.20 and every supported
+floor. `examples/try_lock.rs` and the integration test cover contention,
+repeated successful acquisition, explicit stop, unload and reload; the oldest
+server CI job runs that test too.
+
 `redis_module!` owns accepted configuration private data per load, releasing
 observer captures and the final cached string getter reply after caught load
 failures or successful deinit. Refused or panicking deinit retains this data;

@@ -256,6 +256,46 @@ impl<B: Send> ThreadSafeContext<B> {
     /// similar to `std::sync::Mutex`.
     pub fn lock(&self) -> ContextGuard<'_> {
         unsafe { crate::__required_api!(RedisModule_ThreadSafeContextLock)(self.ctx) };
+        // SAFETY: the native call acquired the Redis lock on this thread.
+        unsafe { self.guard_after_lock() }
+    }
+
+    /// Attempts to acquire the Redis lock without waiting.
+    ///
+    /// Returns `None` if the lock cannot be acquired immediately. A successful
+    /// guard borrows this owner and releases the lock when dropped, just like
+    /// [`Self::lock`]. Use this from a worker that must check a stop flag instead
+    /// of waiting for a lock held by `MODULE UNLOAD`; stop and join workers
+    /// before the module unloads. See `examples/try_lock.rs`.
+    ///
+    /// The guard cannot outlive the owner:
+    ///
+    /// ```compile_fail,E0515
+    /// fn escape() -> Option<redis_module::ContextGuard<'static>> {
+    ///     let owner = redis_module::ThreadSafeContext::new();
+    ///     owner.try_lock()
+    /// }
+    /// ```
+    ///
+    /// The guard must stay on the thread that acquired the lock:
+    ///
+    /// ```compile_fail,E0277
+    /// fn move_guard(guard: redis_module::ContextGuard<'_>) {
+    ///     std::thread::scope(|scope| { scope.spawn(move || drop(guard)); });
+    /// }
+    /// ```
+    pub fn try_lock(&self) -> Option<ContextGuard<'_>> {
+        let status =
+            unsafe { crate::__required_api!(RedisModule_ThreadSafeContextTryLock)(self.ctx) };
+        if raw::Status::from(status) != raw::Status::Ok {
+            return None;
+        }
+        // SAFETY: TryLock returned OK, so this thread holds the Redis lock.
+        Some(unsafe { self.guard_after_lock() })
+    }
+
+    /// The caller must hold the Redis lock on the current thread.
+    unsafe fn guard_after_lock(&self) -> ContextGuard<'_> {
         let ctx =
             unsafe { crate::__required_api!(RedisModule_GetThreadSafeContext)(ptr::null_mut()) };
         let ctx = unsafe { WorkerContext::new(ctx) };
