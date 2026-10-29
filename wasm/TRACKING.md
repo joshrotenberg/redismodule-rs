@@ -111,6 +111,14 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-10-29: merged SDK master `f4df0dd` into the branch as `016e421`.
+  SDK PR 128 (#110) imports upstream's persistence-event payload, its alias,
+  version constant and syncer flag, with regenerated bindings and the upstream
+  review checkpoint. No host adaptations were needed. `cj run wasm-sync`
+  fetched with `--locked` and ran `wasm/ci/check.sh` on Rust 1.94.0 and Redis
+  8.10.2: 398 tests passed. All four lockfiles remained byte-identical to
+  their snapshots.
+
 - 2026-10-29: merged SDK master `a4caff5` into the branch as `76dd1b4`.
   SDK PR 127 adds `AGENTS.md` and a `CLAUDE.md` that imports it, pointing
   agent sessions at `CONTRIBUTING.md` and the project `cj` recipes. No runtime
