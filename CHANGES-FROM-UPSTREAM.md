@@ -344,6 +344,17 @@ Redis's errors and frees the private data Redis rejects ([c3432c5]).
 
 ## Upstream pull requests this fork includes, adapts or supersedes
 
+The one-time assessment in #101 covers the 26 previously unlisted pull
+requests below, including proposals deferred rather than ported. Their current
+diffs and the 42 open upstream pull requests were checked on 2026-10-30 against
+upstream master `1c84d3d` and this fork's SDK at `d710daf`. No open upstream
+pull request had changed since the preceding watch review. Missing wrappers
+stay ranked in [the API inventory](docs/API-COVERAGE.md#ranking-by-evidence-of-need):
+that inventory requires a concrete consumer this repository can build and test
+before creating implementation work. This assessment selects no additional
+ports; the existing runtime subscription and streaming reply questions remain
+in #114 and #55.
+
 | upstream PR | title | state upstream | in this fork |
 |---|---|---|---|
 | [93][p93] | Changed parse_call_reply to return a BulkString. | open | Adapted: string call replies keep their type ([b29cd45], [41238c3]). |
@@ -363,6 +374,32 @@ Redis's errors and frees the private data Redis rejects ([c3432c5]).
 | [487][p487], [488][p488] | Fix ServerInfo::field leak with a null context.; Fix ServerInfo field string leaks with and without auto-memory | closed; 488 merged | The same fix ([813cfa0]), and 488's `None` for a field name with a NUL byte ([9ea85f4]); see Base. |
 | [489][p489] | Add `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` to redismodule.h | closed; merged | Included in the header and bindings, and exposed as `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`; see Base. |
 | [490][p490] | update redismodule.h with RedisModulePersistenceInfo | closed; merged | Included in the header and bindings: the persistence-event payload, version and syncer flag; see Base. |
+| [100][p100] | Added hash_get macro to allow getting multiple hash fields at once | open | Superseded by `RedisKey::hash_get_multi` and `HMGetResult`, which handle retained values and missing fields without exposing native variadic calls in a caller's macro expansion. No additional port. |
+| [168][p168] | add support for Command filter | open | Deferred with 437: no safe command-filter wrapper exists here. A port needs its own borrowed callback view and audited argument ownership, rather than public raw contexts. The API inventory ranks this gap third; no buildable downstream consumer is identified. |
+| [169][p169] | initial commit of dictionary support | open draft | Deferred: no SDK dictionary wrapper. The draft's native value pointers and iterator lifetimes need an ownership design; Rust collections remain available. Keep the gap in the API inventory until a concrete module needs a native dictionary. |
+| [193][p193] | codecov integration | open | Not adopted: adds a nightly coverage workflow, downloads a latest binary, uses `--all-features` despite mutually exclusive floors, and uploads to Codecov. The fork's pinned-toolchain server/floor matrix already exercises the SDK; no coverage service is part of the current workflow. |
+| [228][p228] | add support for dictionary | open draft | Deferred with 169: this draft adds only creation and destruction around raw dictionary/context pointers, not usable map operations. No additional capability over the raw bindings justifies a port without a consumer. |
+| [229][p229] | API extentions. | open | Mostly superseded: scans, streams, typed server-event attributes, call options, RESP3 values, role/OOM queries, scoped ACL-call users, configuration registration and allocator fallback exist here. Direct incremental reply construction remains the #55 design question; conditional runtime server-event subscription remains #114. Do not port the draft's broad context access or callback ownership wholesale. |
+| [240][p240] | add ERR prefix to error | open | Not adopted: unconditionally adding `ERR` in `Display` would duplicate existing prefixes and change explicit codes such as `WRONGTYPE`. This fork preserves explicit error text, and standard-error conversions and `RedisError::from_error` add `ERR` at conversion time. |
+| [245][p245] | Publicizing RedisKey member | open | Superseded by `to_raw_parts`, which consumes the key and transfers native close responsibility, and unsafe `from_raw_parts`. `key_inner` stays private to protect the key/context lifetime. Its unrelated CircleCI/readies changes do not fit this fork's CI. |
+| [325][p325] | Publishing test, both on PR and manually available | open | Not adopted: the fork distributes git pre-release tags and requires separate owner authorization for publication. Upstream-only release workflows remain disabled here; a fake-version publishing workflow would not validate the supported git installation path. |
+| [336][p336] | Add checks for module initialisation. | open | Not adopted as written: `RedisModule_OnLoad` is unsafe and requires valid Redis callback inputs. The fork's unsafe `decode_args` already handles zero/negative counts and null argv without constructing a slice. Dereferencing `*argv` before checking the count and logging before API initialization, as this PR does, are unsuitable guards. |
+| [354][p354] | Add capability to create module users | open | Deferred: scoped calls and ACL checks for existing users are supported, but owned module-user creation, ACL mutation and client authentication are not. A port needs callback/unload and user-lifetime rules; the draft's unconditional `Send` is unsuitable. Keep the distinct gap ranked in the API inventory pending a concrete consumer. |
+| [374][p374] | CI improvements | open | Not adopted: the fork already runs formatting, Clippy, dependency-policy checks and tests in GitHub Actions on its pinned toolchain. CircleCI/Makefile changes and additional nightly, pants and spelling workflows do not replace or extend the required validation for this work. |
+| [391][p391] | Add API to get expire for RedisKey | open | Deferred: raw `GetExpire` and `GetAbsExpire` are declared but have no key wrapper. A future key API should handle absent keys, no-expiry sentinels and API availability rather than copy the draft's unchecked pointer lookup. Ranked in the API inventory; no concrete consumer identified. |
+| [400][p400] | Update the headers to the latest state. | open | OSS additions are covered by the current header, except the deliberately disabled long-double APIs described above. Enterprise sharding, swap metadata and type extensions, plus the separate RLEC header/build mode, are not adopted without an Enterprise consumer. Keep `init_api` and the separate initialization entry point used by this fork. |
+| [405][p405] | Avoid calling decode args if there are no args given when loading module | open draft | Covered: `decode_args` returns early for null argv or a nonpositive count. It is unsafe, explicitly documents the remaining pointer requirements, and retains each native string independently of the callback. |
+| [431][p431] | MOD-11297: cleanup add crate owner | open | Already covered: the crate-owner invitation workflow is absent. No crates.io ownership changes are needed or authorized by the fork's development workflow. |
+| [437][p437] | Add Rust bindings for Redis Module Command Filter APIs (upstream PR 3) | open | Deferred: all eight APIs remain raw. The proposed public raw-pointer constructors, argument ownership and unregister behavior need adaptation to a registration owner and borrowed filter callback view. Ranked with 168 in the API inventory, without a buildable downstream consumer. |
+| [442][p442] | Add New missing events | open | Header constants `OVERWRITTEN` and `TYPE_CHANGED` are already present; `NotifyEvent` does not expose them. Defer the flag wrappers with the API inventory's request list until a concrete consumer appears. The command-filter code included in its diff is the separate 437 proposal. |
+| [444][p444] | Add lru lfu api support | open | Deferred: `SetLRU`, `GetLRU`, `SetLFU` and `GetLFU` remain raw. A key wrapper needs checked statuses, null-key handling and duration conversion. The inventory ranks this fourth; the bundled filter/event changes are assessed under 437/442, not additional implementations. |
+| [446][p446] | Add support for randomkey API | open | Deferred: raw `RandomKey` is available; there is no `RuntimeContext` wrapper. The inventory ranks this fifth; `RANDOMKEY` through `call` is the existing command path. A direct wrapper needs native-string ownership tests and a concrete consumer before porting. |
+| [452][p452] | bring complete redismodule.h | open | Not a wholesale OSS header refresh: the diff defines `REDISMODULE_H_ENTERPRISE` and adds Enterprise/internal hooks, sharding, SST replication, auto-memory internals and call variants. Retain the OSS 8.10.2 refresh plus existing Enterprise declarations described above; defer the extra interfaces without a consumer. Do not remove `init_api` or replace deliberate typedef/signature differences. |
+| [459][p459] | Add constant for accessing trimmed keys | open | Covered: `KeyFlags::ACCESS_TRIMMED` already exposes the header constant inherited from upstream PR 468. |
+| [466][p466] | ci: Add a dry-run workflow for release PRs | open | Not adopted for this stage: registry publication is separately authorized, while current pre-releases validate a git dependency. A workspace publish dry run belongs with eventual crates.io release preparation, not every SDK manifest change. |
+| [469][p469] | add RedisKey::name method | open | Deferred: raw `GetKeyNameFromModuleKey` exists, but `RedisKey::name` does not. A wrapper must retain the borrowed native name without first treating it as an owned string. The API inventory ranks this eighth; callers that open a key already have its name and no additional consumer is identified. |
+| [482][p482] | feat: add try_scan/try_for_each to the scan cursors | open draft | Deferred: scans are safe here but lack callback-driven `ControlFlow` cancellation. The draft suppresses later callbacks in the current batch; it cannot stop Redis mid-batch, so resuming skips the unvisited entries in that batch. Adapt only for a consumer accepting those semantics, preserving this fork's mutable callback borrowing, optional set values and panic containment. |
+| [484][p484] | MOD-18400: Expose WBM budget APIs in Rust | open draft | Deferred: the actual diff adds `SetWriteBufferBudget`, not the allocate/free pair named in the description. It extends the Enterprise budget interface and is absent from the fork and OSS 8.10.2. No tested consumer justifies adding a new header declaration or wrapper now. |
 | [85][p85], [348][p348], [360][p360], [361][p361] | dependency updates | open | Superseded: `enum-primitive-derive` removed ([5dbf237]), `nix` and `strum_macros` removed ([86b8113]), bindgen at 0.73 ([0e1d8f2]). |
 
 ## Fixes with no upstream issue or pull request
@@ -761,3 +798,30 @@ These compile unchanged but behave differently:
 [p488]: https://github.com/RedisLabsModules/redismodule-rs/pull/488
 [p489]: https://github.com/RedisLabsModules/redismodule-rs/pull/489
 [p490]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/490
+
+[p100]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/100
+[p168]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/168
+[p169]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/169
+[p193]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/193
+[p228]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/228
+[p229]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/229
+[p240]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/240
+[p245]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/245
+[p325]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/325
+[p336]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/336
+[p354]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/354
+[p374]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/374
+[p391]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/391
+[p400]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/400
+[p405]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/405
+[p431]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/431
+[p437]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/437
+[p442]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/442
+[p444]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/444
+[p446]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/446
+[p452]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/452
+[p459]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/459
+[p466]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/466
+[p469]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/469
+[p482]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/482
+[p484]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/484
