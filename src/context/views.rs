@@ -153,6 +153,12 @@ unsafe impl RedisLockIndicator for EventContext {}
 /// ```
 ///
 /// ```compile_fail,E0599
+/// fn worker(ctx: &redis_module::WorkerContext) {
+///     ctx.subscribe_to_server_event(redis_module::server_events::ServerEventHandler::Shutdown(|_| {}));
+/// }
+/// ```
+///
+/// ```compile_fail,E0599
 /// fn worker(ctx: &redis_module::WorkerContext) { ctx.replicate_verbatim(); }
 /// ```
 ///

@@ -680,6 +680,9 @@ macro_rules! redis_module {
             // Captured destructors run after init panic containment, never while
             // unwinding the load callback.
             configuration_load.finish(status);
+            if status != raw::Status::Ok as c_int {
+                $crate::server_events::__clear_runtime_handlers();
+            }
             if detached_stored && status != raw::Status::Ok as c_int {
                 // Redis frees a module whose load fails without calling OnUnload.
                 // SAFETY: OnLoad holds the Redis lock and the module still exists.
@@ -738,6 +741,7 @@ macro_rules! redis_module {
                         return $crate::Status::Err as c_int;
                     }
                     timer_unload.commit();
+                    $crate::server_events::__clear_runtime_handlers();
                     // A later load of a retained image needs a fresh context.
                     // SAFETY: OnUnload holds the Redis lock and the module still exists.
                     unsafe { $crate::MODULE_CONTEXT.__release() };
