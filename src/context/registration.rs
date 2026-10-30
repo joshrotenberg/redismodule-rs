@@ -1,7 +1,8 @@
 //! Module initialization capabilities, borrowed for one load invocation.
+use std::ffi::CString;
 use std::ops::Deref;
 
-use crate::{EventContext, ModuleOptions};
+use crate::{AclCategory, EventContext, ModuleOptions, RedisError, Status, raw};
 
 /// A module's load-time registration context.
 ///
@@ -81,6 +82,9 @@ use crate::{EventContext, ModuleOptions};
 #[derive(Debug)]
 pub struct RegistrationContext<'load> {
     context: &'load EventContext,
+    // This belongs to the load, including commands registered by init. It must
+    // not survive a failed load or leak into another module's registrations.
+    unregistered_acl_categories: Vec<String>,
 }
 
 impl<'load> RegistrationContext<'load> {
@@ -106,7 +110,70 @@ impl<'load> RegistrationContext<'load> {
     /// association must be live, and the Redis lock must be held. The wrapper
     /// and any references derived from it must not outlive that invocation.
     pub const unsafe fn from_context(context: &'load EventContext) -> Self {
-        Self { context }
+        Self {
+            context,
+            unregistered_acl_categories: Vec::new(),
+        }
+    }
+
+    /// Registration plumbing for `redis_module!`.
+    #[doc(hidden)]
+    pub fn __register_acl_categories(
+        mut self,
+        categories: impl IntoIterator<Item = AclCategory>,
+    ) -> Result<Self, RedisError> {
+        for category in categories {
+            if category == AclCategory::None {
+                continue;
+            }
+            let name = category.to_string();
+            let Some(add) = (unsafe { raw::RedisModule_AddACLCategory }) else {
+                if self.unregistered_acl_categories.is_empty() {
+                    self.log_notice(
+                        "Warning: Redis version does not support adding new ACL categories",
+                    );
+                }
+                self.unregistered_acl_categories.push(name);
+                continue;
+            };
+            let name_c = CString::new(name.as_str())?;
+            if unsafe { add(self.context.get_raw(), name_c.as_ptr()) } == Status::Err as i32 {
+                // Capture errno before formatting or logging can change it. Redis
+                // keeps categories after unload; only EBUSY means the name exists.
+                let error = std::io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::EBUSY) {
+                    return Err(RedisError::String(format!(
+                        "Error: failed to add ACL category `{name}`"
+                    )));
+                }
+            }
+        }
+        Ok(self)
+    }
+
+    pub(crate) fn filter_optional_acl_categories(&self, categories: &str) -> String {
+        let unregistered = &self.unregistered_acl_categories;
+        // Redis separates category names with single spaces, treating empty
+        // tokens as errors. Keep malformed input intact so it still warns.
+        if unregistered.is_empty() || categories.split(' ').any(str::is_empty) {
+            return categories.to_owned();
+        }
+        categories
+            .split(' ')
+            .filter(|name| {
+                let declared = unregistered
+                    .iter()
+                    .any(|category| category.eq_ignore_ascii_case(name));
+                // Built-in categories remain available even when a module
+                // redundantly declares one on a server without AddACLCategory.
+                let builtin = !matches!(
+                    AclCategory::from(name.to_ascii_lowercase().as_str()),
+                    AclCategory::Single(_) | AclCategory::Multi(_)
+                );
+                !declared || builtin
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// Sets module behavior options during initialization.

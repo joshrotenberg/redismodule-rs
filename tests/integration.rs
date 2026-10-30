@@ -1267,6 +1267,93 @@ fn test_command_builder_optional_acl_failure_retains_required_access() -> Result
 }
 
 #[test]
+fn test_optional_declared_acl_categories_follow_server_support_and_reload() -> Result<()> {
+    let mut con = TestConnection::new("command_builder");
+    let supported = redis::cmd("builder.custom_supported").query::<i64>(&mut con)? != 0;
+    let module = utils::module_path("command_builder")?;
+    for load in 1..=2 {
+        for command in [
+            "builder.custom",
+            "builder.legacy_custom",
+            "builder.init_acl",
+            "builder.optional_read",
+        ] {
+            let info: Vec<Vec<Value>> = redis::cmd("COMMAND")
+                .arg(&["INFO", command])
+                .query(&mut con)?;
+            let categories: Vec<String> = redis::from_redis_value_ref(&info[0][6])?;
+            assert!(categories.contains(&"@read".to_owned()), "{categories:?}");
+            assert_eq!(
+                categories.contains(&"@builder_custom".to_owned()),
+                supported,
+                "{command}: {categories:?}"
+            );
+            assert_eq!(redis::cmd(command).query::<String>(&mut con)?, "PONG");
+        }
+        assert_eq!(
+            redis::cmd("builder.only_custom").query::<String>(&mut con)?,
+            "PONG"
+        );
+        let info: Vec<Vec<Value>> = redis::cmd("COMMAND")
+            .arg(&["INFO", "builder.only_custom"])
+            .query(&mut con)?;
+        let categories: Vec<String> = redis::from_redis_value_ref(&info[0][6])?;
+        assert_eq!(
+            categories.contains(&"@builder_second".to_owned()),
+            supported
+        );
+        let log = con.server_log()?;
+        assert_eq!(
+            log.matches("Redis version does not support adding new ACL categories")
+                .count(),
+            if supported { 0 } else { load },
+            "{log}"
+        );
+        for command in [
+            "builder.custom",
+            "builder.legacy_custom",
+            "builder.init_acl",
+            "builder.only_custom",
+            "builder.optional_read",
+        ] {
+            assert!(
+                !log.contains(&format!(
+                    "Failed to set optional ACL categories for command {command}"
+                )),
+                "{log}"
+            );
+        }
+        // A declared missing category must not suppress failures for an
+        // unrelated invalid optional category, or its required read fallback.
+        assert!(
+            log.contains("Failed to set optional ACL categories for command builder.mixed_invalid")
+        );
+        let info: Vec<Vec<Value>> = redis::cmd("COMMAND")
+            .arg(&["INFO", "builder.mixed_invalid"])
+            .query(&mut con)?;
+        let categories: Vec<String> = redis::from_redis_value_ref(&info[0][6])?;
+        assert!(categories.contains(&"@read".to_owned()));
+        if load == 1 {
+            redis::cmd("MODULE")
+                .arg(&["UNLOAD", "command_builder"])
+                .query::<()>(&mut con)?;
+            redis::cmd("MODULE")
+                .arg(&["LOAD", &module])
+                .query::<()>(&mut con)?;
+        }
+    }
+    if !supported {
+        let error = match TestConnection::try_with_args("command_builder", &["required-custom-acl"])
+        {
+            Ok(_) => panic!("a missing mandatory custom category loaded"),
+            Err(error) => error,
+        };
+        assert!(format!("{error:#}").contains("failed to set mandatory ACL categories"));
+    }
+    Ok(())
+}
+
+#[test]
 fn test_command_builder_invalid_definitions_fail_the_load() {
     for (mode, expected) in [
         ("key-zero", "invalid command key range"),

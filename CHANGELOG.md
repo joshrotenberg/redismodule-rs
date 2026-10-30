@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On servers without `AddACLCategory`, `redis_module!` reports that limitation
+  once per load and omits its declared custom names from optional command ACL
+  categories (#115). Built-in categories and mandatory checks remain active;
+  unrelated optional-category errors still warn. The policy also applies to
+  legacy command definitions and builders registered by init.
 - **Breaking:** `raw::RedisModule_GetUserUsername` takes the context as its
   first argument, as Redis 8.8 and later define it. The vendored header, like
   upstream's, declared it without one, from a Redis unstable snapshot, so a

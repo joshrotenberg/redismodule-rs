@@ -307,7 +307,9 @@ macro_rules! redis_event_handler {
 ///
 /// Custom `acl_categories` are shared across modules and remain registered
 /// after unload. Existing categories are reused; other registration errors
-/// fail the module load.
+/// fail the module load. If the server lacks custom category registration, one
+/// notice is logged per load and those custom names are omitted from optional
+/// command categories. Required categories still have to be accepted by Redis.
 ///
 /// Initialization hooks receive a borrowed [`RegistrationContext`](crate::RegistrationContext).
 /// Load-only APIs require it; command handlers continue receiving [`Context`](crate::Context).
@@ -410,7 +412,6 @@ macro_rules! redis_module {
             argc: std::os::raw::c_int,
         ) -> std::os::raw::c_int {
             use std::os::raw::c_int;
-            use std::ffi::CString;
 
             use $crate::raw;
             use $crate::RedisString;
@@ -520,32 +521,15 @@ macro_rules! redis_module {
                         }
                     )*
 
-                    $(
-                        $(
-                            // SAFETY: Redis sets the API pointers before OnLoad runs.
-                            if let Some(RM_AddACLCategory) = unsafe { raw::RedisModule_AddACLCategory } {
-                                let module_acl_category = AclCategory::from($module_acl_category);
-                                if module_acl_category != AclCategory::None {
-                                    let category = CString::new(format!("{module_acl_category}")).unwrap();
-                                    // SAFETY: ctx is the load context; the string outlives the call.
-                                    if unsafe { RM_AddACLCategory(ctx, category.as_ptr()) } == raw::Status::Err as c_int {
-                                        // Capture errno before formatting or logging can change it.
-                                        let error = ::std::io::Error::last_os_error();
-                                        // Redis keeps categories after unload and permits every
-                                        // module to use them. Only EBUSY means the name exists.
-                                        if error.raw_os_error() != Some($crate::__private::EBUSY) {
-                                            // SAFETY: ctx is the module's load context.
-                                            unsafe { raw::redis_log(ctx, &format!("Error: failed to add ACL category `{module_acl_category}`")) };
-                                            return raw::Status::Err as c_int;
-                                        }
-                                    }
-                                }
-                            } else {
-                                // SAFETY: ctx is the module's load context.
-                                unsafe { raw::redis_log(ctx, "Warning: Redis version does not support adding new ACL categories") };
-                            }
-                        )*
-                    )?
+                    let context = match context.__register_acl_categories([
+                        $($($crate::AclCategory::from($module_acl_category),)*)?
+                    ]) {
+                        Ok(context) => context,
+                        Err(error) => {
+                            runtime_context.log_warning(&error.to_string());
+                            return raw::Status::Err as c_int;
+                        }
+                    };
 
                     $(
                         $crate::__redis_register_commands!(&context; $($commands)*);

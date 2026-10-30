@@ -179,6 +179,9 @@ impl CommandBuilder {
     /// Sets extra categories tried together with the required categories.
     /// Failure logs a warning and retries only the required categories. On
     /// Redis without command ACL support, optional categories are skipped.
+    /// Custom names declared by `redis_module!` are also skipped when Redis
+    /// cannot register them, after one module-level notice. Built-in and
+    /// required categories are unaffected; other optional failures still warn.
     /// An explicitly empty optional category is rejected.
     pub fn optional_acl_categories(mut self, categories: impl Into<AclCategory>) -> Self {
         self.optional_acl = Some(categories.into());
@@ -225,6 +228,14 @@ impl CommandBuilder {
                 "ERR optional ACL categories must not be empty",
             ));
         }
+        let optional = optional
+            .map(|category| {
+                // The C string was constructed above from a Rust String.
+                let categories = ctx.filter_optional_acl_categories(category.to_str().unwrap());
+                CString::new(categories)
+            })
+            .transpose()?
+            .filter(|category| !category.as_bytes().is_empty());
         let name = register_base_command(ctx, &self.name, &flags, self.callback, self.keys)?;
         set_acl_categories(ctx, &name, &required, optional.as_deref())
     }

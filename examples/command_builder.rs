@@ -15,6 +15,14 @@ fn ping(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok("PONG".into())
 }
 
+// The regression fixture checks capability directly: Valkey's redis_version
+// field reports its Redis compatibility version, not its available module APIs.
+fn custom_acl_supported(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    // SAFETY: Redis initialized this module's API table before invoking a command.
+    let supported = unsafe { redis_module::raw::RedisModule_AddACLCategory }.is_some();
+    Ok(i64::from(supported).into())
+}
+
 fn get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let key = args.get(1).ok_or(RedisError::WrongArity)?;
     ctx.call("GET", &[key])
@@ -35,6 +43,16 @@ fn panic_command(_: &Context, _: Vec<RedisString>) -> RedisResult {
 }
 
 fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> Status {
+    // Declared custom categories are optional on servers without AddACLCategory;
+    // the built-in read category remains mandatory on every supported server.
+    if let Err(error) = redis_command!("builder.init_acl", ping)
+        .acl_categories("read")
+        .optional_acl_categories("builder_custom builder_second")
+        .register(ctx)
+    {
+        ctx.log_warning(&error.to_string());
+        return Status::Err;
+    }
     let Some(mode) = args.first() else {
         return Status::Ok;
     };
@@ -48,6 +66,7 @@ fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> St
         "last-zero" => command.keys(KeyRange::new(1).last(0)),
         "unknown-flags" => command.flags(CommandFlags::from_bits_retain(1 << 31)),
         "required-acl" => command.acl_categories("nonexistent_builder_category"),
+        "required-custom-acl" => command.acl_categories("builder_custom"),
         "optional-empty" => command.optional_acl_categories(""),
         "nul-acl" => command.acl_categories("read\0write"),
         "empty-name" => redis_command!("", ping),
@@ -69,6 +88,7 @@ redis_module! {
     version: 1,
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
+    acl_categories: ["builder_custom", "builder_second", "read",],
     init: init,
     commands: [
         ["builder.legacy", ping, "readonly fast", 0, 0, 0, ""],
@@ -77,6 +97,7 @@ redis_module! {
         redis_command!("builder.callback", callback),
         redis_command!("builder.invoke", invoke),
         redis_command!("builder.ping", ping).read_only().fast(),
+        redis_command!("builder.custom_supported", custom_acl_supported).read_only(),
         redis_command!("builder.get", get)
             .flags(CommandFlags::READ_ONLY | CommandFlags::DENY_SCRIPT)
             .fast().key(1),
@@ -91,6 +112,17 @@ redis_module! {
             .optional_acl_categories("nonexistent_builder_category"),
         redis_command!("builder.optional", ping)
             .optional_acl_categories("nonexistent_builder_category"),
+        ["builder.legacy_custom", ping, "", 0, 0, 0, AclCategory::Read, "builder_custom"],
+        redis_command!("builder.custom", ping)
+            .acl_categories("read")
+            .optional_acl_categories("BuIlDeR_CuStOm read"),
+        redis_command!("builder.only_custom", ping)
+            .optional_acl_categories("builder_second"),
+        redis_command!("builder.optional_read", ping)
+            .optional_acl_categories("read builder_custom"),
+        redis_command!("builder.mixed_invalid", ping)
+            .acl_categories("read")
+            .optional_acl_categories("builder_custom nonexistent_builder_category"),
         redis_command!("builder.panic", panic_command),
     ],
 }
