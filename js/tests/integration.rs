@@ -211,18 +211,14 @@ fn validates_utf8_and_canonical_json_size_without_vm_hooks() -> Result<()> {
         ])
     );
 
-    // {"a":"..."} contributes eight structural bytes. Each NUL uses the
-    // canonical six-byte JSON escape while the remaining characters use one.
-    let escaped = 16usize;
-    let boundary_ascii = 1024 * 1024 - 8 - escaped * 6;
-    let at_boundary =
-        format!("() => ({{a: 'x'.repeat({boundary_ascii}) + '\\0'.repeat({escaped})}})");
-    assert_eq!(project(&mut con, "source", "boundary", at_boundary)?, 1);
-    let over_boundary = format!(
-        "() => ({{a: 'x'.repeat({}) + '\\0'.repeat({escaped})}})",
-        boundary_ascii + 1
-    );
-    assert_rejected_unchanged(&mut con, "source", over_boundary)?;
+    // This escaped output exceeds the JSON byte budget even when a script
+    // attempts to hide it through a prototype hook. Exact-size success cases
+    // are tested in host code, independently of the execution deadline.
+    assert_rejected_unchanged(
+        &mut con,
+        "source",
+        r#"() => { Object.prototype.toJSON = () => "x"; return {escaped: "\u0000".repeat(200000)}; }"#,
+    )?;
     Ok(())
 }
 
@@ -243,7 +239,6 @@ fn exception_timeout_and_heap_refusal_do_not_mutate_destination() -> Result<()> 
 
     con.set_read_timeout(Some(Duration::from_secs(2)))?;
     assert_rejected_unchanged(&mut con, "source", "() => { while (true) {} }")?;
-    con.set_read_timeout(None)?;
 
     assert_rejected_unchanged(
         &mut con,
@@ -370,7 +365,11 @@ fn replication_replays_only_the_hset_effect() -> Result<()> {
         )?,
         1
     );
+    // WAIT may block for five seconds. Keep a finite transport bound that
+    // accommodates that explicit server-side timeout.
+    primary.set_read_timeout(Some(Duration::from_secs(6)))?;
     let acknowledged: usize = redis::cmd("WAIT").arg(&[1, 5000]).query(&mut primary)?;
+    primary.set_read_timeout(Some(Duration::from_secs(2)))?;
     ensure!(
         acknowledged == 1,
         "replica did not acknowledge the projection: {}",

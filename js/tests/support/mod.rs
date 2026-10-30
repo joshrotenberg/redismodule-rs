@@ -230,9 +230,19 @@ impl TestConnection {
                 let Some(mut probe) = probe_connection(port, server.child.child.id())? else {
                     return Ok(false);
                 };
-                let info: String = redis::cmd("INFO").arg("replication").query(&mut probe)?;
-                Ok(info.lines().any(|line| line == "master_link_status:up")
-                    && info.lines().any(|line| line == "master_sync_in_progress:0"))
+                match redis::cmd("INFO")
+                    .arg("replication")
+                    .query::<String>(&mut probe)
+                {
+                    Ok(info) => Ok(info.lines().any(|line| line == "master_link_status:up")
+                        && info.lines().any(|line| line == "master_sync_in_progress:0")),
+                    // Discard a timed-out/LOADING connection and retry a fresh
+                    // bounded probe within the outer synchronization deadline.
+                    Err(error) if error.is_io_error() || error.code() == Some("LOADING") => {
+                        Ok(false)
+                    }
+                    Err(error) => Err(error.into()),
+                }
             })?;
         }
         Ok(server)
@@ -266,11 +276,7 @@ fn probe_connection(port: u16, expected_pid: u32) -> Result<Option<Connection>> 
                 .any(|line| line == format!("process_id:{expected_pid}")))
     })();
     match probe {
-        Ok(true) => {
-            connection.socket.set_read_timeout(None)?;
-            connection.socket.set_write_timeout(None)?;
-            Ok(Some(connection))
-        }
+        Ok(true) => Ok(Some(connection)),
         Ok(false) => Ok(None),
         Err(error) if error.is_io_error() || error.code() == Some("LOADING") => Ok(None),
         Err(error) => Err(error.into()),

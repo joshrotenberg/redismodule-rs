@@ -1,3 +1,6 @@
+mod json_size;
+
+use json_size::serialized_json_bytes;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -17,26 +20,6 @@ const MAX_OUTPUT_FIELDS: usize = 1024;
 const JS_HEAP_BYTES: usize = 8 * 1024 * 1024;
 const JS_STACK_BYTES: usize = 256 * 1024;
 const JS_DEADLINE: Duration = Duration::from_millis(25);
-
-fn escaped_json_string_bytes(value: &str) -> Option<usize> {
-    value.chars().try_fold(2usize, |size, character| {
-        let escaped = match character {
-            '"' | '\\' | '\u{0008}' | '\u{000c}' | '\n' | '\r' | '\t' => 2,
-            '\u{0000}'..='\u{001f}' => 6,
-            _ => character.len_utf8(),
-        };
-        size.checked_add(escaped)
-    })
-}
-
-fn serialized_json_bytes(fields: &BTreeMap<String, String>) -> Option<usize> {
-    fields.iter().try_fold(2usize, |size, (name, value)| {
-        size.checked_add(usize::from(size > 2))?
-            .checked_add(escaped_json_string_bytes(name)?)?
-            .checked_add(1)?
-            .checked_add(escaped_json_string_bytes(value)?)
-    })
-}
 
 fn project(input: Vec<u8>, source: &str) -> Result<BTreeMap<String, String>, RedisError> {
     let deadline = Instant::now() + JS_DEADLINE;
