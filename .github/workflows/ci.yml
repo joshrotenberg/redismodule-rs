@@ -76,6 +76,12 @@ jobs:
       - name: Test
         run: cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
 
+      - name: Build and test native JavaScript projection
+        if: matrix.server == 'redis' && (matrix.version == '7.2.16' || matrix.version == '8.10.2')
+        run: |
+          cargo build --package redis-module-js --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
+          cargo test --package redis-module-js --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
+
       - name: Test macro parsers
         run: cargo test -p redis-module-macros -p redis-module-macros-internals
 
@@ -110,6 +116,7 @@ jobs:
           name: logs-${{ matrix.os }}-${{ matrix.server }}-${{ matrix.version }}-${{ matrix.floor }}
           path: |
             target/**/integration-test/**
+            target/**/redis-module-js-integration/**
             examples/compatibility-floors/target/check-logs/**
             ${{ runner.temp }}/sdk-server-build.log
           if-no-files-found: ignore

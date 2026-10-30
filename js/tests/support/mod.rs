@@ -1,60 +1,21 @@
 use std::fs::{self, OpenOptions};
-use std::net::TcpListener;
+use std::io::Write;
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
-use redis::Connection;
+use redis::{ConnectionLike, RedisResult, Value};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
+const PROBE_TIMEOUT: Duration = Duration::from_millis(200);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 static INSTANCE_ID: AtomicUsize = AtomicUsize::new(0);
-static MODULE_BUILD: OnceLock<Result<(), String>> = OnceLock::new();
-
-fn build_module() -> Result<()> {
-    let result = MODULE_BUILD.get_or_init(|| {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let workspace = manifest_dir
-            .parent()
-            .expect("js package has a workspace parent");
-        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-        let mut command = Command::new(cargo);
-        command
-            .current_dir(workspace)
-            .args(["build", "--package", "redis-module-js"]);
-        if cfg!(feature = "min-redis-compatibility-version-7-2") {
-            command.args([
-                "--no-default-features",
-                "--features",
-                "min-redis-compatibility-version-7-2",
-            ]);
-        }
-        let output = command.output().map_err(|error| error.to_string())?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(format!(
-                "module build failed with {}:\n{}\n{}",
-                output.status,
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            ))
-        }
-    });
-    result
-        .as_ref()
-        .map_err(|message| anyhow::anyhow!(message.clone()))
-        .copied()
-}
 
 pub fn module_path(name: &str) -> Result<String> {
-    // Cargo does not link a loadable cdylib for `cargo test`; build the module
-    // once in the foreground before any server tries to load it.
-    build_module()?;
     let executable = std::env::current_exe()?;
     let deps = executable
         .parent()
@@ -65,11 +26,96 @@ pub fn module_path(name: &str) -> Result<String> {
     } else {
         "so"
     };
-    Ok(profile
-        .join(format!("lib{name}.{extension}"))
-        .to_str()
-        .context("module path is UTF-8")?
-        .to_owned())
+    let module = profile.join(format!("lib{name}.{extension}"));
+    ensure!(
+        module.is_file(),
+        "module artifact is missing; build it with the matching profile and features: {}",
+        module.display()
+    );
+    Ok(module.to_str().context("module path is UTF-8")?.to_owned())
+}
+
+pub struct Connection {
+    socket: TcpStream,
+    parser: redis::Parser,
+    open: bool,
+}
+
+impl Connection {
+    fn connect(port: u16) -> RedisResult<Self> {
+        let address = SocketAddr::from(([127, 0, 0, 1], port));
+        let socket = TcpStream::connect_timeout(&address, PROBE_TIMEOUT)?;
+        socket.set_read_timeout(Some(PROBE_TIMEOUT))?;
+        socket.set_write_timeout(Some(PROBE_TIMEOUT))?;
+        Ok(Self {
+            socket,
+            parser: redis::Parser::new(),
+            open: true,
+        })
+    }
+
+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> std::io::Result<()> {
+        self.socket.set_read_timeout(timeout)
+    }
+
+    fn send(&mut self, command: &[u8]) -> RedisResult<()> {
+        if let Err(error) = self.socket.write_all(command) {
+            self.open = false;
+            let _ = self.socket.shutdown(Shutdown::Both);
+            return Err(error.into());
+        }
+        Ok(())
+    }
+
+    fn receive(&mut self) -> RedisResult<Value> {
+        let reply = self.parser.parse_value(&mut self.socket);
+        if reply.is_err() {
+            self.open = false;
+            let _ = self.socket.shutdown(Shutdown::Both);
+        }
+        reply.and_then(Value::extract_error)
+    }
+}
+
+impl ConnectionLike for Connection {
+    fn req_packed_command(&mut self, command: &[u8]) -> RedisResult<Value> {
+        self.send(command)?;
+        self.receive()
+    }
+
+    fn req_packed_commands(
+        &mut self,
+        command: &[u8],
+        offset: usize,
+        count: usize,
+    ) -> RedisResult<Vec<Value>> {
+        self.send(command)?;
+        let mut replies = Vec::new();
+        let mut first_error = None;
+        for index in 0..(offset + count) {
+            match self.receive() {
+                Ok(reply) if index >= offset => replies.push(reply),
+                Ok(_) => {}
+                Err(error) if first_error.is_none() => first_error = Some(error),
+                Err(_) => {}
+            }
+        }
+        first_error.map_or(Ok(replies), Err)
+    }
+
+    fn get_db(&self) -> i64 {
+        0
+    }
+
+    fn is_open(&self) -> bool {
+        self.open
+    }
+
+    fn check_connection(&mut self) -> bool {
+        redis::cmd("PING")
+            .query::<String>(self)
+            .is_ok_and(|reply| reply == "PONG")
+    }
 }
 
 fn wait_for(description: &str, mut ready: impl FnMut() -> Result<bool>) -> Result<()> {
@@ -87,7 +133,7 @@ fn wait_for(description: &str, mut ready: impl FnMut() -> Result<bool>) -> Resul
 }
 
 pub struct TestConnection {
-    child: Child,
+    child: ChildGuard,
     connection: Connection,
     module: String,
     port: u16,
@@ -145,37 +191,29 @@ impl TestConnection {
                 .args(["--replicaof", "127.0.0.1"])
                 .arg(primary.to_string());
         }
-        let mut child = command
+        let child = command
             .arg("--loadmodule")
             .arg(&module)
             .stdout(Stdio::from(log.try_clone()?))
             .stderr(Stdio::from(log))
             .spawn()?;
+        // Own the process before any fallible setup so startup failures always
+        // kill and reap it.
+        let mut child = ChildGuard {
+            child,
+            log_file: log_file.clone(),
+        };
 
-        let client = redis::Client::open(format!("redis://127.0.0.1:{port}/"))?;
         let mut connection = None;
         wait_for("Redis startup", || {
-            if let Some(status) = child.try_wait()? {
+            if let Some(status) = child.child.try_wait()? {
                 bail!(
                     "Redis exited with {status}. Server log:\n{}",
                     fs::read_to_string(&log_file).unwrap_or_default()
                 );
             }
-            match client.get_connection() {
-                Ok(mut candidate) => {
-                    if redis::cmd("PING")
-                        .query::<String>(&mut candidate)
-                        .is_ok_and(|reply| reply == "PONG")
-                    {
-                        connection = Some(candidate);
-                        Ok(true)
-                    } else {
-                        Ok(false)
-                    }
-                }
-                Err(error) if error.is_io_error() => Ok(false),
-                Err(error) => Err(error.into()),
-            }
+            connection = probe_connection(port, child.child.id())?;
+            Ok(connection.is_some())
         })?;
         let mut server = Self {
             child,
@@ -186,9 +224,13 @@ impl TestConnection {
         };
         if replica_of.is_some() {
             wait_for("replica synchronization", || {
-                let info: String = redis::cmd("INFO")
-                    .arg("replication")
-                    .query(&mut server.connection)?;
+                if let Some(status) = server.child.child.try_wait()? {
+                    bail!("Redis exited with {status} during replica synchronization");
+                }
+                let Some(mut probe) = probe_connection(port, server.child.child.id())? else {
+                    return Ok(false);
+                };
+                let info: String = redis::cmd("INFO").arg("replication").query(&mut probe)?;
                 Ok(info.lines().any(|line| line == "master_link_status:up")
                     && info.lines().any(|line| line == "master_sync_in_progress:0"))
             })?;
@@ -197,7 +239,7 @@ impl TestConnection {
     }
 
     pub fn connection(&self) -> Result<Connection> {
-        Ok(redis::Client::open(format!("redis://127.0.0.1:{}/", self.port))?.get_connection()?)
+        get_connection(self.port, self.child.child.id())
     }
 
     pub fn replica(&self) -> Result<Self> {
@@ -207,6 +249,41 @@ impl TestConnection {
     pub fn server_log(&self) -> Result<String> {
         Ok(fs::read_to_string(&self.log_file)?)
     }
+}
+
+fn probe_connection(port: u16, expected_pid: u32) -> Result<Option<Connection>> {
+    let mut connection = match Connection::connect(port) {
+        Ok(connection) => connection,
+        Err(error) if error.is_io_error() => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let probe = (|| -> RedisResult<bool> {
+        let pong: String = redis::cmd("PING").query(&mut connection)?;
+        let info: String = redis::cmd("INFO").arg("server").query(&mut connection)?;
+        Ok(pong == "PONG"
+            && info
+                .lines()
+                .any(|line| line == format!("process_id:{expected_pid}")))
+    })();
+    match probe {
+        Ok(true) => {
+            connection.socket.set_read_timeout(None)?;
+            connection.socket.set_write_timeout(None)?;
+            Ok(Some(connection))
+        }
+        Ok(false) => Ok(None),
+        Err(error) if error.is_io_error() || error.code() == Some("LOADING") => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn get_connection(port: u16, expected_pid: u32) -> Result<Connection> {
+    let mut connection = None;
+    wait_for("authenticated Redis connection", || {
+        connection = probe_connection(port, expected_pid)?;
+        Ok(connection.is_some())
+    })?;
+    Ok(connection.expect("successful connection probe"))
 }
 
 impl Deref for TestConnection {
@@ -223,7 +300,12 @@ impl DerefMut for TestConnection {
     }
 }
 
-impl Drop for TestConnection {
+struct ChildGuard {
+    child: Child,
+    log_file: PathBuf,
+}
+
+impl Drop for ChildGuard {
     fn drop(&mut self) {
         if !matches!(self.child.try_wait(), Ok(Some(_))) {
             let _ = self.child.kill();

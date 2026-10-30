@@ -167,6 +167,66 @@ fn invalid_inputs_and_results_do_not_mutate_destination() -> Result<()> {
 }
 
 #[test]
+fn validates_utf8_and_canonical_json_size_without_vm_hooks() -> Result<()> {
+    let mut con = server()?;
+    redis::cmd("SET")
+        .arg("source")
+        .arg("{}")
+        .query::<()>(&mut con)?;
+    redis::cmd("HSET")
+        .arg("destination")
+        .arg("kept")
+        .arg("value")
+        .query::<i64>(&mut con)?;
+
+    assert_rejected_unchanged(
+        &mut con,
+        "source",
+        r"() => { const output = {}; output['\uD800'] = 'value'; return output; }",
+    )?;
+    assert_rejected_unchanged(&mut con, "source", r"() => ({value: '\uD800'})")?;
+
+    let function = r#"() => {
+        Object.prototype.toJSON = () => "spoofed";
+        Object.defineProperty(Object.prototype, "trap", {
+            set() { throw new Error("host serialization invoked a setter"); }
+        });
+        const output = {};
+        Object.defineProperty(output, "__proto__", {
+            value: "prototype", enumerable: true
+        });
+        output.constructor = "constructor";
+        output.toJSON = "field";
+        Object.defineProperty(output, "trap", {value: "safe", enumerable: true});
+        return output;
+    }"#;
+    assert_eq!(project(&mut con, "source", "magic", function)?, 4);
+    assert_eq!(
+        hash(&mut con, "magic")?,
+        HashMap::from([
+            ("__proto__".into(), "prototype".into()),
+            ("constructor".into(), "constructor".into()),
+            ("toJSON".into(), "field".into()),
+            ("trap".into(), "safe".into()),
+        ])
+    );
+
+    // {"a":"..."} contributes eight structural bytes. Each NUL uses the
+    // canonical six-byte JSON escape while the remaining characters use one.
+    let escaped = 16usize;
+    let boundary_ascii = 1024 * 1024 - 8 - escaped * 6;
+    let at_boundary =
+        format!("() => ({{a: 'x'.repeat({boundary_ascii}) + '\\0'.repeat({escaped})}})");
+    assert_eq!(project(&mut con, "source", "boundary", at_boundary)?, 1);
+    let over_boundary = format!(
+        "() => ({{a: 'x'.repeat({}) + '\\0'.repeat({escaped})}})",
+        boundary_ascii + 1
+    );
+    assert_rejected_unchanged(&mut con, "source", over_boundary)?;
+    Ok(())
+}
+
+#[test]
 fn exception_timeout_and_heap_refusal_do_not_mutate_destination() -> Result<()> {
     let mut con = server()?;
     redis::cmd("SET")

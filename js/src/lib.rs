@@ -18,12 +18,32 @@ const JS_HEAP_BYTES: usize = 8 * 1024 * 1024;
 const JS_STACK_BYTES: usize = 256 * 1024;
 const JS_DEADLINE: Duration = Duration::from_millis(25);
 
+fn escaped_json_string_bytes(value: &str) -> Option<usize> {
+    value.chars().try_fold(2usize, |size, character| {
+        let escaped = match character {
+            '"' | '\\' | '\u{0008}' | '\u{000c}' | '\n' | '\r' | '\t' => 2,
+            '\u{0000}'..='\u{001f}' => 6,
+            _ => character.len_utf8(),
+        };
+        size.checked_add(escaped)
+    })
+}
+
+fn serialized_json_bytes(fields: &BTreeMap<String, String>) -> Option<usize> {
+    fields.iter().try_fold(2usize, |size, (name, value)| {
+        size.checked_add(usize::from(size > 2))?
+            .checked_add(escaped_json_string_bytes(name)?)?
+            .checked_add(1)?
+            .checked_add(escaped_json_string_bytes(value)?)
+    })
+}
+
 fn project(input: Vec<u8>, source: &str) -> Result<BTreeMap<String, String>, RedisError> {
+    let deadline = Instant::now() + JS_DEADLINE;
     let runtime =
         Runtime::new().map_err(|_| RedisError::Str("ERR could not create JavaScript runtime"))?;
     runtime.set_memory_limit(JS_HEAP_BYTES);
     runtime.set_max_stack_size(JS_STACK_BYTES);
-    let deadline = Instant::now() + JS_DEADLINE;
     runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() >= deadline)));
 
     // Promise is intentionally absent: this command is synchronous and never runs jobs.
@@ -74,35 +94,41 @@ fn project(input: Vec<u8>, source: &str) -> Result<BTreeMap<String, String>, Red
             }
             let value = JsString::from_js(&js, value)
                 .map_err(|_| RedisError::Str("ERR could not read projection output"))?;
-            let value = value
+            // CString length is safe to inspect, but its string accessors assume
+            // QuickJS returned UTF-8. JavaScript can contain unmatched UTF-16
+            // surrogates, so copy only through JsString's checked conversion.
+            let value_bytes = value
+                .clone()
                 .to_cstring()
                 .map_err(|_| RedisError::Str("ERR could not read projection output"))?;
-            let name = name
+            let name_bytes = name
+                .clone()
                 .to_cstring()
                 .map_err(|_| RedisError::Str("ERR could not read projection output"))?;
             raw_output_bytes = raw_output_bytes
-                .checked_add(name.len())
-                .and_then(|size| size.checked_add(value.len()))
+                .checked_add(name_bytes.len())
+                .and_then(|size| size.checked_add(value_bytes.len()))
                 .ok_or(RedisError::Str("ERR projection output is too large"))?;
             if raw_output_bytes > MAX_OUTPUT_BYTES {
                 return Err(RedisError::Str("ERR projection output is too large"));
             }
-            fields.insert(name.as_str().to_owned(), value.as_str().to_owned());
+            let name = name
+                .to_string()
+                .map_err(|_| RedisError::Str("ERR projection output must be UTF-8"))?;
+            let value = value
+                .to_string()
+                .map_err(|_| RedisError::Str("ERR projection output must be UTF-8"))?;
+            fields.insert(name, value);
         }
         if fields.is_empty() {
             return Err(RedisError::Str("ERR projection must not be empty"));
         }
 
-        // Serialize a new plain object so the limit describes exactly the validated
-        // field/value snapshot, without invoking methods on the script's object again.
-        let json = js
-            .json_stringify(&fields)
-            .map_err(|_| RedisError::Str("ERR could not serialize projection output"))?
-            .ok_or(RedisError::Str("ERR could not serialize projection output"))?;
-        let json = json
-            .to_cstring()
-            .map_err(|_| RedisError::Str("ERR could not serialize projection output"))?;
-        if json.len() > MAX_OUTPUT_BYTES {
+        // Account for canonical compact JSON entirely in host code. Re-entering
+        // the VM here would let script-controlled prototypes affect validation.
+        if serialized_json_bytes(&fields)
+            .is_none_or(|serialized_bytes| serialized_bytes > MAX_OUTPUT_BYTES)
+        {
             return Err(RedisError::Str("ERR projection output is too large"));
         }
 
@@ -112,6 +138,9 @@ fn project(input: Vec<u8>, source: &str) -> Result<BTreeMap<String, String>, Red
     // All context-owned JavaScript values are gone before the context and runtime.
     drop(context);
     drop(runtime);
+    if Instant::now() >= deadline {
+        return Err(RedisError::Str("ERR JavaScript projection timed out"));
+    }
     projection
 }
 
