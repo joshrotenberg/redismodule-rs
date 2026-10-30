@@ -4376,6 +4376,123 @@ fn test_server_event() -> Result<()> {
 }
 
 #[test]
+fn test_runtime_server_event_fanout_and_panics() -> Result<()> {
+    let mut con = TestConnection::with_args("runtime_server_events", &["off"]);
+    let counts = |con: &mut TestConnection| -> Result<Vec<i64>> {
+        Ok(redis::cmd("runtime_server.counts").query(con)?)
+    };
+    assert_eq!(
+        counts(&mut con)?[1],
+        0,
+        "conditional cron handler is disabled"
+    );
+    redis::cmd("runtime_server.subscribe").query::<()>(&mut con)?;
+    redis::cmd("runtime_server.subscribe").query::<()>(&mut con)?;
+    let before = counts(&mut con)?;
+    utils::wait_until(Duration::from_secs(2), "both cron handlers", || {
+        let after = counts(&mut con)?;
+        let ticks = after[0] - before[0];
+        Ok(ticks > 0 && after[1] - before[1] == ticks)
+    })?;
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    assert_eq!(&counts(&mut con)?[2..], &[1, 1, 1, 0]);
+    assert_eq!(
+        redis::cmd("runtime_server.order").query::<Vec<i64>>(&mut con)?,
+        vec![0, 1, 2]
+    );
+    redis::cmd("runtime_server.flags")
+        .arg(&["yes", "no"])
+        .query::<()>(&mut con)?;
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    assert_eq!(&counts(&mut con)?[2..], &[2, 2, 2, 1]);
+    assert_eq!(
+        redis::cmd("runtime_server.order").query::<Vec<i64>>(&mut con)?,
+        vec![0, 1, 2, 3]
+    );
+    assert!(con.server_log()?.contains("flush event handler panicked"));
+    Ok(())
+}
+
+#[test]
+fn test_runtime_server_event_refusals_and_runtime_only_payload() -> Result<()> {
+    let mut con = TestConnection::new("runtime_server_events");
+    for (mode, message) in [
+        ("missing", "unavailable"),
+        ("rejected", "subscription failed"),
+    ] {
+        let error = redis::cmd("runtime_server.refuse")
+            .arg(mode)
+            .query::<()>(&mut con)
+            .unwrap_err();
+        assert!(error.to_string().contains(message), "{error}");
+    }
+    redis::cmd("SWAPDB").arg(&[2, 5]).query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("runtime_server.swaps").query::<i64>(&mut con)?,
+        0
+    );
+    for _ in 0..2 {
+        redis::cmd("runtime_server.subscribe_swap").query::<()>(&mut con)?;
+    }
+    redis::cmd("SWAPDB").arg(&[2, 5]).query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("runtime_server.swaps").query::<i64>(&mut con)?,
+        1
+    );
+    assert!(con.server_log()?.contains("runtime swap: 2 5"));
+    Ok(())
+}
+
+#[test]
+fn test_runtime_server_event_lifecycle() -> Result<()> {
+    let mut con = TestConnection::with_args("runtime_server_events", &["on"]);
+    let module = utils::module_path("runtime_server_events")?;
+    // A rejected unload must retain both the native adapter and its handlers.
+    redis::cmd("runtime_server.flags")
+        .arg(&["no", "yes"])
+        .query::<()>(&mut con)?;
+    assert!(
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "runtime_server_events"])
+            .query::<()>(&mut con)
+            .is_err()
+    );
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    let counts: Vec<i64> = redis::cmd("runtime_server.counts").query(&mut con)?;
+    assert_eq!(&counts[2..], &[1, 1, 1, 0]);
+    redis::cmd("runtime_server.flags")
+        .arg(&["no", "no"])
+        .query::<()>(&mut con)?;
+    for failed in [None, Some("fail"), Some("panic")] {
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "runtime_server_events"])
+            .query::<()>(&mut con)?;
+        // No callback may remain in Redis after successful unload.
+        redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+        if let Some(mode) = failed {
+            assert!(
+                redis::cmd("MODULE")
+                    .arg(&["LOAD", &module, mode])
+                    .query::<()>(&mut con)
+                    .is_err()
+            );
+            redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+        }
+        redis::cmd("MODULE")
+            .arg(&["LOAD", &module, "off"])
+            .query::<()>(&mut con)?;
+        redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+        let counts: Vec<i64> = redis::cmd("runtime_server.counts").query(&mut con)?;
+        assert_eq!(
+            &counts[2..],
+            &[1, 0, 0, 0],
+            "runtime handlers survived a rejected load or successful unload"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn test_server_event_flush_payloads() -> Result<()> {
     // This module has only payload-aware flush handlers, so it also verifies
     // registration when the legacy distributed slice is empty.

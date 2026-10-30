@@ -11,6 +11,20 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Runtime server-event subscriptions
+
+`EventContext::subscribe_to_server_event` accepts a typed `ServerEventHandler`
+with a static function (#114). One SDK adapter per native event fans out to
+attribute handlers, then runtime handlers in registration order. Repeated
+function addresses are idempotent, including functions registered by attributes.
+Each callback contains panics independently and snapshots handlers before user
+code so reentrant registration is safe. Failed native subscription stores
+nothing. The `redis_module!` lifecycle clears the registry after failed loads
+and successful unloads, while rejected unloads preserve it. Captured closures
+and unsubscribe tokens are outside this API. Upstream offers attribute handlers
+only. The runtime example and integration tests cover conditional registration,
+fan-out, reentrant addition, panics and retained-image load/unload recovery.
+
 ## Redis OSS 8.x header declarations
 
 `src/include/redismodule.h` is upstream's header at `1c84d3d` plus what Redis
