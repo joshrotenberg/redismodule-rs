@@ -93,13 +93,17 @@ its callers already converted each reply into guest nodes before the guest
 call returned, and the host does not enable AutoMemory. Call replies are no
 longer `Send` ([issue 96](https://github.com/joshrotenberg/redismodule-rs/issues/96),
 merged as `b67ca39`); the host never moved one off its thread.
-Refreshing the exploratory sidecar versus Redis core
-comparison is tracked in [issue 86](https://github.com/joshrotenberg/redismodule-rs/issues/86);
-existing benchmark results below are historical, not fresh measurements. Issue 86
-is the first wasm item and gates the allocator policy (68), external-runtime
-access (54) and streaming replies (55). The comparison with the public core
-branch, pinned at `0302b84`, and the cost of epoch interruption are in
-[CORE-COMPARISON.md](CORE-COMPARISON.md).
+The owner accepted the source comparison and host interruption study from
+[PR 120](https://github.com/joshrotenberg/redismodule-rs/pull/120) on
+2026-10-29; [issue 86](https://github.com/joshrotenberg/redismodule-rs/issues/86)
+is complete. The comparison with the public core branch, pinned at `0302b84`,
+and the epoch measurements remain in [CORE-COMPARISON.md](CORE-COMPARISON.md).
+The accepted allocator/accounting policy and fresh macOS/libc and
+Linux/jemalloc measurements for issue 68 are in
+[MEMORY-POLICY.md](MEMORY-POLICY.md). Compiler isolation (131) precedes
+aggregate guest/code budgets (132). External-runtime access (54) and streaming
+replies (55) remain separate design items. Earlier benchmark results below
+retain their original dates and scope.
 
 SDK master `e99779e` ([PR 94](https://github.com/joshrotenberg/redismodule-rs/pull/94))
 replaced the shared handoff from PR 87 with those contributing rules; both
@@ -458,15 +462,19 @@ avoids both instantiating and tearing down, and was adopted.
 | H10 | done | **Guest helper library.** `wasm/guest-sdk`, crate `redis-wasm-guest`: a `Value` type that converts to and from pre-order node lists and flat replies, `From` conversions, and `call`, `pcall` and `log` that take and return `Value`s. It generates bindings for a `guest-imports` world (the host's interface alone), and a library's own bindings share its types through wit-bindgen's `with`. | The example guest uses it. |
 | H11 | done | **Bounds check cost.** Decided: keep signal-based traps off, so guests get explicit bounds checks. With H3's benchmark, turning them on made `primes` 18% faster (185 against 226 µs, old sieve loop) and `median` 6%. On Linux they are not safe in a module: wasmtime installs `SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE` handlers that chain to Redis's crash handler, but `CONFIG SET crash-log-enabled` (either value) reinstalls Redis's handlers or the defaults over them, and the next out-of-bounds guest access kills the server: silently after `no`, with a crash report after `yes` (G7). On macOS wasmtime takes faults through Mach exception ports, so the same steps are safe there. A crash outside wasm (`DEBUG SEGFAULT`) still produced Redis's crash report with wasmtime's handlers installed. | A decision, with a crash report checked with handlers on. |
 | H12 | done | **Context in the store.** The store holds a raw pointer to the command's `Context`. The safety argument is written down in `host.rs` ("The context pointer"): set and cleared around each guest run, re-entrant calls use their own instance, a panic drops the instance with the stale pointer, and instances stay on the main thread. No SDK pattern replaces it yet (S3). | Reviewed and documented, or replaced. |
-| H13 | todo ([issue 68](https://github.com/joshrotenberg/redismodule-rs/issues/68)) | **Footprint.** Remeasured 2026-10-27 with `wasm/bench/memory.sh`, two runs per allocator (wasmtime 36.0.19, Homebrew Redis 8.10.2 with libc malloc, macOS 26.7.1 on an Apple M3, release build; see Memory accounting below). The release dylib is 12.0 MiB. The JavaScript component (10.7 MiB) compiles to 90.2 MiB of code and runs in 7.3 MiB of linear memory, both outside the Redis allocator. With Redis's allocator as the module's global allocator, the compiler's transient heap counts: `used_memory` reached 656 to 795 MiB and `used_memory_peak` 767 to 811 MiB during one load, and 16 of 17 `SET`s against a `maxmemory` 64 MiB above `used_memory` got `OOM` during it. 44 to 47 MiB stayed counted while the library was loaded, 33 to 35 MiB after `WASM.DELETE`, and 50 to 66 MiB after repeated loads: mostly the compiler's context pool, which shrank to 6 MiB with one compile thread; not a leak. With `std::alloc::System`, `used_memory` stayed at 1.0 to 1.1 MiB (peak 22 to 25 MiB, the `WASM.LOAD` argument), no `SET` was refused, and RSS behaved the same: 0.8 to 0.9 GB during the load, then 0.3 to 1.2 GB, mostly freed pages that macOS's malloc keeps. Decision needed: see Policy options, a proposal. | Sizes recorded before and after. |
+| H13 | done ([issue 68](https://github.com/joshrotenberg/redismodule-rs/issues/68)) | **Footprint and policy.** Fresh 2026-10-29 runs cover the baseline, System and heap-backed variants on macOS/libc and Linux/jemalloc, with 20 load/delete cycles and 30 loaded and empty reloads. The owner accepted keeping lasting heap accounted, isolating/bounding compilation first (131), then adding aggregate guest/code budgets (132). The measurements and implementation gates are in [MEMORY-POLICY.md](MEMORY-POLICY.md). Production allocator/configuration remain unchanged. | Reproducible measurements and the accepted policy; runtime implementation is tracked separately. |
 | H14 | done ([issue 69](https://github.com/joshrotenberg/redismodule-rs/issues/69)) | **CI.** A [branch-scoped Ubuntu job](CI.md) pins Rust 1.94, Node 24.22.1, Redis 8.10.2 and Rust/JS dependency inputs, checks the default workspace and host-excluded SDK 7.2, builds/lints Rust guests and requires JavaScript tests. Commands are bounded, cached and logged. SDK master retains its separate server matrix. | Successful experiment push and PR validation. |
-| H16 | done | **Unloading.** Since H5 the module registers a data type for its aux data, and Redis refuses `MODULE UNLOAD` for a module with one. `wasm.persist no`, an immutable config read in `init`, leaves the type unregistered and persistence off, so the module unloads. Each unload and reload grew RSS by about 0.5 MB (7.9 MB at start, 39.8 MB after 5 cycles, 54.8 MB after 30). Remeasured for issue 68 (Memory accounting): reloads with no library leave RSS flat; with a library loaded each time `used_memory` stays flat while RSS grows mostly at first use, which is allocator retention, not a leak. macOS keeps the dylib mapped after `MODULE UNLOAD`. | `MODULE UNLOAD` works with the argument; a test covers both ways. |
+| H16 | done | **Unloading.** `wasm.persist no` leaves the aux data type unregistered and persistence off, so the module can unload. The 2026-10-29 runs compare 30 empty reloads with 30 guest-loaded reloads on both platforms. Counted heap returns near idle after the last unload; the image stays mapped and RSS retains first-use/allocator costs. This supports bounded retention in these runs, not a general leak-free claim; see [MEMORY-POLICY.md](MEMORY-POLICY.md). | `MODULE UNLOAD` works with the argument; a test covers both ways. |
 | H17 | done | **Load time.** Loading an RDB compiled each library's component on the main thread before the server served: 1.56 to 1.67 s for the JavaScript library (release build), 15 ms of it reading. Now the libraries are added at once with their code compiling on a thread (`code.rs`): a call to a library still compiling blocks its client until the code is ready (or waits in place inside `MULTI` or a script), `INFO wasm` counts the libraries compiling, and the server was ready in 0.11 to 0.12 s. | Load time with the JavaScript library, before and after. |
 | H18 | done | **Dump, restore, flush.** `WASM.DUMP`, `WASM.RESTORE <payload> [FLUSH\|APPEND\|REPLACE]` and `WASM.FLUSH`, as `FUNCTION DUMP`, `RESTORE` and `FLUSH` work. The payload (`dump.rs`) holds names and components with an FNV-1a checksum; a restore compiles on a thread, lists every library's functions, checks every conflict, then adds all or none. | Tests restore into another server under each policy, refuse a conflicting or damaged payload without changing anything, and replicate `WASM.FLUSH` and `WASM.RESTORE`. |
 | H19 | done | **Stats.** `WASM.STATS`, `allow-busy` like `FUNCTION STATS`: the running function's name and duration, and the counts of libraries and functions (nil while a library loads and holds the host). | The busy test reads it while a function spins and after it is killed. |
 | H15 | done | **Large replies into the guest.** `lrange` (the LRANGE of `median`, count only) took 139 µs in wasm against 58 µs in Lua; a profile showed the time spread over allocating and copying each string on both sides. `call-flat` and `pcall-flat` return the reply as nodes whose strings are spans of one buffer: `lrange_flat` takes 77 µs (1.4 times Lua) and `median_flat` 126 µs (0.50 of Lua's 253). The typed `call` and `pcall` stay for small replies. | `median`'s time split, and a lower number. |
 
 ### Memory accounting (issue 68)
+
+The following measurements and options are historical, dated 2026-10-27. The
+accepted policy and fresh two-platform evidence are in
+[MEMORY-POLICY.md](MEMORY-POLICY.md).
 
 Measured 2026-10-27 with `wasm/bench/memory.sh`: macOS 26.7.1 on an Apple M3 (8
 cores, 16 GB), Homebrew Redis 8.10.2 (`mem_allocator` libc), Rust 1.94.0,
@@ -682,7 +690,7 @@ counts the requested size plus alignment padding and allocator rounding, once
 it meets `LinearMemory`'s alignment, stability, zeroing and failure
 obligations.
 
-#### Policy options (a proposal for the owner, not decided)
+#### Historical policy options (2026-10-27)
 
 The three categories can be decided apart.
 
@@ -782,6 +790,18 @@ evidence as the host meets them.
 | Q1 | Where the crate lives so others can use it. Answered: the fork's `experiment/wasm-host` branch, kept in sync with master. |
 
 ## Log
+
+- 2026-10-29: the owner accepted PR 120's source comparison and interruption
+  assessment; issue 86 is complete. Issue 68 now has fresh baseline, System
+  and heap-backed measurements on macOS/libc and Linux/jemalloc, with 20
+  load/delete cycles and 30 loaded and empty reloads for each variant.
+  `bench/policy.py` adds controlled eviction and RDB-startup probes;
+  `bench/memory-variants.py` and the small research container reproduce the
+  disposable builds. Counting guest memory alone can evict unrelated keys,
+  as compiler allocation already does. The owner accepted the staged policy
+  in `MEMORY-POLICY.md`: preserve lasting-heap accounting, isolate and bound
+  compilation first (131), then add aggregate guest/code budgets (132).
+  No runtime allocator or configuration changed.
 
 - 2026-10-28: issue 123. `a_restart_serves_while_saved_libraries_compile`
   failed two of five full runs of the same wasm code, once locally on macOS at
