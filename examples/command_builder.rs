@@ -35,6 +35,16 @@ fn panic_command(_: &Context, _: Vec<RedisString>) -> RedisResult {
 }
 
 fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> Status {
+    // Declared custom categories are optional on servers without AddACLCategory;
+    // the built-in read category remains mandatory on every supported server.
+    if let Err(error) = redis_command!("builder.init_acl", ping)
+        .acl_categories("read")
+        .optional_acl_categories("builder_custom builder_second")
+        .register(ctx)
+    {
+        ctx.log_warning(&error.to_string());
+        return Status::Err;
+    }
     let Some(mode) = args.first() else {
         return Status::Ok;
     };
@@ -48,6 +58,7 @@ fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> St
         "last-zero" => command.keys(KeyRange::new(1).last(0)),
         "unknown-flags" => command.flags(CommandFlags::from_bits_retain(1 << 31)),
         "required-acl" => command.acl_categories("nonexistent_builder_category"),
+        "required-custom-acl" => command.acl_categories("builder_custom"),
         "optional-empty" => command.optional_acl_categories(""),
         "nul-acl" => command.acl_categories("read\0write"),
         "empty-name" => redis_command!("", ping),
@@ -69,6 +80,7 @@ redis_module! {
     version: 1,
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
+    acl_categories: ["builder_custom", "builder_second", "read",],
     init: init,
     commands: [
         ["builder.legacy", ping, "readonly fast", 0, 0, 0, ""],
@@ -91,6 +103,17 @@ redis_module! {
             .optional_acl_categories("nonexistent_builder_category"),
         redis_command!("builder.optional", ping)
             .optional_acl_categories("nonexistent_builder_category"),
+        ["builder.legacy_custom", ping, "", 0, 0, 0, AclCategory::Read, "builder_custom"],
+        redis_command!("builder.custom", ping)
+            .acl_categories("read")
+            .optional_acl_categories("BuIlDeR_CuStOm read"),
+        redis_command!("builder.only_custom", ping)
+            .optional_acl_categories("builder_second"),
+        redis_command!("builder.optional_read", ping)
+            .optional_acl_categories("read builder_custom"),
+        redis_command!("builder.mixed_invalid", ping)
+            .acl_categories("read")
+            .optional_acl_categories("builder_custom nonexistent_builder_category"),
         redis_command!("builder.panic", panic_command),
     ],
 }
