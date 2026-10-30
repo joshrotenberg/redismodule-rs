@@ -190,6 +190,10 @@ name = "server_event_payloads"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "runtime_server_events"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "runtime_events"
 crate-type = ["cdylib"]
 

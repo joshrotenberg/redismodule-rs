@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `EventContext::subscribe_to_server_event` adds typed static function handlers
+  at load time or during commands/events (#114). It preserves attribute handlers,
+  deduplicates function addresses, contains each handler's panics and snapshots
+  each delivery before invoking user code. Failed loads and successful unloads
+  release runtime registrations; rejected unloads retain them. The
+  `runtime_server_events` example demonstrates conditional subscription.
+
 - `ThreadSafeContext::try_lock` and `DetachedContext::try_lock` return their
   existing borrowed guards on success and `None` when the Redis lock cannot
   be acquired immediately (#113). Workers can check a stop flag between

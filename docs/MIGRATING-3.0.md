@@ -860,3 +860,11 @@ redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = 
 
 `redis_module!` fails the module load if a module built with the feature has
 already allocated from the system allocator when Redis loads it.
+
+## Runtime server-event handlers
+
+`server_events::ServerEventHandler` adds `Cron`, `FlushInfo`, `SwapDb` and
+`ConfigChanged` variants for `EventContext::subscribe_to_server_event`. Update
+exhaustive matches on this enum. Existing variants, including the historical
+`RuleChanged` spelling, remain available. Existing attribute handlers need no
+changes and stay active alongside runtime subscriptions.

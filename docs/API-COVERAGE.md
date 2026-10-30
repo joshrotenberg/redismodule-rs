@@ -174,7 +174,7 @@ API pointers the downstream calls through `redis_module::raw`:
 | `AddACLCategory`, `GetCommand`, `SetCommandACLCategories` | `src/lib.rs` adds the `eventstream` ACL category and tags three commands with it, accepting the error a reload returns for an existing category | safe: `redis_module!`'s `acl_categories` accepts the `EBUSY` Redis returns for a category kept from an earlier load |
 | `AddPostNotificationJob` | `src/lib.rs` refuses to load without it | safe: `EventContext::add_post_notification_job` |
 | `SubscribeToKeyspaceEvents` | `src/lib.rs` subscribes with a mask chosen at load, through a raw callback that accepts non-UTF-8 event names | safe: `EventContext::subscribe_to_keyspace_events`; event names are decoded lossily |
-| `SubscribeToServerEvent` | `src/lib.rs` subscribes to the flush and SWAPDB events, whose data the old SDK did not deliver, to the configuration event, and to the cron event only when checkpointing is configured | safe: `#[flush_info_event_handler]`, `#[swapdb_event_handler]`, `#[config_changed_event_handler]` and `#[cron_event_handler]`. Handlers subscribe at load whenever they exist; no safe subscription can depend on configuration. |
+| `SubscribeToServerEvent` | `src/lib.rs` subscribes to the flush and SWAPDB events, whose data the old SDK did not deliver, to the configuration event, and to the cron event only when checkpointing is configured | safe: `#[flush_info_event_handler]`, `#[swapdb_event_handler]`, `#[config_changed_event_handler]` and `#[cron_event_handler]`. `EventContext::subscribe_to_server_event(ServerEventHandler)` also supports conditional static subscriptions at runtime while preserving attribute handlers (#114). |
 | `GetSelectedDb`, `SelectDb` | `src/capture.rs`, `src/commands.rs`, `src/config.rs` and `src/markers.rs` write to database 0 and restore the selection | safe: `RuntimeContext::get_selected_db`, `select_db` and `with_db` |
 | `Milliseconds` | `src/capture.rs` reads the server clock for stream trimming | safe: `redis_module::milliseconds` |
 | `GetThreadSafeContext`, `ThreadSafeContextUnlock`, `FreeThreadSafeContext` | `src/dispatch.rs` creates the writer thread's context and releases it | safe: `ThreadSafeContext` and its guard |
@@ -864,7 +864,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
-| `SubscribeToServerEvent` | 6.0 | 6.0 | available | safe | `server_events::register_server_events` |  |  |
+| `SubscribeToServerEvent` | 6.0 | 6.0 | direct | safe | `EventContext::subscribe_to_server_event`, `server_events::register_server_events` |  |  |
 | `IsSubEventSupported` | 6.0 | 6.0 |  | none |  | context-free |  |
 
 #### Keyspace notifications
