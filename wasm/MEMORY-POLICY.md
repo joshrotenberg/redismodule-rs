@@ -1,6 +1,6 @@
 # Wasm allocator and memory policy
 
-Issue #68, assessed 2026-10-29. **Proposal pending the owner's decision.**
+Issue #68, assessed and accepted by the owner on 2026-10-29.
 The owner accepted the source comparison and host interruption study from
 PR 120 on this date; issue #86 is complete. This document concerns memory
 policy only. It changes no allocator or host configuration.
@@ -58,7 +58,7 @@ was not measured. On Linux, purging after deletion reduced baseline RSS from
 jemalloc did not reclaim the System build's 983.6 MiB RSS. These observations
 support separating allocator retention from live module ownership.
 
-## Recommended policy
+## Accepted policy
 
 1. **Keep lasting runtime heap accounted.** Retain `RedisAlloc` for module
    metadata, stores and saved component bytes. Do not switch the whole module
@@ -103,6 +103,15 @@ support separating allocator retention from live module ownership.
 
 These are policy and implementation gates. This PR ships no compiler helper,
 new budget configuration, allocator switch, or unsafe memory creator.
+
+## Implementation follow-ups
+
+Implement bounded compiler isolation first in
+[issue 131](https://github.com/joshrotenberg/redismodule-rs/issues/131), then
+aggregate guest/code admission in
+[issue 132](https://github.com/joshrotenberg/redismodule-rs/issues/132).
+Each issue records the design work required for its protocol or configuration
+and the acceptance tests required before shipping the implementation.
 
 ## Retention and release
 
