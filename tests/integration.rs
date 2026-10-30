@@ -1269,7 +1269,7 @@ fn test_command_builder_optional_acl_failure_retains_required_access() -> Result
 #[test]
 fn test_optional_declared_acl_categories_follow_server_support_and_reload() -> Result<()> {
     let mut con = TestConnection::new("command_builder");
-    let supported = supports_custom_acl_categories(&mut con)?;
+    let supported = redis::cmd("builder.custom_supported").query::<i64>(&mut con)? != 0;
     let module = utils::module_path("command_builder")?;
     for load in 1..=2 {
         for command in [

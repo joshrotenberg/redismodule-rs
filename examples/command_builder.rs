@@ -15,6 +15,14 @@ fn ping(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok("PONG".into())
 }
 
+// The regression fixture checks capability directly: Valkey's redis_version
+// field reports its Redis compatibility version, not its available module APIs.
+fn custom_acl_supported(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    // SAFETY: Redis initialized this module's API table before invoking a command.
+    let supported = unsafe { redis_module::raw::RedisModule_AddACLCategory }.is_some();
+    Ok(i64::from(supported).into())
+}
+
 fn get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let key = args.get(1).ok_or(RedisError::WrongArity)?;
     ctx.call("GET", &[key])
@@ -89,6 +97,7 @@ redis_module! {
         redis_command!("builder.callback", callback),
         redis_command!("builder.invoke", invoke),
         redis_command!("builder.ping", ping).read_only().fast(),
+        redis_command!("builder.custom_supported", custom_acl_supported).read_only(),
         redis_command!("builder.get", get)
             .flags(CommandFlags::READ_ONLY | CommandFlags::DENY_SCRIPT)
             .fast().key(1),
