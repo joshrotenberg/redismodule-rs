@@ -48,7 +48,9 @@ TEST_REDIS_SERVER_BIN=/path/to/redis-7.2/src/redis-server \
 
 Build the cdylib with the same profile and compatibility features immediately
 before its native tests. `cargo test` does not itself produce the loadable
-module artifact.
+module artifact. The native functional cases serialize their Redis instances
+because concurrent process startup can consume the unchanged 25 ms projection
+budget on shared CI runners. The host-only accounting tests run separately.
 
 ## Order summary example
 

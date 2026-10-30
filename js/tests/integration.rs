@@ -46,6 +46,7 @@ fn assert_rejected_unchanged(
 
 #[test]
 fn projects_real_json_and_preserves_unrelated_hash_fields() -> Result<()> {
+    let _serial = support::serial_native_test();
     let mut con = server()?;
     redis::cmd("SET")
         .arg("order:1")
@@ -82,6 +83,7 @@ fn projects_real_json_and_preserves_unrelated_hash_fields() -> Result<()> {
 
 #[test]
 fn invalid_inputs_and_results_do_not_mutate_destination() -> Result<()> {
+    let _serial = support::serial_native_test();
     let mut con = server()?;
     redis::cmd("HSET")
         .arg("destination")
@@ -168,6 +170,7 @@ fn invalid_inputs_and_results_do_not_mutate_destination() -> Result<()> {
 
 #[test]
 fn validates_utf8_and_canonical_json_size_without_vm_hooks() -> Result<()> {
+    let _serial = support::serial_native_test();
     let mut con = server()?;
     redis::cmd("SET")
         .arg("source")
@@ -224,6 +227,7 @@ fn validates_utf8_and_canonical_json_size_without_vm_hooks() -> Result<()> {
 
 #[test]
 fn exception_timeout_and_heap_refusal_do_not_mutate_destination() -> Result<()> {
+    let _serial = support::serial_native_test();
     let mut con = server()?;
     redis::cmd("SET")
         .arg("source")
@@ -250,6 +254,7 @@ fn exception_timeout_and_heap_refusal_do_not_mutate_destination() -> Result<()> 
 
 #[test]
 fn nested_get_and_hset_obey_the_callers_acl() -> Result<()> {
+    let _serial = support::serial_native_test();
     let mut admin = server()?;
     redis::cmd("SET")
         .arg("source")
@@ -314,6 +319,7 @@ fn nested_get_and_hset_obey_the_callers_acl() -> Result<()> {
 
 #[test]
 fn declares_both_keys_and_survives_unload_reload() -> Result<()> {
+    let _serial = support::serial_native_test();
     let mut con = server()?;
     let keys: Vec<String> = redis::cmd("COMMAND")
         .arg("GETKEYS")
@@ -349,6 +355,7 @@ fn declares_both_keys_and_survives_unload_reload() -> Result<()> {
 
 #[test]
 fn replication_replays_only_the_hset_effect() -> Result<()> {
+    let _serial = support::serial_native_test();
     let mut primary = server()?;
     redis::cmd("SET")
         .arg("source")
@@ -407,6 +414,7 @@ fn replication_replays_only_the_hset_effect() -> Result<()> {
 
 #[test]
 fn command_info_reports_write_and_key_metadata() -> Result<()> {
+    let _serial = support::serial_native_test();
     let mut con = server()?;
     let info: Value = redis::cmd("COMMAND")
         .arg("INFO")

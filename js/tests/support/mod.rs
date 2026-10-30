@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -14,6 +15,17 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(200);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 static INSTANCE_ID: AtomicUsize = AtomicUsize::new(0);
+static NATIVE_TEST: Mutex<()> = Mutex::new(());
+
+/// Each functional test owns its Redis instances until the guard is dropped.
+/// Concurrent process startup can consume the 25 ms wall-time projection
+/// budget on CI. Resource refusals still exercise the unchanged production
+/// deadline, while semantic success tests avoid that unrelated contention.
+pub fn serial_native_test() -> MutexGuard<'static, ()> {
+    NATIVE_TEST
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
 
 pub fn module_path(name: &str) -> Result<String> {
     let executable = std::env::current_exe()?;
