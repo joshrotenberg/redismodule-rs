@@ -115,6 +115,14 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-10-29: merged SDK master `7f5dc3f` into the branch as `23edbae`.
+  SDK PR 134 (#115) logs unavailable custom ACL category registration once per
+  load and skips declared custom names in optional command categories. Required
+  and built-in categories retain their checks; no host adaptation was needed.
+  `cj run wasm-sync` fetched with `--locked` and ran the full `wasm/ci/check.sh`
+  on Rust 1.94.0 and Redis 8.10.2: 404 tests passed. All four installed
+  lockfiles remained byte-identical to their snapshots.
+
 - 2026-10-29: merged SDK master `6f1df04` into the branch as `5d86902`.
   SDK PR 133 (#101) records dispositions for 26 upstream pull requests and
   updates the upstream-watch review timestamp. No runtime source or
