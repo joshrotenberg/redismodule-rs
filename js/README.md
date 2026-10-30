@@ -1,10 +1,14 @@
 # redis-module-js experiment
 
 `redis-module-js` is a native Redis module experiment. It keeps QuickJS out of
-the `redis-module` SDK crate and exposes one synchronous command:
+the `redis-module` SDK crate and exposes a synchronous command plus ephemeral
+reactive projections:
 
 ```text
 JS.PROJECT <source-key> <destination-key> <function>
+JS.WATCH <name> <source-key> <destination-key> <function>
+JS.UNWATCH <name>
+JS.INFO <name>
 ```
 
 The source key must be a Redis string containing a UTF-8 JSON object. The
@@ -20,6 +24,32 @@ effect is what reaches replicas and AOF, so JavaScript is not re-executed during
 replay. Any input, script, result, resource or execution failure happens before
 the write and leaves the destination unchanged. A destination of the wrong type
 returns Redis's normal `HSET` error.
+
+`JS.WATCH` registers without reading or projecting its source. Later source
+mutations, deletion, expiry and eviction run the function against the latest
+snapshot. Missing, non-string, non-UTF-8 or invalid JSON records a failure and
+leaves the last good destination unchanged. Notifications before the
+post-notification drain are coalesced. `JS.INFO` reports the keys, bounded
+counters, pending state, last duration and a bounded last error; it never
+reports source code.
+
+Names are nonempty UTF-8 of at most 128 bytes and are scoped to the selected
+database. A name must be explicitly unwatched before reuse. Definitions belong
+to the ACL username that registered them, and only that username can inspect or
+remove them. Redis looks up that username afresh for each run, so disabling or
+deleting it fails closed. Recreating a username with the same bytes assumes the
+old name's authority until the watch is removed. `JS.UNWATCH` itself performs
+no `GET` or `HSET`, allowing an owner with `+js.unwatch` to remove a definition
+after those permissions are revoked.
+
+Registration preflights the owner's current `GET`/source and `HSET`/destination
+permissions without touching either key. Every run checks those permissions,
+the owner's current permission to run `JS.WATCH`, and performs the actual calls
+under that owner. Both keys have read-source/write-destination metadata and
+`COMMAND GETKEYS` coverage. Reactive watches require standalone Redis and
+execute only on a writable primary outside loading, replay and shutdown.
+Replicas receive replicated `HSET` effects and never rerun JavaScript.
+`JS.PROJECT` keeps its existing behavior, including in cluster mode.
 
 ## Build and load
 
@@ -57,14 +87,22 @@ budget on shared CI runners. The host-only accounting tests run separately.
 The runnable function is in [`examples/order-summary.js`](examples/order-summary.js):
 
 ```sh
-redis-cli SET order:1 '{"customer":"Ada","items":[{"quantity":2,"price_cents":1250},{"quantity":1,"price_cents":500}]}'
 redis-cli HSET order:1:summary retained yes
-redis-cli -x JS.PROJECT order:1 order:1:summary < js/examples/order-summary.js
+redis-cli -x JS.WATCH order-summary order:1 order:1:summary < js/examples/order-summary.js
+redis-cli SET order:1 '{"customer":"Ada","items":[{"quantity":2,"price_cents":1250},{"quantity":1,"price_cents":500}]}'
 redis-cli HGETALL order:1:summary
+redis-cli SET order:1 'not JSON'
+redis-cli HGETALL order:1:summary
+redis-cli JS.INFO order-summary
+redis-cli JS.UNWATCH order-summary
 ```
 
-The result contains `customer`, `item_count` and `total_cents`, while `retained`
-is preserved.
+Register once, then each valid `SET` refreshes `customer`, `item_count` and
+`total_cents` automatically while `retained` is preserved. The invalid update
+increments failure diagnostics and keeps the previous hash. Projection uses
+merge-`HSET`: unrelated fields and fields omitted by later output stay.
+Deleting or expiring the source similarly preserves the last good hash and
+records a failure.
 
 ## Resource and accounting limits
 
@@ -76,6 +114,15 @@ I/O bridge, Redis handle, futures support or pending-job execution. Limits are:
 - 1024 output fields
 - 8 MiB QuickJS heap, 256 KiB QuickJS stack and a 25 ms invocation deadline
 
+Reactive definitions additionally allow at most 64 watches across all
+databases, 4 MiB of aggregate retained name/owner/key/source bytes, 1024-byte
+keys and owners, and one active source per database. Any source/destination
+overlap with another watch in that database is rejected, preventing chains and
+cycles. A single queue bounded by the watch limit feeds one drain. Each drain
+runs at most 64 distinct watches and shares a 25 ms budget; exhausted work is
+cleared and diagnosed without continuation jobs. Projection failure never rolls
+back the source write.
+
 This milestone deliberately uses QuickJS's bounded default libc allocator.
 QuickJS allocations are therefore external to Redis `used_memory`. The heap,
 stack and deadline are not a whole-process memory ceiling; Rust, Redis and
@@ -86,7 +133,9 @@ output conversion, accounting and QuickJS cleanup before allowing `HSET`. The
 `set_memory_limit` is a no-op with custom allocators. A fallible, budgeted Redis
 allocator remains separate future work.
 
-The next experiment is a reactive adapter that invokes the same pure snapshot
-to projection boundary from keyspace or stream triggers. Persistent libraries,
-background execution, general Redis host calls, production allocator policy
-and script-defined data types are intentionally out of scope here.
+Watch definitions are module-local and ephemeral. They are not replicated,
+persisted, reconstructed after RDB/AOF load, or recovered on failover;
+unloading or retained-image reload starts empty. Only successful native `HSET`
+effects replicate and persist. Persistent libraries, background execution,
+general Redis host calls, production allocator policy and script-defined data
+types remain out of scope.

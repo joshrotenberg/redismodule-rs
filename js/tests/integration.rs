@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use redis::Value;
@@ -27,6 +27,28 @@ fn project(
         .arg(destination)
         .arg(function)
         .query(con)
+}
+
+fn watch(
+    con: &mut impl redis::ConnectionLike,
+    name: impl redis::ToRedisArgs,
+    source: impl redis::ToRedisArgs,
+    destination: impl redis::ToRedisArgs,
+    function: impl redis::ToRedisArgs,
+) -> redis::RedisResult<String> {
+    redis::cmd("JS.WATCH")
+        .arg(name)
+        .arg(source)
+        .arg(destination)
+        .arg(function)
+        .query(con)
+}
+
+fn info(
+    con: &mut impl redis::ConnectionLike,
+    name: &str,
+) -> redis::RedisResult<HashMap<String, String>> {
+    redis::cmd("JS.INFO").arg(name).query(con)
 }
 
 fn hash(con: &mut impl redis::ConnectionLike, key: &str) -> Result<HashMap<String, String>> {
@@ -413,6 +435,44 @@ fn replication_replays_only_the_hset_effect() -> Result<()> {
 }
 
 #[test]
+fn reactive_replication_sends_hset_without_running_js_on_replica() -> Result<()> {
+    let _serial = support::serial_native_test();
+    let mut primary = server()?;
+    assert_eq!(
+        watch(
+            &mut primary,
+            "replicated",
+            "source",
+            "destination",
+            "() => ({token: String(Math.random())})",
+        )?,
+        "OK"
+    );
+    let mut replica = primary.replica()?;
+    redis::cmd("SET")
+        .arg(&["source", "{}"])
+        .query::<()>(&mut primary)?;
+    primary.set_read_timeout(Some(Duration::from_secs(6)))?;
+    let acknowledged: usize = redis::cmd("WAIT").arg(&[1, 5000]).query(&mut primary)?;
+    primary.set_read_timeout(Some(Duration::from_secs(2)))?;
+    ensure!(
+        acknowledged == 1,
+        "replica did not acknowledge reactive HSET"
+    );
+    let expected: String = redis::cmd("HGET")
+        .arg(&["destination", "token"])
+        .query(&mut primary)?;
+    let actual: String = redis::cmd("HGET")
+        .arg(&["destination", "token"])
+        .query(&mut replica)?;
+    assert_eq!(actual, expected);
+    let stats: String = redis::cmd("INFO").arg("commandstats").query(&mut replica)?;
+    assert!(!stats.lines().any(|line| line.starts_with("cmdstat_js.")));
+    assert!(stats.lines().any(|line| line.starts_with("cmdstat_hset:")));
+    Ok(())
+}
+
+#[test]
 fn command_info_reports_write_and_key_metadata() -> Result<()> {
     let _serial = support::serial_native_test();
     let mut con = server()?;
@@ -427,5 +487,342 @@ fn command_info_reports_write_and_key_metadata() -> Result<()> {
         debug.contains("begin_search") && debug.contains("lastkey"),
         "missing key specification: {debug}"
     );
+    let watch_info: Value = redis::cmd("COMMAND")
+        .arg("INFO")
+        .arg("JS.WATCH")
+        .query(&mut con)?;
+    let watch_debug = format!("{watch_info:?}").to_ascii_lowercase();
+    for expected in ["ro", "access", "rw", "update", "insert"] {
+        assert!(
+            watch_debug.contains(expected),
+            "JS.WATCH metadata lacks {expected}: {watch_debug}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn watches_update_automatically_coalesce_and_keep_last_good_output() -> Result<()> {
+    let _serial = support::serial_native_test();
+    let mut con = server()?;
+    redis::cmd("HSET")
+        .arg(&["summary", "retained", "yes"])
+        .query::<i64>(&mut con)?;
+    let registration_started = Instant::now();
+    assert_eq!(
+        watch(
+            &mut con,
+            "orders",
+            "order",
+            "summary",
+            "value => ({customer: value.customer, total: String(value.total)})"
+        )?,
+        "OK"
+    );
+    let registration_elapsed = registration_started.elapsed();
+    assert!(!hash(&mut con, "summary")?.contains_key("customer"));
+
+    redis::cmd("MULTI").query::<String>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["order", r#"{"customer":"first","total":1}"#])
+        .query::<Value>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["order", r#"{"customer":"Ada","total":30}"#])
+        .query::<Value>(&mut con)?;
+    let update_started = Instant::now();
+    redis::cmd("EXEC").query::<Value>(&mut con)?;
+    let update_elapsed = update_started.elapsed();
+    eprintln!(
+        "reactive engine startup/registration: {registration_elapsed:?}; transaction-to-projection reply: {update_elapsed:?}"
+    );
+    assert_eq!(
+        hash(&mut con, "summary")?,
+        HashMap::from([
+            ("customer".into(), "Ada".into()),
+            ("total".into(), "30".into()),
+            ("retained".into(), "yes".into()),
+        ])
+    );
+    let status = info(&mut con, "orders")?;
+    assert_eq!(status.get("runs").map(String::as_str), Some("1"));
+    assert_eq!(status.get("successes").map(String::as_str), Some("1"));
+    assert_eq!(status.get("coalesced").map(String::as_str), Some("1"));
+    assert_eq!(status.get("pending").map(String::as_str), Some("0"));
+
+    redis::cmd("SET")
+        .arg(&["order", "not-json"])
+        .query::<()>(&mut con)?;
+    assert_eq!(
+        hash(&mut con, "summary")?
+            .get("customer")
+            .map(String::as_str),
+        Some("Ada")
+    );
+    let failed = info(&mut con, "orders")?;
+    assert_eq!(failed.get("failures").map(String::as_str), Some("1"));
+    assert!(!failed.get("last_error").unwrap().is_empty());
+
+    redis::cmd("DEL").arg("order").query::<i64>(&mut con)?;
+    assert_eq!(
+        hash(&mut con, "summary")?
+            .get("customer")
+            .map(String::as_str),
+        Some("Ada")
+    );
+    assert_eq!(
+        info(&mut con, "orders")?
+            .get("failures")
+            .map(String::as_str),
+        Some("2")
+    );
+    Ok(())
+}
+
+#[test]
+fn watch_count_limit_rejects_without_touching_keys() -> Result<()> {
+    let _serial = support::serial_native_test();
+    let mut con = server()?;
+    for index in 0..64 {
+        assert_eq!(
+            watch(
+                &mut con,
+                format!("watch-{index}"),
+                format!("source-{index}"),
+                format!("destination-{index}"),
+                "() => ({value: 'ok'})",
+            )?,
+            "OK"
+        );
+    }
+    watch(
+        &mut con,
+        "overflow",
+        "overflow-source",
+        "overflow-destination",
+        "() => ({value: 'bad'})",
+    )
+    .expect_err("the 65th watch was accepted");
+    assert_eq!(
+        redis::cmd("EXISTS")
+            .arg(&["overflow-source", "overflow-destination"])
+            .query::<i64>(&mut con)?,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn watch_names_databases_collisions_cancellation_and_reload_are_isolated() -> Result<()> {
+    let _serial = support::serial_native_test();
+    let mut con = server()?;
+    assert_eq!(
+        watch(
+            &mut con,
+            "same",
+            "source",
+            "destination",
+            "v => ({v: String(v.v)})"
+        )?,
+        "OK"
+    );
+    watch(
+        &mut con,
+        "same",
+        "other",
+        "other-destination",
+        "v => ({v: 'x'})",
+    )
+    .expect_err("duplicate name was replaced");
+    watch(
+        &mut con,
+        "overlap",
+        "destination",
+        "third",
+        "v => ({v: 'x'})",
+    )
+    .expect_err("a projection chain was accepted");
+    watch(&mut con, "equal", "equal", "equal", "v => ({v: 'x'})")
+        .expect_err("equal keys were accepted");
+    watch(&mut con, "", "a", "b", "v => ({v: 'x'})").expect_err("empty name accepted");
+    watch(&mut con, "x".repeat(129), "a", "b", "v => ({v: 'x'})").expect_err("long name accepted");
+
+    redis::cmd("SELECT").arg(1).query::<()>(&mut con)?;
+    assert_eq!(
+        watch(
+            &mut con,
+            "same",
+            "source",
+            "destination",
+            "v => ({v: 'db1'})"
+        )?,
+        "OK"
+    );
+    redis::cmd("SET")
+        .arg(&["source", "{}"])
+        .query::<()>(&mut con)?;
+    assert_eq!(
+        hash(&mut con, "destination")?.get("v").map(String::as_str),
+        Some("db1")
+    );
+    redis::cmd("SELECT").arg(0).query::<()>(&mut con)?;
+    assert!(hash(&mut con, "destination")?.is_empty());
+
+    redis::cmd("MULTI").query::<String>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["source", "{}"])
+        .query::<Value>(&mut con)?;
+    redis::cmd("JS.UNWATCH")
+        .arg("same")
+        .query::<Value>(&mut con)?;
+    redis::cmd("JS.WATCH")
+        .arg(&["same", "source", "destination", "v => ({v: 'new'})"])
+        .query::<Value>(&mut con)?;
+    redis::cmd("EXEC").query::<Value>(&mut con)?;
+    assert!(hash(&mut con, "destination")?.is_empty());
+    redis::cmd("SET")
+        .arg(&["source", "{}"])
+        .query::<()>(&mut con)?;
+    assert_eq!(
+        hash(&mut con, "destination")?.get("v").map(String::as_str),
+        Some("new")
+    );
+
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "redis_module_js"])
+        .query::<()>(&mut con)?;
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(module_path()?)
+        .query::<()>(&mut con)?;
+    redis::cmd("JS.INFO")
+        .arg("same")
+        .query::<Value>(&mut con)
+        .expect_err("watch survived reload");
+    Ok(())
+}
+
+#[test]
+fn watch_uses_owner_acl_and_declares_keys() -> Result<()> {
+    let _serial = support::serial_native_test();
+    let mut admin = server()?;
+    redis::cmd("ACL")
+        .arg(&[
+            "SETUSER",
+            "owner",
+            "reset",
+            "on",
+            ">secret",
+            "%R~source",
+            "%W~destination",
+            "+js.watch",
+            "+js.unwatch",
+            "+js.info",
+            "+get",
+            "+hset",
+        ])
+        .query::<()>(&mut admin)?;
+    let mut caller = admin.connection()?;
+    redis::cmd("AUTH")
+        .arg(&["owner", "secret"])
+        .query::<()>(&mut caller)?;
+    assert_eq!(
+        watch(
+            &mut caller,
+            "owned",
+            "source",
+            "destination",
+            "v => ({v: String(v.v)})"
+        )?,
+        "OK"
+    );
+    redis::cmd("SET")
+        .arg(&["source", r#"{"v":1}"#])
+        .query::<()>(&mut admin)?;
+    assert_eq!(
+        hash(&mut admin, "destination")?
+            .get("v")
+            .map(String::as_str),
+        Some("1")
+    );
+
+    redis::cmd("JS.INFO")
+        .arg("owned")
+        .query::<Value>(&mut admin)
+        .expect_err("another user inspected owner diagnostics");
+    redis::cmd("ACL")
+        .arg(&["SETUSER", "owner", "-get", "-hset"])
+        .query::<()>(&mut admin)?;
+    redis::cmd("SET")
+        .arg(&["source", r#"{"v":2}"#])
+        .query::<()>(&mut admin)?;
+    assert_eq!(
+        hash(&mut admin, "destination")?
+            .get("v")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        redis::cmd("JS.UNWATCH")
+            .arg("owned")
+            .query::<String>(&mut caller)?,
+        "OK"
+    );
+
+    redis::cmd("ACL")
+        .arg(&["SETUSER", "owner", "+get", "+hset"])
+        .query::<()>(&mut admin)?;
+    assert_eq!(
+        watch(
+            &mut caller,
+            "disabled",
+            "source",
+            "destination",
+            "v => ({v: String(v.v)})"
+        )?,
+        "OK"
+    );
+    redis::cmd("ACL")
+        .arg(&["SETUSER", "owner", "off"])
+        .query::<()>(&mut admin)?;
+    redis::cmd("SET")
+        .arg(&["source", r#"{"v":3}"#])
+        .query::<()>(&mut admin)?;
+    assert_eq!(
+        hash(&mut admin, "destination")?
+            .get("v")
+            .map(String::as_str),
+        Some("1")
+    );
+    redis::cmd("ACL")
+        .arg(&["SETUSER", "owner", "on"])
+        .query::<()>(&mut admin)?;
+    assert_eq!(
+        info(&mut caller, "disabled")?
+            .get("failures")
+            .map(String::as_str),
+        Some("1")
+    );
+    redis::cmd("ACL")
+        .arg(&["DELUSER", "owner"])
+        .query::<i64>(&mut admin)?;
+    redis::cmd("SET")
+        .arg(&["source", r#"{"v":4}"#])
+        .query::<()>(&mut admin)?;
+    assert_eq!(
+        hash(&mut admin, "destination")?
+            .get("v")
+            .map(String::as_str),
+        Some("1")
+    );
+
+    let keys: Vec<String> = redis::cmd("COMMAND")
+        .arg("GETKEYS")
+        .arg("JS.WATCH")
+        .arg("name")
+        .arg("source")
+        .arg("destination")
+        .arg("v => ({v: 'x'})")
+        .query(&mut admin)?;
+    assert_eq!(keys, ["source", "destination"]);
     Ok(())
 }
