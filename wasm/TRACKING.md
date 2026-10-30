@@ -7,7 +7,7 @@ scope and readiness. Historical H/S/G IDs remain useful for the evidence below.
 
 Status: `done`, `next` (being worked on or first in line), `todo`, `blocked`.
 
-Last updated 2026-10-27.
+Last updated 2026-10-29.
 
 ## Where it stands
 
@@ -114,6 +114,13 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-10-29: merged SDK master `6f1df04` into the branch as `5d86902`.
+  SDK PR 133 (#101) records dispositions for 26 upstream pull requests and
+  updates the upstream-watch review timestamp. No runtime source or
+  dependencies changed. `cj run wasm-sync` used `--skip-check` for this
+  documentation-only sync; all four installed lockfiles were byte-identical
+  to their snapshots. The experiment push CI runs `wasm/ci/check.sh`.
 
 - 2026-10-29: merged SDK master `d710daf` into the branch as `bb15d52`.
   SDK PR 129 (#113) adds nonblocking `try_lock` methods on both thread-safe
