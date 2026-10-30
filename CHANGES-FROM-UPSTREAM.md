@@ -404,6 +404,15 @@ in #114 and #55.
 
 ## Fixes with no upstream issue or pull request
 
+When Redis lacks `AddACLCategory`, `redis_module!` logs one notice per load
+and its registration context tracks the declared names for that load (#115).
+Command builders and legacy definitions skip those custom names in optional
+ACL categories, including commands registered by init. Built-in categories
+remain available, required-category failures remain fatal, and unrelated
+optional failures still warn. There is no global category cache or new public
+registration API. The command-builder example and native regression cover
+old/new servers, mixed categories, mandatory rejection and module reload.
+
 Upstream's issues and pull requests, open and closed, were searched for each of
 these in October 2026.
 
