@@ -817,8 +817,9 @@ text.
 - **Errors on the wire.** A key of the wrong type replies the standard
   `WRONGTYPE` error from `get_value`, `hash_set`, `hash_del` and the hash
   getters. A failed ACL key
-  check replies `NOPERM User does not have permissions on the key`, and an
-  unknown or disabled user `ERR the user does not exist or is disabled`.
+  check replies `NOPERM User does not have permissions on the key`, and a
+  failed native user lookup replies `ERR the user does not exist or is disabled`.
+  An existing account marked `off` can still pass lookup and permission checks.
 - **Load failures.** `redis_module!` fails the load when a configuration
   registration fails, where 2.x loaded without that configuration. It also fails
   the load, before `init` runs, when `LoadConfigs` rejects a value given at load

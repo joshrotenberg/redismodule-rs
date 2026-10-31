@@ -348,7 +348,7 @@ Entries marked **Breaking** need a change in modules;
 - **Breaking:** `raw::export_shared_api` and `Context::export_shared_api` return `Status`.
 - **Breaking:** the opaque handle types in `raw` derive only `Debug`, not `Copy` and `Clone` (bindgen 0.73).
 - **Breaking:** `bindgen-runtime` is no longer a default feature. The bindings are pregenerated in `src/redisraw/bindings.rs` for 64-bit targets, so a default build needs no libclang; `bindgen-runtime` and `bindgen-static` regenerate them with bindgen 0.73, and CI checks that the committed file is current.
-- Error texts on the wire: wrong-type keys reply `WRONGTYPE`, a denied ACL key check replies `NOPERM`, and an unknown or disabled user replies `ERR the user does not exist or is disabled`.
+- Error texts on the wire: wrong-type keys reply `WRONGTYPE`, a denied ACL key check replies `NOPERM`, and a failed native user lookup replies `ERR the user does not exist or is disabled` (documentation corrected in #141; runtime behavior is unchanged).
 - A panic in a command replies `ERR command panicked: <message>`, and a panic in other callbacks is logged, instead of aborting the server.
 - A missing module API is reported by name (`RedisModule_X is not available in this Redis server`) instead of as an unwrap of `None`.
 - `redis_module!` fails the module load when a configuration registration fails, when `LoadConfigs` rejects a value, or when a module built with `system-allocator-fallback` already allocated from the system allocator.
