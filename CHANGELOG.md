@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Clarify that ACL permission checks and scoped call-user selection can succeed
+  for an existing account marked `off` (#141). Deferred work must check enabled
+  state separately when disabling its owner should stop that work. Runtime
+  behavior, error strings, signatures and compatibility floors are unchanged.
+
 - Modules using `redis_module!` refuse unload before user deinit while Redis
   owns an SDK post-notification job (#139). Ownership lasts through callback
   execution and captured-data cleanup, including cancellation and panics.

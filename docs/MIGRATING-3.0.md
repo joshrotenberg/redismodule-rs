@@ -530,6 +530,13 @@ its runtime view ends; worker guards clean up before unlocking. Do not delete
 an ACL account while its scopes are active: Redis's native user handles borrow
 the account.
 
+Scoped users and the key/command/channel ACL helpers check the account's rules.
+Native lookup and permission checks can still succeed for an existing account
+marked `off`; these operations do not authenticate a client or guarantee that
+the account is enabled. Check its current enabled state separately when
+deferred work must stop after disabling its owner. This clarification preserves
+the existing runtime behavior, return types and error strings.
+
 ### Raw items are under `redis_module::raw`
 
 2.x re-exported all of `raw` at the crate root. 3.0 re-exports only `Status`,

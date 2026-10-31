@@ -137,6 +137,10 @@ impl RuntimeContext {
     /// Keep the returned [`CallUserScope`] alive while making those calls.
     /// This changes the context's call user, including on events and workers;
     /// it does not authenticate or modify a client connection.
+    /// Native lookup can select an existing account marked `off`, and
+    /// ACL-checked calls can still pass that account's rules. For deferred work
+    /// whose authority must end when its account is disabled, check the
+    /// account's enabled state separately before accessing data.
     ///
     /// Dropping a guard restores the latest still-active SDK scope on the same
     /// native context. After all scopes end, Redis 8.8+ restores any preexisting
@@ -196,7 +200,8 @@ impl RuntimeContext {
     /// active user. Otherwise returns `Ok(f(self))`: a closure returning a
     /// `Result` keeps that result nested, just like [`Self::with_db`].
     /// Explicit guards created inside `f` follow their own lifetimes.
-    /// See [`Self::scoped_call_user`] for native override and account lifetimes.
+    /// See [`Self::scoped_call_user`] for native overrides, account-state
+    /// limitations and account lifetimes.
     ///
     /// ```no_run
     /// use redis_module::{CallOptionsBuilder, CallResult, RedisError, RedisString, RuntimeContext};

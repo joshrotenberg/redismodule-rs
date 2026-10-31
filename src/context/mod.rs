@@ -1325,9 +1325,10 @@ impl RuntimeContext {
         Ok((status, errno))
     }
 
-    /// Verify the the given user has the give ACL permission on the given key.
-    /// Return Ok(()) if the user has the permissions or error (with relevant error message)
-    /// if the validation failed.
+    /// Checks the named account's ACL permissions on the given key.
+    /// Permission checks can succeed for an existing account marked `off`.
+    /// Check enabled state separately when deferred work must stop after its
+    /// account is disabled; this method checks rules rather than authentication.
     pub fn acl_check_key_permission(
         &self,
         user_name: &RedisString,
@@ -1409,10 +1410,14 @@ impl RuntimeContext {
     /// does. The arguments matter for the key permissions of the command and for
     /// rules on subcommands.
     ///
+    /// These native checks can authorize an existing account marked `off`.
+    /// Check enabled state separately when deferred work must stop after its
+    /// account is disabled; permission checks do not authenticate a client.
+    ///
     /// # Errors
     ///
     /// Returns an error starting with `NOPERM` if the user may not run the
-    /// command, and an error if the user does not exist or is disabled, `args`
+    /// command, and an error if the user lookup fails, `args`
     /// is empty, the command does not exist, or the running Redis does not
     /// provide the API (before 7.0).
     pub fn acl_check_command_permission(
@@ -1446,10 +1451,14 @@ impl RuntimeContext {
     /// `RedisModule_ACLCheckChannelPermissions` does. Unsubscribing is always
     /// allowed.
     ///
+    /// These native checks can authorize an existing account marked `off`.
+    /// Check enabled state separately when deferred work must stop after its
+    /// account is disabled; permission checks do not authenticate a client.
+    ///
     /// # Errors
     ///
     /// Returns an error starting with `NOPERM` if the user may not access the
-    /// channel, and an error if the user does not exist or is disabled, or the
+    /// channel, and an error if the user lookup fails or the
     /// running Redis does not provide the API (before 7.0).
     pub fn acl_check_channel_permission(
         &self,
