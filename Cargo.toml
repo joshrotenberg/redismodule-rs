@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "redismodule-rs-macros", "redismodule-rs-macros-internals"]
+members = [".", "js", "redismodule-rs-macros", "redismodule-rs-macros-internals"]
 # Prefer dependency versions that support rust-version.
 resolver = "3"
 

@@ -1,0 +1,34 @@
+[package]
+name = "redis-module-js"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Experimental native QuickJS projection module for Redis"
+readme = "README.md"
+
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+redis-module = { path = "..", default-features = false }
+rquickjs = { version = "=0.14.0", default-features = false, features = ["std"] }
+
+[features]
+default = ["min-redis-compatibility-version-6-0"]
+min-redis-compatibility-version-8-0 = ["redis-module/min-redis-compatibility-version-8-0"]
+min-redis-compatibility-version-7-4 = ["redis-module/min-redis-compatibility-version-7-4"]
+min-redis-compatibility-version-7-2 = ["redis-module/min-redis-compatibility-version-7-2"]
+min-redis-compatibility-version-7-0 = ["redis-module/min-redis-compatibility-version-7-0"]
+min-redis-compatibility-version-6-2 = ["redis-module/min-redis-compatibility-version-6-2"]
+min-redis-compatibility-version-6-0 = ["redis-module/min-redis-compatibility-version-6-0"]
+all-features-but-xor = []
+
+[dev-dependencies]
+anyhow = "1"
+redis = { version = "=1.2.2", default-features = false }
+serde_json = "1"

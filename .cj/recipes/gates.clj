@@ -2,10 +2,11 @@
   "Run CONTRIBUTING.md's validation list in a checkout; print each step's result and the test counts. Writes only build output: target/ and the ignored Cargo.lock.
 
   Runs every step even after one fails, in this order: fmt, Clippy at the
-  default and 7.2 floors, examples, workspace tests, the allocator fallback
-  test, strict rustdoc, then examples, tests and strict rustdoc at the 7.2
-  floor, and the doctests with RUSTC_BOOTSTRAP=1 so compile_fail error codes
-  are checked. On experiment/wasm-host (a checkout with wasm/Cargo.toml) the
+  default and 7.2 floors, examples, the redis-module-js cdylib when present,
+  workspace tests, the allocator fallback test, strict rustdoc, then examples,
+  the redis-module-js cdylib, tests and strict rustdoc at the 7.2 floor, and
+  the doctests with RUSTC_BOOTSTRAP=1 so compile_fail error codes are checked.
+  On experiment/wasm-host (a checkout with wasm/Cargo.toml) the
   7.2-floor workspace steps exclude redis-module-wasm, as CONTRIBUTING.md
   says; wasm/ci/check.sh covers the wasm host.
 
@@ -33,41 +34,49 @@
 
 (defn- validation-steps
   "CONTRIBUTING.md's validation list, repeated at the 7.2 floor."
-  [wasm?]
+  [wasm? js?]
   (let [exclude (when wasm? ["--exclude" "redis-module-wasm"])
         threads {"RUST_TEST_THREADS" "4"}
         strict-doc {"RUSTDOCFLAGS" "-D warnings"}]
-    [{:name "fmt" :argv ["cargo" "fmt" "--all" "--" "--check"]}
-     {:name "clippy" :argv ["cargo" "clippy" "--workspace" "--all-targets" "--" "-D" "warnings"]}
-     {:name "clippy-7.2"
-      :argv (concat ["cargo" "clippy" "--workspace" "--all-targets"] exclude floor-7-2
-                    ["--" "-D" "warnings"])}
-     {:name "examples" :argv ["cargo" "build" "--examples"]}
-     {:name "test" :argv ["cargo" "test" "--workspace" "--no-fail-fast"] :env threads}
-     {:name "alloc-fallback"
-      :argv ["cargo" "test" "--features" "system-allocator-fallback"
-             "--test" "system_allocator_fallback"]}
-     {:name "doc"
-      :argv ["cargo" "doc" "--workspace" "--no-deps" "--features" "all-features-but-xor"]
-      :env strict-doc}
-     {:name "examples-7.2" :argv (concat ["cargo" "build" "--examples"] floor-7-2)}
-     {:name "test-7.2"
-      :argv (concat ["cargo" "test" "--workspace" "--no-fail-fast"] exclude floor-7-2)
-      :env threads}
-     {:name "doc-7.2"
-      ;; As CI's floor jobs build it: the floor plus all-features-but-xor.
-      :argv (concat ["cargo" "doc" "--workspace" "--no-deps"] exclude
-                    ["--no-default-features" "--features"
-                     "all-features-but-xor min-redis-compatibility-version-7-2"])
-      :env strict-doc}
-     {:name "doctest-bootstrap" :argv ["cargo" "test" "--doc"] :env {"RUSTC_BOOTSTRAP" "1"}}]))
+    (vec
+     (concat
+      [{:name "fmt" :argv ["cargo" "fmt" "--all" "--" "--check"]}
+       {:name "clippy" :argv ["cargo" "clippy" "--workspace" "--all-targets" "--" "-D" "warnings"]}
+       {:name "clippy-7.2"
+        :argv (concat ["cargo" "clippy" "--workspace" "--all-targets"] exclude floor-7-2
+                      ["--" "-D" "warnings"])}
+       {:name "examples" :argv ["cargo" "build" "--examples"]}]
+      (when js?
+        [{:name "js-build" :argv ["cargo" "build" "--package" "redis-module-js"]}])
+      [{:name "test" :argv ["cargo" "test" "--workspace" "--no-fail-fast"] :env threads}
+       {:name "alloc-fallback"
+        :argv ["cargo" "test" "--features" "system-allocator-fallback"
+               "--test" "system_allocator_fallback"]}
+       {:name "doc"
+        :argv ["cargo" "doc" "--workspace" "--no-deps" "--features" "all-features-but-xor"]
+        :env strict-doc}
+       {:name "examples-7.2" :argv (concat ["cargo" "build" "--examples"] floor-7-2)}]
+      (when js?
+        [{:name "js-build-7.2"
+          :argv (concat ["cargo" "build" "--package" "redis-module-js"] floor-7-2)}])
+      [{:name "test-7.2"
+        :argv (concat ["cargo" "test" "--workspace" "--no-fail-fast"] exclude floor-7-2)
+        :env threads}
+       {:name "doc-7.2"
+        ;; As CI's floor jobs build it: the floor plus all-features-but-xor.
+        :argv (concat ["cargo" "doc" "--workspace" "--no-deps"] exclude
+                      ["--no-default-features" "--features"
+                       "all-features-but-xor min-redis-compatibility-version-7-2"])
+        :env strict-doc}
+       {:name "doctest-bootstrap" :argv ["cargo" "test" "--doc"] :env {"RUSTC_BOOTSTRAP" "1"}}]))))
 
 (defn -main [{:keys [dir server only]}]
   (let [dir (str (fs/canonicalize (or dir (System/getProperty "user.dir"))))
         _ (when-not (fs/exists? (fs/path dir "Cargo.toml"))
             (throw (ex-info (str dir " has no Cargo.toml") {:kind :invalid-input})))
         wasm? (fs/exists? (fs/path dir "wasm" "Cargo.toml"))
-        all-steps (validation-steps wasm?)
+        js? (fs/exists? (fs/path dir "js" "Cargo.toml"))
+        all-steps (validation-steps wasm? js?)
         selected (when only (set (map str/trim (str/split only #","))))
         unknown (remove (set (map :name all-steps)) selected)
         _ (when (seq unknown)
