@@ -655,7 +655,7 @@ These compile unchanged but behave differently:
 | change | behavior change |
 |---|---|
 | [752b2a7], [dd25376] | Keys of the wrong type reply `WRONGTYPE` from `get_value`, the hash getters, `hash_set` and `hash_del`. |
-| [3cb2121] | A denied ACL key check replies `NOPERM ...`; an unknown or disabled user replies `ERR the user does not exist or is disabled`. |
+| [3cb2121] | A denied ACL key check replies `NOPERM ...`; a failed native user lookup replies `ERR the user does not exist or is disabled`. An existing account marked `off` can still pass native lookup and ACL-rule checks, so enabled state requires a separate check. |
 | [b29cd45], [41238c3] | `Context::call` returns `SimpleString` only for simple string replies, so a forwarded bulk reply reaches the client as a bulk string; a call that fails without the `E` flag returns an error. |
 | [7333dba] | Simple string and error replies replace CR, LF and NUL with spaces. |
 | [c478791] | A command that panics gets an error reply instead of aborting the server; other callbacks log the panic. |
