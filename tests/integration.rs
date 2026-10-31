@@ -64,6 +64,117 @@ mod notification_write_tests {
         Ok(redis::cmd("notify_stream.stats").query(con)?)
     }
 
+    fn unload(con: &mut TestConnection) -> Result<()> {
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "keyspace_to_stream"])
+            .query::<()>(con)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_notification_jobs_refuse_queued_unload_before_deinit() -> Result<()> {
+        for mode in ["event", "run", "cancel", "panic"] {
+            let mut con = TestConnection::new("keyspace_to_stream");
+            redis::cmd("MULTI").query::<String>(&mut con)?;
+            if mode == "event" {
+                redis::cmd("SET")
+                    .arg(&["watched:queued", "value"])
+                    .query::<Value>(&mut con)?;
+            } else {
+                redis::cmd("notify_stream.job_probe")
+                    .arg(mode)
+                    .query::<Value>(&mut con)?;
+            }
+            redis::cmd("MODULE")
+                .arg(&["UNLOAD", "keyspace_to_stream"])
+                .query::<Value>(&mut con)?;
+            redis::cmd("EXEC")
+                .query::<Value>(&mut con)
+                .expect_err("unload accepted with a Redis-owned callback");
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+            assert!(
+                con.server_log()?
+                    .contains("pending or executing post-notification jobs")
+            );
+            if mode == "event" {
+                assert_eq!(entries(&mut con)?.len(), 1);
+            } else {
+                let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut con)?;
+                assert_eq!(counts, [1, i64::from(mode != "cancel")]);
+            }
+            // Refusal must not enter deinit and leave STOPPING set.
+            let before = stats(&mut con)?[1];
+            redis::cmd("SET")
+                .arg(&["watched:after-refusal", "value"])
+                .query::<()>(&mut con)?;
+            assert_eq!(stats(&mut con)?[1], before + 1);
+            unload(&mut con)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_notification_job_execution_and_panics_release_ownership() -> Result<()> {
+        for mode in ["unload", "panic", "drop-panic"] {
+            let mut con = TestConnection::new("keyspace_to_stream");
+            let accepted: Vec<i64> = redis::cmd("notify_stream.job_probe")
+                .arg(mode)
+                .query(&mut con)?;
+            assert_eq!(accepted, [1, 0]);
+            let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut con)?;
+            assert_eq!(counts, [1, 1]);
+            let log = con.server_log()?;
+            if mode == "unload" {
+                assert!(log.contains("pending or executing post-notification jobs"));
+            } else {
+                assert!(log.contains("probe panic") || log.contains("capture drop panic"));
+            }
+            unload(&mut con)?;
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        }
+        let primary = TestConnection::new("keyspace_to_stream");
+        let mut replica = primary.replica()?;
+        redis::cmd("notify_stream.job_probe")
+            .arg("drop-panic")
+            .query::<Value>(&mut replica)
+            .expect_err("rejected capture destructor should panic inside the command adapter");
+        let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut replica)?;
+        assert_eq!(counts, [1, 0]);
+        unload(&mut replica)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_notification_jobs_refuse_load_and_unload_submission_and_recover() -> Result<()> {
+        let mut con =
+            TestConnection::with_args("keyspace_to_stream", &["probe-load", "probe-unload"]);
+        let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut con)?;
+        assert_eq!(counts, [1, 0]);
+        assert!(con.server_log()?.contains("load job probe refused"));
+        unload(&mut con)?;
+        assert!(con.server_log()?.contains("unload job probe refused"));
+        let path = utils::module_path("keyspace_to_stream")?;
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(&path)
+            .arg("fail-load")
+            .query::<()>(&mut con)
+            .expect_err("probe fixture should reject its load");
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(path)
+            .arg("probe-load")
+            .query::<()>(&mut con)?;
+        let before: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut con)?;
+        let accepted: Vec<i64> = redis::cmd("notify_stream.job_probe").query(&mut con)?;
+        assert_eq!(accepted, [1, 0]);
+        let after: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut con)?;
+        assert_eq!(after, [before[0] + 1, before[1] + 1]);
+        unload(&mut con)?;
+        Ok(())
+    }
+
     #[test]
     fn test_notification_writes_keep_binary_keys_database_and_feedback_guard() -> Result<()> {
         let mut con = TestConnection::new("keyspace_to_stream");

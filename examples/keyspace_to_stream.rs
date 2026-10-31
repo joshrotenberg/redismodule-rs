@@ -14,6 +14,7 @@ static WRITTEN: AtomicI64 = AtomicI64::new(0);
 static ERRORS: AtomicI64 = AtomicI64::new(0);
 static SKIPPED: AtomicI64 = AtomicI64::new(0);
 static STOPPING: AtomicBool = AtomicBool::new(false);
+static PROBE_UNLOAD: AtomicBool = AtomicBool::new(false);
 
 fn writable_primary(ctx: &EventContext) -> bool {
     let flags = ctx.get_flags();
@@ -89,7 +90,7 @@ fn on_event(ctx: &EventContext, _: NotifyEvent, event: &str, key: &[u8]) {
     }
 }
 
-fn init(ctx: &RegistrationContext<'_>, _: &[RedisString]) -> Status {
+fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
     if ctx.get_flags().contains(ContextFlags::CLUSTER) {
         ctx.log_warning("keyspace_to_stream requires standalone Redis");
         return Status::Err;
@@ -101,12 +102,34 @@ fn init(ctx: &RegistrationContext<'_>, _: &[RedisString]) -> Status {
         return Status::Err;
     }
     STOPPING.store(false, Ordering::Relaxed);
+    PROBE_UNLOAD.store(
+        args.iter().any(|arg| arg.as_slice() == b"probe-unload"),
+        Ordering::Relaxed,
+    );
+    if args
+        .iter()
+        .any(|arg| matches!(arg.as_slice(), b"probe-load" | b"fail-load"))
+    {
+        if submit_probe(ctx, "run")[0] != 0 {
+            return Status::Err;
+        }
+        ctx.log_notice("load job probe refused");
+    }
+    if args.iter().any(|arg| arg.as_slice() == b"fail-load") {
+        return Status::Err;
+    }
     Status::Ok
 }
 
-fn deinit(_: &EventContext) -> Status {
+fn deinit(ctx: &EventContext) -> Status {
+    if PROBE_UNLOAD.load(Ordering::Relaxed) {
+        if submit_probe(ctx, "run")[0] != 0 {
+            return Status::Err;
+        }
+        ctx.log_notice("unload job probe refused");
+    }
     // Set this before any future teardown operation that could emit events.
-    // This example has no threads, timers or retained callbacks to drain.
+    // The SDK refuses entry here while Redis still owns a notification job.
     STOPPING.store(true, Ordering::Relaxed);
     Status::Ok
 }
@@ -125,25 +148,43 @@ fn stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
 // It changes module-local counters, never the Redis keyspace.
 static PROBE_DROPS: AtomicI64 = AtomicI64::new(0);
 static PROBE_RUNS: AtomicI64 = AtomicI64::new(0);
-struct Probe(Vec<u8>);
+struct Probe(Vec<u8>, bool);
 impl Drop for Probe {
     fn drop(&mut self) {
         PROBE_DROPS.fetch_add(1, Ordering::Relaxed);
+        assert!(!self.1, "post-notification capture drop panic");
     }
 }
-fn job_probe(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+fn submit_probe(ctx: &EventContext, mode: &str) -> Vec<i64> {
     let before = PROBE_DROPS.load(Ordering::Relaxed);
-    let probe = Probe(vec![42; 8]);
-    let status = ctx.add_post_notification_job(move |_| {
+    let probe = Probe(vec![42; 8], mode == "drop-panic");
+    let panic = mode == "panic";
+    let cancel = mode == "cancel";
+    let unload = mode == "unload";
+    let status = ctx.add_post_notification_job(move |ctx| {
         assert_eq!(probe.0, [42; 8]);
+        if cancel {
+            // Logical cancellation does not release Redis's native callback.
+            return;
+        }
         PROBE_RUNS.fetch_add(1, Ordering::Relaxed);
+        assert!(!panic, "post-notification probe panic");
+        if unload {
+            let options = CallOptionsBuilder::new().errors_as_replies().build();
+            let reply: CallResult =
+                ctx.call_ext("MODULE", &options, &["UNLOAD", "keyspace_to_stream"]);
+            assert!(reply.is_err(), "executing job unloaded its module");
+        }
         drop(probe);
     });
-    Ok(vec![
+    vec![
         i64::from(status == Status::Ok),
         PROBE_DROPS.load(Ordering::Relaxed) - before,
     ]
-    .into())
+}
+fn job_probe(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mode = args.get(1).map_or(Ok("run"), RedisString::try_as_str)?;
+    Ok(submit_probe(ctx, mode).into())
 }
 fn probe_counts(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(vec![

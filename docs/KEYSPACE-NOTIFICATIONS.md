@@ -108,7 +108,10 @@ alone does not upgrade the running Redis server.
 Redis rejects job submission during loading or on a readonly replica. The SDK
 drops the closure and its captures immediately on rejection. After successful
 submission, Redis owns the job and the SDK releases captured values as the
-closure runs and its native private data is cleaned up.
+closure runs and its native private data is cleaned up. Modules using
+`redis_module!` reject submission during module load and unload with
+`Status::Err` and drop captures immediately. Queue work after loading instead;
+a failed load has no unload callback in which to clean up an accepted job.
 
 Successful submission does not guarantee a successful append. A wrong-type
 destination or OOM can fail the `XADD`; the example logs that error and counts
@@ -127,10 +130,18 @@ subscribed. Initialization resets the flag, including on platforms where an
 unload does not reset Rust statics.
 
 Post-notification jobs run at the end of the enclosing execution unit rather
-than at an arbitrary later background time. The example has no workers, timers
-or retained callbacks. A larger module must also finish or
-cancel its own outstanding work before its code is unloaded; a stopping flag
-alone does not make retained callback pointers safe.
+than at an arbitrary later background time. A transaction can still request
+`MODULE UNLOAD` after queuing a job and before that unit ends. Redis retains
+the callback even when the application cancelled its logical work.
+`redis_module!` therefore refuses unload before user deinit until every SDK
+job's callback and native captured-data cleanup finish. Retry unload after
+the enclosing unit completes. Refusal leaves the module usable, and callback
+or destructor panics do not strand the SDK's ownership accounting.
+
+The example has no workers or timers. Larger modules must also finish their
+other outstanding work before their code is unloaded. A stopping flag alone
+does not make retained callback pointers safe. Custom native entrypoints and
+jobs submitted through raw APIs must provide their own lifetime protection.
 
 The tests exercise ordinary unload followed by further writes and an in-place
 reload. They also verify binary keys, database selection, feedback exclusion,
