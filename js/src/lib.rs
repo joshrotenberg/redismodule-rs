@@ -70,6 +70,7 @@ struct Registry {
     retained_bytes: usize,
     next_generation: u64,
     drain_scheduled: bool,
+    draining: bool,
     stopping: bool,
 }
 
@@ -79,6 +80,7 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     retained_bytes: 0,
     next_generation: 0,
     drain_scheduled: false,
+    draining: false,
     stopping: false,
 });
 
@@ -322,6 +324,48 @@ fn check_owner(current: &[u8], watch: &Watch) -> Result<(), RedisError> {
     }
 }
 
+// Redis 7.2's user lookup accepts disabled accounts. Inspect only the first
+// ACL token, which Redis emits as on/off, and release all callback-local handles.
+// Missing APIs, missing users and unexpected encodings fail closed.
+fn check_owner_enabled(owner: &RedisString) -> Result<(), RedisError> {
+    use redis_module::raw;
+    let unavailable = || RedisError::Str("ERR owner enabled-state API is unavailable");
+    let (get_user, free_user, describe, bytes, free_string) = unsafe {
+        (
+            raw::RedisModule_GetModuleUserFromUserName.ok_or_else(unavailable)?,
+            raw::RedisModule_FreeModuleUser.ok_or_else(unavailable)?,
+            raw::RedisModule_GetModuleUserACLString.ok_or_else(unavailable)?,
+            raw::RedisModule_StringPtrLen.ok_or_else(unavailable)?,
+            raw::RedisModule_FreeString.ok_or_else(unavailable)?,
+        )
+    };
+    let enabled = unsafe {
+        let user = get_user(owner.as_ptr());
+        if user.is_null() {
+            return Err(RedisError::Str("ERR owner does not exist or is disabled"));
+        }
+        let acl = describe(user);
+        free_user(user);
+        if acl.is_null() {
+            false
+        } else {
+            let mut len = 0;
+            let data = bytes(acl, &mut len);
+            // No ACL-sized copy or scan: the enabled token is at most three bytes.
+            let enabled = !data.is_null()
+                && len >= 3
+                && std::slice::from_raw_parts(data.cast::<u8>(), 3) == b"on ";
+            free_string(ptr::null_mut(), acl);
+            enabled
+        }
+    };
+    if enabled {
+        Ok(())
+    } else {
+        Err(RedisError::Str("ERR owner does not exist or is disabled"))
+    }
+}
+
 fn preflight(
     ctx: &RuntimeContext,
     owner: &[u8],
@@ -329,6 +373,7 @@ fn preflight(
     destination: &[u8],
 ) -> Result<(), RedisError> {
     let owner = ctx.create_string(owner);
+    check_owner_enabled(&owner)?;
     let get = [ctx.create_string("GET"), ctx.create_string(source)];
     let hset = [
         ctx.create_string("HSET"),
@@ -541,33 +586,36 @@ fn execute_watch(ctx: &EventContext, id: &WatchId, generation: u64, drain_deadli
             "ERR shared projection drain budget exhausted",
         ))
     } else {
-        let owner = ctx.create_string(watch.owner.clone());
-        let source = ctx.create_string(watch.source.clone());
-        let destination = ctx.create_string(watch.destination.clone());
-        let watch_command = [
-            ctx.create_string("JS.WATCH"),
-            ctx.create_string(id.name.clone()),
-            source.safe_clone(ctx),
-            destination.safe_clone(ctx),
-            ctx.create_string(watch.function.clone()),
-        ];
-        ctx.acl_check_command_permission(&owner, &watch_command)
-            .and_then(|()| preflight(ctx, &watch.owner, &watch.source, &watch.destination))
-            .and_then(|()| {
-                ctx.with_call_user(&owner, |ctx| read_source(ctx, &source))
-                    .and_then(|v| v)
-            })
-            .and_then(|input| project_until(input, &watch.function, drain_deadline))
-            .and_then(|fields| {
-                if Instant::now() >= drain_deadline {
-                    return Err(RedisError::Str(
-                        "ERR shared projection drain budget exhausted",
-                    ));
-                }
-                ctx.with_call_user(&owner, |ctx| write_projection(ctx, &destination, &fields))
-                    .and_then(|v| v)
-                    .map(|_| ())
-            })
+        ctx.with_db(id.db, |ctx| {
+            let owner = ctx.create_string(watch.owner.clone());
+            let source = ctx.create_string(watch.source.clone());
+            let destination = ctx.create_string(watch.destination.clone());
+            let watch_command = [
+                ctx.create_string("JS.WATCH"),
+                ctx.create_string(id.name.clone()),
+                source.safe_clone(ctx),
+                destination.safe_clone(ctx),
+                ctx.create_string(watch.function.clone()),
+            ];
+            ctx.acl_check_command_permission(&owner, &watch_command)
+                .and_then(|()| preflight(ctx, &watch.owner, &watch.source, &watch.destination))
+                .and_then(|()| {
+                    ctx.with_call_user(&owner, |ctx| read_source(ctx, &source))
+                        .and_then(|v| v)
+                })
+                .and_then(|input| project_until(input, &watch.function, drain_deadline))
+                .and_then(|fields| {
+                    if Instant::now() >= drain_deadline {
+                        return Err(RedisError::Str(
+                            "ERR shared projection drain budget exhausted",
+                        ));
+                    }
+                    ctx.with_call_user(&owner, |ctx| write_projection(ctx, &destination, &fields))
+                        .and_then(|v| v)
+                        .map(|_| ())
+                })
+        })
+        .and_then(|result| result)
     };
     let elapsed = started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;
     let mut registry = REGISTRY.lock().unwrap();
@@ -600,7 +648,7 @@ fn drain(ctx: &EventContext) {
     let drain_deadline = Instant::now() + JS_DEADLINE;
     let pending: Vec<_> = {
         let mut registry = REGISTRY.lock().unwrap();
-        registry.drain_scheduled = false;
+        registry.draining = true;
         std::mem::take(&mut registry.pending)
             .into_iter()
             .take(MAX_WATCHES)
@@ -609,6 +657,9 @@ fn drain(ctx: &EventContext) {
     for (id, generation) in pending {
         execute_watch(ctx, &id, generation, drain_deadline);
     }
+    let mut registry = REGISTRY.lock().unwrap();
+    registry.draining = false;
+    registry.drain_scheduled = false;
 }
 
 fn on_key_event(ctx: &EventContext, _: NotifyEvent, _: &str, key: &[u8]) {
@@ -618,6 +669,11 @@ fn on_key_event(ctx: &EventContext, _: NotifyEvent, _: &str, key: &[u8]) {
     let db = ctx.get_selected_db();
     let should_schedule = {
         let mut registry = REGISTRY.lock().unwrap();
+        // GET may lazily expire a source. That event is already represented by
+        // this drain; never enqueue a continuation while executing it.
+        if registry.draining {
+            return;
+        }
         let ids: Vec<_> = registry
             .watches
             .iter()
@@ -713,11 +769,7 @@ fn set_watch_key_specs(ctx: &RegistrationContext<'_>) -> Result<(), RedisError> 
         },
         raw::RedisModuleCommandKeySpec {
             notes: ptr::null(),
-            flags: u64::from(
-                raw::REDISMODULE_CMD_KEY_RW
-                    | raw::REDISMODULE_CMD_KEY_UPDATE
-                    | raw::REDISMODULE_CMD_KEY_INSERT,
-            ),
+            flags: u64::from(raw::REDISMODULE_CMD_KEY_RW | raw::REDISMODULE_CMD_KEY_UPDATE),
             begin_search_type: raw::RedisModuleKeySpecBeginSearchType_REDISMODULE_KSPEC_BS_INDEX,
             bs: index(3),
             find_keys_type: raw::RedisModuleKeySpecFindKeysType_REDISMODULE_KSPEC_FK_RANGE,
@@ -767,6 +819,11 @@ fn init(ctx: &RegistrationContext<'_>, _: &[RedisString]) -> Status {
 
 fn deinit(_: &EventContext) -> Status {
     let mut registry = REGISTRY.lock().unwrap();
+    // Redis still owns the callback even if UNWATCH emptied pending.
+    // Refusal must leave definitions active so the accepted callback can finish.
+    if registry.drain_scheduled {
+        return Status::Err;
+    }
     registry.stopping = true;
     registry.watches.clear();
     registry.pending.clear();

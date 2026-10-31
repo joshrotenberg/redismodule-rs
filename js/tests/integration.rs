@@ -492,12 +492,13 @@ fn command_info_reports_write_and_key_metadata() -> Result<()> {
         .arg("JS.WATCH")
         .query(&mut con)?;
     let watch_debug = format!("{watch_info:?}").to_ascii_lowercase();
-    for expected in ["ro", "access", "rw", "update", "insert"] {
+    for expected in ["ro", "access", "rw", "update"] {
         assert!(
             watch_debug.contains(expected),
             "JS.WATCH metadata lacks {expected}: {watch_debug}"
         );
     }
+    assert!(!watch_debug.contains("insert"));
     Ok(())
 }
 
@@ -750,6 +751,17 @@ fn watch_uses_owner_acl_and_declares_keys() -> Result<()> {
         .query::<Value>(&mut admin)
         .expect_err("another user inspected owner diagnostics");
     redis::cmd("ACL")
+        .arg(&["SETUSER", "owner", "-js.watch"])
+        .query::<()>(&mut admin)?;
+    redis::cmd("SET")
+        .arg(&["source", r#"{"v":99}"#])
+        .query::<()>(&mut admin)?;
+    assert_eq!(hash(&mut admin, "destination")?["v"], "1");
+    assert_eq!(info(&mut caller, "owned")?["failures"], "1");
+    redis::cmd("ACL")
+        .arg(&["SETUSER", "owner", "+js.watch"])
+        .query::<()>(&mut admin)?;
+    redis::cmd("ACL")
         .arg(&["SETUSER", "owner", "-get", "-hset"])
         .query::<()>(&mut admin)?;
     redis::cmd("SET")
@@ -824,5 +836,264 @@ fn watch_uses_owner_acl_and_declares_keys() -> Result<()> {
         .arg("v => ({v: 'x'})")
         .query(&mut admin)?;
     assert_eq!(keys, ["source", "destination"]);
+    Ok(())
+}
+
+#[test]
+fn mixed_database_transaction_projects_each_snapshot_and_restores_context() -> Result<()> {
+    let _serial = support::serial_native_test();
+    let mut con = server()?;
+    for db in [0, 1] {
+        redis::cmd("SELECT").arg(db).query::<()>(&mut con)?;
+        watch(
+            &mut con,
+            "mixed",
+            "source",
+            "destination",
+            "v => ({v: v.v})",
+        )?;
+    }
+    redis::cmd("SELECT").arg(0).query::<()>(&mut con)?;
+    redis::cmd("MULTI").query::<String>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["source", r#"{"v":"db0"}"#])
+        .query::<Value>(&mut con)?;
+    redis::cmd("SELECT").arg(1).query::<Value>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["source", r#"{"v":"db1"}"#])
+        .query::<Value>(&mut con)?;
+    redis::cmd("EXEC").query::<Value>(&mut con)?;
+    // The client's final SELECT survives the callback's temporary selections.
+    assert_eq!(
+        hash(&mut con, "destination")?,
+        HashMap::from([("v".into(), "db1".into())])
+    );
+    for db in [0, 1] {
+        redis::cmd("SELECT").arg(db).query::<()>(&mut con)?;
+        assert_eq!(
+            hash(&mut con, "destination")?,
+            HashMap::from([("v".into(), format!("db{db}"))])
+        );
+        let status = info(&mut con, "mixed")?;
+        assert_eq!(status["successes"], "1");
+        assert_eq!(status["pending"], "0");
+    }
+    Ok(())
+}
+
+#[test]
+fn shared_drain_budget_clears_every_watch_and_later_updates_recover() -> Result<()> {
+    let _serial = support::serial_native_test();
+    let mut con = server()?;
+    for name in ["a", "b", "c"] {
+        watch(
+            &mut con,
+            name,
+            format!("source-{name}"),
+            format!("dest-{name}"),
+            "v => { if (v.spin) { while (true) {} } return {v: v.v}; }",
+        )?;
+        redis::cmd("SET")
+            .arg(format!("source-{name}"))
+            .arg(r#"{"v":"good"}"#)
+            .query::<()>(&mut con)?;
+    }
+    redis::cmd("MULTI").query::<String>(&mut con)?;
+    for name in ["a", "b", "c"] {
+        redis::cmd("SET")
+            .arg(format!("source-{name}"))
+            .arg(r#"{"spin":true,"v":"bad"}"#)
+            .query::<Value>(&mut con)?;
+    }
+    let replies: Vec<Value> = redis::cmd("EXEC").query(&mut con)?;
+    assert_eq!(replies.len(), 3);
+    for name in ["a", "b", "c"] {
+        assert_eq!(hash(&mut con, &format!("dest-{name}"))?["v"], "good");
+        let status = info(&mut con, name)?;
+        assert_eq!(status["pending"], "0");
+        assert_eq!(status["runs"], "2");
+        assert_eq!(status["failures"], "1");
+        if name == "a" {
+            assert!(status["last_error"].contains("timed out"));
+        } else {
+            assert_eq!(status["skips"], "1");
+            assert!(status["last_error"].contains("budget exhausted"));
+        }
+        // Source writes committed despite projection failure.
+        let source: String = redis::cmd("GET")
+            .arg(format!("source-{name}"))
+            .query(&mut con)?;
+        assert!(source.contains("bad"));
+        redis::cmd("SET")
+            .arg(format!("source-{name}"))
+            .arg(r#"{"v":"recovered"}"#)
+            .query::<()>(&mut con)?;
+        assert_eq!(hash(&mut con, &format!("dest-{name}"))?["v"], "recovered");
+        assert_eq!(info(&mut con, name)?["successes"], "2");
+    }
+    Ok(())
+}
+
+#[test]
+fn queued_drain_refuses_unload_even_after_unwatch() -> Result<()> {
+    let _serial = support::serial_native_test();
+    // Each case owns an isolated child, never a user's Redis instance.
+    for cancel in [false, true] {
+        let mut con = server()?;
+        watch(
+            &mut con,
+            "queued",
+            "source",
+            "destination",
+            "v => ({v: 'done'})",
+        )?;
+        redis::cmd("MULTI").query::<String>(&mut con)?;
+        redis::cmd("SET")
+            .arg(&["source", "{}"])
+            .query::<Value>(&mut con)?;
+        if cancel {
+            redis::cmd("JS.UNWATCH")
+                .arg("queued")
+                .query::<Value>(&mut con)?;
+        }
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "redis_module_js"])
+            .query::<Value>(&mut con)?;
+        // EXEC contains the unload error; the custom connection extracts it.
+        redis::cmd("EXEC")
+            .query::<Value>(&mut con)
+            .expect_err("unload accepted with Redis-owned callback");
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        if cancel {
+            assert!(hash(&mut con, "destination")?.is_empty());
+        } else {
+            assert_eq!(hash(&mut con, "destination")?["v"], "done");
+            assert_eq!(info(&mut con, "queued")?["pending"], "0");
+            // Refused unload left the registry active.
+            redis::cmd("SET")
+                .arg(&["source", "{}"])
+                .query::<()>(&mut con)?;
+            assert_eq!(info(&mut con, "queued")?["successes"], "2");
+        }
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "redis_module_js"])
+            .query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(module_path()?)
+            .query::<()>(&mut con)?;
+        redis::cmd("JS.INFO")
+            .arg("queued")
+            .query::<Value>(&mut con)
+            .expect_err("watch survived reload");
+    }
+    Ok(())
+}
+
+#[test]
+fn lazy_expiration_counts_once_and_persisted_effects_survive_empty_registration_reload()
+-> Result<()> {
+    let _serial = support::serial_native_test();
+    let mut con = server()?;
+    redis::cmd("DEBUG")
+        .arg(&["SET-ACTIVE-EXPIRE", "0"])
+        .query::<()>(&mut con)?;
+    watch(
+        &mut con,
+        "expiry",
+        "source",
+        "destination",
+        "v => ({v: 'good'})",
+    )?;
+    redis::cmd("SET")
+        .arg(&["source", "{}"])
+        .query::<()>(&mut con)?;
+    redis::cmd("PEXPIRE")
+        .arg("source")
+        .arg(1)
+        .query::<i64>(&mut con)?;
+    // Wait only for expiry eligibility, never for a timed VM-success boundary.
+    std::thread::sleep(Duration::from_millis(20));
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("source")
+            .query::<Option<String>>(&mut con)?,
+        None
+    );
+    let status = info(&mut con, "expiry")?;
+    assert_eq!(status["failures"], "1");
+    assert_eq!(status["pending"], "0");
+    assert_eq!(hash(&mut con, "destination")?["v"], "good");
+    redis::cmd("SET")
+        .arg(&["source", "{}"])
+        .query::<()>(&mut con)?;
+    assert_eq!(info(&mut con, "expiry")?["successes"], "3");
+    redis::cmd("SAVE").query::<()>(&mut con)?;
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "redis_module_js"])
+        .query::<()>(&mut con)?;
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(module_path()?)
+        .query::<()>(&mut con)?;
+    redis::cmd("DEBUG").arg("RELOAD").query::<()>(&mut con)?;
+    assert_eq!(hash(&mut con, "destination")?["v"], "good");
+    redis::cmd("JS.INFO")
+        .arg("expiry")
+        .query::<Value>(&mut con)
+        .expect_err("registration persisted");
+    Ok(())
+}
+
+#[test]
+fn expiry_during_drain_does_not_submit_a_continuation() -> Result<()> {
+    let _serial = support::serial_native_test();
+    let mut con = server()?;
+    let help: Vec<String> = redis::cmd("DEBUG").arg("HELP").query(&mut con)?;
+    // Current Redis provides this deterministic expired-key fixture. Redis 7.2
+    // lacks it; the separate lazy-expiry test covers that server's trigger path.
+    if !help
+        .iter()
+        .any(|line| line.starts_with("SET-ALLOW-ACCESS-EXPIRED"))
+    {
+        return Ok(());
+    }
+    redis::cmd("DEBUG")
+        .arg(&["SET-ACTIVE-EXPIRE", "0"])
+        .query::<()>(&mut con)?;
+    watch(
+        &mut con,
+        "reentry",
+        "source",
+        "destination",
+        "v => ({v: 'good'})",
+    )?;
+    redis::cmd("SET")
+        .arg(&["source", "{}", "PX", "1"])
+        .query::<()>(&mut con)?;
+    std::thread::sleep(Duration::from_millis(20));
+    // Modify an expired key while preserving its TTL, then restore normal
+    // expiration before the queued drain reads it. GET in the drain itself
+    // emits the expired notification, exercising callback reentry directly.
+    redis::cmd("DEBUG")
+        .arg(&["SET-ALLOW-ACCESS-EXPIRED", "1"])
+        .query::<()>(&mut con)?;
+    redis::cmd("MULTI").query::<String>(&mut con)?;
+    redis::cmd("APPEND")
+        .arg(&["source", " "])
+        .query::<Value>(&mut con)?;
+    redis::cmd("DEBUG")
+        .arg(&["SET-ALLOW-ACCESS-EXPIRED", "0"])
+        .query::<Value>(&mut con)?;
+    redis::cmd("EXEC").query::<Value>(&mut con)?;
+    let status = info(&mut con, "reentry")?;
+    assert_eq!(status["runs"], "2");
+    assert_eq!(status["failures"], "1");
+    assert_eq!(status["pending"], "0");
+    assert_eq!(hash(&mut con, "destination")?["v"], "good");
+    redis::cmd("SET")
+        .arg(&["source", "{}"])
+        .query::<()>(&mut con)?;
+    assert_eq!(info(&mut con, "reentry")?["successes"], "2");
     Ok(())
 }

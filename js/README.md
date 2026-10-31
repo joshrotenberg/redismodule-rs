@@ -37,8 +37,9 @@ Names are nonempty UTF-8 of at most 128 bytes and are scoped to the selected
 database. A name must be explicitly unwatched before reuse. Definitions belong
 to the ACL username that registered them, and only that username can inspect or
 remove them. Redis looks up that username afresh for each run, so disabling or
-deleting it fails closed. Recreating a username with the same bytes assumes the
-old name's authority until the watch is removed. `JS.UNWATCH` itself performs
+deleting it fails closed. Recreating a username with the same bytes makes the new account the watch
+owner; subsequent runs use that account's current enabled state and permissions
+until the watch is removed. `JS.UNWATCH` itself performs
 no `GET` or `HSET`, allowing an owner with `+js.unwatch` to remove a definition
 after those permissions are revoked.
 
@@ -120,7 +121,11 @@ keys and owners, and one active source per database. Any source/destination
 overlap with another watch in that database is rejected, preventing chains and
 cycles. A single queue bounded by the watch limit feeds one drain. Each drain
 runs at most 64 distinct watches and shares a 25 ms budget; exhausted work is
-cleared and diagnosed without continuation jobs. Projection failure never rolls
+cleared and diagnosed without continuation jobs. Source notifications generated
+by a drain itself (including lazy expiry during `GET`) are suppressed because
+the current snapshot read already accounts for them. Unload is refused while
+Redis owns a queued or executing drain, even if its watches were unwatched;
+unload can be retried after that drain finishes. Projection failure never rolls
 back the source write.
 
 This milestone deliberately uses QuickJS's bounded default libc allocator.
