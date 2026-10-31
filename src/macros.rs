@@ -471,6 +471,8 @@ macro_rules! redis_module {
                 return raw::Status::Err as c_int;
             }
 
+            // Keep submission refused through failed-load captured destructors.
+            let _post_notification_load = $crate::__private::PostNotificationLoadGuard::begin();
             // SAFETY: Init succeeded and this is the module's native OnLoad.
             let configuration_load = match unsafe { $crate::__private::ConfigurationLoad::begin(ctx) } {
                 Ok(load) => load,
@@ -703,6 +705,15 @@ macro_rules! redis_module {
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
                     let context = unsafe { $crate::EventContext::new(ctx) };
+                    // Redis does not count these callbacks as blocked clients.
+                    // Refuse before destructive user deinit or other teardown.
+                    let _post_notification_unload = match $crate::__private::PostNotificationUnloadGuard::begin() {
+                        Ok(guard) => guard,
+                        Err(error) => {
+                            context.log_warning(&format!("{error}"));
+                            return $crate::Status::Err as c_int;
+                        }
+                    };
                     // Check native CONFIG quiescence before user deinit.
                     // SAFETY: This is the module's native OnUnload callback.
                     let configuration_unload = match unsafe { $crate::__private::ConfigurationUnload::begin(&context) } {

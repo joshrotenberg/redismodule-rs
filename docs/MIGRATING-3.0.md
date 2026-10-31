@@ -480,6 +480,17 @@ also borrow the context they came from, as the sections above describe. Release
 other native resources obtained through raw APIs before the callback returns
 or the worker guard is dropped.
 
+### Post-notification jobs and module unload
+
+Modules using `redis_module!` now refuse unload before user deinit while Redis
+owns an accepted SDK post-notification job. Retry unload after the enclosing
+execution unit finishes, even if the application cancelled its logical work.
+Submission during module load or unload returns `Status::Err` and drops
+captures immediately; move that scheduling into commands or events after
+loading. The existing compatibility-dependent return types are unchanged.
+Raw job submissions and custom native entrypoints still require their own
+lifetime protection. See [the notification guide](KEYSPACE-NOTIFICATIONS.md).
+
 ### Scoped call users
 
 Rename `ctx.authenticate_user(&username)` to `ctx.scoped_call_user(&username)`.

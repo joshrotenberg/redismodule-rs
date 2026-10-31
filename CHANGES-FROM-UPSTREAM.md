@@ -11,6 +11,19 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Post-notification job lifetime
+
+The SDK retains lifecycle accounting for every job accepted by
+`add_post_notification_job` until Redis frees its callback data (#139).
+Generated module unload refuses before user deinit while jobs remain,
+including when application work was cancelled or the callback panicked.
+Submission during generated load/unload returns `Status::Err` and drops
+captures immediately. Failed loads and retained-image reloads cannot inherit
+queued callbacks. Signatures and compatibility floors are unchanged; upstream
+does not protect these jobs in its generated unload. Native tests exercise
+queued and executing jobs, cancellation, callback/destructor panics, native
+submission refusal and load/unload recovery.
+
 ## Runtime server-event subscriptions
 
 `EventContext::subscribe_to_server_event` accepts a typed `ServerEventHandler`

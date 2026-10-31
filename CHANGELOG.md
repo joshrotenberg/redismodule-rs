@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Modules using `redis_module!` refuse unload before user deinit while Redis
+  owns an SDK post-notification job (#139). Ownership lasts through callback
+  execution and captured-data cleanup, including cancellation and panics.
+  Submissions during module load/unload return `Status::Err` and release
+  captures immediately, preventing callbacks from surviving a failed load.
+
 ### Added
 
 - `EventContext::subscribe_to_server_event` adds typed static function handlers

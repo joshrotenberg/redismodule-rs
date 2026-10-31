@@ -27,6 +27,7 @@ use self::thread_safe::RedisLockIndicator;
 
 mod call_user;
 pub use call_user::CallUserScope;
+pub(crate) mod post_notification;
 mod registration;
 mod views;
 pub use views::{EventContext, RuntimeContext, WorkerContext};
@@ -1579,6 +1580,9 @@ impl EventContext {
         /// On rejection, the closure and its captures are dropped immediately.
         /// On acceptance, Redis owns the job until execution and cleanup.
         /// Callback panics are caught and logged by the SDK.
+        /// Modules using `redis_module!` refuse unload until native cleanup
+        /// releases every accepted job, including empty/cancelled work. They
+        /// reject submission during load and unload, dropping captures immediately.
         ///
         /// With a 7.2+ compatibility floor the result is [`Status`]; older
         /// floors return `APIResult<Status>` and can report a missing API.
@@ -1589,7 +1593,10 @@ impl EventContext {
             &self,
             callback: F,
         ) -> Status {
-            let callback = Box::into_raw(Box::new(Some(callback)));
+            let Some(callback) = post_notification::Job::new(callback) else {
+                return Status::Err;
+            };
+            let callback = Box::into_raw(Box::new(callback));
             let status = unsafe {
                 RedisModule_AddPostNotificationJob(
                     self.ctx,
@@ -1765,7 +1772,7 @@ impl ReplyContext {
 extern "C" fn post_notification_job_free_callback<F: FnOnce(&EventContext)>(pd: *mut c_void) {
     crate::panic::run_callback(
         "post notification job free",
-        || drop(unsafe { Box::from_raw(pd as *mut Option<F>) }),
+        || drop(unsafe { Box::from_raw(pd as *mut post_notification::Job<F>) }),
         || (),
     );
 }
@@ -1774,9 +1781,9 @@ extern "C" fn post_notification_job<F: FnOnce(&EventContext)>(
     ctx: *mut raw::RedisModuleCtx,
     pd: *mut c_void,
 ) {
-    let callback = unsafe { &mut *(pd as *mut Option<F>) };
+    let job = unsafe { &mut *(pd as *mut post_notification::Job<F>) };
     let ctx = unsafe { EventContext::new(ctx) };
-    callback.take().map_or_else(
+    job.callback.take().map_or_else(
         || {
             ctx.log(
                 RedisLogLevel::Warning,
