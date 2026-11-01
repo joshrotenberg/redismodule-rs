@@ -8,8 +8,10 @@ additional requirements; load and test the actual module on its oldest server.
 
 For example, `EventContext::add_post_notification_job` returns
 `APIResult<Status>` with a 6.0 floor because the native API, added in Redis 7.2,
-may be missing. At a 7.2 floor it returns `Status` and assumes the API is present.
-Selecting 7.2 does not add that API to an older server. See the
+may be missing. At a 7.2 floor it returns `Status`, with `Status::Err` when the
+API is missing instead of panicking. Older floors keep the API error. Selecting
+7.2 does not add that API to an older server. Use
+`ctx.api_available("AddPostNotificationJob")` to check native presence. See the
 [notification guide](KEYSPACE-NOTIFICATIONS.md) for checking availability during
 initialization and for the native callback restrictions.
 

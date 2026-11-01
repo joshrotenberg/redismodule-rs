@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `EventContext::add_post_notification_job` returns `Status::Err` instead of
+  panicking when its native API is missing at a 7.2+ compatibility floor (#117).
+  Older floors keep their existing API error and all refused paths drop captures.
+
 - Clarify that ACL permission checks and scoped call-user selection can succeed
   for an existing account marked `off` (#141). Deferred work must check enabled
   state separately when disabling its owner should stop that work. Runtime
@@ -21,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   captures immediately, preventing callbacks from surviving a failed load.
 
 ### Added
+
+- `RuntimeContext::api_available` safely queries the running server for a short
+  native API name (#117). Every context view exposes it; unknown/missing names
+  return false and interior NUL returns an error. Presence does not grant a
+  context permission to call the API. The `api_availability` example demonstrates
+  lookup and missing-API handling; `keyspace_to_stream` uses it at load time.
 
 - `EventContext::subscribe_to_server_event` adds typed static function handlers
   at load time or during commands/events (#114). It preserves attribute handlers,

@@ -514,8 +514,14 @@ The module also reads three bindings without calling them, to check that an
 API exists: `RedisModule_AddPostNotificationJob` in `init`,
 `RedisModule_ThreadSafeContextTryLock` when the worker starts, and
 `RedisModule_ClusterCanonicalKeyNameInSlot` for its Redis 7.2 fallback. The SDK
-has no safe availability query (#117). At the 7.2 floor,
-`add_post_notification_job` panics with the API name when the API is missing.
+at the pinned alpha.1 tag has no safe availability query (#117). At that tag's
+7.2 floor, `add_post_notification_job` panics with the API name when the API is
+missing.
+
+Current SDK master resolves #117 with `ctx.api_available("AddPostNotificationJob")`
+and the corresponding short-name checks for the other APIs. Scheduling now
+returns `Status::Err` on a missing API at 7.2+ floors and preserves the API error
+at older floors. The pinned port above has not been updated by this SDK change.
 
 Separately, on Redis 6.0 to 7.4 every module built with the SDK logs a defrag
 registration warning on load, whether or not it registers defrag code. The

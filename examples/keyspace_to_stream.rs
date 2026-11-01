@@ -97,7 +97,7 @@ fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
     }
     // An explicit compatibility floor changes the Rust return type, not the
     // running server. Check the optional native API before accepting the load.
-    if unsafe { redis_module::raw::RedisModule_AddPostNotificationJob }.is_none() {
+    if !ctx.api_available("AddPostNotificationJob").unwrap_or(false) {
         ctx.log_warning("keyspace_to_stream requires Redis 7.2+ post-notification jobs");
         return Status::Err;
     }

@@ -12,6 +12,65 @@ use redis_module::RedisValue;
 mod configuration_ownership;
 mod utils;
 
+#[test]
+fn test_api_availability_queries_native_presence_and_rejects_nul() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    for (name, expected) in [
+        ("CreateString", 1),
+        ("AddPostNotificationJob", 1),
+        ("DefinitelyNotARedisModuleAPI", 0),
+        ("", 0),
+        ("createstring", 0),
+        ("RedisModule_CreateString", 0),
+        ("not_an_api_\u{2603}", 0),
+    ] {
+        let found: i64 = redis::cmd("api.available").arg(name).query(&mut con)?;
+        assert_eq!(found, expected, "{name:?}");
+    }
+    let error = redis::cmd("api.available")
+        .arg("CreateString\0ignored")
+        .query::<i64>(&mut con)
+        .unwrap_err();
+    assert!(error.to_string().contains("nul byte"), "{error}");
+    Ok(())
+}
+
+#[test]
+fn test_api_availability_missing_lookup_is_an_error_and_recovers() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    let error = redis::cmd("api.missing_lookup")
+        .query::<i64>(&mut con)
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("RedisModule_GetApi is not available"),
+        "{error}"
+    );
+    assert_eq!(
+        redis::cmd("api.available")
+            .arg("CreateString")
+            .query::<i64>(&mut con)?,
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn test_api_availability_missing_job_releases_captures_without_panicking() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    for _ in 0..2 {
+        let counts: Vec<i64> = redis::cmd("api.missing_job").query(&mut con)?;
+        assert_eq!(counts, [1, 0], "drop captures once, without running them");
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    assert!(!con.server_log()?.contains("panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "api_availability"])
+        .query::<()>(&mut con)?;
+    Ok(())
+}
+
 #[cfg(feature = "redis-7-2-examples")]
 #[test]
 fn test_notification_job_rejection_releases_captures() -> Result<()> {

@@ -102,8 +102,13 @@ database layout there.
 
 With a 7.2+ feature floor, `add_post_notification_job` returns `Status`. An older
 floor returns `APIResult<Status>` because the native function may be missing.
-The example checks API availability during initialization; a compile-time floor
-alone does not upgrade the running Redis server.
+A missing API returns `Status::Err` at 7.2+ floors and an API error at older
+floors; neither path panics, and both immediately release callback captures.
+The example uses `ctx.api_available("AddPostNotificationJob")` during
+initialization; a compile-time floor alone does not upgrade the running Redis
+server. The query accepts case-sensitive short native names, returns false for
+unknown names and rejects interior NUL. It reports presence, not permission to
+call the API from the current context.
 
 Redis rejects job submission during loading or on a readonly replica. The SDK
 drops the closure and its captures immediately on rejection. After successful
