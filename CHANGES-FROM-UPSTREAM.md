@@ -11,6 +11,23 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Native API availability
+
+`RuntimeContext::api_available(&str)` queries Redis's native API registry for a
+case-sensitive short name, such as `AddPostNotificationJob` (#117). Registration,
+client, event and locked worker views share it. The context preserves initialized,
+locked access; the query returns presence, not permission or capability. Unknown
+names return false, interior NUL is an error, and the result is independent of
+the compile-time compatibility floor and cached raw bindings. Upstream has no
+safe context-bound query.
+
+`EventContext::add_post_notification_job` checks its binding before transferring
+callback ownership. A missing API returns `Status::Err` at 7.2+ floors instead of
+panicking; older floors retain their API error. Existing signatures stay intact
+and every refused path releases captures. Native tests hide the lookup and job
+bindings under the Redis lock to verify errors, cleanup and recovery at both
+floors. The `keyspace_to_stream` example checks availability safely during load.
+
 ## Post-notification job lifetime
 
 The SDK retains lifecycle accounting for every job accepted by

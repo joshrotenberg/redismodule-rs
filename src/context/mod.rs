@@ -800,6 +800,38 @@ impl Context {
 }
 
 impl RuntimeContext {
+    /// Whether the running server provides a native module API.
+    ///
+    /// Pass its case-sensitive short name, such as `AddPostNotificationJob`,
+    /// without the `RedisModule_` prefix. Unknown or unavailable names return
+    /// `false`; an interior NUL or an unavailable native lookup API is an error.
+    /// This queries the server, independently of the SDK's compatibility floor
+    /// and cached raw bindings. It reports presence, not whether this context
+    /// has permission or the capabilities to call that API.
+    ///
+    /// Like other runtime operations, this requires an initialized context and
+    /// the Redis lock. Client, registration, event and locked worker views all
+    /// expose this method through their runtime view.
+    ///
+    /// ```no_run
+    /// fn require_jobs(ctx: &redis_module::RuntimeContext) -> Result<(), redis_module::RedisError> {
+    ///     if !ctx.api_available("AddPostNotificationJob")? {
+    ///         return Err(redis_module::RedisError::Str("ERR post-notification jobs unavailable"));
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn api_available(&self, name: &str) -> Result<bool, RedisError> {
+        let name = CString::new(format!("RedisModule_{name}"))?;
+        let get_api = unsafe { crate::__available_api!(RedisModule_GetApi) };
+        let mut api: *mut c_void = ptr::null_mut();
+        // SAFETY: the runtime view proves initialization and the Redis lock.
+        // The C string lives through the lookup, and Redis writes one pointer
+        // into our local slot. No function pointer escapes or is invoked.
+        let status = unsafe { get_api(name.as_ptr(), ptr::addr_of_mut!(api).cast()) };
+        Ok(status == raw::REDISMODULE_OK as c_int && !api.is_null())
+    }
+
     /// Logs `message` at `level` with the module name.
     /// Embedded NUL bytes are written as `\0`, which reads the same as a literal
     /// backslash and zero; other text is passed literally.
@@ -1574,55 +1606,98 @@ impl EventContext {
         unsafe { raw::export_shared_api(self.ctx, func, name) }
     }
 
-    api!(
-        [RedisModule_AddPostNotificationJob],
-        /// Defers work from a keyspace notification until Redis permits writes.
-        /// Requires Redis 7.2+. The job receives a fresh event view in the
-        /// database selected when it was queued and runs as part of the same
-        /// execution unit, rather than on a worker thread or timer.
-        ///
-        /// Capture owned data: callback key bytes and context references must
-        /// not escape their invocation. Jobs can produce more notifications;
-        /// exclude output keys before scheduling to prevent feedback loops.
-        ///
-        /// Redis rejects submission while loading or on a readonly replica.
-        /// On rejection, the closure and its captures are dropped immediately.
-        /// On acceptance, Redis owns the job until execution and cleanup.
-        /// Callback panics are caught and logged by the SDK.
-        /// Modules using `redis_module!` refuse unload until native cleanup
-        /// releases every accepted job, including empty/cancelled work. They
-        /// reject submission during load and unload, dropping captures immediately.
-        ///
-        /// With a 7.2+ compatibility floor the result is [`Status`]; older
-        /// floors return `APIResult<Status>` and can report a missing API.
-        /// Scheduling successfully does not promise the later write succeeds.
-        /// See the [notification write guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/KEYSPACE-NOTIFICATIONS.md)
-        /// for replication, role/loading gates, database scopes and teardown.
-        pub fn add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
-            &self,
-            callback: F,
-        ) -> Status {
-            let Some(callback) = post_notification::Job::new(callback) else {
-                return Status::Err;
-            };
-            let callback = Box::into_raw(Box::new(callback));
-            let status = unsafe {
-                RedisModule_AddPostNotificationJob(
-                    self.ctx,
-                    Some(post_notification_job::<F>),
-                    callback as *mut c_void,
-                    Some(post_notification_job_free_callback::<F>),
-                )
-            }
-            .into();
-            if status == Status::Err {
-                // Redis rejected the job before taking ownership. It will not
-                // invoke either callback, so release our closure and captures.
-                unsafe { drop(Box::from_raw(callback)) };
-            }
-            status
+    #[cfg(not(any(
+        feature = "min-redis-compatibility-version-6-0",
+        feature = "min-redis-compatibility-version-6-2",
+        feature = "min-redis-compatibility-version-7-0"
+    )))]
+    /// Defers work from a keyspace notification until Redis permits writes.
+    /// Requires Redis 7.2+. The job receives a fresh event view in the
+    /// database selected when it was queued and runs as part of the same
+    /// execution unit, rather than on a worker thread or timer.
+    ///
+    /// Capture owned data: callback key bytes and context references must
+    /// not escape their invocation. Jobs can produce more notifications;
+    /// exclude output keys before scheduling to prevent feedback loops.
+    ///
+    /// Redis rejects submission while loading or on a readonly replica.
+    /// On rejection, the closure and its captures are dropped immediately.
+    /// On acceptance, Redis owns the job until execution and cleanup.
+    /// Callback panics are caught and logged by the SDK.
+    /// Modules using `redis_module!` refuse unload until native cleanup
+    /// releases every accepted job, including empty/cancelled work. They
+    /// reject submission during load and unload, dropping captures immediately.
+    ///
+    /// With a 7.2+ compatibility floor the result is [`Status`]; older
+    /// floors return `APIResult<Status>` and can report a missing API.
+    /// At a 7.2+ floor, a missing API returns `Status::Err` instead of
+    /// panicking. Captures are released on either missing-API path.
+    /// Scheduling successfully does not promise the later write succeeds.
+    /// See the [notification write guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/KEYSPACE-NOTIFICATIONS.md)
+    /// for replication, role/loading gates, database scopes and teardown.
+    pub fn add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
+        &self,
+        callback: F,
+    ) -> Status {
+        self.try_add_post_notification_job(callback)
+            .unwrap_or(Status::Err)
+    }
+
+    /// Defers owned work from a keyspace notification until Redis permits writes.
+    /// Requires Redis 7.2+ at runtime. The fresh event view uses the database
+    /// selected when queued; the job runs in the same execution unit, not on a
+    /// worker or timer. Exclude output keys to avoid notification feedback loops.
+    ///
+    /// Older compatibility floors return an API error when the native API is
+    /// missing, and `Ok(Status::Err)` on refused submission. At 7.2+ floors the
+    /// return type is `Status`, with `Status::Err` for either case. Every refusal
+    /// immediately drops the closure and its captures. Accepted jobs are owned
+    /// by Redis until execution and cleanup, with callback panics caught/logged.
+    /// Generated module load/unload refuses new jobs; unload refuses until all
+    /// accepted jobs have been cleaned up, including empty/cancelled work.
+    /// Scheduling successfully does not promise the later write succeeds.
+    /// See the [notification write guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/KEYSPACE-NOTIFICATIONS.md).
+    #[cfg(any(
+        feature = "min-redis-compatibility-version-6-0",
+        feature = "min-redis-compatibility-version-6-2",
+        feature = "min-redis-compatibility-version-7-0"
+    ))]
+    pub fn add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
+        &self,
+        callback: F,
+    ) -> crate::apierror::APIResult<Status> {
+        self.try_add_post_notification_job(callback)
+    }
+
+    fn try_add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
+        &self,
+        callback: F,
+    ) -> crate::apierror::APIResult<Status> {
+        // Preserve the older-floor API error while checking before any
+        // ownership transfer, at every floor. The 7.2+ wrapper maps it to
+        // Status::Err instead of using the required-API panic path.
+        let add_job = unsafe { raw::RedisModule_AddPostNotificationJob }
+            .ok_or_else(|| "RedisModule_AddPostNotificationJob does not exists".to_owned())?;
+        let Some(callback) = post_notification::Job::new(callback) else {
+            return Ok(Status::Err);
+        };
+        let callback = Box::into_raw(Box::new(callback));
+        let status = unsafe {
+            add_job(
+                self.ctx,
+                Some(post_notification_job::<F>),
+                callback as *mut c_void,
+                Some(post_notification_job_free_callback::<F>),
+            )
         }
-    );
+        .into();
+        if status == Status::Err {
+            // Redis rejected the job before taking ownership. It will not
+            // invoke either callback, so release our closure and captures.
+            unsafe { drop(Box::from_raw(callback)) };
+        }
+        Ok(status)
+    }
 }
 
 impl ReplyContext {
