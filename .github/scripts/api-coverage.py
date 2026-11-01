@@ -39,8 +39,6 @@ OVERRIDES = {
               "`redis_module!` use it; no wrapper allocates through it."),
     "Free": ("internal", "`RedisAlloc` frees with it, and wrappers free buffers Redis returned "
              "(`RedisBuffer`, the key array of `get_command_keys`); no wrapper frees through it."),
-    "GetApi": ("internal", "the header's inline `RedisModule_InitAPI`, exported by "
-               "`src/redismodule.c`, resolves every API pointer through it."),
     "SetModuleAttribs": ("internal", "the header's inline `RedisModule_Init`, which "
                          "`redis_module!` calls through `src/redismodule.c`, calls it."),
     "IsModuleNameBusy": ("internal", "the header's inline `RedisModule_Init`, which "
@@ -65,7 +63,8 @@ AREAS = [
         (r"MallocSize\w*|MallocUsableSize|GetUsedMemoryRatio", "context-free"),
     ]),
     ("Module lifecycle", [
-        (r"GetApi|SetModuleAttribs|IsModuleNameBusy", "n/a"),
+        (r"GetApi", "runtime"),
+        (r"SetModuleAttribs|IsModuleNameBusy", "n/a"),
         (r"SetModuleOptions", "registration"),
         (r"GetModuleOptionsAll|GetContextFlagsAll|GetServerVersion|GetTypeMethodVersion",
          "context-free"),
