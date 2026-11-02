@@ -800,6 +800,54 @@ impl Context {
 }
 
 impl RuntimeContext {
+    /// Returns Redis's canonical name for `slot`, without adding braces or a prefix.
+    ///
+    /// Slots at or above [`crate::cluster::SLOTS`] return `Ok(None)` without
+    /// accessing the native API. For valid slots, an unavailable API (Redis
+    /// before 7.4), an unexpected null name or invalid UTF-8 is an error at every
+    /// compatibility floor. The result owns a copy of the native name.
+    ///
+    /// This follows the running server's table, without promising identical
+    /// names across server versions. It does not discover ownership or grant
+    /// permission. There is no automatic fallback: [`crate::cluster::key_for_slot`]
+    /// generates different, SDK-stable names and remains a separate choice.
+    /// Changing name generators for existing data can change stored key names.
+    ///
+    /// Registration, client, event and locked worker views expose this method.
+    /// The runtime view proves initialization and holds the Redis lock while
+    /// reading the binding and copying the name.
+    ///
+    /// ```no_run
+    /// fn stream_key(ctx: &redis_module::RuntimeContext, slot: u16)
+    ///     -> Result<Option<String>, redis_module::RedisError>
+    /// {
+    ///     Ok(ctx.canonical_key_for_slot(slot)?.map(|tag| format!("module:{{{tag}}}:events")))
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// redis_module::ThreadSafeContext::new().canonical_key_for_slot(0);
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// redis_module::MODULE_CONTEXT.canonical_key_for_slot(0);
+    /// ```
+    pub fn canonical_key_for_slot(&self, slot: u16) -> Result<Option<String>, RedisError> {
+        if slot >= crate::cluster::SLOTS {
+            return Ok(None);
+        }
+        let canonical =
+            unsafe { crate::__available_api!(RedisModule_ClusterCanonicalKeyNameInSlot) };
+        // SAFETY: the runtime view proves initialization and the Redis lock.
+        // Redis returns a borrowed NUL-terminated entry in its immutable slot
+        // table. Check null and copy it before returning; no pointer escapes.
+        let name = unsafe { canonical(slot.into()) };
+        if name.is_null() {
+            return Err(RedisError::Str("ERR canonical slot name is null"));
+        }
+        Ok(Some(unsafe { CStr::from_ptr(name) }.to_str()?.to_owned()))
+    }
+
     /// Fills exactly `destination` with bytes from Redis's random generator.
     ///
     /// Does not allocate an output buffer. An empty buffer succeeds
