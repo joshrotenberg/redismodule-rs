@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The vendored header and committed bindings add
+  `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`), matching upstream PR 491
+  (#150). It marks standard RDB saves restored one key at a time. Existing
+  payload layout, flags, API pointers and compatibility floors are unchanged.
+
 - `RuntimeContext::canonical_key_for_slot` returns an owned copy of Redis's
   exact native slot name on supporting servers (Redis 7.4+) (#146). Invalid
   slots return `None`; unavailable APIs, unexpected null names and invalid
