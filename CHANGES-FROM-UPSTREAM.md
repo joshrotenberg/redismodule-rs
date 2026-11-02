@@ -11,6 +11,24 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Context-bound random fills
+
+`RuntimeContext::fill_random_bytes` and `fill_random_hex` wrap Redis's native
+random generator with caller-owned mutable slices (#144). They are shared by
+registration, client, event and locked worker views. Redis documents the
+generator as not thread safe, so the runtime view supplies initialization and
+lock guarantees. The methods fill exactly the supplied slice, without an output
+allocation, and return a missing-binding error before mutation at every floor.
+Empty buffers succeed after checking availability; hex output consists of
+lowercase ASCII characters, including odd lengths, with no NUL terminator.
+The downstream port's per-load generation ID can use `fill_random_hex` in place
+of raw FFI. Native tests cover bounds, context views, missing bindings and worker
+teardown without probabilistic uniqueness assertions.
+
+The design decisions in #51 and #60 preserve owned Rust shared storage and
+`CONFIG GET` through `call`; no retained-native storage or configuration-read
+API is added.
+
 ## Native API availability
 
 `RuntimeContext::api_available(&str)` queries Redis's native API registry for a

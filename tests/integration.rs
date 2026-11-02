@@ -13,6 +13,90 @@ mod configuration_ownership;
 mod utils;
 
 #[test]
+fn test_random_fill_lengths_hex_and_registration_generation() -> Result<()> {
+    let mut con = TestConnection::new("random_fill");
+    for len in [0, 1, 2, 17, 32, 33, 4096] {
+        let bytes: Vec<u8> = redis::cmd("random.bytes").arg(len).query(&mut con)?;
+        let hex: Vec<u8> = redis::cmd("random.hex").arg(len).query(&mut con)?;
+        assert_eq!(bytes.len(), len);
+        assert_eq!(hex.len(), len);
+        assert!(
+            hex.iter()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+        );
+    }
+    let generation: Vec<u8> = redis::cmd("random.generation").query(&mut con)?;
+    assert_eq!(generation.len(), 32);
+    assert!(
+        generation
+            .iter()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+    );
+    assert_eq!(
+        redis::cmd("random.generation").query::<Vec<u8>>(&mut con)?,
+        generation
+    );
+    Ok(())
+}
+
+#[test]
+fn test_random_fill_missing_apis_preserve_output_and_recover() -> Result<()> {
+    let mut con = TestConnection::new("random_fill");
+    for (mode, api) in [("bytes", "GetRandomBytes"), ("hex", "GetRandomHexChars")] {
+        for _ in 0..2 {
+            let error: String = redis::cmd("random.missing").arg(mode).query(&mut con)?;
+            assert!(
+                error.contains(&format!("RedisModule_{api} is not available")),
+                "{error}"
+            );
+            let output: Vec<u8> = redis::cmd(&format!("random.{mode}"))
+                .arg(17)
+                .query(&mut con)?;
+            assert_eq!(output.len(), 17);
+        }
+    }
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+#[test]
+fn test_random_fill_event_and_locked_worker_views() -> Result<()> {
+    let mut con = TestConnection::new("random_fill");
+    assert_eq!(redis::cmd("random.event_ok").query::<i64>(&mut con)?, 0);
+    redis::cmd("SET")
+        .arg(&["random:trigger", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("random.event_ok").query::<i64>(&mut con)?, 1);
+    redis::cmd("random.worker").query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "random worker fill", || {
+        Ok(redis::cmd("random.finish").query::<i64>(&mut con)? == 1)
+    })?;
+    Ok(())
+}
+
+#[test]
+fn test_random_fill_worker_unload_and_reload() -> Result<()> {
+    let mut con = TestConnection::new("random_fill");
+    for _ in 0..2 {
+        redis::cmd("random.worker").query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "random_fill"])
+            .query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(utils::module_path("random_fill")?)
+            .query::<()>(&mut con)?;
+        assert_eq!(
+            redis::cmd("random.generation")
+                .query::<Vec<u8>>(&mut con)?
+                .len(),
+            32
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn test_api_availability_queries_native_presence_and_rejects_nul() -> Result<()> {
     let mut con = TestConnection::new("api_availability");
     for (name, expected) in [

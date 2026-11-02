@@ -484,8 +484,23 @@ Twelve raw call or read sites remain. Each has a reason:
 | `ThreadSafeContextTryLock`, and with it the worker's whole thread-safe context lifecycle | `src/dispatch.rs` | No try-lock wrapper, and `ThreadSafeContext` exposes neither its pointer nor a guard for a lock taken elsewhere | #113 |
 | `SubscribeToServerEvent` for the cron loop, with the last `extern "C"` callback | `src/lib.rs`, `src/markers.rs` | The module subscribes only when `control-checkpoint-ms` is positive; `#[cron_event_handler]` subscribes on every load, and there is no runtime server-event subscription | #114 |
 | `AddACLCategory`, `GetCommand`, `SetCommandACLCategories` | `src/lib.rs` `setup_acl_category` | On Redis 7.2 and 7.3 the macro's per-command categories log a warning for each command; the module logs one notice, which `tests/acl.rs` uses to detect the server lane | #115 |
-| `GetRandomHexChars` | `src/markers.rs` `initialize_generation` | No wrapper | none |
+| `GetRandomHexChars` | `src/markers.rs` `initialize_generation` | No wrapper at the pinned tag; current SDK offers `RuntimeContext::fill_random_hex` | #144 |
 | `ClusterCanonicalKeyNameInSlot` | `src/cluster.rs` `select_owned_tag` | `cluster::key_for_slot` makes different names, and pinned tags must stay stable across the upgrade | none |
+
+Current SDK master provides a checked replacement for the generation-ID fill
+(#144), using Redis's generator under the runtime view's Redis lock:
+
+```rust
+fn generation(ctx: &redis_module::RuntimeContext) -> Result<[u8; 32], redis_module::RedisError> {
+    let mut bytes = [0; 32];
+    ctx.fill_random_hex(&mut bytes)?;
+    Ok(bytes)
+}
+```
+
+The output is exactly 32 lowercase ASCII hex characters with no trailing NUL.
+A missing API returns an error; the caller can propagate it to load failure.
+The pinned downstream source above is unchanged by this SDK addition.
 
 The worker try-locks so that it can see a stop request while `MODULE UNLOAD`
 holds the Redis lock; a blocking lock would deadlock there. Its hand-written

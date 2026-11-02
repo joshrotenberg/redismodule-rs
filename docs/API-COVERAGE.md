@@ -133,23 +133,25 @@ PRs 442 and 444 build on the command filters of upstream PR 437.
 
 | rank | gap | fit | evidence |
 |---|---|---|---|
-| 1 | `GetRandomHexChars`, and `GetRandomBytes` with it | context-free | #89: the downstream takes its per-load generation id from it, to avoid another dependency. A Rust random-number crate can replace it. |
-| 2 | `ClusterCanonicalKeyNameInSlot` | context-free | #89: the downstream picks a hash tag owned by the node with it on 7.4 and later, and with its own table on 7.2. `cluster::key_for_slot` works on every version but generates different names, which changes the downstream's stream names. Whether the port can accept that was not checked. |
-| 3 | Command filters, all eight APIs | registration for the filter; the callback needs a view of its own | upstream PR 437, opened from FalkorDB's fork; also upstream PR 168. |
-| 4 | `SetLRU`, `GetLRU`, `SetLFU`, `GetLFU` | key | upstream issue 443; upstream PR 444, opened from FalkorDB's fork. |
-| 5 | `RandomKey` | runtime | upstream issue 445; upstream PR 446, opened from FalkorDB's fork. |
-| 6 | Cluster messages and topology | registration, runtime and context-free | upstream issue 236; upstream issue 438, by the author of the FalkorDB pull requests. |
-| 7 | Module users and authentication | registration, command and context-free | upstream PR 354 (users and authentication); upstream issue 381 (`RegisterAuthCallback`). |
-| 8 | `GetKeyNameFromModuleKey` | key | upstream PR 469 and the closed upstream PR 436, which state no consumer. Their author also opened upstream PR 459, which says RediSearch needs its flag. |
-| 9 | `GetExpire`, `GetAbsExpire` | key | upstream PR 391. |
-| 10 | `RdbLoad`, `RdbSave` and the RDB streams | runtime | upstream issue 382. Its reply points to data-type RDB callbacks, which this SDK supports, not to these APIs. |
-| 11 | Sorted sets | key | upstream issue 235. |
-| 12 | Dictionaries | context-free | upstream PRs 169 and 228, both drafts by one author. With `RedisAlloc` as the global allocator, Rust maps already count toward Redis's memory. |
-| 13 | `EmitAOF` | callback (I/O) | upstream issue 74. |
-| 14 | Server configuration reads | runtime | #60, a design issue that first needs a read use case. |
+| 1 | `ClusterCanonicalKeyNameInSlot` | context-free | #89: the downstream picks a hash tag owned by the node with it on 7.4 and later, and with its own table on 7.2. `cluster::key_for_slot` works on every version but generates different names, which changes the downstream's stream names. Whether the port can accept that was not checked. |
+| 2 | Command filters, all eight APIs | registration for the filter; the callback needs a view of its own | upstream PR 437, opened from FalkorDB's fork; also upstream PR 168. |
+| 3 | `SetLRU`, `GetLRU`, `SetLFU`, `GetLFU` | key | upstream issue 443; upstream PR 444, opened from FalkorDB's fork. |
+| 4 | `RandomKey` | runtime | upstream issue 445; upstream PR 446, opened from FalkorDB's fork. |
+| 5 | Cluster messages and topology | registration, runtime and context-free | upstream issue 236; upstream issue 438, by the author of the FalkorDB pull requests. |
+| 6 | Module users and authentication | registration, command and context-free | upstream PR 354 (users and authentication); upstream issue 381 (`RegisterAuthCallback`). |
+| 7 | `GetKeyNameFromModuleKey` | key | upstream PR 469 and the closed upstream PR 436, which state no consumer. Their author also opened upstream PR 459, which says RediSearch needs its flag. |
+| 8 | `GetExpire`, `GetAbsExpire` | key | upstream PR 391. |
+| 9 | `RdbLoad`, `RdbSave` and the RDB streams | runtime | upstream issue 382. Its reply points to data-type RDB callbacks, which this SDK supports, not to these APIs. |
+| 10 | Sorted sets | key | upstream issue 235. |
+| 11 | Dictionaries | context-free | upstream PRs 169 and 228, both drafts by one author. With `RedisAlloc` as the global allocator, Rust maps already count toward Redis's memory. |
+| 12 | `EmitAOF` | callback (I/O) | upstream issue 74. |
 
-Ranks 1 to 2 are tier 1, 3 to 5 tier 2 and the rest tier 3, with this
-repository's design issue last.
+Rank 1 is tier 1, ranks 2 to 4 are tier 2 and the rest are tier 3.
+Random fills, previously rank 1, are now covered by the context-bound methods
+in #144. Redis documents its generator as not thread safe; these methods
+require an initialized runtime view holding the Redis lock. The decision in
+#60 keeps `CONFIG GET` through `call`; reconsider a read wrapper only for a
+concrete consumer.
 
 #90 files implementation issues only for gaps with a concrete consumer. Tier 1
 has one, the #89 port, and its gaps become issues once the port shows it
@@ -179,12 +181,13 @@ API pointers the downstream calls through `redis_module::raw`:
 | `Milliseconds` | `src/capture.rs` reads the server clock for stream trimming | safe: `redis_module::milliseconds` |
 | `GetThreadSafeContext`, `ThreadSafeContextUnlock`, `FreeThreadSafeContext` | `src/dispatch.rs` creates the writer thread's context and releases it | safe: `ThreadSafeContext` and its guard |
 | `ThreadSafeContextTryLock` | `src/dispatch.rs` locks without blocking in the experimental asynchronous write modes, so unload cannot deadlock | safe: `ThreadSafeContext::try_lock` and `DetachedContext::try_lock` (#113) |
-| `GetRandomHexChars` | `src/markers.rs` makes the generation id | none |
-| `ClusterCanonicalKeyNameInSlot` | `src/cluster.rs` picks a hash tag per slot on 7.4 and later | none; `cluster::key_for_slot` is a substitute that generates different names (rank 2) |
+| `GetRandomHexChars` | `src/markers.rs` makes the generation id | safe: `RuntimeContext::fill_random_hex` (#144) |
+| `ClusterCanonicalKeyNameInSlot` | `src/cluster.rs` picks a hash tag per slot on 7.4 and later | none; `cluster::key_for_slot` is a substitute that generates different names (rank 1) |
 | `NotifyKeyspaceEvent` | `examples/notifytest.rs`, a test module, sends event names that are not UTF-8 | safe: `RuntimeContext::notify_keyspace_event_bytes` |
 
-Two of these are gaps. The port can keep raw calls for them, so none blocks
-it; they are what #89 would record as remaining raw-API workarounds.
+Canonical slot-name lookup remains a gap. The pinned port can keep that raw
+call to preserve its names. Current SDK random fills can replace its generation
+ID workaround; adopting them in the downstream source is a separate change.
 
 ## Requests upstream
 
@@ -342,8 +345,9 @@ path. `LatencyAddSample` is context-free.
 `milliseconds` is the only clock. `std::time` covers `Microseconds` and
 `MonotonicMicroseconds`. `CachedMicroseconds` returns the time Redis caches
 before each command and in its cron job, so that nested callbacks see one
-clock; it has no Rust equivalent. `GetRandomBytes` and `GetRandomHexChars` are
-context-free and ranked above.
+clock; it has no Rust equivalent. `RuntimeContext::fill_random_bytes` and
+`fill_random_hex` safely wrap `GetRandomBytes` and `GetRandomHexChars` (#144).
+Redis's generator is not thread safe, so both require a locked runtime view.
 
 ### Dictionaries
 
@@ -431,8 +435,9 @@ accessors. All fit the callback. `DefragContext::defrag_realloc` is `unsafe`.
 ### Configuration
 
 Module configurations are covered except `LoadDefaultConfigs` (8.0). The
-server configuration APIs (8.2) are unwrapped; #60 evaluates read
-helpers and `CONFIG GET` through `call` is the current path.
+server configuration APIs (8.2) are unwrapped. The decision in #60 keeps
+`CONFIG GET` through `call` as the supported read pattern; reconsider wrappers
+only when a concrete consumer demonstrates a need.
 
 ### Key metadata and Enterprise extensions
 
@@ -446,8 +451,8 @@ Redis OSS implementation to test against.
 <!-- api-coverage:begin -->
 <!-- Generated by .github/scripts/api-coverage.py; edit the script instead. -->
 
-`src/include/redismodule.h` declares 404 API pointers: 157 safe, 9 unsafe, 7
-internal, 231 none.
+`src/include/redismodule.h` declares 404 API pointers: 159 safe, 9 unsafe, 7
+internal, 229 none.
 
 It also has 5 declarations commented out, which have no binding and are not in
 the table: `CreateStringFromLongDouble`, `ReplyWithLongDouble`,
@@ -464,12 +469,12 @@ floor, or not in the Redis OSS sources.
 
 | floor | APIs | safe | unsafe | internal | none |
 |---|---|---|---|---|---|
-| 6.0 | 233 | 109 | 5 | 6 | 113 |
-| 6.2 | 258 | 121 | 6 | 6 | 125 |
-| 7.0 | 328 | 149 | 9 | 6 | 164 |
-| 7.2 | 348 | 155 | 9 | 6 | 178 |
-| 7.4 | 353 | 156 | 9 | 6 | 182 |
-| 8.0 | 362 | 157 | 9 | 6 | 190 |
+| 6.0 | 233 | 111 | 5 | 6 | 111 |
+| 6.2 | 258 | 123 | 6 | 6 | 123 |
+| 7.0 | 328 | 151 | 9 | 6 | 162 |
+| 7.2 | 348 | 157 | 9 | 6 | 176 |
+| 7.4 | 353 | 158 | 9 | 6 | 180 |
+| 8.0 | 362 | 159 | 9 | 6 | 188 |
 | no floor | 42 | 0 | 0 | 1 | 41 |
 
 ### Required above the lowest floor
@@ -809,8 +814,8 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `MonotonicMicroseconds` | 7.0 | 7.0 |  | none |  | context-free; `std::time::Instant` |  |
 | `Microseconds` | 7.2 | 7.2 |  | none |  | context-free; `std::time::SystemTime` |  |
 | `CachedMicroseconds` | 7.2 | 7.2 |  | none |  | context-free |  |
-| `GetRandomBytes` | 6.0 | 6.0 |  | none |  | context-free |  |
-| `GetRandomHexChars` | 6.0 | 6.0 |  | none |  | context-free | #89 |
+| `GetRandomBytes` | 6.0 | 6.0 | available | safe | `RuntimeContext::fill_random_bytes` |  | #144 |
+| `GetRandomHexChars` | 6.0 | 6.0 | available | safe | `RuntimeContext::fill_random_hex` |  | #89, #144 |
 
 #### Dictionaries
 
