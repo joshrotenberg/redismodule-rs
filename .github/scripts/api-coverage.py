@@ -157,7 +157,7 @@ AREAS = [
     ("Cluster", [
         (r"RegisterClusterMessageReceiver|SetClusterFlags", "registration"),
         (r"GetMyClusterID|GetClusterSize|FreeClusterNodesList|ClusterKeySlotC?"
-         r"|ClusterCanonicalKeyNameInSlot|ClusterCanAccessKeysInSlot", "context-free"),
+         r"|ClusterCanAccessKeysInSlot", "context-free"),
         (r"SendClusterMessage|GetClusterNode(Info|SlotRanges)|GetClusterNodesList|Cluster\w+",
          "runtime"),
     ]),
@@ -199,7 +199,6 @@ AREAS = [
 EQUIVALENTS = {
     "ClusterKeySlot": "`cluster::key_slot` computes it",
     "ClusterKeySlotC": "`cluster::key_slot` computes it",
-    "ClusterCanonicalKeyNameInSlot": "`cluster::key_for_slot` chooses a different name",
     "CreateStringFromLongLong": "format, then `RedisString::create`",
     "CreateStringFromULongLong": "format, then `RedisString::create`",
     "CreateStringFromDouble": "format, then `RedisString::create`",
@@ -246,6 +245,7 @@ for _refs, _names in [
     (["upstream PR 100"], "HashGet"),
     (["upstream PR 482"], "Scan ScanKey"),
     (["#89"], "ThreadSafeContextTryLock GetRandomHexChars ClusterCanonicalKeyNameInSlot"),
+    (["#146"], "ClusterCanonicalKeyNameInSlot"),
     (["#144"], "GetRandomBytes GetRandomHexChars"),
     (["#55"], "ReplySetArrayLength ReplySetMapLength ReplySetSetLength"),
     (["#60"], "ConfigGet ConfigGetBool ConfigGetEnum ConfigGetNumeric ConfigGetType "

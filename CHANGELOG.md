@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `RuntimeContext::canonical_key_for_slot` returns an owned copy of Redis's
+  exact native slot name on supporting servers (Redis 7.4+) (#146). Invalid
+  slots return `None`; unavailable APIs, unexpected null names and invalid
+  UTF-8 return errors at every floor. There is no automatic fallback. The
+  separate `cluster::key_for_slot` keeps its existing stable names.
+
 - `RuntimeContext::fill_random_bytes` and `fill_random_hex` fill caller-owned
   slices using Redis's generator under the Redis lock (#144). Hex output is
   lowercase ASCII, supports odd lengths and has no trailing NUL. Empty slices

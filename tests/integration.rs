@@ -13,6 +13,112 @@ mod configuration_ownership;
 mod utils;
 
 #[test]
+fn test_canonical_slot_name_native_and_boundaries() -> Result<()> {
+    let mut con = TestConnection::new("canonical_slot_name");
+    for slot in [16384_u16, u16::MAX] {
+        assert_eq!(
+            redis::cmd("canonical.name")
+                .arg(slot)
+                .query::<Option<String>>(&mut con)?,
+            None
+        );
+    }
+    let available: bool = redis::cmd("canonical.available").query(&mut con)?;
+    if available {
+        assert_eq!(
+            redis::cmd("canonical.name")
+                .arg(0)
+                .query::<String>(&mut con)?,
+            "06S"
+        );
+        assert_eq!(redis::cmd("canonical.all").query::<i64>(&mut con)?, 16384);
+    } else {
+        let error = redis::cmd("canonical.name")
+            .arg(0)
+            .query::<String>(&mut con)
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("RedisModule_ClusterCanonicalKeyNameInSlot is not available"),
+            "{error}"
+        );
+    }
+    // The server-independent helper retains its separate, stable naming scheme.
+    assert_eq!(
+        redis_module::cluster::key_for_slot(0).as_deref(),
+        Some("{DLH}")
+    );
+    Ok(())
+}
+
+#[test]
+fn test_canonical_slot_name_diagnostics_and_recovery() -> Result<()> {
+    let mut con = TestConnection::new("canonical_slot_name");
+    for _ in 0..2 {
+        for (mode, message) in [
+            (
+                "missing",
+                "RedisModule_ClusterCanonicalKeyNameInSlot is not available",
+            ),
+            ("null", "canonical slot name is null"),
+            ("utf8", "invalid utf-8"),
+        ] {
+            let error = redis::cmd("canonical.diagnostic")
+                .arg(mode)
+                .query::<String>(&mut con)
+                .unwrap_err();
+            assert!(error.to_string().contains(message), "{mode}: {error}");
+        }
+        assert_eq!(
+            redis::cmd("canonical.diagnostic")
+                .arg("exact")
+                .query::<String>(&mut con)?,
+            "native:{exact}:name"
+        );
+        let available: bool = redis::cmd("canonical.available").query(&mut con)?;
+        let result = redis::cmd("canonical.name")
+            .arg(0)
+            .query::<String>(&mut con);
+        assert_eq!(result.is_ok(), available, "native binding restored");
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+#[test]
+fn test_canonical_slot_name_event_and_locked_worker_views() -> Result<()> {
+    let mut con = TestConnection::new("canonical_slot_name");
+    assert_eq!(redis::cmd("canonical.event_ok").query::<i64>(&mut con)?, 0);
+    redis::cmd("SET")
+        .arg(&["canonical:trigger", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("canonical.event_ok").query::<i64>(&mut con)?, 1);
+    redis::cmd("canonical.worker").query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "canonical worker lookup", || {
+        Ok(redis::cmd("canonical.finish").query::<i64>(&mut con)? == 1)
+    })?;
+    Ok(())
+}
+
+#[test]
+fn test_canonical_slot_name_worker_unload_and_reload() -> Result<()> {
+    let mut con = TestConnection::new("canonical_slot_name");
+    for _ in 0..2 {
+        redis::cmd("canonical.worker").query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "canonical_slot_name"])
+            .query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(utils::module_path("canonical_slot_name")?)
+            .query::<()>(&mut con)?;
+    }
+    Ok(())
+}
+
+#[test]
 fn test_random_fill_lengths_hex_and_registration_generation() -> Result<()> {
     let mut con = TestConnection::new("random_fill");
     for len in [0, 1, 2, 17, 32, 33, 4096] {

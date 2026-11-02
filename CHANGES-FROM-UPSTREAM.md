@@ -11,6 +11,24 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Native canonical slot names
+
+`RuntimeContext::canonical_key_for_slot` safely copies the running server's
+canonical slot name into an owned `String` (#146). Registration, client, event
+and locked worker views share the API. Invalid slots return `None` before
+native access. Valid slots return errors for an unavailable API (Redis before
+7.4), an unexpected null name or invalid UTF-8, at every compatibility floor.
+No native pointer escapes and no braces or prefix are added. Native names
+follow Redis's table without a new cross-version stability promise.
+
+There is no automatic fallback to `cluster::key_for_slot`, whose exact stable
+names and compatibility fixture are unchanged. Substituting that helper for
+native names can rename persisted keys. The concrete downstream consumer in
+#89 keeps its own explicit Redis 7.2 fallback; this change does not modify it.
+The example and native tests exercise exact bytes, every slot, older servers,
+missing bindings, context views and worker teardown. Upstream has no safe
+wrapper for this native API.
+
 ## Context-bound random fills
 
 `RuntimeContext::fill_random_bytes` and `fill_random_hex` wrap Redis's native
