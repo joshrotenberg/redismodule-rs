@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `RuntimeContext::fill_random_bytes` and `fill_random_hex` fill caller-owned
+  slices using Redis's generator under the Redis lock (#144). Hex output is
+  lowercase ASCII, supports odd lengths and has no trailing NUL. Empty slices
+  succeed after checking availability; missing bindings return errors without
+  changing the buffer. Signatures are uniform at every compatibility floor.
+  The `random_fill` example demonstrates per-load IDs and locked worker access.
+
 - `RuntimeContext::api_available` safely queries the running server for a short
   native API name (#117). Every context view exposes it; unknown/missing names
   return false and interior NUL returns an error. Presence does not grant a

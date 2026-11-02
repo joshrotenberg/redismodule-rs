@@ -123,8 +123,8 @@ AREAS = [
     ("Pub/Sub", [(r"PublishMessage(Shard)?", "runtime")]),
     ("Logging and diagnostics", [(r"Log|LatencyAddSample", "context-free"), (r"_Assert", "n/a")]),
     ("Time and randomness", [
-        (r"Milliseconds|(Monotonic|Cached)?Microseconds|GetRandom(Bytes|HexChars)",
-         "context-free"),
+        (r"Milliseconds|(Monotonic|Cached)?Microseconds", "context-free"),
+        (r"GetRandom(Bytes|HexChars)", "runtime"),
     ]),
     ("Dictionaries", [(r"CreateDict|FreeDict|Dict\w+", "context-free")]),
     ("INFO", [
@@ -246,6 +246,7 @@ for _refs, _names in [
     (["upstream PR 100"], "HashGet"),
     (["upstream PR 482"], "Scan ScanKey"),
     (["#89"], "ThreadSafeContextTryLock GetRandomHexChars ClusterCanonicalKeyNameInSlot"),
+    (["#144"], "GetRandomBytes GetRandomHexChars"),
     (["#55"], "ReplySetArrayLength ReplySetMapLength ReplySetSetLength"),
     (["#60"], "ConfigGet ConfigGetBool ConfigGetEnum ConfigGetNumeric ConfigGetType "
               "ConfigIteratorCreate ConfigIteratorNext ConfigIteratorRelease"),

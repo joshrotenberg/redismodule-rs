@@ -800,6 +800,60 @@ impl Context {
 }
 
 impl RuntimeContext {
+    /// Fills exactly `destination` with bytes from Redis's random generator.
+    ///
+    /// Does not allocate an output buffer. An empty buffer succeeds
+    /// without calling the generator, after checking that the API is available.
+    /// A missing native API returns an error without changing the buffer, at
+    /// every compatibility floor.
+    ///
+    /// Redis's generator is not thread safe. This runtime view proves that
+    /// Redis is initialized and its lock stays held throughout the call.
+    /// An unlocked worker-context owner does not expose this operation:
+    ///
+    /// ```compile_fail,E0599
+    /// let owner = redis_module::ThreadSafeContext::new();
+    /// owner.fill_random_bytes(&mut [0; 8]);
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// redis_module::MODULE_CONTEXT.fill_random_hex(&mut [0; 8]);
+    /// ```
+    pub fn fill_random_bytes(&self, destination: &mut [u8]) -> Result<(), RedisError> {
+        let random = unsafe { crate::__available_api!(RedisModule_GetRandomBytes) };
+        if !destination.is_empty() {
+            // SAFETY: the view holds the Redis lock; the exclusive slice
+            // supplies a writable buffer of exactly this length.
+            unsafe { random(destination.as_mut_ptr(), destination.len()) };
+        }
+        Ok(())
+    }
+
+    /// Fills exactly `destination` with lowercase ASCII hex characters (0-9, a-f).
+    ///
+    /// The length counts output characters, can be odd, and includes no trailing
+    /// NUL. Does not allocate an output buffer. Empty buffers succeed
+    /// after checking availability; a missing API leaves the buffer unchanged.
+    /// Like [`Self::fill_random_bytes`], this uses Redis's generator under the
+    /// runtime view's initialization and Redis-lock guarantees.
+    ///
+    /// ```no_run
+    /// fn generation(ctx: &redis_module::RuntimeContext) -> Result<[u8; 32], redis_module::RedisError> {
+    ///     let mut id = [0; 32];
+    ///     ctx.fill_random_hex(&mut id)?;
+    ///     Ok(id)
+    /// }
+    /// ```
+    pub fn fill_random_hex(&self, destination: &mut [u8]) -> Result<(), RedisError> {
+        let random = unsafe { crate::__available_api!(RedisModule_GetRandomHexChars) };
+        if !destination.is_empty() {
+            // SAFETY: as above. The native hex API takes char*, but writes
+            // exactly destination.len() bytes, with no C-string terminator.
+            unsafe { random(destination.as_mut_ptr().cast(), destination.len()) };
+        }
+        Ok(())
+    }
+
     /// Whether the running server provides a native module API.
     ///
     /// Pass its case-sensitive short name, such as `AddPostNotificationJob`,

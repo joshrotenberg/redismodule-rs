@@ -186,6 +186,10 @@ name = "api_availability"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "random_fill"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "server_events"
 crate-type = ["cdylib"]
 
