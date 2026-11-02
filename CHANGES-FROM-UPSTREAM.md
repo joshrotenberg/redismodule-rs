@@ -393,6 +393,18 @@ metadata still fails compilation; diagnostic wording may differ.
     header differences above. The upstream review checked all 42 open pull
     requests on 2026-10-29; none had been updated since the previous review
     at 2026-10-22T20:45:00Z. The older pull request assessment stays in #101.
+  - [a383429](https://github.com/RedisLabsModules/redismodule-rs/commit/a383429360733936751bed5758648b01e48e7e55)
+    (2026-11-01, [upstream PR 491][p491]): adds
+    `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`) and its comment for standard
+    RDB saves restored one key at a time. This fork already includes the
+    persistence-event payload, version and syncer flag, but lacks this constant
+    in the header and committed bindings. The bounded declaration port is #150;
+    it adds no API pointer, struct layout, dispatch or compatibility-floor change.
+- The #148 review checked upstream master at `a383429` and all 42 open pull
+  requests on 2026-11-02 at 16:19:39 UTC. No open pull request had been updated
+  since the recorded cutoff of 2026-10-30T03:42:01Z. The earlier pull request
+  assessments remain unchanged. Only the standard-RDB constant needs a new port;
+  advancing the review record does not claim #150 is implemented.
 
 ## Upstream issues this fork fixes
 
@@ -454,6 +466,7 @@ in #114 and #55.
 | [487][p487], [488][p488] | Fix ServerInfo::field leak with a null context.; Fix ServerInfo field string leaks with and without auto-memory | closed; 488 merged | The same fix ([813cfa0]), and 488's `None` for a field name with a NUL byte ([9ea85f4]); see Base. |
 | [489][p489] | Add `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` to redismodule.h | closed; merged | Included in the header and bindings, and exposed as `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`; see Base. |
 | [490][p490] | update redismodule.h with RedisModulePersistenceInfo | closed; merged | Included in the header and bindings: the persistence-event payload, version and syncer flag; see Base. |
+| [491][p491] | add `REDISMODULE_PERSISTENCE_FLAG_STDRDB` to `redismodule.h` | closed; merged | Not yet included: the standard-RDB persistence flag and comment are tracked in #150; payload layout and existing flags stay unchanged. |
 | [100][p100] | Added hash_get macro to allow getting multiple hash fields at once | open | Superseded by `RedisKey::hash_get_multi` and `HMGetResult`, which handle retained values and missing fields without exposing native variadic calls in a caller's macro expansion. No additional port. |
 | [168][p168] | add support for Command filter | open | Deferred with 437: no safe command-filter wrapper exists here. A port needs its own borrowed callback view and audited argument ownership, rather than public raw contexts. The API inventory ranks this gap third; no buildable downstream consumer is identified. |
 | [169][p169] | initial commit of dictionary support | open draft | Deferred: no SDK dictionary wrapper. The draft's native value pointers and iterator lifetimes need an ownership design; Rust collections remain available. Keep the gap in the API inventory until a concrete module needs a native dictionary. |
@@ -914,3 +927,5 @@ These compile unchanged but behave differently:
 [p469]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/469
 [p482]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/482
 [p484]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/484
+
+[p491]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/491
