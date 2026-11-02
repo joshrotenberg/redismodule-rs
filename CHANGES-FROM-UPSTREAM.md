@@ -93,7 +93,7 @@ fan-out, reentrant addition, panics and retained-image load/unload recovery.
 
 ## Redis OSS 8.x header declarations
 
-`src/include/redismodule.h` is upstream's header at `1c84d3d` plus what Redis
+`src/include/redismodule.h` is upstream's header at `a383429` plus what Redis
 OSS 8.10.2's `src/redismodule.h` declares and upstream's lacks, in OSS's text
 and at OSS's positions, so a later refresh from either header stays a small
 diff (#106). The committed bindings include the additions; the SDK adds no
@@ -143,8 +143,11 @@ The header still differs from OSS 8.10.2's:
 - It includes upstream's persistence-event payload
   `RedisModulePersistenceInfoV1` and its `RedisModulePersistenceInfo` alias,
   `REDISMODULE_PERSISTENCEINFO_VERSION` and
-  `REDISMODULE_PERSISTENCE_FLAG_SYNCER` from [upstream PR 490][p490]. OSS
-  8.10.2's header has none of these declarations. They add no API pointers.
+  `REDISMODULE_PERSISTENCE_FLAG_SYNCER` from [upstream PR 490][p490], plus
+  `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`) and its standard-RDB save
+  comment from [upstream PR 491][p491] (#150). OSS 8.10.2's header has none of
+  these declarations. They add no API pointers or compatibility-floor changes;
+  the new flag leaves the existing payload layout and syncer value unchanged.
 - Value 8 has two key type names: upstream's `REDISMODULE_KEYTYPE_GCRA`, from
   a Redis unstable snapshot, and OSS's `REDISMODULE_KEYTYPE_ARRAY`. OSS
   returns a GCRA type only when built with `ENABLE_GCRA`. `KeyType::Array`
@@ -396,15 +399,15 @@ metadata still fails compilation; diagnostic wording may differ.
   - [a383429](https://github.com/RedisLabsModules/redismodule-rs/commit/a383429360733936751bed5758648b01e48e7e55)
     (2026-11-01, [upstream PR 491][p491]): adds
     `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`) and its comment for standard
-    RDB saves restored one key at a time. This fork already includes the
-    persistence-event payload, version and syncer flag, but lacks this constant
-    in the header and committed bindings. The bounded declaration port is #150;
-    it adds no API pointer, struct layout, dispatch or compatibility-floor change.
+    RDB saves restored one key at a time. Included in the header and committed
+    bindings by #150, alongside the persistence-event payload, version and syncer
+    flag. This additive declaration changes no API pointer, struct layout,
+    dispatch or compatibility floor.
 - The #148 review checked upstream master at `a383429` and all 42 open pull
   requests on 2026-11-02 at 16:19:39 UTC. No open pull request had been updated
   since the recorded cutoff of 2026-10-30T03:42:01Z. The earlier pull request
-  assessments remain unchanged. Only the standard-RDB constant needs a new port;
-  advancing the review record does not claim #150 is implemented.
+  assessments remain unchanged. That review identified only the standard-RDB
+  constant for a new port; #150 now includes its declaration and binding.
 
 ## Upstream issues this fork fixes
 
@@ -466,7 +469,7 @@ in #114 and #55.
 | [487][p487], [488][p488] | Fix ServerInfo::field leak with a null context.; Fix ServerInfo field string leaks with and without auto-memory | closed; 488 merged | The same fix ([813cfa0]), and 488's `None` for a field name with a NUL byte ([9ea85f4]); see Base. |
 | [489][p489] | Add `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` to redismodule.h | closed; merged | Included in the header and bindings, and exposed as `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`; see Base. |
 | [490][p490] | update redismodule.h with RedisModulePersistenceInfo | closed; merged | Included in the header and bindings: the persistence-event payload, version and syncer flag; see Base. |
-| [491][p491] | add `REDISMODULE_PERSISTENCE_FLAG_STDRDB` to `redismodule.h` | closed; merged | Not yet included: the standard-RDB persistence flag and comment are tracked in #150; payload layout and existing flags stay unchanged. |
+| [491][p491] | add `REDISMODULE_PERSISTENCE_FLAG_STDRDB` to `redismodule.h` | closed; merged | Included in the header and bindings by #150: the standard-RDB persistence flag and comment; payload layout and existing flags stay unchanged. |
 | [100][p100] | Added hash_get macro to allow getting multiple hash fields at once | open | Superseded by `RedisKey::hash_get_multi` and `HMGetResult`, which handle retained values and missing fields without exposing native variadic calls in a caller's macro expansion. No additional port. |
 | [168][p168] | add support for Command filter | open | Deferred with 437: no safe command-filter wrapper exists here. A port needs its own borrowed callback view and audited argument ownership, rather than public raw contexts. The API inventory ranks this gap third; no buildable downstream consumer is identified. |
 | [169][p169] | initial commit of dictionary support | open draft | Deferred: no SDK dictionary wrapper. The draft's native value pointers and iterator lifetimes need an ownership design; Rust collections remain available. Keep the gap in the API inventory until a concrete module needs a native dictionary. |
