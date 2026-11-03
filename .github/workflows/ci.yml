@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, experiment/quickjs]
   pull_request:
 
 concurrency:
