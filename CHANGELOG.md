@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Breaking:** `RedisString` implements `Borrow<[u8]>` instead of
+  `Borrow<str>` (#164). Byte-slice collection lookups agree with its hash,
+  equality and binary ordering, including invalid UTF-8. Use
+  `map.get(name.as_bytes())` or `set.contains(name.as_bytes())` for text keys.
+  Equality/order compare byte slices directly, including large length
+  differences that the native comparator can truncate through an `int`.
+
 - `RedisAlloc` prefers non-aborting `TryAlloc` when the running server
   provides it (Redis 7.0+) (#163). Fallible Rust allocation and inherited
   allocate/copy/free growth can return errors instead of aborting Redis;
