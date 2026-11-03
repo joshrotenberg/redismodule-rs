@@ -13,12 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   panic (#159). With `redis_module!`, a successful unload stops watching every
   descriptor still watched after `deinit` and a failed load those it added,
   since Redis keeps them and calls them in the unloaded image. Redis cannot
-  cancel a one-shot, so unload is refused while one is pending, and
-  `add_one_shot` returns an error while the module loads or unloads; `add`
-  returns one during unload. A callback that panics stops being watched, with
+  cancel a one-shot, so unload is refused while one is pending or a
+  descriptor callback is running, and `add_one_shot` returns an error while
+  the module loads or unloads; `add` returns one during and after unload.
+  Modules with their own `RedisModule_OnLoad` keep the previous behavior. A
+  callback that panics stops being watched in every direction it handles, with
   a warning, instead of being skipped through its poisoned lock on every event,
-  and replaced or removed callbacks are dropped with the registry unlocked, so
-  their destructors can add or remove descriptors.
+  and replaced or removed callbacks are dropped with the registry unlocked and
+  inside a panic guard, so their destructors can add or remove descriptors.
 
 - A failed load no longer leaves native event subscriptions into the unloaded
   module on Redis before 7.2.4, which keeps them itself (#158). The

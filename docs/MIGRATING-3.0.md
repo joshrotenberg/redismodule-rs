@@ -817,11 +817,15 @@ text.
   `event_loop::add_one_shot` returns an error while the module loads or
   unloads, so schedule one-shots from commands, events or workers rather than
   `init` or `deinit`, and `MODULE UNLOAD` is refused while a one-shot is still
-  pending. `event_loop::add` returns an error during unload, and a successful
-  unload stops watching every descriptor still watched after `deinit`, as a
-  failed load does for those it added; the descriptors stay open. A callback
-  that panics is no longer watched afterwards; before, it stayed registered
-  and was skipped on every event.
+  pending or a descriptor callback is running. A worker can get that error
+  while an unload is attempted and then refused; retry it. `event_loop::add`
+  returns an error during and after unload, and a successful unload stops
+  watching every descriptor still watched after `deinit`, as a failed load
+  does for those it added; the descriptors stay open. A callback that panics
+  is no longer watched in any direction it handles; before, it stayed
+  registered and was skipped on every event. Modules with their own
+  `RedisModule_OnLoad` are unaffected and must still remove watches and let
+  one-shots run before unloading.
 
 - **`event_handlers` subscribe after `init`.** `redis_module!` now subscribes
   the `event_handlers` keyspace handlers once `init` has succeeded, as the last
@@ -862,8 +866,9 @@ text.
 - **Detached context after unload.** `MODULE_CONTEXT` is released when
   `redis_module!` unloads the module or its load fails, and the next load stores
   a fresh one. Until then `MODULE_CONTEXT.lock()` panics instead of using the
-  freed module's context, and event loop callbacks that Redis still runs are
-  skipped; a worker that outlives a reload uses the new load's context. Stop
+  freed module's context, and event loop one-shots that Redis still runs are
+  skipped (with `redis_module!` none can be pending at unload, and watches are
+  removed); a worker that outlives a reload uses the new load's context. Stop
   workers, including ones that log, before unloading. Calling `logging::setup()`
   again, as on a reload, succeeds instead of returning an error.
 - **Unload with pending blocking calls.** `MODULE UNLOAD` now fails while an

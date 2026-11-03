@@ -20,8 +20,10 @@ skip-without-a-context check only helps while that image stays mapped (#159).
 successful unload stops watching every descriptor still watched after
 `deinit`, and a failed load those it added; the descriptors stay open. Redis
 has no way to cancel a one-shot, so unload is refused, before `deinit`, while
-one is pending, and `add_one_shot` is refused while the module loads or
-unloads, ordered against a concurrent unload so one of them backs out.
+one is pending or a descriptor callback is running, and `add_one_shot` is
+refused while the module loads or unloads, ordered against a concurrent unload
+so one of them backs out. Modules with their own `RedisModule_OnLoad` keep the
+unguarded behavior.
 
 A panicking fd callback poisoned its mutex, and every later event skipped it
 silently as if it were reentrant, so a readable callback that panicked before

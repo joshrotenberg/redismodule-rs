@@ -9,7 +9,10 @@
 //! [`crate::redis_module!`], a successful unload stops watching every
 //! descriptor still watched after `deinit`, and a failed load those it added.
 //! Redis cannot cancel a one-shot, so [`add_one_shot`] is refused while the
-//! module loads or unloads, and unload is refused while one is pending.
+//! module loads or unloads, and unload is refused while one is pending or a
+//! descriptor callback is running. A module with its own `RedisModule_OnLoad`
+//! gets none of this: it must remove watches and let one-shots run before
+//! unloading.
 
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -54,14 +57,21 @@ fn fd_callbacks() -> std::sync::MutexGuard<'static, BTreeMap<RawFd, FdCallbacks>
 }
 
 /// Where the module is in its `redis_module!` lifecycle, for the event loop.
-const UNLOADED: u8 = 0;
+/// A module with its own `RedisModule_OnLoad` stays unbound, where [`add`]
+/// and [`add_one_shot`] work as they always did and nothing guards unload.
+const UNBOUND: u8 = 0;
 const LOADING: u8 = 1;
 const ACTIVE: u8 = 2;
 const UNLOADING: u8 = 3;
-static PHASE: AtomicU8 = AtomicU8::new(UNLOADED);
+const UNLOADED: u8 = 4;
+static PHASE: AtomicU8 = AtomicU8::new(UNBOUND);
 
 /// One-shots Redis holds that have not finished running.
 static PENDING_ONE_SHOTS: AtomicUsize = AtomicUsize::new(0);
+
+/// Descriptor callbacks running now, one of which could reach `MODULE UNLOAD`
+/// through a call. Main thread only.
+static RUNNING_FD_CALLBACKS: AtomicUsize = AtomicUsize::new(0);
 
 /// Internal binding for `redis_module!`: [`add_one_shot`] is refused until the
 /// load commits, and a failed load stops watching what it added.
@@ -104,10 +114,12 @@ impl EventLoopUnloadGuard {
         // A worker's add_one_shot counts itself before it reads the phase, so
         // either it sees this store and backs out, or the load below sees it.
         PHASE.store(UNLOADING, Ordering::SeqCst);
-        if PENDING_ONE_SHOTS.load(Ordering::SeqCst) != 0 {
+        if PENDING_ONE_SHOTS.load(Ordering::SeqCst) != 0
+            || RUNNING_FD_CALLBACKS.load(Ordering::SeqCst) != 0
+        {
             PHASE.store(ACTIVE, Ordering::SeqCst);
             return Err(RedisError::Str(
-                "ERR module has pending event loop one-shots",
+                "ERR module has pending or running event loop callbacks",
             ));
         }
         Ok(Self { committed: false })
@@ -143,7 +155,18 @@ fn remove_all_watches() {
             unsafe { event_loop_del(*fd, mask.bits()) };
         }
     }
-    drop(watched);
+    // Each destructor runs inside its own guard: a failed load drops these while
+    // its load callback may be unwinding, and a panic here must not fail an
+    // unload that has already committed.
+    for (_, entry) in watched {
+        for callback in [entry.readable, entry.writable].into_iter().flatten() {
+            crate::panic::run_callback(
+                "event loop callback destructor",
+                move || drop(callback),
+                || (),
+            );
+        }
+    }
 }
 
 /// The context passed to event loop callbacks, or `None` while no module
@@ -172,11 +195,12 @@ fn call_error(api: &str) -> RedisError {
 /// ready. Adding a callback for a direction that already has one replaces it.
 ///
 /// A callback that panics stops being called: the panic is logged and the
-/// direction is no longer watched, since a callback that panicked before
-/// handling its event would otherwise be called again on every event loop
-/// iteration. With `redis_module!`, a successful unload stops watching every
-/// descriptor still watched after `deinit`, and a failed load stops watching
-/// those it added; the descriptors themselves stay open.
+/// descriptor is no longer watched in any direction that callback handles,
+/// since a callback that panicked before handling its event would otherwise be
+/// called again on every event loop iteration. With `redis_module!`, a
+/// successful unload stops watching every descriptor still watched after
+/// `deinit`, and a failed load stops watching those it added; the descriptors
+/// themselves stay open. Unload is refused while a callback is running.
 ///
 /// # Safety
 ///
@@ -188,9 +212,10 @@ fn call_error(api: &str) -> RedisError {
 /// # Errors
 ///
 /// Returns an error if `mask` is empty, if Redis rejects `fd` (for example one
-/// above `maxclients`), if the module is unloading, or if the running Redis
-/// does not provide `RedisModule_EventLoopAdd` (before 7.0). Nothing stays
-/// registered after an error.
+/// above `maxclients`), if the `redis_module!` module is unloading or has
+/// unloaded or failed to load, or if the running Redis does not provide
+/// `RedisModule_EventLoopAdd` (before 7.0). Nothing stays registered after an
+/// error.
 pub unsafe fn add(
     fd: RawFd,
     mask: EventLoopMask,
@@ -203,9 +228,9 @@ pub unsafe fn add(
             "ERR an event loop mask needs READABLE or WRITABLE",
         ));
     }
-    if !matches!(PHASE.load(Ordering::SeqCst), LOADING | ACTIVE) {
+    if !matches!(PHASE.load(Ordering::SeqCst), UNBOUND | LOADING | ACTIVE) {
         return Err(RedisError::Str(
-            "ERR event loop descriptors cannot be watched while the module unloads",
+            "ERR event loop descriptors cannot be watched while the module unloads or after it unloaded",
         ));
     }
     let callback: FdCallback = Arc::new(Mutex::new(callback));
@@ -337,7 +362,8 @@ fn run_fd_callback(fd: RawFd, direction: EventLoopMask) {
         return;
     };
     // The registry is unlocked here, so the callback may add or remove
-    // descriptors, its own included.
+    // descriptors, its own included. While it runs, the module cannot unload.
+    RUNNING_FD_CALLBACKS.fetch_add(1, Ordering::SeqCst);
     let completed = crate::panic::run_callback(
         "event loop callback",
         || match callback.try_lock() {
@@ -355,7 +381,7 @@ fn run_fd_callback(fd: RawFd, direction: EventLoopMask) {
         || false,
     );
     if !completed {
-        stop_after_panic(fd, direction, &callback);
+        stop_after_panic(fd, &callback);
     }
     // When the callback removed its own descriptor, this is the last reference,
     // and its destructor runs inside the guard.
@@ -364,27 +390,27 @@ fn run_fd_callback(fd: RawFd, direction: EventLoopMask) {
         move || drop(callback),
         || (),
     );
+    RUNNING_FD_CALLBACKS.fetch_sub(1, Ordering::SeqCst);
 }
 
-/// Stops watching `fd` in `direction` after its callback panicked, if that
-/// callback is still the registered one.
-fn stop_after_panic(fd: RawFd, direction: EventLoopMask, callback: &FdCallback) {
-    let registered = fd_callbacks().get(&fd).is_some_and(|entry| {
-        let current = if direction == EventLoopMask::READABLE {
-            &entry.readable
-        } else {
-            &entry.writable
+/// Stops watching `fd` in every direction `callback` is still registered for,
+/// after it panicked.
+fn stop_after_panic(fd: RawFd, callback: &FdCallback) {
+    let mut mask = EventLoopMask::empty();
+    if let Some(entry) = fd_callbacks().get(&fd) {
+        let holds = |slot: &Option<FdCallback>| {
+            slot.as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, callback))
         };
-        current
-            .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, callback))
-    });
-    if !registered {
+        mask.set(EventLoopMask::READABLE, holds(&entry.readable));
+        mask.set(EventLoopMask::WRITABLE, holds(&entry.writable));
+    }
+    if mask.is_empty() {
         return;
     }
     // SAFETY: event loop callbacks run on the main thread, and the registry
-    // holds a callback for this direction.
-    let removed = unsafe { remove(fd, direction) };
+    // holds this callback for the directions in mask.
+    let removed = unsafe { remove(fd, mask) };
     if let Some(ctx) = callback_context() {
         match removed {
             Ok(()) => ctx.log_warning(&format!(
@@ -398,14 +424,17 @@ fn stop_after_panic(fd: RawFd, direction: EventLoopMask, callback: &FdCallback) 
 }
 
 /// Runs `callback` once on the main thread, with the Redis lock held. It can be
-/// called from any thread. Module unload is refused until it has run.
+/// called from any thread. With `redis_module!`, module unload is refused until
+/// it has run.
 ///
 /// # Errors
 ///
-/// Returns an error if the module is loading or unloading (schedule from a
-/// command, event or worker instead of `init` or deinit), if the running Redis
-/// does not provide `RedisModule_EventLoopAddOneShot` (before 7.0), or if it
-/// rejects the call.
+/// Returns an error if the `redis_module!` module is loading or unloading
+/// (schedule from a command, event or worker instead of `init` or `deinit`), if
+/// the running Redis does not provide `RedisModule_EventLoopAddOneShot` (before
+/// 7.0), or if it rejects the call. A worker can get the loading-or-unloading
+/// error while an unload is being attempted that is then refused; retry once
+/// the module is active again.
 pub fn add_one_shot(
     callback: impl FnOnce(&EventContext) + Send + 'static,
 ) -> Result<(), RedisError> {
@@ -413,7 +442,7 @@ pub fn add_one_shot(
     // Counted before reading the phase, so a concurrent unload either sees
     // this one-shot or this call sees the unload; see EventLoopUnloadGuard.
     PENDING_ONE_SHOTS.fetch_add(1, Ordering::SeqCst);
-    if PHASE.load(Ordering::SeqCst) != ACTIVE {
+    if !matches!(PHASE.load(Ordering::SeqCst), UNBOUND | ACTIVE) {
         PENDING_ONE_SHOTS.fetch_sub(1, Ordering::SeqCst);
         return Err(RedisError::Str(
             "ERR event loop one-shots cannot be added while the module loads or unloads",
