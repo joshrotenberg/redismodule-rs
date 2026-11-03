@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Event loop callbacks no longer outlive their module or loop forever after a
+  panic (#159). With `redis_module!`, a successful unload stops watching every
+  descriptor still watched after `deinit` and a failed load those it added,
+  since Redis keeps them and calls them in the unloaded image. Redis cannot
+  cancel a one-shot, so unload is refused while one is pending, and
+  `add_one_shot` returns an error while the module loads or unloads; `add`
+  returns one during unload. A callback that panics stops being watched, with
+  a warning, instead of being skipped through its poisoned lock on every event,
+  and replaced or removed callbacks are dropped with the registry unlocked, so
+  their destructors can add or remove descriptors.
+
 - A plain blocked client released without a reply no longer waits forever
   (#157). Dropping a `BlockedClient`, or its `ThreadSafeContext`, without a
   reply sends `ERR the blocked client was released without a reply`. When the

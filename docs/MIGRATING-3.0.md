@@ -810,6 +810,15 @@ These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
 
+- **Event loop callbacks and the module lifecycle.** With `redis_module!`,
+  `event_loop::add_one_shot` returns an error while the module loads or
+  unloads, so schedule one-shots from commands, events or workers rather than
+  `init` or `deinit`, and `MODULE UNLOAD` is refused while a one-shot is still
+  pending. `event_loop::add` returns an error during unload, and a successful
+  unload stops watching every descriptor still watched after `deinit`, as a
+  failed load does for those it added; the descriptors stay open. A callback
+  that panics is no longer watched afterwards; before, it stayed registered
+  and was skipped on every event.
 - **Blocked clients get one reply.** Dropping a `BlockedClient`, or the
   `ThreadSafeContext` that holds it, without replying now sends
   `ERR the blocked client was released without a reply`; before, the client
