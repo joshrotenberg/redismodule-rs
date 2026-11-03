@@ -40,7 +40,8 @@ pub enum RedisValue {
     /// numbers without a length. In an array or map the error takes the big
     /// number's place. A Lua script can return big number text that is not
     /// digits, so a call reply converted to `RedisValue` can be refused this
-    /// way; [`crate::Context::reply_with_call_reply`] forwards it unchanged.
+    /// way; [`crate::Context::reply_with_call_reply`] forwards it as Redis
+    /// sent it, where the client's protocol allows.
     BigNumber(String),
     /// RESP3 verbatim text with its three-letter format, such as `txt` or
     /// `mkd`. A RESP2 client gets the text as a bulk string. Redis before 7.0

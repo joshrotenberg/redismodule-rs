@@ -785,11 +785,11 @@ text.
   `NoReply` still sends nothing. `RedisValue::BigNumber` text that is not an
   optional `-` followed by decimal digits is now the error
   `ERR big number reply is not a decimal integer` for every client. Before,
-  `BigNumber("3.14".into())` reached a RESP2 client, or any client of Redis
-  before 7.0, as the bulk string `3.14`, and text with CR or LF injected
-  replies for RESP3 clients. Inside an array or map the error takes the big
-  number's place, and clients such as redis-rs then report the whole reply as
-  an error. Send other numeric text as a bulk string or a double instead.
+  `BigNumber("3.14".into())` reached a RESP2 client as the bulk string `3.14`,
+  and text with CR or LF injected replies for RESP3 clients of Redis 7.0 and
+  later. Inside an array or map the error takes the big number's place, and
+  clients such as redis-rs then report the whole reply as an error. Send other
+  numeric text as a bulk string or a double instead.
 - **Detached context after unload.** `MODULE_CONTEXT` is released when
   `redis_module!` unloads the module or its load fails, and the next load stores
   a fresh one. Until then `MODULE_CONTEXT.lock()` panics instead of using the
