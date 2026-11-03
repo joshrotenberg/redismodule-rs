@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A failed load no longer leaves native event subscriptions into the unloaded
+  module on Redis before 7.2.4, which keeps them itself (#158). The
+  `redis_module!` load removes the server-event subscriptions it made,
+  attribute and runtime handlers alike, and subscribes the `event_handlers`
+  keyspace handlers after `init` succeeds, since Redis has no API to remove
+  keyspace subscriptions before 8.2; their APIs are checked before `init`.
+  Events raised during `init` no longer reach those keyspace handlers.
+
+- A plain blocked client released without a reply no longer waits forever
+  (#157). Dropping a `BlockedClient`, or its `ThreadSafeContext`, without a
+  reply sends `ERR the blocked client was released without a reply`. When the
+  command that blocked the client drops it on the command's own thread before
+  returning, the command's reply stands instead (an error it returns, or the
+  panic error), and a `NoReply` it returns becomes that error. Commands
+  registered without the SDK's command callbacks always get the error. A
+  second `ThreadSafeContext<BlockedClient>::reply` returns `Status::Err`
+  without writing, and a wrong-arity error through it is sent as
+  `ERR wrong number of arguments` instead of crashing Redis.
+
+- **Breaking:** `ThreadSafeContext<BlockedClient>` is no longer `Sync`, since
+  its `reply` writes without the Redis lock (#157).
+  `ThreadSafeContext<DetachedFromClient>` stays `Sync`.
+
+- **Breaking:** `RedisString` implements `Borrow<[u8]>` instead of
+  `Borrow<str>` (#164). Byte-slice collection lookups agree with its hash,
+  equality and binary ordering, including invalid UTF-8. Use
+  `map.get(name.as_bytes())` or `set.contains(name.as_bytes())` for text keys.
+  Equality/order compare byte slices directly, including large length
+  differences that the native comparator can truncate through an `int`.
+
+- `RedisAlloc` prefers non-aborting `TryAlloc` when the running server
+  provides it (Redis 7.0+) (#163). Fallible Rust allocation and inherited
+  allocate/copy/free growth can return errors instead of aborting Redis;
+  older servers keep the aborting allocator. Alignment above one word uses
+  the existing header/padding path, including 16-byte layouts on Redis
+  builds with a size prefix.
+
 - `Context::reply` no longer writes replies that shift the client's later
   replies (#153). A `RedisValue::NoReply` array element or map value, which
   wrote nothing although the aggregate counted it, is replied as null.

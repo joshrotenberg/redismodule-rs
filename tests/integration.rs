@@ -3908,6 +3908,63 @@ fn check_client_blocking_rejections(commands: &[(&str, &[&str])], calls: &[&str]
     Ok(())
 }
 
+/// A plain blocked client gets exactly one reply: an error when its handle is
+/// released without one, the command's own error when the command fails after
+/// blocking, and only the first of two worker replies. Each reply is followed
+/// by another command on the same connection, which a missing or extra reply
+/// would answer wrongly or not at all.
+#[test]
+fn test_blocked_client_gets_exactly_one_reply() -> Result<()> {
+    let mut con = TestConnection::new("block");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    con.set_write_timeout(Some(Duration::from_secs(5)))?;
+
+    for command in [
+        "block.release_unreplied",
+        "block.worker_panics",
+        "block.release_then_no_reply",
+    ] {
+        let error = redis::cmd(command)
+            .query::<Value>(&mut con)
+            .expect_err("a released blocked client got a value");
+        assert_eq!(error.code(), Some("ERR"), "{command}");
+        assert_eq!(
+            error.detail(),
+            Some("the blocked client was released without a reply"),
+            "{command}"
+        );
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+
+    for (command, detail) in [
+        ("block.fail_after_block", "failed after blocking"),
+        (
+            "block.panic_after_block",
+            "command panicked: failed after blocking",
+        ),
+        ("block.worker_wrong_arity", "wrong number of arguments"),
+    ] {
+        let error = redis::cmd(command)
+            .query::<Value>(&mut con)
+            .expect_err("the command replied with a value");
+        assert_eq!(error.code(), Some("ERR"), "{command}");
+        assert_eq!(error.detail(), Some(detail), "{command}");
+        assert_eq!(
+            redis::cmd("ECHO")
+                .arg("aligned")
+                .query::<String>(&mut con)?,
+            "aligned",
+            "{command}"
+        );
+    }
+
+    let first: String = redis::cmd("block.reply_twice").query(&mut con)?;
+    assert_eq!(first, "first");
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    assert!(redis::cmd("block.second_reply_refused").query::<bool>(&mut con)?);
+    Ok(())
+}
+
 // This also runs against Redis 6.0 in CI to exercise its older context flags.
 #[test]
 fn test_direct_client_blocking_rejects_denied_invocations() -> Result<()> {
@@ -3984,6 +4041,68 @@ fn test_string_text_and_bytes() -> Result<()> {
         .with_context(|| "failed to run string.create_nul")?;
     assert_eq!(res, [b"a\0b".to_vec(), b"c\0d".to_vec()]);
 
+    Ok(())
+}
+
+fn string_collection_keys() -> Vec<Vec<u8>> {
+    vec![
+        b"NX".to_vec(),
+        b"field".to_vec(),
+        vec![],
+        b"a\0b".to_vec(),
+        vec![0xff],
+        b"<Invalid UTF-8 data>".to_vec(),
+        b"a".to_vec(),
+        b"aa".to_vec(),
+        b"a\0".to_vec(),
+        b"a\xff".to_vec(),
+        "caf\u{e9}".as_bytes().to_vec(),
+        vec![0xc3],
+        b"-1".to_vec(),
+        b"10".to_vec(),
+        b"2".to_vec(),
+        vec![b'x'; 128],
+        (0..=255).collect(),
+        b"NX".to_vec(),
+    ]
+}
+
+#[test]
+fn test_string_collection_borrowed_bytes_lookup() -> Result<()> {
+    let mut con = TestConnection::new("string");
+    let keys = string_collection_keys();
+    let mut queries = keys.clone();
+    queries.extend([b"missing".to_vec(), vec![0xfe], b"field\0".to_vec()]);
+    for kind in ["hash_set", "ordered_set", "hash_map", "ordered_map"] {
+        for query in &queries {
+            let index = keys.iter().rposition(|key| key == query);
+            let expected = if kind.ends_with("set") {
+                i64::from(index.is_some())
+            } else {
+                index.map_or(-1, |index| index as i64)
+            };
+            let actual: i64 = redis::cmd("string.collection_lookup")
+                .arg(kind)
+                .arg(query)
+                .arg(&keys)
+                .query(&mut con)?;
+            assert_eq!(actual, expected, "{kind}, query {query:?}");
+        }
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_string_collection_byte_order() -> Result<()> {
+    let mut con = TestConnection::new("string");
+    let mut keys = string_collection_keys();
+    let actual: Vec<Vec<u8>> = redis::cmd("string.collection_order")
+        .arg(&keys)
+        .query(&mut con)?;
+    keys.sort();
+    keys.dedup();
+    assert_eq!(actual, keys);
     Ok(())
 }
 
@@ -6731,6 +6850,58 @@ fn test_reply_elements_match_their_aggregate_length() -> Result<()> {
     Ok(())
 }
 
+/// A load that fails after subscribing to keyspace and server events leaves
+/// no native subscription behind. Redis before 7.2.4 keeps a failed load's
+/// subscriptions itself, so a later event would call into the unloaded module;
+/// CI runs this against Redis 7.0.15 for that reason. A successful load then
+/// gets every handler.
+#[test]
+fn test_failed_load_leaves_no_event_subscriptions() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    let path = utils::module_path("failed_load")?;
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(&path)
+        .arg("fail")
+        .query::<()>(&mut con)
+        .expect_err("the module refused its load");
+    // Each of these would deliver an event to the failed load's handlers.
+    redis::cmd("SET")
+        .arg(&["failed_load:key", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SWAPDB")
+        .arg(&["0", "1"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SWAPDB")
+        .arg(&["0", "1"])
+        .query::<()>(&mut con)?;
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    // Several cron ticks at the default hz.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(&path)
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["failed_load:key", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SWAPDB")
+        .arg(&["0", "1"])
+        .query::<()>(&mut con)?;
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "every handler to run", || {
+        let counts: Vec<i64> = redis::cmd("failed_load.counts").query(&mut con)?;
+        Ok(counts.iter().all(|count| *count > 0))
+    })?;
+    let counts: Vec<i64> = redis::cmd("failed_load.counts").query(&mut con)?;
+    assert_eq!(counts[0], 1, "one SET after the successful load");
+    assert_eq!(counts[1], 2, "one FLUSHALL's start and end");
+    assert_eq!(counts[3], 1, "one SWAPDB after the successful load");
+    Ok(())
+}
+
 #[test]
 fn test_key_type_names_each_built_in_type() -> Result<()> {
     let mut con = TestConnection::new("key_type");
@@ -6981,7 +7152,8 @@ fn test_alloc_alignment() -> Result<()> {
     let res: Vec<Vec<i64>> = redis::cmd("alloc_alignment.check")
         .query(&mut con)
         .with_context(|| "failed to run alloc_alignment.check")?;
-    assert_eq!(res.len(), 7);
+    assert_eq!(res.len(), 8);
+    assert_eq!(res[0][0], 16);
 
     let misaligned: Vec<_> = res.iter().filter(|entry| entry[2] != 0).collect();
     assert!(
@@ -6989,5 +7161,25 @@ fn test_alloc_alignment() -> Result<()> {
         "misaligned boxes as [align, size, count]: {misaligned:?}"
     );
 
+    Ok(())
+}
+
+#[test]
+fn test_alloc_fallible_reserve() -> Result<()> {
+    let mut con = TestConnection::new("alloc_alignment");
+    let available: bool = redis::cmd("alloc_alignment.available").query(&mut con)?;
+    if available {
+        let checks: Vec<i64> = redis::cmd("alloc_alignment.try_reserve").query(&mut con)?;
+        assert_eq!(
+            checks, [1; 8],
+            "allocation, growth, contents, alignment and zeroing"
+        );
+    } else {
+        let error = redis::cmd("alloc_alignment.try_reserve")
+            .query::<Vec<i64>>(&mut con)
+            .expect_err("the exhaustion probe must refuse an aborting allocator");
+        assert!(error.to_string().contains("requires TryAlloc"), "{error}");
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
