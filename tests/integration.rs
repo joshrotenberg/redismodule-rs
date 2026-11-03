@@ -6731,6 +6731,57 @@ fn test_reply_elements_match_their_aggregate_length() -> Result<()> {
     Ok(())
 }
 
+/// A load that fails after subscribing to keyspace and server events leaves
+/// no native subscription behind. Redis before 7.2.4 keeps a failed load's
+/// subscriptions itself, so a later event would call into the unloaded module;
+/// CI runs this against Redis 7.0.15 for that reason. A successful load then
+/// gets every handler.
+#[test]
+fn test_failed_load_leaves_no_event_subscriptions() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    let path = utils::module_path("failed_load")?;
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(&path)
+        .arg("fail")
+        .query::<()>(&mut con)
+        .expect_err("the module refused its load");
+    // Each of these would deliver an event to the failed load's handlers.
+    redis::cmd("SET")
+        .arg(&["failed_load:key", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SWAPDB")
+        .arg(&["0", "1"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SWAPDB")
+        .arg(&["0", "1"])
+        .query::<()>(&mut con)?;
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    // Several cron ticks at the default hz.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(&path)
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["failed_load:key", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SWAPDB")
+        .arg(&["0", "1"])
+        .query::<()>(&mut con)?;
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "every handler to run", || {
+        let counts: Vec<i64> = redis::cmd("failed_load.counts").query(&mut con)?;
+        Ok(counts.iter().all(|count| *count > 0))
+    })?;
+    let counts: Vec<i64> = redis::cmd("failed_load.counts").query(&mut con)?;
+    assert_eq!(counts[0], 1, "one SET after the successful load");
+    assert_eq!(counts[3], 1, "one SWAPDB after the successful load");
+    Ok(())
+}
+
 #[test]
 fn test_key_type_names_each_built_in_type() -> Result<()> {
     let mut con = TestConnection::new("key_type");
