@@ -654,6 +654,23 @@ as long as the server runs.
 
 ### `RedisString` and argument parsing
 
+`RedisString` no longer implements `Borrow<str>` (#164). Its replacement,
+`Borrow<[u8]>`, matches the owned type's byte-slice hashing and binary order.
+Change collection lookups from `set.contains("NX")` to
+`set.contains("NX".as_bytes())`, and from `map.get(name)` to
+`map.get(name.as_bytes())` when `name` is a `str`. Byte queries preserve NUL
+and invalid UTF-8, without substituting a text placeholder.
+Slices of `RedisString` no longer support text `join` implicitly; convert
+each value to validated or explicitly lossy text before joining it.
+
+```
+use redis_module::RedisString;
+use std::collections::HashMap;
+fn find<'a, T>(values: &'a HashMap<RedisString, T>, name: &str) -> Option<&'a T> {
+    values.get(name.as_bytes())
+}
+```
+
 - `try_as_str` borrows from the `RedisString`, so the `&str` cannot outlive it.
 - `NextArg::next_str` is removed: it returned a view into the string it had
   just dropped. Use `ArgCursor`, which borrows the arguments without copying,

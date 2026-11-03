@@ -27,6 +27,15 @@ every compatibility floor and for RESP2 clients too, so the result does not
 depend on the protocol. Upstream has the same behavior for both and no issue or
 pull request for either.
 
+## Byte borrows for native string collections
+
+`RedisString` implements `Borrow<[u8]>` instead of `Borrow<str>` (#164).
+Its existing hash consumes a byte slice, and its native equality/order use
+Redis's binary string comparison. The borrowed bytes therefore share those
+collection semantics without a lossy invalid-UTF-8 placeholder. Text queries
+use `as_bytes()`; queries can also contain NUL or invalid UTF-8. The existing
+hash and comparison implementations are preserved.
+
 ## Recoverable Redis allocation
 
 `RedisAlloc` prefers `RedisModule_TryAlloc` when available (Redis 7.0+)
