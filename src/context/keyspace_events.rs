@@ -61,6 +61,7 @@ impl EventContext {
         mask: NotifyEvent,
         handler: KeyspaceEventHandler,
     ) -> Result<(), RedisError> {
+        keyspace_subscription_available()?;
         let flags_all = unsafe { raw::RedisModule_GetKeyspaceNotificationFlagsAll }.ok_or(
             RedisError::Str("ERR keyspace notification flags API is unavailable"),
         )?;
@@ -85,4 +86,20 @@ impl EventContext {
             Err(RedisError::Str("ERR keyspace subscription failed"))
         }
     }
+}
+
+/// Checks for the APIs [`EventContext::subscribe_to_keyspace_events`] needs.
+/// `redis_module!` subscribes its `event_handlers` after `init`, the last step
+/// of the load, because Redis before 7.2.4 keeps a failed load's keyspace
+/// subscriptions and has no API to remove them; this check lets it fail the
+/// load before `init` instead.
+#[doc(hidden)]
+pub fn keyspace_subscription_available() -> Result<(), RedisError> {
+    unsafe { raw::RedisModule_GetKeyspaceNotificationFlagsAll }.ok_or(RedisError::Str(
+        "ERR keyspace notification flags API is unavailable",
+    ))?;
+    unsafe { raw::RedisModule_SubscribeToKeyspaceEvents }.ok_or(RedisError::Str(
+        "ERR keyspace subscription API is unavailable",
+    ))?;
+    Ok(())
 }

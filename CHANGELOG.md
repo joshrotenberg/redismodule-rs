@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A failed load no longer leaves native event subscriptions into the unloaded
+  module on Redis before 7.2.4, which keeps them itself (#158). The
+  `redis_module!` load removes the server-event subscriptions it made,
+  attribute and runtime handlers alike, and subscribes the `event_handlers`
+  keyspace handlers after `init` succeeds, since Redis has no API to remove
+  keyspace subscriptions before 8.2; their APIs are checked before `init`.
+  Events raised during `init` no longer reach those keyspace handlers.
+
 - A plain blocked client released without a reply no longer waits forever
   (#157). Dropping a `BlockedClient`, or its `ThreadSafeContext`, without a
   reply sends `ERR the blocked client was released without a reply`. When the
