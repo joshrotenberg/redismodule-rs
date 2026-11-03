@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Aggregate replies send as many elements as their header announces (#153). A
+  `RedisValue::NoReply` array element or map value, which wrote nothing, is
+  replied as null. `RedisValue::BigNumber` text other than an optional `-` and
+  decimal digits, which RESP3 writes without a length so CR or LF in it could
+  inject replies, is replied as an error at every compatibility floor.
+
 - `EventContext::add_post_notification_job` returns `Status::Err` instead of
   panicking when its native API is missing at a 7.2+ compatibility floor (#117).
   Older floors keep their existing API error and all refused paths drop captures.

@@ -1802,6 +1802,17 @@ impl EventContext {
     }
 }
 
+/// The error reply for [`RedisValue::BigNumber`] text that is not a decimal
+/// integer.
+const INVALID_BIG_NUMBER: &str = "ERR big number reply is not a decimal integer";
+
+/// Whether `s` is an optional `-` followed by one or more ASCII digits, the
+/// text of a RESP3 big number.
+fn is_big_number(s: &str) -> bool {
+    let digits = s.strip_prefix('-').unwrap_or(s);
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
 impl ReplyContext {
     #[allow(clippy::must_use_candidate)]
     pub fn reply_simple_string(&self, s: &str) -> raw::Status {
@@ -1830,6 +1841,15 @@ impl ReplyContext {
         }
     }
 
+    /// Replies with an element of an array or a value of a map. Their header
+    /// already counts it, so `NoReply`, which writes nothing, is sent as null.
+    fn reply_element(&self, value: RedisValue) -> raw::Status {
+        match value {
+            RedisValue::NoReply => raw::reply_with_null(self.ctx),
+            value => self.reply(Ok(value)),
+        }
+    }
+
     /// # Panics
     ///
     /// Will panic if methods used are missing in redismodule.h
@@ -1848,7 +1868,13 @@ impl ReplyContext {
             }
 
             Ok(RedisValue::BigNumber(s)) => {
-                raw::reply_with_big_number(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
+                // A RESP3 big number is written without a length, so text other
+                // than decimal digits could end the reply early.
+                if is_big_number(&s) {
+                    raw::reply_with_big_number(self.ctx, s.as_ptr().cast::<c_char>(), s.len())
+                } else {
+                    self.reply_error_string(INVALID_BIG_NUMBER)
+                }
             }
 
             Ok(RedisValue::VerbatimString((format, data))) => raw::reply_with_verbatim_string(
@@ -1868,7 +1894,7 @@ impl ReplyContext {
                 raw::reply_with_array(self.ctx, array.len() as c_long);
 
                 for elem in array {
-                    self.reply(Ok(elem));
+                    self.reply_element(elem);
                 }
 
                 raw::Status::Ok
@@ -1879,7 +1905,7 @@ impl ReplyContext {
 
                 for (key, value) in map {
                     self.reply_with_key(key);
-                    self.reply(Ok(value));
+                    self.reply_element(value);
                 }
 
                 raw::Status::Ok
@@ -1890,7 +1916,7 @@ impl ReplyContext {
 
                 for (key, value) in map {
                     self.reply_with_key(key);
-                    self.reply(Ok(value));
+                    self.reply_element(value);
                 }
 
                 raw::Status::Ok
@@ -1901,7 +1927,7 @@ impl ReplyContext {
 
                 for (key, value) in entries {
                     self.reply_with_key(key);
-                    self.reply(Ok(value));
+                    self.reply_element(value);
                 }
 
                 raw::Status::Ok
@@ -2736,5 +2762,22 @@ mod call_failure_tests {
                 .unwrap()
                 .starts_with("ERR RedisModule_Call failed: ")
         );
+    }
+}
+
+#[cfg(test)]
+mod big_number_tests {
+    use super::is_big_number;
+
+    #[test]
+    fn big_number_text_is_an_optionally_negative_decimal_integer() {
+        for text in ["0", "7", "-7", "1234567890123456789012345678901234567890"] {
+            assert!(is_big_number(text), "{text:?}");
+        }
+        for text in [
+            "", "-", "+7", " 7", "7 ", "1.5", "1e3", "0x1f", "1\r\n+OK", "٣",
+        ] {
+            assert!(!is_big_number(text), "{text:?}");
+        }
     }
 }

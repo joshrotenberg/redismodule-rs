@@ -6597,6 +6597,85 @@ fn test_reply_types_fall_back_before_redis_7() -> Result<()> {
     Ok(())
 }
 
+/// Every aggregate reply sends as many elements as its header announces: a
+/// nested `NoReply` is null, and big number text that RESP3 would write
+/// without a length is checked first. Each reply is followed by another
+/// command on the same connection, which a misaligned stream would answer
+/// with the wrong reply or not at all.
+#[test]
+fn test_reply_elements_match_their_aggregate_length() -> Result<()> {
+    let mut con = TestConnection::new("reply_types");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    con.set_write_timeout(Some(Duration::from_secs(5)))?;
+    let server: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let native = server
+        .lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .context("INFO server reports redis_version")?
+        .trim()
+        .split('.')
+        .next()
+        .context("major version")?
+        .parse::<u32>()?
+        >= 7;
+    let bulk = |s: &str| Value::BulkString(s.as_bytes().to_vec());
+    let after = Value::SimpleString("after".to_owned());
+
+    for protocol in [2, 3, 2] {
+        redis::cmd("HELLO").arg(protocol).query::<Value>(&mut con)?;
+        let typed = protocol == 3 && native;
+
+        let nested: Value = redis::cmd("reply.nested_no_reply").query(&mut con)?;
+        let map = if typed {
+            Value::Map(vec![(bulk("key"), Value::Nil)])
+        } else {
+            Value::Array(vec![bulk("key"), Value::Nil])
+        };
+        assert_eq!(
+            nested,
+            Value::Array(vec![Value::Int(1), Value::Nil, map]),
+            "RESP{protocol}"
+        );
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+        for text in ["0", "-42", "1234567890123456789012345678901234567890"] {
+            let reply: Value = redis::cmd("reply.big_number_text")
+                .arg(text)
+                .query(&mut con)?;
+            let number = if typed {
+                Value::BigNumber(text.as_bytes().to_vec())
+            } else {
+                bulk(text)
+            };
+            assert_eq!(
+                reply,
+                Value::Array(vec![number, after.clone()]),
+                "RESP{protocol} {text:?}"
+            );
+        }
+        for text in ["1\r\n+OK", "", "+1", "1.5", "12a"] {
+            let error = redis::cmd("reply.big_number_text")
+                .arg(text)
+                .query::<Value>(&mut con)
+                .expect_err("invalid big number text was replied as a number");
+            assert_eq!(error.code(), Some("ERR"), "RESP{protocol} {text:?}");
+            assert_eq!(
+                error.detail(),
+                Some("big number reply is not a decimal integer"),
+                "RESP{protocol} {text:?}"
+            );
+            assert_eq!(
+                redis::cmd("ECHO")
+                    .arg("aligned")
+                    .query::<String>(&mut con)?,
+                "aligned",
+                "RESP{protocol} {text:?}"
+            );
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn test_key_type_names_each_built_in_type() -> Result<()> {
     let mut con = TestConnection::new("key_type");

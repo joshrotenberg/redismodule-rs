@@ -32,9 +32,11 @@ pub enum RedisValue {
     /// every client of Redis before 7.0.
     Bool(bool),
     Float(f64),
-    /// A RESP3 big number, given as its decimal digits. A RESP2 client gets
-    /// the digits as a bulk string, and so does every client of Redis before
-    /// 7.0.
+    /// A RESP3 big number, given as its decimal digits with an optional
+    /// leading `-`. A RESP2 client gets the digits as a bulk string, and so
+    /// does every client of Redis before 7.0. Other text, including an empty
+    /// string or a leading `+`, is replied as an error, since RESP3 writes big
+    /// numbers without a length.
     BigNumber(String),
     /// RESP3 verbatim text with its three-letter format, such as `txt` or
     /// `mkd`. A RESP2 client gets the text as a bulk string. Redis before 7.0
@@ -63,7 +65,11 @@ pub enum RedisValue {
     /// Duplicate keys are sent as they are.
     InsertionOrderedMap(Vec<(RedisValueKey, RedisValue)>),
     Null,
-    NoReply, // No reply at all (as opposed to a Null reply)
+    /// No reply at all, as opposed to a null reply, for a command that replies
+    /// another way, such as through a blocked client. As an array element or
+    /// a map value, which the aggregate's length already counts, it is
+    /// replied as null.
+    NoReply,
 }
 
 impl TryFrom<RedisValue> for String {

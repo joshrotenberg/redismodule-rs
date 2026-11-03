@@ -21,6 +21,31 @@ fn reply_big_number(_: &Context, _: Vec<RedisString>) -> RedisResult {
     ))
 }
 
+/// `reply.big_number_text text`: the text as a big number, then `after`. Text
+/// that is not a decimal integer makes the big number an error reply.
+fn reply_big_number_text(_: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let text = args.next_string()?;
+    args.done()?;
+    Ok(RedisValue::Array(vec![
+        RedisValue::BigNumber(text),
+        RedisValue::SimpleStringStatic("after"),
+    ]))
+}
+
+/// `reply.nested_no_reply`: `NoReply` as an array element and as a map value,
+/// where it is replied as null.
+fn reply_nested_no_reply(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::Array(vec![
+        RedisValue::Integer(1),
+        RedisValue::NoReply,
+        RedisValue::InsertionOrderedMap(vec![(
+            RedisValueKey::String("key".to_owned()),
+            RedisValue::NoReply,
+        )]),
+    ]))
+}
+
 /// `reply.verbatim format text`: the text with a three-letter format.
 fn reply_verbatim(_: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);
@@ -61,6 +86,8 @@ redis_module! {
     commands: [
         ["reply.bool", reply_bool, "readonly", 0, 0, 0, ""],
         ["reply.big_number", reply_big_number, "readonly", 0, 0, 0, ""],
+        ["reply.big_number_text", reply_big_number_text, "readonly", 0, 0, 0, ""],
+        ["reply.nested_no_reply", reply_nested_no_reply, "readonly", 0, 0, 0, ""],
         ["reply.verbatim", reply_verbatim, "readonly", 0, 0, 0, ""],
         ["reply.set", reply_set, "readonly", 0, 0, 0, ""],
         ["reply.user", reply_user, "readonly", 0, 0, 0, ""],
