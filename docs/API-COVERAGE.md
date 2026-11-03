@@ -793,7 +793,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `ReplicateVerbatim` | 6.0 | 6.0 | required | safe | `Context::replicate_verbatim` |  |  |
 | `GetContextFlags` | 6.0 | 6.0 | required, available | safe | `RuntimeContext::get_flags` |  |  |
 | `AvoidReplicaTraffic` | 6.0 | 6.0 | api! | safe | `RuntimeContext::avoid_replication_traffic` |  |  |
-| `Yield` | 7.0 | 7.0 | available | safe | `RuntimeContext::yield_now` |  |  |
+| `Yield` | 7.0 | 7.0 | available | safe | `EventContext::yield_now` |  |  |
 
 #### Pub/Sub
 

@@ -3646,6 +3646,39 @@ fn test_yield_lets_clients_get_busy_replies() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_yield_refuses_worker_triggered_callbacks() -> Result<()> {
+    let mut con = TestConnection::new("yield");
+    assert_eq!(redis::cmd("yield.once").query::<String>(&mut con)?, "OK");
+    redis::cmd("SET")
+        .arg(&["yield:trigger", "main"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("yield.event_result").query::<i64>(&mut con)?, 1);
+
+    assert_eq!(redis::cmd("yield.worker").query::<String>(&mut con)?, "OK");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let result = loop {
+        if let Some(result) =
+            redis::cmd("yield.worker_result").query::<Option<Vec<i64>>>(&mut con)?
+        {
+            break result;
+        }
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "worker did not finish"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    // Both a module command and a synchronous keyspace callback refuse to
+    // enter native Yield when RM_Call invokes them on the worker thread.
+    assert_eq!(result, [1, 2]);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "yield"])
+        .query::<()>(&mut con)?;
+    Ok(())
+}
+
 /// Sends `args` as a command on a new connection and reads the raw RESP reply,
 /// which must be `expected.len()` bytes.
 fn raw_reply(con: &TestConnection, args: &[&str], expected: &str) -> Result<String> {
@@ -6593,6 +6626,107 @@ fn test_reply_types_fall_back_before_redis_7() -> Result<()> {
         assert_eq!(user, expected, "RESP{protocol}");
 
         assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    Ok(())
+}
+
+/// Every aggregate reply sends as many elements as its header announces: a
+/// nested `NoReply` is null, and big number text that RESP3 would write
+/// without a length is checked first. Each reply is followed by another
+/// command on the same connection, which a misaligned stream would answer
+/// with the wrong reply or not at all.
+#[test]
+fn test_reply_elements_match_their_aggregate_length() -> Result<()> {
+    let mut con = TestConnection::new("reply_types");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    con.set_write_timeout(Some(Duration::from_secs(5)))?;
+    let server: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let native = server
+        .lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .context("INFO server reports redis_version")?
+        .trim()
+        .split('.')
+        .next()
+        .context("major version")?
+        .parse::<u32>()?
+        >= 7;
+    let bulk = |s: &str| Value::BulkString(s.as_bytes().to_vec());
+    let after = Value::SimpleString("after".to_owned());
+
+    for protocol in [2, 3, 2] {
+        redis::cmd("HELLO").arg(protocol).query::<Value>(&mut con)?;
+        let typed = protocol == 3 && native;
+
+        let nested: Value = redis::cmd("reply.nested_no_reply").query(&mut con)?;
+        let map = if typed {
+            Value::Map(vec![(bulk("key"), Value::Nil)])
+        } else {
+            Value::Array(vec![bulk("key"), Value::Nil])
+        };
+        assert_eq!(
+            nested,
+            Value::Array(vec![
+                Value::Int(1),
+                Value::Nil,
+                map.clone(),
+                map.clone(),
+                map
+            ]),
+            "RESP{protocol}"
+        );
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+        for text in ["0", "-42", "1234567890123456789012345678901234567890"] {
+            let reply: Value = redis::cmd("reply.big_number_text")
+                .arg(text)
+                .query(&mut con)?;
+            let number = if typed {
+                Value::BigNumber(text.as_bytes().to_vec())
+            } else {
+                bulk(text)
+            };
+            assert_eq!(
+                reply,
+                Value::Array(vec![number, after.clone()]),
+                "RESP{protocol} {text:?}"
+            );
+        }
+        let alone: Value = redis::cmd("reply.big_number_text")
+            .arg(&["-42", "ALONE"])
+            .query(&mut con)?;
+        let expected = if typed {
+            Value::BigNumber(b"-42".to_vec())
+        } else {
+            bulk("-42")
+        };
+        assert_eq!(alone, expected, "RESP{protocol}");
+        for text in ["1\r\n+OK", "1\r", "1\n+OK", "", "-", "+1", "1.5", "12a"] {
+            for alone in [false, true] {
+                let mut cmd = redis::cmd("reply.big_number_text");
+                cmd.arg(text);
+                if alone {
+                    cmd.arg("ALONE");
+                }
+                let error = cmd
+                    .query::<Value>(&mut con)
+                    .expect_err("invalid big number text was replied as a number");
+                let case = format!("RESP{protocol} {text:?} alone={alone}");
+                assert_eq!(error.code(), Some("ERR"), "{case}");
+                assert_eq!(
+                    error.detail(),
+                    Some("big number reply is not a decimal integer"),
+                    "{case}"
+                );
+                assert_eq!(
+                    redis::cmd("ECHO")
+                        .arg("aligned")
+                        .query::<String>(&mut con)?,
+                    "aligned",
+                    "{case}"
+                );
+            }
+        }
     }
     Ok(())
 }
