@@ -17,6 +17,7 @@ use std::ffi::CString;
 use std::os::raw::c_int;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::ptr::{self, NonNull};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::raw;
 
@@ -70,6 +71,21 @@ fn log_panic(callback: &str, message: &str) {
     }
 }
 
+/// Ids for command invocations, unique across threads. 0 means none.
+static NEXT_COMMAND: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    /// The command invocation that [`run_command`] is running on this thread,
+    /// or 0. A `Cell<u64>` has no destructor, which would keep glibc from
+    /// unloading the module.
+    static CURRENT_COMMAND: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The command invocation running on this thread, or 0 outside one.
+pub(crate) fn current_command() -> u64 {
+    CURRENT_COMMAND.get()
+}
+
 /// Runs a command callback. If it panics, replies to the client with
 /// `ERR command panicked: <message>` and returns `REDISMODULE_OK`.
 ///
@@ -81,7 +97,8 @@ fn log_panic(callback: &str, message: &str) {
 /// `ctx` must be the context Redis passed to the command callback.
 #[doc(hidden)]
 pub unsafe fn run_command(ctx: *mut raw::RedisModuleCtx, command: impl FnOnce() -> c_int) -> c_int {
-    catch_panic(command).unwrap_or_else(|message| {
+    let previous = CURRENT_COMMAND.replace(NEXT_COMMAND.fetch_add(1, Ordering::Relaxed));
+    let status = catch_panic(command).unwrap_or_else(|message| {
         let reply = to_c_string(&format!("ERR command panicked: {message}"));
         // SAFETY: ctx is the context Redis passed to this command.
         unsafe {
@@ -90,7 +107,9 @@ pub unsafe fn run_command(ctx: *mut raw::RedisModuleCtx, command: impl FnOnce() 
                 None => raw::Status::Err as c_int,
             }
         }
-    })
+    });
+    CURRENT_COMMAND.set(previous);
+    status
 }
 
 /// Runs a callback that has no client to reply to. If it panics, logs the
@@ -190,6 +209,29 @@ mod tests {
     #[test]
     fn the_deferred_panic_slot_needs_no_destructor() {
         assert!(!std::mem::needs_drop::<Cell<Option<NonNull<dyn Any + Send>>>>());
+        assert!(!std::mem::needs_drop::<Cell<u64>>());
+    }
+
+    #[test]
+    fn run_command_sets_and_restores_the_current_invocation() {
+        assert_eq!(current_command(), 0);
+        let (outer, inner) = unsafe {
+            let mut ids = (0, 0);
+            run_command(ptr::null_mut(), || {
+                ids.0 = current_command();
+                run_command(ptr::null_mut(), || {
+                    ids.1 = current_command();
+                    0
+                });
+                assert_eq!(current_command(), ids.0);
+                0
+            });
+            ids
+        };
+        assert_ne!(outer, 0);
+        assert_ne!(inner, 0);
+        assert_ne!(outer, inner);
+        assert_eq!(current_command(), 0);
     }
 
     #[test]

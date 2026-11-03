@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
 use std::os::raw::{c_int, c_longlong};
@@ -11,8 +12,22 @@ use crate::{Context, ContextFlags, RedisError, RedisResult};
 /// A successfully blocked client, unblocked when this handle is dropped.
 /// Send it to a worker and use [`crate::ThreadSafeContext::with_blocked_client`]
 /// to reply. A successful command must return [`crate::RedisValue::NoReply`].
+///
+/// The client gets exactly one reply. If the handle is dropped without one,
+/// for example when a worker returns early or panics, the client gets
+/// `ERR the blocked client was released without a reply` instead of waiting
+/// forever. A handle dropped by the command that blocked the client, on its
+/// thread and before it returns, leaves the reply to that command: an error it
+/// returns with `?`, or the error for a panic, is the only reply. The command
+/// must then not return `NoReply`, which would leave the client waiting.
+/// Commands registered without the SDK's command callbacks are not tracked
+/// this way, so a handle they drop always sends the error.
 pub struct BlockedClient {
     pub(crate) inner: NonNull<raw::RedisModuleBlockedClient>,
+    /// Whether a reply was sent through this client's thread-safe context.
+    pub(crate) replied: Cell<bool>,
+    /// The command invocation that blocked the client, or 0.
+    command: u64,
 }
 
 // SAFETY: Redis permits UnblockClient and blocked-client thread-safe contexts
@@ -21,17 +36,51 @@ unsafe impl Send for BlockedClient {}
 
 impl Drop for BlockedClient {
     fn drop(&mut self) {
+        let in_blocking_command =
+            self.command != 0 && crate::panic::current_command() == self.command;
+        if !self.replied.get() && !in_blocking_command {
+            reply_released_without_reply(self.inner);
+        }
         unsafe {
             crate::__required_api!(RedisModule_UnblockClient)(self.inner.as_ptr(), ptr::null_mut())
         };
     }
 }
 
+/// Replies with an error to a blocked client that is about to be unblocked
+/// with no reply. Redis would otherwise unblock it with nothing to send, and
+/// the client would wait forever.
+fn reply_released_without_reply(client: NonNull<raw::RedisModuleBlockedClient>) {
+    // SAFETY: Redis permits a blocked client's thread-safe context, and its
+    // reply functions without the Redis lock, on any thread until the client
+    // is unblocked; the context is freed before UnblockClient.
+    unsafe {
+        let (Some(get_context), Some(reply_with_error), Some(free_context)) = (
+            raw::RedisModule_GetThreadSafeContext,
+            raw::RedisModule_ReplyWithError,
+            raw::RedisModule_FreeThreadSafeContext,
+        ) else {
+            return;
+        };
+        let ctx = get_context(client.as_ptr());
+        if ctx.is_null() {
+            return;
+        }
+        reply_with_error(
+            ctx,
+            c"ERR the blocked client was released without a reply".as_ptr(),
+        );
+        free_context(ctx);
+    }
+}
+
 impl Context {
     /// Blocks a client so a worker can reply through a thread-safe context.
-    /// Dropping the returned handle unblocks the client. Once this succeeds,
-    /// return [`crate::RedisValue::NoReply`] and send the reply through that
-    /// thread-safe context; returning a normal reply would send a second one.
+    /// Dropping the returned handle unblocks the client, with an error reply
+    /// if none was sent (see [`BlockedClient`]). Once this succeeds, return
+    /// [`crate::RedisValue::NoReply`] and send the reply through that
+    /// thread-safe context; returning a normal reply after handing the handle
+    /// to a worker would send a second one.
     ///
     /// # Errors
     ///
@@ -57,7 +106,11 @@ impl Context {
         self.validate_blocking_context()?;
         let inner = NonNull::new(unsafe { block(self.ctx, None, None, None, 0) })
             .ok_or(RedisError::Str("ERR Redis did not block the client"))?;
-        Ok(BlockedClient { inner })
+        Ok(BlockedClient {
+            inner,
+            replied: Cell::new(false),
+            command: crate::panic::current_command(),
+        })
     }
 
     fn validate_blocking_context(&self) -> Result<(), RedisError> {

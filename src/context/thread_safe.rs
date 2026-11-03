@@ -201,16 +201,29 @@ impl Borrow<RuntimeContext> for ContextGuard<'_> {
 /// A ``ThreadSafeContext`` can either be bound to a blocked client, or detached from any client.
 pub struct DetachedFromClient;
 
+/// A context for work outside a Redis callback, either bound to a blocked
+/// client or detached from any client.
+///
+/// A context bound to a blocked client is `Send` but not `Sync`: its
+/// [`reply`](ThreadSafeContext::reply) writes without the Redis lock, which
+/// Redis allows from one thread at a time.
+///
+/// ```compile_fail,E0277
+/// fn shared<T: Sync>() {}
+/// shared::<redis_module::ThreadSafeContext<redis_module::BlockedClient>>();
+/// ```
 pub struct ThreadSafeContext<B: Send> {
     pub(crate) ctx: *mut raw::RedisModuleCtx,
 
-    /// This field is only used implicitly by `Drop`, so avoid a compiler warning
-    #[allow(dead_code)]
+    /// The blocked client this context replies to, which it unblocks when
+    /// dropped, or `DetachedFromClient`.
     blocked_client: B,
 }
 
 unsafe impl<B: Send> Send for ThreadSafeContext<B> {}
-unsafe impl<B: Send> Sync for ThreadSafeContext<B> {}
+// SAFETY: a detached context has no client to reply to; everything else it
+// does goes through `lock`, which takes the Redis lock.
+unsafe impl Sync for ThreadSafeContext<DetachedFromClient> {}
 
 impl ThreadSafeContext<DetachedFromClient> {
     #[must_use]
@@ -242,10 +255,24 @@ impl ThreadSafeContext<BlockedClient> {
         }
     }
 
-    /// The Redis modules API does not require locking for `Reply` functions,
-    /// so we pass through its functionality directly.
+    /// Replies to the blocked client. Redis does not require the lock for
+    /// this.
+    ///
+    /// The client gets one reply: after one is sent, later calls return
+    /// [`raw::Status::Err`] without writing anything.
+    /// [`RedisValue::NoReply`](crate::RedisValue::NoReply) sends nothing and
+    /// does not count as the reply. If the context is dropped without a
+    /// reply, the client gets `ERR the blocked client was released without a
+    /// reply`; see [`BlockedClient`].
     #[allow(clippy::must_use_candidate)]
     pub fn reply(&self, r: RedisResult) -> raw::Status {
+        if self.blocked_client.replied.get() {
+            return raw::Status::Err;
+        }
+        if matches!(r, Ok(crate::RedisValue::NoReply)) {
+            return raw::Status::Ok;
+        }
+        self.blocked_client.replied.set(true);
         // ReplyContext grants no RedisLockIndicator or general runtime access.
         ReplyContext { ctx: self.ctx }.reply(r)
     }

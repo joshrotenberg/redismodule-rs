@@ -1,8 +1,8 @@
 use redis_module::{
-    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, ThreadSafeContext,
+    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, Status, ThreadSafeContext,
     redis_module,
 };
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -147,6 +147,54 @@ fn block_dropped(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::NoReply)
 }
 
+/// `block.release_unreplied`: a thread drops the handle without replying, so
+/// the client gets the released-without-a-reply error.
+fn release_unreplied(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let blocked = ctx.block_client()?;
+    thread::spawn(move || drop(blocked));
+    Ok(RedisValue::NoReply)
+}
+
+/// `block.worker_panics`: a thread panics before replying; unwinding drops its
+/// context, and the client gets the released-without-a-reply error.
+fn worker_panics(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let blocked = ctx.block_client()?;
+    thread::spawn(move || {
+        let _reply = ThreadSafeContext::with_blocked_client(blocked);
+        panic!("worker failed before replying");
+    });
+    Ok(RedisValue::NoReply)
+}
+
+/// `block.fail_after_block`: the command fails after blocking, before handing
+/// the handle to a worker; its error is the only reply.
+fn fail_after_block(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let _blocked = ctx.block_client()?;
+    Err(RedisError::Str("ERR failed after blocking"))
+}
+
+static SECOND_REPLY_REFUSED: AtomicBool = AtomicBool::new(false);
+
+/// `block.reply_twice`: a thread replies twice; the second reply is refused.
+fn reply_twice(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let blocked = ctx.block_client()?;
+    thread::spawn(move || {
+        let reply = ThreadSafeContext::with_blocked_client(blocked);
+        reply.reply(Ok("first".into()));
+        let second = reply.reply(Ok("second".into()));
+        SECOND_REPLY_REFUSED.store(second == Status::Err, Ordering::SeqCst);
+    });
+    Ok(RedisValue::NoReply)
+}
+
+/// `block.second_reply_refused`: whether the last `block.reply_twice` worker's
+/// second reply was refused.
+fn second_reply_refused(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::Bool(
+        SECOND_REPLY_REFUSED.load(Ordering::SeqCst),
+    ))
+}
+
 /// `block.live_values`: how many reply values exist.
 fn block_live_values(_: &Context, _args: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Integer(LIVE_VALUES.load(Ordering::SeqCst)))
@@ -171,5 +219,10 @@ redis_module! {
         ["block.timeout", block_timeout, "", 0, 0, 0, ""],
         ["block.dropped", block_dropped, "", 0, 0, 0, ""],
         ["block.live_values", block_live_values, "", 0, 0, 0, ""],
+        ["block.release_unreplied", release_unreplied, "", 0, 0, 0, ""],
+        ["block.worker_panics", worker_panics, "", 0, 0, 0, ""],
+        ["block.fail_after_block", fail_after_block, "", 0, 0, 0, ""],
+        ["block.reply_twice", reply_twice, "", 0, 0, 0, ""],
+        ["block.second_reply_refused", second_reply_refused, "readonly", 0, 0, 0, ""],
     ],
 }

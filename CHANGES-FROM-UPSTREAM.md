@@ -11,6 +11,25 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Blocked-client replies
+
+`ThreadSafeContext<BlockedClient>::reply` writes to the blocked client's reply
+buffer without the Redis lock, which Redis allows from one thread at a time,
+but upstream declares every `ThreadSafeContext` `Sync`, so two threads sharing
+one through an `Arc` could write to that buffer at once. Only
+`ThreadSafeContext<DetachedFromClient>` is `Sync` now (#157).
+
+Dropping a plain `BlockedClient` called `UnblockClient` with no reply, so a
+worker that returned early or panicked left its client waiting with no
+timeout. The handle now replies `ERR the blocked client was released without a
+reply` first, as `ReplyingBlockedClient` already did, unless the command that
+blocked the client drops it on its own thread before returning: that command
+sends its own reply, such as the error it returns with `?`, so it stays the
+only one. The SDK's command callbacks record the running invocation for this.
+A second reply through the same context is refused, since it would reach the
+client as the reply to its next command. Upstream has no issue or pull request
+for these.
+
 ## Reply stream alignment
 
 `Context::reply` writes an array or map header with the element count and then

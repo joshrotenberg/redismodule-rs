@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A plain blocked client gets exactly one reply (#157). Dropping a
+  `BlockedClient`, or its `ThreadSafeContext`, without a reply sends
+  `ERR the blocked client was released without a reply` instead of leaving
+  the client waiting, except when the command that blocked it drops it before
+  returning, whose own reply then stands. A second
+  `ThreadSafeContext<BlockedClient>::reply` returns `Status::Err` without
+  writing. **Breaking:** `ThreadSafeContext<BlockedClient>` is no longer
+  `Sync`, since its `reply` writes without the Redis lock;
+  `ThreadSafeContext<DetachedFromClient>` stays `Sync`.
+
 - `Context::reply` no longer writes replies that shift the client's later
   replies (#153). A `RedisValue::NoReply` array element or map value, which
   wrote nothing although the aggregate counted it, is replied as null.
