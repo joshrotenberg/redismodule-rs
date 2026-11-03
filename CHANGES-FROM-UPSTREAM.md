@@ -23,6 +23,29 @@ them in `@admin` and `@dangerous`, and call `CONFIG` with the `C` flag, so a
 user allowed a wrapper by name still needs `CONFIG` permission. Upstream has no
 issue or pull request for this.
 
+## Event loop lifecycle
+
+Redis keeps watched descriptors and pending one-shots across `MODULE UNLOAD`
+and still calls their callbacks, which are in the module image; the SDK's
+skip-without-a-context check only helps while that image stays mapped (#159).
+`redis_module!` now binds the event loop to the module's lifecycle. A
+successful unload stops watching every descriptor still watched after
+`deinit`, and a failed load those it added; the descriptors stay open. Redis
+has no way to cancel a one-shot, so unload is refused, before `deinit`, while
+one is pending or a descriptor callback is running, and `add_one_shot` is
+refused while the module loads or unloads, ordered against a concurrent unload
+so one of them backs out. Modules with their own `RedisModule_OnLoad` keep the
+unguarded behavior.
+
+A panicking fd callback poisoned its mutex, and every later event skipped it
+silently as if it were reentrant, so a readable callback that panicked before
+draining its descriptor kept the main thread busy. Such a callback now stops
+being watched, with a logged warning. Replacing or removing a callback dropped
+it while the registry was locked, so a destructor that added or removed a
+descriptor deadlocked; callbacks are now dropped after the registry is
+unlocked, and the last reference after a callback ran is dropped inside the
+panic guard. Upstream has no event loop wrapper.
+
 ## Null-array replies
 
 `RedisValue::NullArray` uses `RedisModule_ReplyWithNullArray` at every SDK

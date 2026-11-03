@@ -5,8 +5,8 @@ use std::thread;
 
 use redis_module::event_loop::{self, EventLoopMask};
 use redis_module::{
-    Context, MODULE_CONTEXT, NextArg, RedisError, RedisResult, RedisString, RedisValue,
-    redis_module,
+    Context, EventContext, MODULE_CONTEXT, NextArg, RedisError, RedisResult, RedisString,
+    RedisValue, RegistrationContext, Status, redis_module,
 };
 
 /// `eventloop.set_later key value`: a thread schedules a one-shot, which sets
@@ -84,6 +84,191 @@ fn remove(_: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::SimpleStringStatic("OK"))
 }
 
+/// Creates a pipe, returning its read and write ends.
+fn new_pipe() -> Result<(RawFd, RawFd), RedisError> {
+    let mut fds: [RawFd; 2] = [0; 2];
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(RedisError::Str("ERR pipe failed"));
+    }
+    Ok((fds[0], fds[1]))
+}
+
+/// `eventloop.watch_fifo path`: creates a FIFO at `path` and watches its read
+/// end, which stays open and watched until the module unloads, when the SDK
+/// stops watching it. Returns the read end.
+fn watch_fifo(_: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let path = std::ffi::CString::new(args.next_arg()?.as_slice().to_vec())?;
+    args.done()?;
+    if unsafe { libc::mkfifo(path.as_ptr(), 0o600) } != 0 {
+        return Err(RedisError::Str("ERR mkfifo failed"));
+    }
+    let read_fd = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK) };
+    if read_fd < 0 {
+        return Err(RedisError::Str("ERR opening the FIFO failed"));
+    }
+    // SAFETY: this is a command, on the main thread, and the module owns the FIFO.
+    unsafe {
+        event_loop::add(read_fd, EventLoopMask::READABLE, |_, fd, _| {
+            let mut buffer = [0u8; 64];
+            libc::read(fd, buffer.as_mut_ptr().cast(), buffer.len());
+        })
+    }?;
+    Ok(RedisValue::Integer(read_fd.into()))
+}
+
+/// `eventloop.queue_noop`: queues a one-shot that does nothing, which keeps the
+/// module from unloading until it runs.
+fn queue_noop(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    event_loop::add_one_shot(|_| {})?;
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
+/// `eventloop.panic_watch`: watches a pipe with a byte to read whose callback
+/// panics without reading it. The SDK stops watching it. Returns the read end.
+fn panic_watch(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    let (read_fd, write_fd) = new_pipe()?;
+    // SAFETY: this is a command, on the main thread, and the module owns the pipe.
+    unsafe {
+        event_loop::add(read_fd, EventLoopMask::READABLE, |_, _, _| {
+            panic!("readable callback failed before reading");
+        })
+    }?;
+    unsafe {
+        libc::write(write_fd, b"x".as_ptr().cast(), 1);
+        libc::close(write_fd);
+    }
+    Ok(RedisValue::Integer(read_fd.into()))
+}
+
+/// Stops watching a descriptor when dropped.
+struct RemoveOnDrop(RawFd);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        // SAFETY: the callback holding this is dropped on the main thread.
+        let _ = unsafe { event_loop::remove(self.0, EventLoopMask::READABLE) };
+    }
+}
+
+/// `eventloop.replace_with_dropper`: watches pipe A with a callback that owns a
+/// value whose destructor stops watching pipe B, then replaces that callback,
+/// so the destructor runs inside `event_loop::add`; then does the same for
+/// pipes C and D through `event_loop::remove`. Returns how many of B and D
+/// those destructors removed.
+fn replace_with_dropper(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    let pipes = [new_pipe()?, new_pipe()?, new_pipe()?, new_pipe()?];
+    let [(a, _), (b, _), (c, _), (d, _)] = pipes;
+    let (remove_b, remove_d) = (RemoveOnDrop(b), RemoveOnDrop(d));
+    // SAFETY: this is a command, on the main thread, and the module owns the pipes.
+    unsafe {
+        event_loop::add(b, EventLoopMask::READABLE, |_, _, _| {})?;
+        event_loop::add(a, EventLoopMask::READABLE, move |_, _, _| {
+            let _ = &remove_b;
+        })?;
+        event_loop::add(a, EventLoopMask::READABLE, |_, _, _| {})?;
+        event_loop::add(d, EventLoopMask::READABLE, |_, _, _| {})?;
+        event_loop::add(c, EventLoopMask::READABLE, move |_, _, _| {
+            let _ = &remove_d;
+        })?;
+        event_loop::remove(c, EventLoopMask::READABLE)?;
+    }
+    let removed = [b, d]
+        .into_iter()
+        .filter(|fd| unsafe { event_loop::remove(*fd, EventLoopMask::READABLE) }.is_err())
+        .count();
+    unsafe {
+        event_loop::remove(a, EventLoopMask::READABLE)?;
+        for (read_fd, write_fd) in pipes {
+            libc::close(read_fd);
+            libc::close(write_fd);
+        }
+    }
+    Ok(RedisValue::Integer(i64::try_from(removed)?))
+}
+
+/// What a descriptor callback got when it called `MODULE UNLOAD` on its own
+/// module.
+static CALLBACK_UNLOAD: Mutex<String> = Mutex::new(String::new());
+
+/// `eventloop.unload_from_callback`: a descriptor callback asks Redis to
+/// unload this module while it runs, which is refused; `eventloop.callback_unload`
+/// reports the result.
+fn unload_from_callback(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    let (read_fd, write_fd) = new_pipe()?;
+    // SAFETY: this is a command, on the main thread, and the module owns the pipe.
+    unsafe {
+        event_loop::add(read_fd, EventLoopMask::READABLE, |ctx, fd, _| {
+            let reply = ctx.call("MODULE", &["UNLOAD", "event_loop"]);
+            *CALLBACK_UNLOAD
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = match reply {
+                Ok(_) => "OK".to_owned(),
+                Err(error) => error.to_string(),
+            };
+            let _ = event_loop::remove(fd, EventLoopMask::READABLE);
+            libc::close(fd);
+        })?;
+        libc::write(write_fd, b"x".as_ptr().cast(), 1);
+        libc::close(write_fd);
+    }
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
+/// `eventloop.callback_unload`: what `eventloop.unload_from_callback`'s
+/// callback got.
+fn callback_unload(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::SimpleString(
+        CALLBACK_UNLOAD
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone(),
+    ))
+}
+
+/// Logs what watching a descriptor and queueing a one-shot return during
+/// unload, where both are refused.
+fn deinit(ctx: &EventContext) -> Status {
+    let watched = new_pipe().and_then(|(read_fd, write_fd)| {
+        // SAFETY: deinit runs on the main thread, and the module owns the pipe.
+        let added = unsafe { event_loop::add(read_fd, EventLoopMask::READABLE, |_, _, _| {}) };
+        unsafe {
+            libc::close(read_fd);
+            libc::close(write_fd);
+        }
+        added
+    });
+    let queued = event_loop::add_one_shot(|_| {});
+    for result in [watched, queued] {
+        if let Err(error) = result {
+            ctx.log_notice(&format!("eventloop deinit: {error}"));
+        }
+    }
+    Status::Ok
+}
+
+/// What `add_one_shot` returned when `init` called it.
+static INIT_ONE_SHOT: Mutex<String> = Mutex::new(String::new());
+
+fn init(_: &RegistrationContext<'_>, _: &[RedisString]) -> Status {
+    let result = match event_loop::add_one_shot(|_| {}) {
+        Ok(()) => "OK".to_owned(),
+        Err(error) => error.to_string(),
+    };
+    *INIT_ONE_SHOT.lock().unwrap_or_else(PoisonError::into_inner) = result;
+    Status::Ok
+}
+
+/// `eventloop.init_one_shot`: what `add_one_shot` returned during `init`.
+fn init_one_shot(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::SimpleString(
+        INIT_ONE_SHOT
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone(),
+    ))
+}
+
 /// `eventloop.last_read`: what the last pipe callback read.
 fn last_read(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::StringBuffer(
@@ -101,10 +286,19 @@ redis_module! {
     version: 1,
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
+    init: init,
+    deinit: deinit,
     commands: [
         ["eventloop.set_later", set_later, "", 0, 0, 0, ""],
         ["eventloop.pipe", pipe, "", 0, 0, 0, ""],
         ["eventloop.last_read", last_read, "readonly", 0, 0, 0, ""],
         ["eventloop.remove", remove, "", 0, 0, 0, ""],
+        ["eventloop.watch_fifo", watch_fifo, "", 0, 0, 0, ""],
+        ["eventloop.queue_noop", queue_noop, "", 0, 0, 0, ""],
+        ["eventloop.panic_watch", panic_watch, "", 0, 0, 0, ""],
+        ["eventloop.replace_with_dropper", replace_with_dropper, "", 0, 0, 0, ""],
+        ["eventloop.init_one_shot", init_one_shot, "readonly", 0, 0, 0, ""],
+        ["eventloop.unload_from_callback", unload_from_callback, "", 0, 0, 0, ""],
+        ["eventloop.callback_unload", callback_unload, "readonly", 0, 0, 0, ""],
     ],
 }

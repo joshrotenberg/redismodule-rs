@@ -3607,6 +3607,139 @@ fn test_event_loop() -> Result<()> {
     Ok(())
 }
 
+/// Redis keeps pending one-shots and watched descriptors across MODULE UNLOAD
+/// and calls them in the module image. Unload waits for one-shots, which
+/// cannot be queued while the module loads, and stops watching descriptors.
+#[test]
+fn test_event_loop_unload_waits_for_one_shots_and_drops_watches() -> Result<()> {
+    let mut con = TestConnection::new("event_loop");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let unload = |con: &mut TestConnection| {
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "event_loop"])
+            .query::<()>(con)
+    };
+
+    let init: String = redis::cmd("eventloop.init_one_shot").query(&mut con)?;
+    assert!(
+        init.contains("cannot be added while the module loads or unloads"),
+        "{init}"
+    );
+
+    let fifo = std::env::temp_dir().join(format!("event_loop_{}.fifo", con.port()));
+    let _ = std::fs::remove_file(&fifo);
+    let fd: i64 = redis::cmd("eventloop.watch_fifo")
+        .arg(fifo.to_str().context("FIFO path")?)
+        .query(&mut con)?;
+
+    // The one-shot is still queued when the transaction's unload runs.
+    redis::cmd("MULTI").query::<()>(&mut con)?;
+    redis::cmd("eventloop.queue_noop").query::<Value>(&mut con)?;
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "event_loop"])
+        .query::<Value>(&mut con)?;
+    redis::cmd("EXEC")
+        .query::<Value>(&mut con)
+        .expect_err("unload accepted a pending one-shot");
+    assert!(
+        con.server_log()?
+            .contains("pending or running event loop callbacks")
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    // Once the one-shot has run, the module unloads with the FIFO watched.
+    utils::wait_until(Duration::from_secs(5), "the module to unload", || {
+        Ok(unload(&mut con).is_ok())
+    })?;
+    // deinit could neither watch a descriptor nor queue a one-shot.
+    let log = con.server_log()?;
+    assert!(
+        log.contains("eventloop deinit: ERR event loop descriptors cannot be watched"),
+        "{log}"
+    );
+    assert!(
+        log.contains("eventloop deinit: ERR event loop one-shots cannot be added"),
+        "{log}"
+    );
+    // A watch left behind would call into the unloaded module now. The open
+    // does not block: Redis still holds the read end the module left open.
+    std::io::Write::write_all(&mut open_fifo_writer(&fifo)?, b"after unload")?;
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    std::fs::remove_file(&fifo)?;
+
+    // A new load has no callback for the descriptor.
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("event_loop")?)
+        .query::<()>(&mut con)?;
+    let error = redis::cmd("eventloop.remove")
+        .arg(fd)
+        .query::<String>(&mut con)
+        .expect_err("the unloaded module's watch is still registered");
+    assert!(
+        error.to_string().contains("no event loop callback"),
+        "{error}"
+    );
+    Ok(())
+}
+
+/// A callback that panics stops being watched instead of being skipped on
+/// every event, a callback's destructor can remove other descriptors when
+/// `add` replaces it or `remove` drops it, and a running callback keeps its
+/// module loaded.
+#[test]
+fn test_event_loop_callback_panic_and_destructor() -> Result<()> {
+    let mut con = TestConnection::new("event_loop");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+
+    let fd: i64 = redis::cmd("eventloop.panic_watch").query(&mut con)?;
+    utils::wait_until(
+        Duration::from_secs(5),
+        "the panicking watch to stop",
+        || Ok(con.server_log()?.contains("is no longer watched")),
+    )?;
+    let error = redis::cmd("eventloop.remove")
+        .arg(fd)
+        .query::<String>(&mut con)
+        .expect_err("the panicking callback is still watched");
+    assert!(
+        error.to_string().contains("no event loop callback"),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    let removed: i64 = redis::cmd("eventloop.replace_with_dropper").query(&mut con)?;
+    assert_eq!(
+        removed, 2,
+        "the replaced and removed callbacks' destructors removed pipes B and D"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    redis::cmd("eventloop.unload_from_callback").query::<()>(&mut con)?;
+    utils::wait_until(
+        Duration::from_secs(5),
+        "the callback to try unloading",
+        || {
+            Ok(!redis::cmd("eventloop.callback_unload")
+                .query::<String>(&mut con)?
+                .is_empty())
+        },
+    )?;
+    let unload: String = redis::cmd("eventloop.callback_unload").query(&mut con)?;
+    assert!(unload.starts_with("ERR"), "{unload}");
+    assert!(
+        con.server_log()?
+            .contains("pending or running event loop callbacks")
+    );
+
+    // Nothing is left watched or pending.
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "event_loop"])
+        .query::<()>(&mut con)?;
+    Ok(())
+}
+
 #[test]
 fn test_yield_lets_clients_get_busy_replies() -> Result<()> {
     let mut con = TestConnection::new("yield");
@@ -6974,6 +7107,43 @@ fn test_reply_elements_match_their_aggregate_length() -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// Opens a FIFO for writing without blocking, which fails instead of hanging
+/// when no process holds its read end.
+fn open_fifo_writer(path: &std::path::Path) -> Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+        .with_context(|| format!("opening {} for writing", path.display()))
+}
+
+/// A load that fails after watching a descriptor stops watching it: Redis
+/// keeps a failed load's watched descriptors, so data arriving later would
+/// call into the closed image. On Linux, where the image is unmapped, a watch
+/// left behind crashes the server; macOS keeps the image mapped, so there the
+/// test passes either way.
+#[test]
+fn test_failed_load_stops_watching_descriptors() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let fifo = std::env::temp_dir().join(format!("failed_load_{}.fifo", con.port()));
+    let _ = std::fs::remove_file(&fifo);
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("failed_load")?)
+        .arg(format!("fifo:{}", fifo.to_str().context("FIFO path")?))
+        .arg("fail")
+        .query::<()>(&mut con)
+        .expect_err("the module refused its load");
+    // The failed load left the FIFO's read end open in Redis.
+    std::io::Write::write_all(&mut open_fifo_writer(&fifo)?, b"after the failed load")?;
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    std::fs::remove_file(&fifo)?;
     Ok(())
 }
 
