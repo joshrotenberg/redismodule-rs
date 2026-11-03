@@ -45,7 +45,7 @@ fn collection_lookup(_: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok(found.into())
 }
 
-/// `string.collection_order [keys ...]`: native string order as raw bytes.
+/// `string.collection_order [keys ...]`: RedisString byte order as raw bytes.
 fn collection_order(_: &Context, args: Vec<RedisString>) -> RedisResult {
     let keys: BTreeSet<_> = args.into_iter().skip(1).collect();
     Ok(keys

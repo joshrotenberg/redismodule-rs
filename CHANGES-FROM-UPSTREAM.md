@@ -30,11 +30,12 @@ pull request for either.
 ## Byte borrows for native string collections
 
 `RedisString` implements `Borrow<[u8]>` instead of `Borrow<str>` (#164).
-Its existing hash consumes a byte slice, and its native equality/order use
-Redis's binary string comparison. The borrowed bytes therefore share those
-collection semantics without a lossy invalid-UTF-8 placeholder. Text queries
-use `as_bytes()`; queries can also contain NUL or invalid UTF-8. The existing
-hash and comparison implementations are preserved.
+Its existing hash consumes a byte slice, and equality/order now compare those
+same byte slices. The borrowed bytes therefore share those collection
+semantics without a lossy invalid-UTF-8 placeholder. Text queries use
+`as_bytes()`; queries can also contain NUL or invalid UTF-8. Rust slice ordering
+also avoids truncating a large prefix-length difference through the native
+comparator's `int` result.
 
 ## Recoverable Redis allocation
 

@@ -525,7 +525,9 @@ impl PartialOrd for RedisString {
 
 impl Ord for RedisString {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        raw::string_compare(self.as_ptr(), other.as_ptr())
+        // Keep this identical to Borrow<[u8]>, including lengths whose
+        // difference would truncate in the native comparator's int result.
+        self.as_slice().cmp(other.as_slice())
     }
 }
 

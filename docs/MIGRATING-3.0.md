@@ -656,6 +656,8 @@ as long as the server runs.
 
 `RedisString` no longer implements `Borrow<str>` (#164). Its replacement,
 `Borrow<[u8]>`, matches the owned type's byte-slice hashing and binary order.
+Equality and ordering compare the byte slices directly, avoiding native
+comparison truncation for large prefix-length differences.
 Change collection lookups from `set.contains("NX")` to
 `set.contains("NX".as_bytes())`, and from `map.get(name)` to
 `map.get(name.as_bytes())` when `name` is a `str`. Byte queries preserve NUL

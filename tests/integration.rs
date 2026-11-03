@@ -4037,7 +4037,7 @@ fn test_string_collection_borrowed_bytes_lookup() -> Result<()> {
 }
 
 #[test]
-fn test_string_collection_native_byte_order() -> Result<()> {
+fn test_string_collection_byte_order() -> Result<()> {
     let mut con = TestConnection::new("string");
     let mut keys = string_collection_keys();
     let actual: Vec<Vec<u8>> = redis::cmd("string.collection_order")
