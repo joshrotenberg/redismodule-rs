@@ -5197,6 +5197,67 @@ fn test_configuration() -> Result<()> {
     Ok(())
 }
 
+/// The `module_config_get` and `module_config_set` wrappers need the same
+/// permissions as CONFIG: their admin flag keeps them from users without
+/// `@admin` and from scripts, and the call checks the user's CONFIG access.
+#[test]
+fn test_module_config_wrappers_require_config_permissions() -> Result<()> {
+    let mut con = TestConnection::new("configuration");
+
+    let value: Vec<String> = redis::cmd("configuration.config_get")
+        .arg("i64")
+        .query(&mut con)?;
+    assert_eq!(value, ["configuration.i64", "10"]);
+    redis::cmd("configuration.config_set")
+        .arg(&["i64", "20"])
+        .query::<()>(&mut con)?;
+    let value: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.i64"])
+        .query(&mut con)?;
+    assert_eq!(value[1], "20");
+
+    for (user, rules) in [
+        ("no-admin", &["+@all", "-@admin", "-@dangerous"][..]),
+        // Allowed the wrappers by name but not CONFIG.
+        (
+            "wrappers-only",
+            &["+configuration.config_get", "+configuration.config_set"],
+        ),
+    ] {
+        redis::cmd("ACL")
+            .arg(&["SETUSER", user, "on", "nopass", "~*"])
+            .arg(rules)
+            .query::<()>(&mut con)?;
+        let mut user_con = con.connection()?;
+        redis::cmd("AUTH")
+            .arg(&[user, "unused"])
+            .query::<()>(&mut user_con)?;
+        for (command, args) in [
+            ("configuration.config_get", &["i64"][..]),
+            ("configuration.config_set", &["i64", "30"]),
+        ] {
+            let error = redis::cmd(command)
+                .arg(args)
+                .query::<Value>(&mut user_con)
+                .expect_err("a user without CONFIG permission used a wrapper");
+            assert_eq!(error.code(), Some("NOPERM"), "{user} {command}: {error}");
+        }
+    }
+
+    let error = redis::cmd("EVAL")
+        .arg("return redis.call('configuration.config_set', 'i64', '40')")
+        .arg(0)
+        .query::<Value>(&mut con)
+        .expect_err("a script called the wrapper");
+    assert!(error.to_string().contains("script"), "{error}");
+
+    let value: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.i64"])
+        .query(&mut con)?;
+    assert_eq!(value[1], "20", "no refused call changed the value");
+    Ok(())
+}
+
 #[test]
 fn test_string_configuration_getter_releases_replies() -> Result<()> {
     let mut con = TestConnection::new("configuration_getter");

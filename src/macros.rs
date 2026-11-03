@@ -649,16 +649,20 @@ macro_rules! redis_module {
                             }
                         }
 
+                        // The wrappers are CONFIG GET and CONFIG SET by another
+                        // name, so they take CONFIG's flags: Redis puts admin
+                        // commands in @admin and @dangerous, and scripts cannot
+                        // call them.
                         $(
                             $crate::redis_command!(&context, $module_config_get_command, |ctx, args: Vec<RedisString>| {
                                 module_config_get(ctx, args, const { $module_name })
-                            }, "", 0, 0, 0, "");
+                            }, "admin deny-script allow-loading allow-stale", 0, 0, 0, "");
                         )?
 
                         $(
                             $crate::redis_command!(&context, $module_config_set_command, |ctx, args: Vec<RedisString>| {
                                 module_config_set(ctx, args, const { $module_name })
-                            }, "", 0, 0, 0, "");
+                            }, "admin deny-script allow-loading allow-stale", 0, 0, 0, "");
                         )?
                     )?
 

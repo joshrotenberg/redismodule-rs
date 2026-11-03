@@ -813,6 +813,13 @@ These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
 
+- **Configuration wrapper commands need `CONFIG` permissions.** The commands
+  named by `module_config_get` and `module_config_set` are now admin commands
+  that scripts cannot call, and they check the caller's permission for
+  `CONFIG GET` or `CONFIG SET`. Users who ran them without `@admin`, or with
+  only the wrapper allowed by name, now get `NOPERM`; grant `+config|get` and
+  `+config|set` (or `@admin`) to users who should change the module's
+  configurations.
 - **`event_handlers` subscribe after `init`.** `redis_module!` now subscribes
   the `event_handlers` keyspace handlers once `init` has succeeded, as the last
   step of the load, so events raised during `init` no longer reach them. Redis

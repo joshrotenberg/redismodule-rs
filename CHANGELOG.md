@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `module_config_get` and `module_config_set` commands that
+  `redis_module!` registers require the same permissions as `CONFIG` (#160).
+  They are registered with the flags `admin deny-script allow-loading
+  allow-stale`, so Redis places them in `@admin` and `@dangerous` and scripts
+  cannot call them, and they call `CONFIG` with ACL verification for the
+  calling user. Before, a user without `@admin`, or a script, could read and
+  change the module's configurations through them.
+
 - A failed load no longer leaves native event subscriptions into the unloaded
   module on Redis before 7.2.4, which keeps them itself (#158). The
   `redis_module!` load removes the server-event subscriptions it made,
