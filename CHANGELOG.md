@@ -78,6 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Breaking:** `RedisValue::NullArray` replies as a null array in RESP2
+  (`*-1`) and null in RESP3 (`_`), including inside aggregates (#180).
+  `Null` still sends a RESP2 null bulk string; `None` and `()` conversions
+  keep using it. Exhaustive matches on `RedisValue` need a `NullArray` arm.
+
 - The vendored header and committed bindings add
   `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`), matching upstream PR 491
   (#150). It marks standard RDB saves restored one key at a time. Existing

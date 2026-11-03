@@ -69,7 +69,15 @@ pub enum RedisValue {
     /// before 7.0. `Map` replies in hash order and `OrderedMap` sorted by key.
     /// Duplicate keys are sent as they are.
     InsertionOrderedMap(Vec<(RedisValueKey, RedisValue)>),
+    /// A null bulk string in RESP2 (`$-1`), or null in RESP3 (`_`).
     Null,
+    /// A null array in RESP2 (`*-1`), or null in RESP3 (`_`), through
+    /// `RedisModule_ReplyWithNullArray`. Supported at every SDK floor.
+    ///
+    /// Use this for stream-style replies that distinguish an absent array
+    /// from a null bulk string. It can also be an array element or map value.
+    /// [`Self::Null`] remains the default for `None` and `()` conversions.
+    NullArray,
     /// No reply at all, as opposed to a null reply, for a command that replies
     /// another way, such as through a blocked client. As an array element or
     /// a map value, which the aggregate's length already counts, it is
