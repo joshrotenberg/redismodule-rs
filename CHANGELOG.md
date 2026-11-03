@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A failed load no longer leaves native event subscriptions into the unloaded
+  module on Redis before 7.2.4, which keeps them itself (#158). The
+  `redis_module!` load removes the server-event subscriptions it made,
+  attribute and runtime handlers alike, and subscribes the `event_handlers`
+  keyspace handlers after `init` succeeds, since Redis has no API to remove
+  keyspace subscriptions before 8.2; their APIs are checked before `init`.
+  Events raised during `init` no longer reach those keyspace handlers.
+
 - `RedisAlloc` prefers non-aborting `TryAlloc` when the running server
   provides it (Redis 7.0+) (#163). Fallible Rust allocation and inherited
   allocate/copy/free growth can return errors instead of aborting Redis;

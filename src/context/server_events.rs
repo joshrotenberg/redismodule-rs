@@ -1,5 +1,6 @@
 use std::ffi::CStr;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{InfoContext, RedisResult, raw};
 use crate::{RedisError, context::EventContext};
@@ -197,7 +198,9 @@ impl EventContext {
     ///
     /// Load, command and event callbacks can subscribe; locked workers cannot.
     /// Handlers last until successful module unload. A rejected unload preserves
-    /// them; a failed load clears them. These lifecycle rules are wired by
+    /// them. A failed load clears them and removes the native subscriptions the
+    /// load made, which Redis before 7.2.4 would otherwise keep pointing into
+    /// the unloaded module. These lifecycle rules are wired by
     /// [`crate::redis_module!`]. There are no captured closures or unsubscribe
     /// tokens. Avoid modifying keys during events that prohibit it, such as flush
     /// callbacks, and follow Redis's restrictions for the chosen event.
@@ -509,6 +512,49 @@ extern "C" fn config_change_event_callback(
     );
 }
 
+/// The server events this module subscribed to natively during its current
+/// load, one bit per event id. A failed load releases exactly these: Redis
+/// before 7.2.4 keeps a failed load's subscriptions, and passing a null
+/// callback for an event the module never subscribed to adds a listener with
+/// that null callback instead of doing nothing.
+static NATIVE_SUBSCRIPTIONS: AtomicU64 = AtomicU64::new(0);
+
+/// Forgets earlier loads' native subscriptions; Redis removes them when a
+/// module unloads.
+#[doc(hidden)]
+pub fn __begin_load_subscriptions() {
+    NATIVE_SUBSCRIPTIONS.store(0, Ordering::Relaxed);
+}
+
+/// Removes the native server-event subscriptions made during a load that
+/// failed. Redis 7.2.4 and later remove them too, which this does not disturb.
+///
+/// # Safety
+///
+/// `ctx` must be the module's `RedisModule_OnLoad` context, after the load
+/// failed and before OnLoad returns.
+#[doc(hidden)]
+pub unsafe fn __release_failed_load_subscriptions(ctx: *mut raw::RedisModuleCtx) {
+    let subscribed = NATIVE_SUBSCRIPTIONS.swap(0, Ordering::Relaxed);
+    let Some(subscribe) = (unsafe { raw::RedisModule_SubscribeToServerEvent }) else {
+        return;
+    };
+    for id in (0..u64::BITS).filter(|id| subscribed & (1 << id) != 0) {
+        // SAFETY: ctx is the OnLoad context, and a null callback removes the
+        // subscription this load made for the event.
+        unsafe {
+            subscribe(
+                ctx,
+                raw::RedisModuleEvent {
+                    id: u64::from(id),
+                    dataver: 1,
+                },
+                None,
+            )
+        };
+    }
+}
+
 fn register_single_server_event_type(
     ctx: &EventContext,
     has_handlers: bool,
@@ -531,6 +577,12 @@ fn register_single_server_event_type(
         };
         if res != raw::REDISMODULE_OK as i32 {
             return Err(RedisError::Str("ERR server-event subscription failed"));
+        }
+        if let Some(bit) = u32::try_from(server_event)
+            .ok()
+            .and_then(|id| 1_u64.checked_shl(id))
+        {
+            NATIVE_SUBSCRIPTIONS.fetch_or(bit, Ordering::Relaxed);
         }
     }
 

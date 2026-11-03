@@ -779,6 +779,13 @@ These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
 
+- **`event_handlers` subscribe after `init`.** `redis_module!` now subscribes
+  the `event_handlers` keyspace handlers once `init` has succeeded, as the last
+  step of the load, so events raised during `init` no longer reach them. Redis
+  before 7.2.4 keeps a failed load's keyspace subscriptions and has no API to
+  remove them, which this avoids. Subscribe from `init` with
+  `subscribe_to_keyspace_events` if a handler must see those events, at the
+  cost of that subscription surviving a later load failure on those servers.
 - **Nested `NoReply` and big number text.** A `RedisValue::NoReply` array
   element or map value is now replied as null; it used to write nothing, and
   the client then read the next command's reply in its place. A top-level

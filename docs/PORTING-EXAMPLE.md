@@ -463,8 +463,10 @@ None of these is a regression; each follows from a 3.0 change that the
    where the module logged a warning and continued. The SDK also reads the
    event payload without the module's null checks, and its config adapter
    expects UTF-8 configuration names. None of this is reachable on a supported
-   server: a refused `init` fails the load and Redis drops the subscriptions,
-   Redis always passes the payload, and configuration names are ASCII.
+   server: a refused `init` fails the load and the SDK removes the server-event
+   subscriptions the load made (Redis 7.2.0 to 7.2.3 would keep them; 7.2.4
+   and later also drop them itself, #158), Redis always passes the payload, and
+   configuration names are ASCII.
 6. **A pre-7.2 server gets a logged load failure instead of SIGABRT.** On
    Redis 6.0.20, 2.1.3 exited with status 134 and 3.0 with status 1, as
    described above. CI has no pre-7.2 server: `tests/version_gate.rs`
