@@ -916,6 +916,15 @@ text.
 
 ## Testing a module with `cargo test`
 
+`RedisAlloc` now uses non-aborting `TryAlloc` when the running server provides
+it (Redis 7.0+). Fallible operations such as `Vec::try_reserve` can report
+allocation failure, including growth of an existing buffer, without aborting
+Redis. Older servers retain the aborting allocation path. Rust's infallible
+allocation operations can still abort on failure. This is native allocation
+failure handling, not enforcement of Redis `maxmemory` or a module budget.
+Growth retains the inherited allocate/copy/free behavior; no native
+`TryRealloc` or `TryCalloc` dependency is introduced.
+
 A module's unit tests that allocate abort under `RedisAlloc`, because there is
 no Redis allocator outside a server. The `system-allocator-fallback` feature
 lets them use the system allocator. Enable it for tests only, from the same

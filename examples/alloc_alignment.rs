@@ -1,8 +1,14 @@
-//! Boxes values with alignments above 16 bytes through `RedisAlloc` and
-//! reports how many of them landed on a misaligned address.
+//! Checks alignment through `RedisAlloc` and demonstrates recoverable reserve
+//! failures on servers with TryAlloc. Older servers skip the failure probe.
 
-use redis_module::{Context, RedisResult, RedisString, RedisValue, redis_module};
+use redis_module::{Context, RedisError, RedisResult, RedisString, RedisValue, raw, redis_module};
+use std::alloc::Layout;
 use std::hint::black_box;
+
+#[repr(align(16))]
+struct Align16 {
+    _bytes: [u8; 16],
+}
 
 #[repr(align(32))]
 struct Align32 {
@@ -69,6 +75,7 @@ fn check<T>(make: fn() -> T, count: usize) -> RedisValue {
 
 fn alloc_alignment_check(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Array(vec![
+        check(|| Align16 { _bytes: [0; 16] }, 1000),
         check(|| Align32 { _bytes: [0; 32] }, 1000),
         check(|| Align64 { _bytes: [0; 64] }, 1000),
         check(|| Align128 { _bytes: [0; 128] }, 1000),
@@ -77,6 +84,72 @@ fn alloc_alignment_check(_: &Context, _: Vec<RedisString>) -> RedisResult {
         check(|| Align4096 { _bytes: [0; 4096] }, 500),
         check(|| Align32768 { _bytes: [0; 32768] }, 200),
     ]))
+}
+
+fn fallible_available(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    // SAFETY: the module has initialized its native API bindings.
+    Ok(i64::from(unsafe { raw::RedisModule_TryAlloc }.is_some()).into())
+}
+
+fn fallible_reserve(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    // Never run an exhaustion probe through the older aborting allocator.
+    if unsafe { raw::RedisModule_TryAlloc }.is_none() {
+        return Err(RedisError::Str(
+            "ERR recoverable allocation requires TryAlloc",
+        ));
+    }
+    // Maximum valid Rust layouts reach the native allocator, which refuses
+    // these oversized requests. Vec's capacity arithmetic must not reject
+    // them before Redis has a chance to return null.
+    let huge = isize::MAX as usize;
+    let fresh_failed = Vec::<u8>::new().try_reserve_exact(huge).is_err();
+
+    let mut bytes = vec![1_u8, 2, 3, 4];
+    let capacity = bytes.capacity();
+    let additional = huge - bytes.len();
+    Layout::array::<u8>(bytes.len() + additional)?;
+    let grow_failed = bytes.try_reserve_exact(additional).is_err();
+    let bytes_preserved = bytes == [1, 2, 3, 4] && bytes.capacity() == capacity;
+    bytes.try_reserve_exact(128)?;
+    let grow_ok = bytes == [1, 2, 3, 4];
+
+    // u128 exercises the header/padding path on 64-bit platforms too.
+    let mut aligned = vec![1_u128, 2, 3, 4];
+    let capacity = aligned.capacity();
+    let additional = huge / std::mem::size_of::<u128>() - aligned.len();
+    Layout::array::<u128>(aligned.len() + additional)?;
+    let aligned_failed = aligned.try_reserve_exact(additional).is_err();
+    let aligned_preserved = aligned == [1, 2, 3, 4] && aligned.capacity() == capacity;
+    aligned.try_reserve_exact(128)?;
+    let aligned_grow_ok = aligned == [1, 2, 3, 4]
+        && (black_box(aligned.as_ptr()) as usize).is_multiple_of(std::mem::align_of::<u128>());
+
+    let layout = Layout::from_size_align(1024, 16)?;
+    // SAFETY: layout is nonzero; check allocation before reading and free it
+    // once with the original layout.
+    let zeroed = unsafe {
+        let block = std::alloc::alloc_zeroed(layout);
+        if block.is_null() {
+            false
+        } else {
+            let zeroed = std::slice::from_raw_parts(block, layout.size())
+                .iter()
+                .all(|byte| *byte == 0);
+            std::alloc::dealloc(block, layout);
+            zeroed
+        }
+    };
+    Ok(vec![
+        i64::from(fresh_failed),
+        i64::from(grow_failed),
+        i64::from(bytes_preserved),
+        i64::from(grow_ok),
+        i64::from(aligned_failed),
+        i64::from(aligned_preserved),
+        i64::from(aligned_grow_ok),
+        i64::from(zeroed),
+    ]
+    .into())
 }
 
 //////////////////////////////////////////////////////
@@ -88,5 +161,7 @@ redis_module! {
     data_types: [],
     commands: [
         ["alloc_alignment.check", alloc_alignment_check, "readonly", 0, 0, 0, ""],
+        ["alloc_alignment.available", fallible_available, "readonly", 0, 0, 0, ""],
+        ["alloc_alignment.try_reserve", fallible_reserve, "readonly", 0, 0, 0, ""],
     ],
 }
