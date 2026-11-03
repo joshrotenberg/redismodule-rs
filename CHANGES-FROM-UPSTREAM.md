@@ -27,6 +27,20 @@ every compatibility floor and for RESP2 clients too, so the result does not
 depend on the protocol. Upstream has the same behavior for both and no issue or
 pull request for either.
 
+## Recoverable Redis allocation
+
+`RedisAlloc` prefers `RedisModule_TryAlloc` when available (Redis 7.0+)
+(#163). A refused allocation returns null, so `Vec::try_reserve` can report
+failure. The existing inherited Rust growth and zeroing paths use this same
+choice; growth allocates, copies and frees rather than calling native
+`Realloc`. A failed growth preserves the old allocation. Older servers still
+use aborting `RedisModule_Alloc`. Infallible Rust allocations can still abort,
+and no `maxmemory` or application budget policy is added.
+
+The conservative native alignment is one word. Layouts above that use the
+existing header/padding path, so a Redis size prefix cannot misalign a
+16-byte Rust value. Native realloc/calloc optimizations are separate work.
+
 ## Main-thread yielding
 
 `yield_now` belongs to `EventContext`, which command contexts also expose

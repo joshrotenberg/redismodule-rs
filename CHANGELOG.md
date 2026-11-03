@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `RedisAlloc` prefers non-aborting `TryAlloc` when the running server
+  provides it (Redis 7.0+) (#163). Fallible Rust allocation and inherited
+  allocate/copy/free growth can return errors instead of aborting Redis;
+  older servers keep the aborting allocator. Alignment above one word uses
+  the existing header/padding path, including 16-byte layouts on Redis
+  builds with a size prefix.
+
 - `Context::reply` no longer writes replies that shift the client's later
   replies (#153). A `RedisValue::NoReply` array element or map value, which
   wrote nothing although the aggregate counted it, is replied as null.
