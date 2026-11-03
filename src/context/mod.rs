@@ -2007,6 +2007,8 @@ impl ReplyContext {
 
             Ok(RedisValue::Null) => raw::reply_with_null(self.ctx),
 
+            Ok(RedisValue::NullArray) => raw::reply_with_null_array(self.ctx),
+
             Ok(RedisValue::NoReply) => raw::Status::Ok,
 
             Ok(RedisValue::StaticError(s)) => self.reply_error_string(s),

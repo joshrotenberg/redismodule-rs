@@ -732,10 +732,13 @@ if let Some(value) = key.get_value::<MyType>(&MY_TYPE)? {
 
 ### Replies
 
-`RedisValue` has two new variants: `InsertionOrderedMap`, which replies with
-the entries in the order the module added them, and `Error(String)`, an error
-reply with an owned message, which can be an array element or a map value. An
-exhaustive `match` on `RedisValue` needs two more arms.
+`RedisValue` has three new variants: `InsertionOrderedMap`, which replies with
+the entries in the order the module added them; `Error(String)`, an error
+reply with an owned message, which can be an array element or a map value;
+and `NullArray`, a RESP2 null array (`*-1`) or RESP3 null (`_`) (#180).
+Use `NullArray` for stream-style absent arrays, including inside aggregates.
+`Null` remains a RESP2 null bulk string (`$-1`), and `None` and `()` still
+convert to `Null`. Exhaustive matches on `RedisValue` need three more arms.
 
 `RedisValueKey` has a new variant, `SimpleString`, for a map key or set element
 replied as a simple string. A map or set converted from a call reply holds it

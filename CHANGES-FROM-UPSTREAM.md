@@ -11,6 +11,15 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Null-array replies
+
+`RedisValue::NullArray` uses `RedisModule_ReplyWithNullArray` at every SDK
+floor (#180). RESP2 clients receive `*-1`, distinct from `Null`'s `$-1`;
+RESP3 clients receive `_` for both. The variant also works as an array
+element or map value, so stream-style replies can represent absent entry
+fields without raw reply calls. Existing `None` and `()` conversions keep
+using `Null`. Exhaustive matches on `RedisValue` need the new arm.
+
 ## Blocked-client replies
 
 `ThreadSafeContext<BlockedClient>::reply` writes to the blocked client's reply

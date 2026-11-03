@@ -426,6 +426,11 @@ pub(crate) fn reply_with_null(ctx: *mut RedisModuleCtx) -> Status {
     unsafe { crate::__required_api!(RedisModule_ReplyWithNull)(ctx).into() }
 }
 
+#[inline]
+pub(crate) fn reply_with_null_array(ctx: *mut RedisModuleCtx) -> Status {
+    unsafe { crate::__required_api!(RedisModule_ReplyWithNullArray)(ctx).into() }
+}
+
 /// Replies with a boolean. Redis before 7.0 has no `RedisModule_ReplyWithBool`;
 /// there the reply is the integer 1 or 0, which is what Redis 7 sends a RESP2
 /// client for a boolean.
