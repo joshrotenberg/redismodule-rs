@@ -136,6 +136,8 @@ unsafe impl RedisLockIndicator for EventContext {}
 /// register commands, or retain module callbacks through timers/subscriptions.
 /// A blocked client's [`ThreadSafeContext`](crate::ThreadSafeContext) retains its
 /// separate reply API, which does not require locking.
+/// It cannot yield: a native worker yield may release the Redis lock while
+/// references derived from this view are still live.
 ///
 /// ```compile_fail,E0599
 /// fn worker(ctx: &redis_module::WorkerContext) { ctx.reply(Ok("OK".into())); }

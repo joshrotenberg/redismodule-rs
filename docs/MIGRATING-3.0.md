@@ -446,6 +446,22 @@ runtime view ends, before a worker unlocks. Worker guards cannot create timers
 or subscribe to events. Configuration
 and command/type registration still require `RegistrationContext`.
 
+`yield_now` moved from `RuntimeContext` to `EventContext` (#156). Existing
+command and event calls keep their syntax. A helper that yields must take
+`&EventContext` or `&Context`, rather than the shared runtime view. Locked
+workers (`ContextGuard`, `DetachedContextGuard` and `WorkerContext`) cannot
+call it: Redis may release their lock inside a yield while borrowed keys or
+guarded state remain live. Finish using that data and drop the lock guard
+before allowing other threads to run; reacquire a fresh guard for later Redis
+access. No replacement worker-yield API is provided. Main-thread callbacks
+can still reenter while yielding, so release locks and borrowed key data that
+those callbacks could invalidate before calling it.
+
+A command or event callback can also run synchronously inside a worker's
+`call`. Its `yield_now` returns an error before entering Redis. Main-thread
+verification supports Linux and macOS; other platforms also return an error
+rather than assuming the callback runs on the Redis main thread.
+
 Both guard types borrow their owner and cannot outlive it. Their runtime views
 are neither `Send` nor `Sync` and cannot outlive the lock guard. A
 `ThreadSafeContext<BlockedClient>` retains its separate `reply` method, callable
