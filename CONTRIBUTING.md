@@ -27,8 +27,11 @@ the work list. Git history, pull requests and
   experiment, documented in its
   [README](https://github.com/joshrotenberg/redismodule-rs/blob/experiment/wasm-host/wasm/README.md)
   and [tracking notes](https://github.com/joshrotenberg/redismodule-rs/blob/experiment/wasm-host/wasm/TRACKING.md).
-  Wasm code does not go on `master`. Other branches belong to pull requests;
-  merged ones are historical, not pending work.
+  Wasm code does not go on `master`. `experiment/quickjs` is `master` plus the
+  `js/` crate, the native QuickJS projection experiment documented in its
+  [README](https://github.com/joshrotenberg/redismodule-rs/blob/experiment/quickjs/js/README.md);
+  QuickJS code does not go on `master` either. Other branches belong to pull
+  requests; merged ones are historical, not pending work.
 - Push only to this repository. Upstream,
   [RedisLabsModules/redismodule-rs](https://github.com/RedisLabsModules/redismodule-rs),
   is read-only for this work: no pushes, pull requests, issues or comments.
@@ -52,8 +55,8 @@ git remote add origin https://github.com/RedisLabsModules/redismodule-rs
 
 1. Fetch `fork`, read the current issue and open PR state, and inspect local
    changes; preserve unrelated files.
-2. Branch from the latest `fork/master`, or `fork/experiment/wasm-host` for wasm
-   work, as `codex/<topic>`.
+2. Branch from the latest `fork/master`, `fork/experiment/wasm-host` for wasm
+   work or `fork/experiment/quickjs` for QuickJS work, as `codex/<topic>`.
 3. Push an empty `chore: start <topic> [skip ci]` commit and open a draft PR
    whose body has Plan, Changes, Verification and Out of scope sections.
 4. Keep the change focused. Add tests to `tests/integration.rs` (helpers are in
@@ -105,6 +108,13 @@ With [clajent](https://github.com/joshrotenberg/clajent)'s `cj`,
 `cj run wasm-sync /abs/path --message "chore: sync wasm host with ..."` does
 the merge, the lockfiles and `check.sh` in a new worktree and prints the
 results; the `wasm/TRACKING.md` entry and the push stay manual.
+
+## Syncing the QuickJS experiment
+
+After each SDK merge, merge `master` into `experiment/quickjs` the same way,
+with `git merge --no-ff fork/master` and no rebase. Run `cj run gates` there:
+on a checkout with `js/Cargo.toml` it also builds and tests `redis-module-js`
+at both floors. Push, and confirm the push CI passes.
 
 ## Tracking upstream
 
