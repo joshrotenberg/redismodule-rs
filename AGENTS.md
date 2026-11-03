@@ -1,7 +1,8 @@
 # Agent instructions
 
 This repository is a fork of RedisLabsModules/redismodule-rs: SDK 3.0 on
-`master`, and the wasm host experiment on `experiment/wasm-host`.
+`master`, the wasm host experiment on `experiment/wasm-host`, and the native
+QuickJS projection experiment on `experiment/quickjs`.
 
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing anything. It holds
   the rules: the issue backlog as the work list, `codex/<topic>` branches, a
