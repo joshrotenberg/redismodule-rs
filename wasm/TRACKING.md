@@ -115,6 +115,13 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-03: merged SDK master `d6a031c` into the branch as `034697a`. It is
+  SDK PR 152: CONTRIBUTING.md, AGENTS.md and the fork-workflow skill describe
+  the new `experiment/quickjs` branch and its sync, and CI's push trigger adds
+  that branch (this branch keeps using `wasm.yml`). Only documentation and
+  the trigger changed, so `cj run wasm-sync --skip-check` merged without the
+  local `wasm/ci/check.sh` run; the experiment push CI validates this sync.
+
 - 2026-11-03: merged SDK master `f2d2da5` into the branch as `c2e11d5`.
   It brings SDK PRs 137 (runtime server-event subscriptions), 140 (unload
   guard for post-notification jobs), 142 (disabled-user ACL docs), 143 (API
