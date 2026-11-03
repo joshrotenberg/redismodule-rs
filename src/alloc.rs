@@ -63,14 +63,13 @@ mod fallback {
     }
 }
 
-/// The alignment `RedisModule_Alloc` guarantees, like `malloc`: 16 bytes on
-/// 64-bit targets and 8 bytes on 32-bit targets.
+/// A conservative alignment guaranteed by Redis allocations: one machine word.
 ///
-/// Redis returns the underlying allocator's pointer unchanged when it is built
-/// with jemalloc, tcmalloc, or a libc that provides `malloc_size` or
-/// `malloc_usable_size` (macOS, glibc, FreeBSD). Rounding the requested size
-/// up does not change where that pointer lands.
-const MALLOC_ALIGN: usize = 2 * size_of::<usize>();
+/// Builds without malloc-size introspection prefix the allocation with its
+/// size and return the pointer after that prefix. On 64-bit targets that can
+/// reduce malloc's 16-byte alignment to 8. Do not infer a stronger guarantee
+/// from the allocator or platform used to build the module.
+const MALLOC_ALIGN: usize = size_of::<usize>();
 
 /// Space reserved below an over-aligned block for the pointer Redis returned.
 const HEADER: usize = size_of::<*mut u8>();
@@ -168,9 +167,21 @@ pub fn __uses_system_allocator() -> bool {
 /// and deallocation tasks to the Redis server when available, otherwise
 /// it aborts the process.
 ///
-/// `RedisModule_Alloc` aligns memory like `malloc`. Layouts that need more
-/// alignment are over-allocated and aligned within the allocation, so every
-/// alignment that [`Layout`] accepts is honored.
+/// Uses `RedisModule_TryAlloc` when the running server provides it (Redis 7.0
+/// and later), so fallible Rust allocations such as `Vec::try_reserve` can
+/// return an error on exhaustion. Older servers retain `RedisModule_Alloc`,
+/// which aborts Redis on exhaustion. Rust's infallible allocation operations
+/// can still abort when allocation fails. This does not enforce `maxmemory`
+/// or an application memory budget.
+///
+/// Growth uses [`GlobalAlloc`]'s allocate/copy/free implementation, and zeroed
+/// allocation uses its allocate/zero implementation. Both use the same
+/// allocation choice, including on Redis 7.0 before native `TryRealloc` and
+/// `TryCalloc` are available. A failed growth preserves the original block.
+///
+/// Layouts that need more than word alignment are over-allocated and aligned
+/// within the allocation, including on Redis builds that prefix allocations
+/// with their sizes, so every alignment that [`Layout`] accepts is honored.
 ///
 /// # Outside a Redis server
 ///
@@ -208,10 +219,12 @@ unsafe impl GlobalAlloc for RedisAlloc {
             return unsafe { std::alloc::System.alloc(layout) };
         }
         // SAFETY: Redis sets the API pointers once, before the module runs.
-        match unsafe { raw::RedisModule_Alloc } {
+        match unsafe { raw::RedisModule_TryAlloc.or(raw::RedisModule_Alloc) } {
             // SAFETY: the caller's GlobalAlloc contract gives a non-zero
-            // size; RedisModule_Alloc is callable once set and has malloc
-            // semantics and alignment, as alloc_with requires.
+            // size. Both native allocation functions share RedisModule_Free
+            // and guarantee at least word alignment, as alloc_with requires.
+            // Choose the function, not its result: a refused TryAlloc must
+            // remain null rather than retry through the aborting allocator.
             Some(alloc) => unsafe { alloc_with(layout, |size| alloc(size).cast()) },
             None => allocation_free_panic(REDIS_ALLOCATOR_NOT_AVAILABLE_MESSAGE),
         }
@@ -242,9 +255,9 @@ unsafe impl GlobalAlloc for RedisAlloc {
 ///
 /// # Safety
 ///
-/// `ptr` must be a live allocation that `RedisModule_Alloc`, `RedisModule_Calloc`
-/// or `RedisModule_Realloc` returned. For a block from [`RedisAlloc`], use
-/// [`redis_alloc_size`].
+/// `ptr` must be a live allocation from Redis's allocation family (`Alloc`,
+/// `Calloc`, `Realloc`, or their `Try` counterparts). For a block from
+/// [`RedisAlloc`], use [`redis_alloc_size`].
 pub unsafe fn malloc_size(ptr: *mut std::ffi::c_void) -> Result<usize, crate::RedisError> {
     // SAFETY: Redis sets the API pointers once, before the module runs.
     let malloc_size = unsafe { crate::__available_api!(RedisModule_MallocSize) };
@@ -320,7 +333,7 @@ mod tests {
 
     #[test]
     fn layouts_up_to_malloc_align_are_not_over_aligned() {
-        for align in [1, 2, 4, 8, MALLOC_ALIGN] {
+        for align in (0..=MALLOC_ALIGN.trailing_zeros()).map(|shift| 1 << shift) {
             assert!(!is_over_aligned(Layout::from_size_align(1, align).unwrap()));
         }
         assert!(is_over_aligned(
@@ -363,6 +376,9 @@ mod tests {
     fn direct_path_rounds_the_size_and_returns_the_pointer_unchanged() {
         let backing = Layout::from_size_align(64, MALLOC_ALIGN).unwrap();
         for (size, align) in [(1, 1), (3, 2), (5, 4), (4, 8), (8, 8), (1, MALLOC_ALIGN)] {
+            if align > MALLOC_ALIGN {
+                continue;
+            }
             let layout = Layout::from_size_align(size, align).unwrap();
             unsafe {
                 let base = System.alloc(backing);
@@ -431,6 +447,14 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn sixteen_byte_layout_handles_an_eight_byte_native_prefix() {
+        // A malloc base aligned to 16 plus Redis's 8-byte size prefix is no
+        // longer aligned to 16. Keep this independent of MALLOC_ALIGN, so
+        // restoring the old double-word assumption makes the regression fail.
+        round_trip(Layout::from_size_align(16, 16).unwrap(), 8);
     }
 
     #[test]

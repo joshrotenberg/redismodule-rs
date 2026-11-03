@@ -137,8 +137,20 @@ absent, nested module-call clients are rejected through client lookup.
 
 After successful blocking, return `RedisValue::NoReply`; returning a normal
 result would produce a second reply. Worker errors must be sent through the
-blocked client's thread-safe context. Dropping the handle unblocks the client,
-but does not synthesize a reply. See [block.rs](../examples/block.rs).
+blocked client's thread-safe context. Dropping the handle without a reply
+sends `ERR the blocked client was released without a reply`; see "Blocked
+clients get one reply" under
+[Changes that compile unchanged](#changes-that-compile-unchanged), and
+[block.rs](../examples/block.rs).
+
+### Blocked-client contexts are not `Sync`
+
+`ThreadSafeContext<BlockedClient>` is `Send` but no longer `Sync`. Its `reply`
+writes to the client without the Redis lock, which Redis allows from one thread
+at a time, so sharing one context between threads, for example through an
+`Arc`, could corrupt the client's reply. Give the context to the one thread that
+replies, or send the result to that thread. `ThreadSafeContext<DetachedFromClient>`
+stays `Sync`.
 
 ### Open keys stay inside their opening context scope
 
@@ -654,6 +666,25 @@ as long as the server runs.
 
 ### `RedisString` and argument parsing
 
+`RedisString` no longer implements `Borrow<str>` (#164). Its replacement,
+`Borrow<[u8]>`, matches the owned type's byte-slice hashing and binary order.
+Equality and ordering compare the byte slices directly, avoiding native
+comparison truncation for large prefix-length differences.
+Change collection lookups from `set.contains("NX")` to
+`set.contains("NX".as_bytes())`, and from `map.get(name)` to
+`map.get(name.as_bytes())` when `name` is a `str`. Byte queries preserve NUL
+and invalid UTF-8, without substituting a text placeholder.
+Slices of `RedisString` no longer support text `join` implicitly; convert
+each value to validated or explicitly lossy text before joining it.
+
+```
+use redis_module::RedisString;
+use std::collections::HashMap;
+fn find<'a, T>(values: &'a HashMap<RedisString, T>, name: &str) -> Option<&'a T> {
+    values.get(name.as_bytes())
+}
+```
+
 - `try_as_str` borrows from the `RedisString`, so the `&str` cannot outlive it.
 - `NextArg::next_str` is removed: it returned a view into the string it had
   just dropped. Use `ArgCursor`, which borrows the arguments without copying,
@@ -701,10 +732,13 @@ if let Some(value) = key.get_value::<MyType>(&MY_TYPE)? {
 
 ### Replies
 
-`RedisValue` has two new variants: `InsertionOrderedMap`, which replies with
-the entries in the order the module added them, and `Error(String)`, an error
-reply with an owned message, which can be an array element or a map value. An
-exhaustive `match` on `RedisValue` needs two more arms.
+`RedisValue` has three new variants: `InsertionOrderedMap`, which replies with
+the entries in the order the module added them; `Error(String)`, an error
+reply with an owned message, which can be an array element or a map value;
+and `NullArray`, a RESP2 null array (`*-1`) or RESP3 null (`_`) (#180).
+Use `NullArray` for stream-style absent arrays, including inside aggregates.
+`Null` remains a RESP2 null bulk string (`$-1`), and `None` and `()` still
+convert to `Null`. Exhaustive matches on `RedisValue` need three more arms.
 
 `RedisValueKey` has a new variant, `SimpleString`, for a map key or set element
 replied as a simple string. A map or set converted from a call reply holds it
@@ -779,6 +813,45 @@ These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
 
+- **Event loop callbacks and the module lifecycle.** With `redis_module!`,
+  `event_loop::add_one_shot` returns an error while the module loads or
+  unloads, so schedule one-shots from commands, events or workers rather than
+  `init` or `deinit`, and `MODULE UNLOAD` is refused while a one-shot is still
+  pending or a descriptor callback is running. A worker can get that error
+  while an unload is attempted and then refused; retry it. `event_loop::add`
+  returns an error during and after unload, and a successful unload stops
+  watching every descriptor still watched after `deinit`, as a failed load
+  does for those it added; the descriptors stay open. A callback that panics
+  is no longer watched in any direction it handles; before, it stayed
+  registered and was skipped on every event. Modules with their own
+  `RedisModule_OnLoad` are unaffected and must still remove watches and let
+  one-shots run before unloading.
+
+- **`event_handlers` subscribe after `init`.** `redis_module!` now subscribes
+  the `event_handlers` keyspace handlers once `init` has succeeded, as the last
+  step of the load, so events raised during `init` no longer reach them. Redis
+  before 7.2.4 keeps a failed load's keyspace subscriptions and has no API to
+  remove them, which this avoids. Subscribe from `init` with
+  `subscribe_to_keyspace_events` if a handler must see those events, at the
+  cost of that subscription surviving a later load failure on those servers.
+  Redis calls keyspace subscribers in subscription order, so handlers a module
+  subscribes from `init` now run before its `event_handlers` entries.
+
+- **Blocked clients get one reply.** Dropping a `BlockedClient`, or the
+  `ThreadSafeContext` that holds it, without replying now sends
+  `ERR the blocked client was released without a reply`; before, the client
+  usually waited forever. A handle dropped by the command that blocked the
+  client, on the command's own thread and before it returns, is the
+  exception: the command's own reply, such as an error returned with `?` or
+  the error for a panic, stays the only one, and a `NoReply` it returns
+  becomes the error. A command that replied normally after blocking and let a
+  worker drop the handle without replying, to hold the client until the work
+  finished, now sends a second reply; return `NoReply` and reply through the
+  worker instead. A second `ThreadSafeContext<BlockedClient>::reply` returns
+  `Status::Err` and writes nothing; before, the client read it as the reply to
+  its next command. `RedisValue::NoReply` through that context sends nothing
+  and does not count, and `RedisError::WrongArity` is sent as
+  `ERR wrong number of arguments`.
 - **Nested `NoReply` and big number text.** A `RedisValue::NoReply` array
   element or map value is now replied as null; it used to write nothing, and
   the client then read the next command's reply in its place. A top-level
@@ -793,8 +866,9 @@ text.
 - **Detached context after unload.** `MODULE_CONTEXT` is released when
   `redis_module!` unloads the module or its load fails, and the next load stores
   a fresh one. Until then `MODULE_CONTEXT.lock()` panics instead of using the
-  freed module's context, and event loop callbacks that Redis still runs are
-  skipped; a worker that outlives a reload uses the new load's context. Stop
+  freed module's context, and event loop one-shots that Redis still runs are
+  skipped (with `redis_module!` none can be pending at unload, and watches are
+  removed); a worker that outlives a reload uses the new load's context. Stop
   workers, including ones that log, before unloading. Calling `logging::setup()`
   again, as on a reload, succeeds instead of returning an error.
 - **Unload with pending blocking calls.** `MODULE UNLOAD` now fails while an
@@ -893,6 +967,15 @@ text.
   instead of the `backtrace` crate's numbered frames.
 
 ## Testing a module with `cargo test`
+
+`RedisAlloc` now uses non-aborting `TryAlloc` when the running server provides
+it (Redis 7.0+). Fallible operations such as `Vec::try_reserve` can report
+allocation failure, including growth of an existing buffer, without aborting
+Redis. Older servers retain the aborting allocation path. Rust's infallible
+allocation operations can still abort on failure. This is native allocation
+failure handling, not enforcement of Redis `maxmemory` or a module budget.
+Growth retains the inherited allocate/copy/free behavior; no native
+`TryRealloc` or `TryCalloc` dependency is introduced.
 
 A module's unit tests that allocate abort under `RedisAlloc`, because there is
 no Redis allocator outside a server. The `system-allocator-fallback` feature

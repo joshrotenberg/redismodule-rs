@@ -11,6 +11,80 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Event loop lifecycle
+
+Redis keeps watched descriptors and pending one-shots across `MODULE UNLOAD`
+and still calls their callbacks, which are in the module image; the SDK's
+skip-without-a-context check only helps while that image stays mapped (#159).
+`redis_module!` now binds the event loop to the module's lifecycle. A
+successful unload stops watching every descriptor still watched after
+`deinit`, and a failed load those it added; the descriptors stay open. Redis
+has no way to cancel a one-shot, so unload is refused, before `deinit`, while
+one is pending or a descriptor callback is running, and `add_one_shot` is
+refused while the module loads or unloads, ordered against a concurrent unload
+so one of them backs out. Modules with their own `RedisModule_OnLoad` keep the
+unguarded behavior.
+
+A panicking fd callback poisoned its mutex, and every later event skipped it
+silently as if it were reentrant, so a readable callback that panicked before
+draining its descriptor kept the main thread busy. Such a callback now stops
+being watched, with a logged warning. Replacing or removing a callback dropped
+it while the registry was locked, so a destructor that added or removed a
+descriptor deadlocked; callbacks are now dropped after the registry is
+unlocked, and the last reference after a callback ran is dropped inside the
+panic guard. Upstream has no event loop wrapper.
+
+## Null-array replies
+
+`RedisValue::NullArray` uses `RedisModule_ReplyWithNullArray` at every SDK
+floor (#180). RESP2 clients receive `*-1`, distinct from `Null`'s `$-1`;
+RESP3 clients receive `_` for both. The variant also works as an array
+element or map value, so stream-style replies can represent absent entry
+fields without raw reply calls. Existing `None` and `()` conversions keep
+using `Null`. Exhaustive matches on `RedisValue` need the new arm.
+
+## Failed-load event subscriptions
+
+Redis 6.x, 7.0.x and 7.2.0 to 7.2.3 do not remove keyspace or server-event
+subscriptions when `RedisModule_OnLoad` fails, though they remove commands,
+shared and used APIs and, from 7.0, configurations; Redis PR 12809 (7.2.4)
+added the missing unsubscribe. A load that failed after subscribing left the
+subscriptions pointing at the freed module and at code in an image Redis had
+closed, so the next matching event could crash the server (#158).
+
+The `redis_module!` load now records the server events it subscribes to, for
+attribute and runtime handlers, and removes exactly those when the load fails.
+Only those: on every Redis version, passing a null callback for an event the
+module never subscribed to adds a listener with a null callback. Keyspace
+subscriptions cannot be removed before Redis 8.2, so the load checks their
+APIs before `init` and subscribes the `event_handlers` entries after it, as its
+last step. A module that subscribes from `init` and then fails the load still
+leaves that subscription behind on those servers. Upstream subscribes in the
+same order as before and has no issue or pull request for this.
+
+## Blocked-client replies
+
+`ThreadSafeContext<BlockedClient>::reply` writes to the blocked client's reply
+buffer without the Redis lock, which Redis allows from one thread at a time,
+but upstream declares every `ThreadSafeContext` `Sync`, so two threads sharing
+one through an `Arc` could write to that buffer at once. Only
+`ThreadSafeContext<DetachedFromClient>` is `Sync` now (#157).
+
+Dropping a plain `BlockedClient` called `UnblockClient` with no reply, so a
+worker that returned early or panicked left its client waiting with no
+timeout. The handle now replies `ERR the blocked client was released without a
+reply` first, as `ReplyingBlockedClient` already did, unless the command that
+blocked the client drops it on its own thread before returning: that command
+sends its own reply, such as the error it returns with `?`, so it stays the
+only one, and a `NoReply` it returns is replaced by the error. The SDK's
+command callbacks record the running invocation for this. A second reply
+through the same context is refused, since it would reach the client as the
+reply to its next command. A wrong-arity error through the context called
+`RedisModule_WrongArity`, which writes to the context's own client rather than
+the blocked one and reads its command; it is now sent as
+`ERR wrong number of arguments`. Upstream has no issue or pull request for
+these.
+
 ## Reply stream alignment
 
 `Context::reply` writes an array or map header with the element count and then
@@ -26,6 +100,30 @@ than an optional `-` followed by decimal digits is now replied as an error, at
 every compatibility floor and for RESP2 clients too, so the result does not
 depend on the protocol. Upstream has the same behavior for both and no issue or
 pull request for either.
+
+## Byte borrows for native string collections
+
+`RedisString` implements `Borrow<[u8]>` instead of `Borrow<str>` (#164).
+Its existing hash consumes a byte slice, and equality/order now compare those
+same byte slices. The borrowed bytes therefore share those collection
+semantics without a lossy invalid-UTF-8 placeholder. Text queries use
+`as_bytes()`; queries can also contain NUL or invalid UTF-8. Rust slice ordering
+also avoids truncating a large prefix-length difference through the native
+comparator's `int` result.
+
+## Recoverable Redis allocation
+
+`RedisAlloc` prefers `RedisModule_TryAlloc` when available (Redis 7.0+)
+(#163). A refused allocation returns null, so `Vec::try_reserve` can report
+failure. The existing inherited Rust growth and zeroing paths use this same
+choice; growth allocates, copies and frees rather than calling native
+`Realloc`. A failed growth preserves the old allocation. Older servers still
+use aborting `RedisModule_Alloc`. Infallible Rust allocations can still abort,
+and no `maxmemory` or application budget policy is added.
+
+The conservative native alignment is one word. Layouts above that use the
+existing header/padding path, so a Redis size prefix cannot misalign a
+16-byte Rust value. Native realloc/calloc optimizations are separate work.
 
 ## Main-thread yielding
 

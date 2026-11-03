@@ -531,7 +531,10 @@ pub(crate) fn redis_command(attr: TokenStream, item: TokenStream) -> TokenStream
                 // SAFETY: Redis supplies live callback argv/count with legal retention.
                 let args = unsafe { redis_module::decode_args(ctx, argv, argc) };
                 let response = #original_function_name(&context, args);
-                context.reply(response.map(|v| v.into())) as i32
+                let response = redis_module::__private::command_reply_after_release(
+                    response.map(|v| v.into()),
+                );
+                context.reply(response) as i32
             };
             // SAFETY: ctx is the context Redis passed to this command.
             unsafe { redis_module::panic::run_command(ctx, command) }

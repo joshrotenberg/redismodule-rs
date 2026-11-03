@@ -1,6 +1,5 @@
 extern crate libc;
 
-use std::cmp::Ordering;
 use std::ffi::{CString, c_ulonglong};
 use std::os::raw::{c_char, c_double, c_int, c_long, c_longlong, c_void};
 use std::ptr;
@@ -425,6 +424,11 @@ pub(crate) fn reply_with_set(ctx: *mut RedisModuleCtx, len: c_long) -> Status {
 #[inline]
 pub(crate) fn reply_with_null(ctx: *mut RedisModuleCtx) -> Status {
     unsafe { crate::__required_api!(RedisModule_ReplyWithNull)(ctx).into() }
+}
+
+#[inline]
+pub(crate) fn reply_with_null_array(ctx: *mut RedisModuleCtx) -> Status {
+    unsafe { crate::__required_api!(RedisModule_ReplyWithNullArray)(ctx).into() }
 }
 
 /// Replies with a boolean. Redis before 7.0 has no `RedisModule_ReplyWithBool`;
@@ -999,10 +1003,6 @@ pub unsafe fn save_float(rdb: *mut RedisModuleIO, val: f32) {
 /// callback.
 pub unsafe fn save_unsigned(rdb: *mut RedisModuleIO, val: u64) {
     unsafe { crate::__required_api!(RedisModule_SaveUnsigned)(rdb, val) };
-}
-
-pub(crate) fn string_compare(a: *mut RedisModuleString, b: *mut RedisModuleString) -> Ordering {
-    unsafe { crate::__required_api!(RedisModule_StringCompare)(a, b).cmp(&0) }
 }
 
 pub(crate) fn string_append_buffer(

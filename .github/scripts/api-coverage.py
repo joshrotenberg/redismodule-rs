@@ -35,6 +35,8 @@ ENTERPRISE = {
 # Classifications checked by hand where reachability from public items gives
 # the wrong answer: API -> (status, reason).
 OVERRIDES = {
+    "TryAlloc": ("internal", "`RedisAlloc` prefers the non-aborting native allocator when "
+                 "available; its inherited growth and zeroing also use that path."),
     "Alloc": ("internal", "`RedisAlloc`, the global allocator, and the allocator check in "
               "`redis_module!` use it; no wrapper allocates through it."),
     "Free": ("internal", "`RedisAlloc` frees with it, and wrappers free buffers Redis returned "

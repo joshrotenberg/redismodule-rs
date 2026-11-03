@@ -1,6 +1,59 @@
 use redis_module::{
     Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
 };
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+
+/// `string.collection_lookup kind query [keys ...]`: looks up a byte slice in
+/// native-string collections. Maps return the last matching input index or -1;
+/// sets return 1 or 0. Keys and the query may contain arbitrary bytes.
+fn collection_lookup(_: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let kind = args.next_string()?;
+    let query = args.next_arg()?;
+    let keys: Vec<_> = args.collect();
+    let found = match kind.as_str() {
+        "hash_set" => {
+            let keys: HashSet<_> = keys.into_iter().collect();
+            i64::from(keys.contains(query.as_slice()))
+        }
+        "ordered_set" => {
+            let keys: BTreeSet<_> = keys.into_iter().collect();
+            i64::from(keys.contains(query.as_slice()))
+        }
+        "hash_map" => {
+            let keys: HashMap<_, _> = keys
+                .into_iter()
+                .enumerate()
+                .map(|(index, key)| (key, index as i64))
+                .collect();
+            keys.get(query.as_slice()).copied().unwrap_or(-1)
+        }
+        "ordered_map" => {
+            let keys: BTreeMap<_, _> = keys
+                .into_iter()
+                .enumerate()
+                .map(|(index, key)| (key, index as i64))
+                .collect();
+            keys.get(query.as_slice()).copied().unwrap_or(-1)
+        }
+        _ => {
+            return Err(RedisError::Str(
+                "ERR expected hash_set, ordered_set, hash_map or ordered_map",
+            ));
+        }
+    };
+    Ok(found.into())
+}
+
+/// `string.collection_order [keys ...]`: RedisString byte order as raw bytes.
+fn collection_order(_: &Context, args: Vec<RedisString>) -> RedisResult {
+    let keys: BTreeSet<_> = args.into_iter().skip(1).collect();
+    Ok(keys
+        .into_iter()
+        .map(|key| RedisValue::StringBuffer(key.as_slice().to_vec()))
+        .collect::<Vec<_>>()
+        .into())
+}
 
 fn string_set(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     if args.len() < 3 {
@@ -83,5 +136,7 @@ redis_module! {
         ["string.unlink", string_del, "write", 1, 1, 1, ""],
         ["string.reply", string_reply, "", 0, 0, 0, ""],
         ["string.create_nul", string_create_nul, "", 0, 0, 0, ""],
+        ["string.collection_lookup", collection_lookup, "readonly", 0, 0, 0, ""],
+        ["string.collection_order", collection_order, "readonly", 0, 0, 0, ""],
     ],
 }

@@ -7,6 +7,30 @@ use redis_module::{
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+/// `reply.nulls bulk|array|empty|nested`: distinguish RESP2 null types and
+/// empty arrays, including null arrays inside arrays and each map form.
+fn reply_nulls(_: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let kind = args.next_string()?;
+    args.done()?;
+    let key = || RedisValueKey::String("key".to_owned());
+    match kind.as_str() {
+        "bulk" => Ok(RedisValue::Null),
+        "array" => Ok(RedisValue::NullArray),
+        "empty" => Ok(RedisValue::Array(vec![])),
+        "nested" => Ok(RedisValue::Array(vec![
+            RedisValue::Null,
+            RedisValue::NullArray,
+            RedisValue::Array(vec![]),
+            RedisValue::Map(HashMap::from([(key(), RedisValue::NullArray)])),
+            RedisValue::OrderedMap(BTreeMap::from([(key(), RedisValue::NullArray)])),
+            RedisValue::InsertionOrderedMap(vec![(key(), RedisValue::NullArray)]),
+            RedisValue::SimpleStringStatic("after"),
+        ])),
+        _ => Err(RedisError::Str("ERR expected bulk, array, empty or nested")),
+    }
+}
+
 /// `reply.bool`: true and false.
 fn reply_bool(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Array(vec![
@@ -94,6 +118,7 @@ redis_module! {
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
     commands: [
+        ["reply.nulls", reply_nulls, "readonly", 0, 0, 0, ""],
         ["reply.bool", reply_bool, "readonly", 0, 0, 0, ""],
         ["reply.big_number", reply_big_number, "readonly", 0, 0, 0, ""],
         ["reply.big_number_text", reply_big_number_text, "readonly", 0, 0, 0, ""],
