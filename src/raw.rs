@@ -1,6 +1,5 @@
 extern crate libc;
 
-use std::cmp::Ordering;
 use std::ffi::{CString, c_ulonglong};
 use std::os::raw::{c_char, c_double, c_int, c_long, c_longlong, c_void};
 use std::ptr;
@@ -999,10 +998,6 @@ pub unsafe fn save_float(rdb: *mut RedisModuleIO, val: f32) {
 /// callback.
 pub unsafe fn save_unsigned(rdb: *mut RedisModuleIO, val: u64) {
     unsafe { crate::__required_api!(RedisModule_SaveUnsigned)(rdb, val) };
-}
-
-pub(crate) fn string_compare(a: *mut RedisModuleString, b: *mut RedisModuleString) -> Ordering {
-    unsafe { crate::__required_api!(RedisModule_StringCompare)(a, b).cmp(&0) }
 }
 
 pub(crate) fn string_append_buffer(

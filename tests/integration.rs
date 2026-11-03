@@ -4044,6 +4044,68 @@ fn test_string_text_and_bytes() -> Result<()> {
     Ok(())
 }
 
+fn string_collection_keys() -> Vec<Vec<u8>> {
+    vec![
+        b"NX".to_vec(),
+        b"field".to_vec(),
+        vec![],
+        b"a\0b".to_vec(),
+        vec![0xff],
+        b"<Invalid UTF-8 data>".to_vec(),
+        b"a".to_vec(),
+        b"aa".to_vec(),
+        b"a\0".to_vec(),
+        b"a\xff".to_vec(),
+        "caf\u{e9}".as_bytes().to_vec(),
+        vec![0xc3],
+        b"-1".to_vec(),
+        b"10".to_vec(),
+        b"2".to_vec(),
+        vec![b'x'; 128],
+        (0..=255).collect(),
+        b"NX".to_vec(),
+    ]
+}
+
+#[test]
+fn test_string_collection_borrowed_bytes_lookup() -> Result<()> {
+    let mut con = TestConnection::new("string");
+    let keys = string_collection_keys();
+    let mut queries = keys.clone();
+    queries.extend([b"missing".to_vec(), vec![0xfe], b"field\0".to_vec()]);
+    for kind in ["hash_set", "ordered_set", "hash_map", "ordered_map"] {
+        for query in &queries {
+            let index = keys.iter().rposition(|key| key == query);
+            let expected = if kind.ends_with("set") {
+                i64::from(index.is_some())
+            } else {
+                index.map_or(-1, |index| index as i64)
+            };
+            let actual: i64 = redis::cmd("string.collection_lookup")
+                .arg(kind)
+                .arg(query)
+                .arg(&keys)
+                .query(&mut con)?;
+            assert_eq!(actual, expected, "{kind}, query {query:?}");
+        }
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_string_collection_byte_order() -> Result<()> {
+    let mut con = TestConnection::new("string");
+    let mut keys = string_collection_keys();
+    let actual: Vec<Vec<u8>> = redis::cmd("string.collection_order")
+        .arg(&keys)
+        .query(&mut con)?;
+    keys.sort();
+    keys.dedup();
+    assert_eq!(actual, keys);
+    Ok(())
+}
+
 #[test]
 fn test_scan() -> Result<()> {
     let mut con = TestConnection::new("scan_keys");

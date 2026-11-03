@@ -7,7 +7,11 @@ static GLOBAL_STATE: Mutex<Option<String>> = Mutex::new(None);
 fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> Status {
     let mut state = GLOBAL_STATE.lock().unwrap();
     let before = state.clone();
-    *state = Some(format!("Args passed: {}", args.join(", ")));
+    let text: Vec<_> = args
+        .iter()
+        .map(|arg| arg.try_as_str().unwrap_or("<Invalid UTF-8 data>"))
+        .collect();
+    *state = Some(format!("Args passed: {}", text.join(", ")));
     let after = state.clone();
     ctx.log(
         RedisLogLevel::Warning,

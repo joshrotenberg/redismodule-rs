@@ -139,6 +139,28 @@ pub unsafe fn decode_args(
 /// Creation, access, cloning and Drop require initialized Redis APIs and a legal
 /// native access phase. Native references are not atomic. This owner does not
 /// establish GIL, thread, context or alias/buffer-stability guarantees.
+///
+/// Equality, ordering and hashing use the string's bytes. Collection lookups
+/// borrow `[u8]`, including for UTF-8 keys:
+///
+/// ```
+/// use redis_module::RedisString;
+/// use std::collections::HashSet;
+/// fn has_nx(keys: &HashSet<RedisString>) -> bool {
+///     keys.contains("NX".as_bytes())
+/// }
+/// ```
+///
+/// `str` hashing differs from byte-slice hashing, so text is not a compatible
+/// borrowed lookup type:
+///
+/// ```compile_fail,E0277
+/// use redis_module::RedisString;
+/// use std::collections::HashSet;
+/// fn has_nx(keys: &HashSet<RedisString>) -> bool {
+///     keys.contains("NX")
+/// }
+/// ```
 #[derive(Debug)]
 pub struct RedisString {
     inner: NonNull<raw::RedisModuleString>,
@@ -503,7 +525,9 @@ impl PartialOrd for RedisString {
 
 impl Ord for RedisString {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        raw::string_compare(self.as_ptr(), other.as_ptr())
+        // Keep this identical to Borrow<[u8]>, including lengths whose
+        // difference would truncate in the native comparator's int result.
+        self.as_slice().cmp(other.as_slice())
     }
 }
 
@@ -519,10 +543,9 @@ impl Display for RedisString {
     }
 }
 
-impl Borrow<str> for RedisString {
-    fn borrow(&self) -> &str {
-        // RedisString might not be UTF-8 safe
-        self.try_as_str().unwrap_or("<Invalid UTF-8 data>")
+impl Borrow<[u8]> for RedisString {
+    fn borrow(&self) -> &[u8] {
+        self.as_slice()
     }
 }
 
