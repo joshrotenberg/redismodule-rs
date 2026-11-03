@@ -98,6 +98,8 @@ pub(crate) fn current_command() -> u64 {
 #[doc(hidden)]
 pub unsafe fn run_command(ctx: *mut raw::RedisModuleCtx, command: impl FnOnce() -> c_int) -> c_int {
     let previous = CURRENT_COMMAND.replace(NEXT_COMMAND.fetch_add(1, Ordering::Relaxed));
+    // A nested command records its own released blocked clients.
+    let released = crate::context::blocked::replace_released_unreplied(0);
     let status = catch_panic(command).unwrap_or_else(|message| {
         let reply = to_c_string(&format!("ERR command panicked: {message}"));
         // SAFETY: ctx is the context Redis passed to this command.
@@ -108,6 +110,7 @@ pub unsafe fn run_command(ctx: *mut raw::RedisModuleCtx, command: impl FnOnce() 
             }
         }
     });
+    crate::context::blocked::replace_released_unreplied(released);
     CURRENT_COMMAND.set(previous);
     status
 }
