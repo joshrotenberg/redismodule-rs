@@ -7,7 +7,8 @@ QuickJS projection experiment on `experiment/quickjs`.
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing anything. It holds
   the rules: the issue backlog as the work list, `codex/<topic>` branches, a
   draft PR first, validation, independent review, when a PR may be merged, the
-  wasm sync after each SDK merge, upstream tracking and pre-releases.
+  experiment-branch syncs after each SDK merge, upstream tracking and
+  pre-releases.
 - Upstream RedisLabsModules/redismodule-rs is read-only: no pushes, pull
   requests, issues or comments there.
 - `.cj/` holds project recipes for [clajent](https://github.com/joshrotenberg/clajent)'s

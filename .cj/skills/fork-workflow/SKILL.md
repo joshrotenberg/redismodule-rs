@@ -6,8 +6,8 @@ description: Working on this redismodule-rs fork with cj. Where its rules are, t
 # Working on this fork
 
 The rules are in `CONTRIBUTING.md`: the work list, branches and remotes, the
-draft-PR-first flow, validation, the wasm sync, upstream tracking and
-pre-releases. Read it before changing anything. This skill adds how the
+draft-PR-first flow, validation, the wasm and QuickJS experiment syncs,
+upstream tracking and pre-releases. Read it before changing anything. This skill adds how the
 project recipes fit in.
 
 ## Recipes
@@ -18,7 +18,8 @@ project recipes fit in.
 - `cj run wasm-sync /abs/path --message "chore: sync wasm host with ..."`
   merges master into `experiment/wasm-host` in a new worktree and runs
   `wasm/ci/check.sh`. Then write the `wasm/TRACKING.md` entry, push, and
-  confirm the push CI.
+  confirm the push CI. `experiment/quickjs` has no sync recipe: merge master
+  into it with `--no-ff` and run `cj run gates` there.
 - `cj run review-pr N` is a read-only provider review. It does not replace the
   independent review `CONTRIBUTING.md` asks for, and its findings need
   checking against the code. Its Codex turn fails until clajent issue 75 is
