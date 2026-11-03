@@ -5,7 +5,7 @@ use std::ptr;
 
 use super::ReplyContext;
 use crate::context::blocked::BlockedClient;
-use crate::{RedisResult, RuntimeContext, WorkerContext, raw};
+use crate::{RedisError, RedisResult, RuntimeContext, WorkerContext, raw};
 use std::marker::PhantomData;
 
 pub struct RedisGILGuardScope<'ctx, 'mutex, T, G: RedisLockIndicator> {
@@ -273,6 +273,12 @@ impl ThreadSafeContext<BlockedClient> {
             return raw::Status::Ok;
         }
         self.blocked_client.replied.set(true);
+        // RedisModule_WrongArity writes to the context's own client, which for
+        // this context is not the blocked client, and reads its command.
+        let r = match r {
+            Err(RedisError::WrongArity) => Err(RedisError::Str("ERR wrong number of arguments")),
+            r => r,
+        };
         // ReplyContext grants no RedisLockIndicator or general runtime access.
         ReplyContext { ctx: self.ctx }.reply(r)
     }
@@ -342,7 +348,17 @@ impl<B: Send> Drop for ThreadSafeContext<B> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RedisGILGuard, RedisLockIndicator};
+    use super::{
+        BlockedClient, DetachedFromClient, RedisGILGuard, RedisLockIndicator, ThreadSafeContext,
+    };
+
+    #[test]
+    fn blocked_client_contexts_move_between_threads() {
+        fn send<T: Send>() {}
+        fn shared<T: Send + Sync>() {}
+        send::<ThreadSafeContext<BlockedClient>>();
+        shared::<ThreadSafeContext<DetachedFromClient>>();
+    }
 
     struct Locked;
     // SAFETY: test only; no Redis data is touched.

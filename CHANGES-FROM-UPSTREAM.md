@@ -25,10 +25,14 @@ timeout. The handle now replies `ERR the blocked client was released without a
 reply` first, as `ReplyingBlockedClient` already did, unless the command that
 blocked the client drops it on its own thread before returning: that command
 sends its own reply, such as the error it returns with `?`, so it stays the
-only one. The SDK's command callbacks record the running invocation for this.
-A second reply through the same context is refused, since it would reach the
-client as the reply to its next command. Upstream has no issue or pull request
-for these.
+only one, and a `NoReply` it returns is replaced by the error. The SDK's
+command callbacks record the running invocation for this. A second reply
+through the same context is refused, since it would reach the client as the
+reply to its next command. A wrong-arity error through the context called
+`RedisModule_WrongArity`, which writes to the context's own client rather than
+the blocked one and reads its command; it is now sent as
+`ERR wrong number of arguments`. Upstream has no issue or pull request for
+these.
 
 ## Reply stream alignment
 

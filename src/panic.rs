@@ -232,6 +232,10 @@ mod tests {
         assert_ne!(inner, 0);
         assert_ne!(outer, inner);
         assert_eq!(current_command(), 0);
+        // Outside Redis the panic reply is skipped, and the invocation is
+        // still restored.
+        unsafe { run_command(ptr::null_mut(), || panic!("command failed")) };
+        assert_eq!(current_command(), 0);
     }
 
     #[test]

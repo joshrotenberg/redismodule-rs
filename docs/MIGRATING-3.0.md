@@ -794,13 +794,18 @@ text.
 - **Blocked clients get one reply.** Dropping a `BlockedClient`, or the
   `ThreadSafeContext` that holds it, without replying now sends
   `ERR the blocked client was released without a reply`; before, the client
-  waited forever. A handle dropped by the command that blocked the client, on
-  its thread and before it returns, is the exception: the command's own reply,
-  such as an error returned with `?` or the error for a panic, stays the only
-  one, so the command must not return `NoReply` after dropping it. A second
-  `ThreadSafeContext<BlockedClient>::reply` returns `Status::Err` and writes
-  nothing; before, the client read it as the reply to its next command.
-  `RedisValue::NoReply` through that context sends nothing and does not count.
+  usually waited forever. A handle dropped by the command that blocked the
+  client, on the command's own thread and before it returns, is the
+  exception: the command's own reply, such as an error returned with `?` or
+  the error for a panic, stays the only one, and a `NoReply` it returns
+  becomes the error. A command that replied normally after blocking and let a
+  worker drop the handle without replying, to hold the client until the work
+  finished, now sends a second reply; return `NoReply` and reply through the
+  worker instead. A second `ThreadSafeContext<BlockedClient>::reply` returns
+  `Status::Err` and writes nothing; before, the client read it as the reply to
+  its next command. `RedisValue::NoReply` through that context sends nothing
+  and does not count, and `RedisError::WrongArity` is sent as
+  `ERR wrong number of arguments`.
 - **Nested `NoReply` and big number text.** A `RedisValue::NoReply` array
   element or map value is now replied as null; it used to write nothing, and
   the client then read the next command's reply in its place. A top-level

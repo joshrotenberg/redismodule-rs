@@ -173,6 +173,29 @@ fn fail_after_block(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     Err(RedisError::Str("ERR failed after blocking"))
 }
 
+/// `block.release_then_no_reply`: the command drops the handle itself and
+/// returns `NoReply`; the SDK replies with the released-without-a-reply error.
+fn release_then_no_reply(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    drop(ctx.block_client()?);
+    Ok(RedisValue::NoReply)
+}
+
+/// `block.panic_after_block`: the command panics after blocking; the panic
+/// error is the only reply.
+fn panic_after_block(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let _blocked = ctx.block_client()?;
+    panic!("failed after blocking");
+}
+
+/// `block.worker_wrong_arity`: a worker replies with a wrong-arity error.
+fn worker_wrong_arity(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let blocked = ctx.block_client()?;
+    thread::spawn(move || {
+        ThreadSafeContext::with_blocked_client(blocked).reply(Err(RedisError::WrongArity));
+    });
+    Ok(RedisValue::NoReply)
+}
+
 static SECOND_REPLY_REFUSED: AtomicBool = AtomicBool::new(false);
 
 /// `block.reply_twice`: a thread replies twice; the second reply is refused.
@@ -224,5 +247,8 @@ redis_module! {
         ["block.fail_after_block", fail_after_block, "", 0, 0, 0, ""],
         ["block.reply_twice", reply_twice, "", 0, 0, 0, ""],
         ["block.second_reply_refused", second_reply_refused, "readonly", 0, 0, 0, ""],
+        ["block.release_then_no_reply", release_then_no_reply, "", 0, 0, 0, ""],
+        ["block.panic_after_block", panic_after_block, "", 0, 0, 0, ""],
+        ["block.worker_wrong_arity", worker_wrong_arity, "", 0, 0, 0, ""],
     ],
 }

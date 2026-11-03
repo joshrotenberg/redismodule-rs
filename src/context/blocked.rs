@@ -13,15 +13,16 @@ use crate::{Context, ContextFlags, RedisError, RedisResult};
 /// Send it to a worker and use [`crate::ThreadSafeContext::with_blocked_client`]
 /// to reply. A successful command must return [`crate::RedisValue::NoReply`].
 ///
-/// The client gets exactly one reply. If the handle is dropped without one,
-/// for example when a worker returns early or panics, the client gets
+/// The client gets one reply. If the handle is dropped without one, for
+/// example when a worker returns early or panics, the client gets
 /// `ERR the blocked client was released without a reply` instead of waiting
-/// forever. A handle dropped by the command that blocked the client, on its
-/// thread and before it returns, leaves the reply to that command: an error it
-/// returns with `?`, or the error for a panic, is the only reply. The command
-/// must then not return `NoReply`, which would leave the client waiting.
-/// Commands registered without the SDK's command callbacks are not tracked
-/// this way, so a handle they drop always sends the error.
+/// forever. A handle dropped by the command that blocked the client, on the
+/// command's own thread and before it returns, leaves the reply to that
+/// command: an error it returns with `?`, or the error for a panic, is the
+/// only reply, and if it returns `NoReply` the SDK replies with the
+/// released-without-a-reply error instead. Commands registered without the
+/// SDK's command callbacks are not tracked this way, so a handle they drop
+/// always sends the error, even when the command also replies.
 pub struct BlockedClient {
     pub(crate) inner: NonNull<raw::RedisModuleBlockedClient>,
     /// Whether a reply was sent through this client's thread-safe context.
@@ -34,12 +35,43 @@ pub struct BlockedClient {
 // on module workers. Ownership ensures one eventual UnblockClient call.
 unsafe impl Send for BlockedClient {}
 
+thread_local! {
+    /// The command invocation on this thread that released a blocked client it
+    /// created without a reply, or 0. A `Cell<u64>` has no destructor, which
+    /// would keep glibc from unloading the module.
+    static RELEASED_UNREPLIED: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The released-without-a-reply error, for the command callbacks.
+const RELEASED_WITHOUT_REPLY: &str = "ERR the blocked client was released without a reply";
+
+/// Replaces a command's `NoReply` with the released-without-a-reply error when
+/// the command released a blocked client it created without a reply, which
+/// would otherwise leave the client with no reply at all. Used by the SDK's
+/// command callbacks.
+#[doc(hidden)]
+pub fn __command_reply_after_release(response: RedisResult) -> RedisResult {
+    let current = crate::panic::current_command();
+    if current == 0 || RELEASED_UNREPLIED.get() != current {
+        return response;
+    }
+    RELEASED_UNREPLIED.set(0);
+    match response {
+        Ok(crate::RedisValue::NoReply) => Err(RedisError::Str(RELEASED_WITHOUT_REPLY)),
+        response => response,
+    }
+}
+
 impl Drop for BlockedClient {
     fn drop(&mut self) {
         let in_blocking_command =
             self.command != 0 && crate::panic::current_command() == self.command;
-        if !self.replied.get() && !in_blocking_command {
-            reply_released_without_reply(self.inner);
+        if !self.replied.get() {
+            if in_blocking_command {
+                RELEASED_UNREPLIED.set(self.command);
+            } else {
+                reply_released_without_reply(self.inner);
+            }
         }
         unsafe {
             crate::__required_api!(RedisModule_UnblockClient)(self.inner.as_ptr(), ptr::null_mut())

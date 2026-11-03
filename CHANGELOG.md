@@ -9,14 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A plain blocked client gets exactly one reply (#157). Dropping a
-  `BlockedClient`, or its `ThreadSafeContext`, without a reply sends
-  `ERR the blocked client was released without a reply` instead of leaving
-  the client waiting, except when the command that blocked it drops it before
-  returning, whose own reply then stands. A second
-  `ThreadSafeContext<BlockedClient>::reply` returns `Status::Err` without
-  writing. **Breaking:** `ThreadSafeContext<BlockedClient>` is no longer
-  `Sync`, since its `reply` writes without the Redis lock;
+- A plain blocked client released without a reply no longer waits forever
+  (#157). Dropping a `BlockedClient`, or its `ThreadSafeContext`, without a
+  reply sends `ERR the blocked client was released without a reply`. When the
+  command that blocked the client drops it on the command's own thread before
+  returning, the command's reply stands instead (an error it returns, or the
+  panic error), and a `NoReply` it returns becomes that error. Commands
+  registered without the SDK's command callbacks always get the error. A
+  second `ThreadSafeContext<BlockedClient>::reply` returns `Status::Err`
+  without writing, and a wrong-arity error through it is sent as
+  `ERR wrong number of arguments` instead of crashing Redis.
+
+- **Breaking:** `ThreadSafeContext<BlockedClient>` is no longer `Sync`, since
+  its `reply` writes without the Redis lock (#157).
   `ThreadSafeContext<DetachedFromClient>` stays `Sync`.
 
 - `RedisAlloc` prefers non-aborting `TryAlloc` when the running server

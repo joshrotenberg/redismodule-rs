@@ -3919,7 +3919,11 @@ fn test_blocked_client_gets_exactly_one_reply() -> Result<()> {
     con.set_read_timeout(Some(Duration::from_secs(5)))?;
     con.set_write_timeout(Some(Duration::from_secs(5)))?;
 
-    for command in ["block.release_unreplied", "block.worker_panics"] {
+    for command in [
+        "block.release_unreplied",
+        "block.worker_panics",
+        "block.release_then_no_reply",
+    ] {
         let error = redis::cmd(command)
             .query::<Value>(&mut con)
             .expect_err("a released blocked client got a value");
@@ -3932,16 +3936,27 @@ fn test_blocked_client_gets_exactly_one_reply() -> Result<()> {
         assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     }
 
-    let error = redis::cmd("block.fail_after_block")
-        .query::<Value>(&mut con)
-        .expect_err("a command that failed after blocking replied with a value");
-    assert_eq!(error.detail(), Some("failed after blocking"));
-    assert_eq!(
-        redis::cmd("ECHO")
-            .arg("aligned")
-            .query::<String>(&mut con)?,
-        "aligned"
-    );
+    for (command, detail) in [
+        ("block.fail_after_block", "failed after blocking"),
+        (
+            "block.panic_after_block",
+            "command panicked: failed after blocking",
+        ),
+        ("block.worker_wrong_arity", "wrong number of arguments"),
+    ] {
+        let error = redis::cmd(command)
+            .query::<Value>(&mut con)
+            .expect_err("the command replied with a value");
+        assert_eq!(error.code(), Some("ERR"), "{command}");
+        assert_eq!(error.detail(), Some(detail), "{command}");
+        assert_eq!(
+            redis::cmd("ECHO")
+                .arg("aligned")
+                .query::<String>(&mut con)?,
+            "aligned",
+            "{command}"
+        );
+    }
 
     let first: String = redis::cmd("block.reply_twice").query(&mut con)?;
     assert_eq!(first, "first");
