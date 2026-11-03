@@ -6778,6 +6778,7 @@ fn test_failed_load_leaves_no_event_subscriptions() -> Result<()> {
     })?;
     let counts: Vec<i64> = redis::cmd("failed_load.counts").query(&mut con)?;
     assert_eq!(counts[0], 1, "one SET after the successful load");
+    assert_eq!(counts[1], 2, "one FLUSHALL's start and end");
     assert_eq!(counts[3], 1, "one SWAPDB after the successful load");
     Ok(())
 }

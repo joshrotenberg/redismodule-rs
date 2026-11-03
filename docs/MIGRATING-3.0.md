@@ -786,6 +786,8 @@ text.
   remove them, which this avoids. Subscribe from `init` with
   `subscribe_to_keyspace_events` if a handler must see those events, at the
   cost of that subscription surviving a later load failure on those servers.
+  Redis calls keyspace subscribers in subscription order, so handlers a module
+  subscribes from `init` now run before its `event_handlers` entries.
 - **Nested `NoReply` and big number text.** A `RedisValue::NoReply` array
   element or map value is now replied as null; it used to write nothing, and
   the client then read the next command's reply in its place. A top-level

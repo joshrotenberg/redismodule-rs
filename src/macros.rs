@@ -671,10 +671,12 @@ macro_rules! redis_module {
                     // them after a failed load and cannot remove them, so only
                     // their API is checked before init.
                     $(
-                        $( let _ = &$event_handler; )*
-                        if let Err(error) = $crate::__private::keyspace_subscription_available() {
-                            context.log_warning(&error.to_string());
-                            return raw::Status::Err as c_int;
+                        let keyspace_handlers: &[&str] = &[$( stringify!($event_handler) ),*];
+                        if !keyspace_handlers.is_empty() {
+                            if let Err(error) = $crate::__private::keyspace_subscription_available() {
+                                context.log_warning(&error.to_string());
+                                return raw::Status::Err as c_int;
+                            }
                         }
                     )?
 
@@ -684,6 +686,9 @@ macro_rules! redis_module {
                         }
                     )*
 
+                    // RedisModule_SubscribeToKeyspaceEvents does not fail once its
+                    // APIs exist, which was checked before init. A failure here
+                    // would leave the earlier entries subscribed on those servers.
                     $(
                         $(
                             $crate::redis_event_handler!(&context, $(raw::NotifyEvent::$event_type |)+ raw::NotifyEvent::empty(), $event_handler);
