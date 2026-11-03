@@ -115,6 +115,18 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-03: merged SDK master `57b5cf1` into the branch as `afa0911`. It
+  brings SDK PRs 174 (#163: `RedisAlloc` uses `TryAlloc` where the server has
+  it), 175 (#164: `RedisString` borrows as `[u8]` instead of `str`), 173
+  (#157: blocked clients get one reply, and their thread-safe contexts are no
+  longer `Sync`) and 176 (#158: a failed load releases its native event
+  subscriptions, and `event_handlers` subscribe after `init`); no host
+  adaptation was needed. `cj run wasm-sync` fetched with `--locked` and ran the
+  full `wasm/ci/check.sh` on Rust 1.94.0 and Redis 8.10.2: 446 tests passed
+  (the host's 7 unit and 21 library tests, the SDK's 74 unit, 186 integration
+  and 137 doc tests, and 21 others). All four installed lockfiles remained
+  byte-identical to their snapshots.
+
 - 2026-11-03: merged SDK master `471a048` into the branch as `65f5fcf`. It
   brings SDK PRs 171 (#156: `yield_now` moves to `EventContext`, so locked
   workers can no longer yield) and 172 (#153: a nested `NoReply` is replied as
