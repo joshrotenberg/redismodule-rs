@@ -124,7 +124,7 @@ fn call_failure(errno: Option<i32>) -> Option<String> {
     Some(format!("ERR RedisModule_Call failed: {reason}"))
 }
 
-/// What Redis may do while a command yields with [`RuntimeContext::yield_now`].
+/// What Redis may do while a command yields with [`EventContext::yield_now`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum YieldMode {
     /// Process file events, such as replication traffic and client
@@ -1251,40 +1251,6 @@ impl RuntimeContext {
         self.ctx
     }
 
-    /// Lets Redis process events during a long-running command, through
-    /// `RedisModule_Yield`. Call it periodically; Redis limits how often a call
-    /// does any work, and does none until the command has run for
-    /// `busy-reply-threshold`. It also works on a thread-safe context while its
-    /// lock is held.
-    ///
-    /// Module callbacks can run inside this call, for example the module's own
-    /// `allow-busy` commands or a server event handler. Do not hold a lock that
-    /// such a callback takes across the call: the main thread would wait on
-    /// itself.
-    ///
-    /// `busy_reply` replaces the text after `-BUSY` in the replies that other
-    /// clients get under [`YieldMode::Clients`]. CR, LF and NUL in it are
-    /// replaced with spaces.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the running Redis does not provide
-    /// `RedisModule_Yield` (before 7.0).
-    pub fn yield_now(&self, mode: YieldMode, busy_reply: Option<&str>) -> Result<(), RedisError> {
-        let yield_api = unsafe { crate::__available_api!(RedisModule_Yield) };
-        let flags = match mode {
-            YieldMode::Events => raw::REDISMODULE_YIELD_FLAG_NONE,
-            YieldMode::Clients => raw::REDISMODULE_YIELD_FLAG_CLIENTS,
-        };
-        let busy_reply = busy_reply.map(Context::str_as_legal_resp_string);
-        let busy_reply = busy_reply
-            .as_ref()
-            .map_or(ptr::null(), |text| text.as_ptr());
-        // SAFETY: Redis reads busy_reply only during the call.
-        unsafe { yield_api(self.ctx, flags as c_int, busy_reply) };
-        Ok(())
-    }
-
     /// Fires a keyspace notification for `keyname`.
     ///
     /// Returns [`Status::Err`] if the event contains a NUL byte or Redis rejects
@@ -1667,6 +1633,94 @@ impl RuntimeContext {
 }
 
 impl EventContext {
+    /// Lets Redis process events on its main thread through `RedisModule_Yield`.
+    /// Command contexts also expose this method. A command or event invoked
+    /// synchronously by a worker's call returns an error instead of yielding.
+    /// Call it periodically during a
+    /// long-running command; Redis limits how often a call does any work, and
+    /// does none until the command has run for `busy-reply-threshold`.
+    ///
+    /// Module callbacks can run inside this call, for example the module's own
+    /// `allow-busy` commands or a server event handler. Do not hold a lock that
+    /// such a callback takes across the call: the main thread would wait on
+    /// itself. Callbacks may also change keys; do not keep borrowed key data
+    /// across a yield.
+    ///
+    /// Workers cannot yield through their locked view: Redis can release the
+    /// worker's lock inside a yield, invalidating live borrows. Instead, finish
+    /// using borrowed data and drop the guard before letting other threads run.
+    ///
+    /// `busy_reply` replaces the text after `-BUSY` in the replies that other
+    /// clients get under [`YieldMode::Clients`]. CR, LF and NUL in it are
+    /// replaced with spaces.
+    ///
+    /// ```
+    /// use redis_module::{Context, EventContext, RedisError, YieldMode};
+    /// fn command(ctx: &Context) -> Result<(), RedisError> {
+    ///     ctx.yield_now(YieldMode::Clients, None)
+    /// }
+    /// fn event(ctx: &EventContext) -> Result<(), RedisError> {
+    ///     ctx.yield_now(YieldMode::Events, None)
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// use redis_module::{ContextGuard, YieldMode};
+    /// fn worker(guard: &ContextGuard<'_>) {
+    ///     guard.yield_now(YieldMode::Events, None).unwrap();
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// use redis_module::{DetachedContextGuard, YieldMode};
+    /// fn worker(guard: &DetachedContextGuard<'_>) {
+    ///     guard.yield_now(YieldMode::Events, None).unwrap();
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// use redis_module::{WorkerContext, YieldMode};
+    /// fn worker(ctx: &WorkerContext) {
+    ///     ctx.yield_now(YieldMode::Events, None).unwrap();
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// use redis_module::{RuntimeContext, YieldMode};
+    /// fn shared(ctx: &RuntimeContext) {
+    ///     ctx.yield_now(YieldMode::Events, None).unwrap();
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the running Redis does not provide
+    /// `RedisModule_Yield` (before 7.0), or if the current thread cannot be
+    /// verified as the Redis main thread. Thread verification supports Linux
+    /// and macOS; other platforms refuse yielding.
+    pub fn yield_now(&self, mode: YieldMode, busy_reply: Option<&str>) -> Result<(), RedisError> {
+        // Native calls can invoke module callbacks synchronously on a worker;
+        // neither this view nor the thread which loaded the module proves it.
+        if !crate::configuration::lifecycle::is_main_thread() {
+            return Err(RedisError::Str(
+                "ERR yielding requires the Redis main thread",
+            ));
+        }
+        let yield_api = unsafe { crate::__available_api!(RedisModule_Yield) };
+        let flags = match mode {
+            YieldMode::Events => raw::REDISMODULE_YIELD_FLAG_NONE,
+            YieldMode::Clients => raw::REDISMODULE_YIELD_FLAG_CLIENTS,
+        };
+        let busy_reply = busy_reply.map(Context::str_as_legal_resp_string);
+        let busy_reply = busy_reply
+            .as_ref()
+            .map_or(ptr::null(), |text| text.as_ptr());
+        // SAFETY: the thread check above verifies main-thread use. Redis reads
+        // busy_reply only during the call.
+        unsafe { yield_api(self.ctx, flags as c_int, busy_reply) };
+        Ok(())
+    }
+
     /// Like [`RuntimeContext::call_ext`], allowing blocking commands such as BLPOP.
     ///
     /// Under `redis_module!` it fails while the module loads or unloads: Redis

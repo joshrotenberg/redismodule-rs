@@ -26,6 +26,19 @@ now replied as an error, at every compatibility floor and for RESP2 clients
 too, so the result does not depend on the protocol. Upstream has the same
 behavior for both and no issue or pull request for either.
 
+## Main-thread yielding
+
+`yield_now` belongs to `EventContext`, which command contexts also expose
+(#156). It is no longer available through `RuntimeContext`, `WorkerContext`,
+`ContextGuard` or `DetachedContextGuard`: native yielding may release a
+worker's Redis lock while its borrowed data remains live. Main-thread calls
+keep the same flags, busy-reply handling and missing-API error. Commands and
+events invoked synchronously by workers return an error before native yield.
+The existing OS main-thread query verifies Linux/macOS; other platforms fail
+closed rather than trusting a context's type or load-time caller.
+No replacement worker-yield API is added. Main-thread key aliasing remains
+separate work in #162.
+
 ## Native canonical slot names
 
 `RuntimeContext::canonical_key_for_slot` safely copies the running server's

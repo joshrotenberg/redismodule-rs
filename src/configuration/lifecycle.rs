@@ -48,7 +48,7 @@ unsafe impl Send for NativeContext {}
 // platforms. Do not identify it using OnLoad's caller: a locked worker can
 // itself invoke MODULE LOAD. Rust thread identity would also install TLS with
 // a destructor, which can prevent dlclose on Linux.
-fn is_main_thread() -> bool {
+pub(crate) fn is_main_thread() -> bool {
     #[cfg(target_os = "linux")]
     // SAFETY: These OS identity queries require no pointers or capabilities.
     unsafe {

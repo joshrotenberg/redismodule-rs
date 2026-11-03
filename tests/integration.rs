@@ -3646,6 +3646,39 @@ fn test_yield_lets_clients_get_busy_replies() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_yield_refuses_worker_triggered_callbacks() -> Result<()> {
+    let mut con = TestConnection::new("yield");
+    assert_eq!(redis::cmd("yield.once").query::<String>(&mut con)?, "OK");
+    redis::cmd("SET")
+        .arg(&["yield:trigger", "main"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("yield.event_result").query::<i64>(&mut con)?, 1);
+
+    assert_eq!(redis::cmd("yield.worker").query::<String>(&mut con)?, "OK");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let result = loop {
+        if let Some(result) =
+            redis::cmd("yield.worker_result").query::<Option<Vec<i64>>>(&mut con)?
+        {
+            break result;
+        }
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "worker did not finish"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    // Both a module command and a synchronous keyspace callback refuse to
+    // enter native Yield when RM_Call invokes them on the worker thread.
+    assert_eq!(result, [1, 2]);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "yield"])
+        .query::<()>(&mut con)?;
+    Ok(())
+}
+
 /// Sends `args` as a command on a new connection and reads the raw RESP reply,
 /// which must be `expected.len()` bytes.
 fn raw_reply(con: &TestConnection, args: &[&str], expected: &str) -> Result<String> {

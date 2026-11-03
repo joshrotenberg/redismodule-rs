@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decimal digits, which RESP3 writes without a length so CR or LF in it could
   inject replies, is replied as an error at every compatibility floor.
 
+- **Breaking:** `yield_now` is now an `EventContext` method, also available
+  through command contexts, instead of a shared `RuntimeContext` method
+  (#156). Locked workers cannot call it: Redis can release their lock during
+  a yield while references derived from the guard remain live. Commands and
+  events invoked synchronously by workers also refuse yielding. The native
+  call requires OS main-thread verification on Linux/macOS; other platforms
+  return an error.
+
 - `EventContext::add_post_notification_job` returns `Status::Err` instead of
   panicking when its native API is missing at a 7.2+ compatibility floor (#117).
   Older floors keep their existing API error and all refused paths drop captures.
