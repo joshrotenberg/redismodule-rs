@@ -446,6 +446,17 @@ runtime view ends, before a worker unlocks. Worker guards cannot create timers
 or subscribe to events. Configuration
 and command/type registration still require `RegistrationContext`.
 
+`yield_now` moved from `RuntimeContext` to `EventContext` (#156). Existing
+command and event calls keep their syntax. A helper that yields must take
+`&EventContext` or `&Context`, rather than the shared runtime view. Locked
+workers (`ContextGuard`, `DetachedContextGuard` and `WorkerContext`) cannot
+call it: Redis may release their lock inside a yield while borrowed keys or
+guarded state remain live. Finish using that data and drop the lock guard
+before allowing other threads to run; reacquire a fresh guard for later Redis
+access. No replacement worker-yield API is provided. Main-thread callbacks
+can still reenter while yielding, so release locks and borrowed key data that
+those callbacks could invalidate before calling it.
+
 Both guard types borrow their owner and cannot outlive it. Their runtime views
 are neither `Send` nor `Sync` and cannot outlive the lock guard. A
 `ThreadSafeContext<BlockedClient>` retains its separate `reply` method, callable
@@ -457,9 +468,12 @@ association. `MODULE_CONTEXT.lock()` retains that association and supports it.
 Custom native integrations must choose their unsafe constructor deliberately:
 `Context::new` (and its `from_module_context` alias) now requires both a live
 module association and a client reply target or key-position request.
-`EventContext::new` requires module ownership but no client; `RuntimeContext::new`
-requires only a live context and the Redis lock. All require valid invocation and
-lock scope throughout use. Replace `Context::dummy` with `RuntimeContext::dummy`
+`EventContext::new` requires module ownership but no client. Both it and
+`Context::new` require use on the Redis main thread; a locked worker must use
+`RuntimeContext::new`, even when its native context belongs to the module.
+`RuntimeContext::new` requires only a live context and the Redis lock. All
+require valid invocation and lock scope throughout use. Replace
+`Context::dummy` with `RuntimeContext::dummy`
 for APIs that explicitly accept a null context, such as logging.
 
 Prefer `ThreadSafeContext::try_lock` or `MODULE_CONTEXT.try_lock()` when a
