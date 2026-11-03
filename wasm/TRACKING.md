@@ -115,6 +115,16 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-03: merged SDK master `471a048` into the branch as `65f5fcf`. It
+  brings SDK PRs 171 (#156: `yield_now` moves to `EventContext`, so locked
+  workers can no longer yield) and 172 (#153: a nested `NoReply` is replied as
+  null and invalid `BigNumber` text as an error); the host uses neither, so no
+  adaptation was needed. `cj run wasm-sync` fetched with `--locked` and ran the
+  full `wasm/ci/check.sh` on Rust 1.94.0 and Redis 8.10.2: 435 tests passed
+  (the host's 7 unit and 21 library tests, the SDK's 71 unit, 181 integration
+  and 134 doc tests, and 21 others). All four installed lockfiles remained
+  byte-identical to their snapshots.
+
 - 2026-11-03: merged SDK master `d6a031c` into the branch as `034697a`. It is
   SDK PR 152: CONTRIBUTING.md, AGENTS.md and the fork-workflow skill describe
   the new `experiment/quickjs` branch and its sync, and CI's push trigger adds
