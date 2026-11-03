@@ -732,10 +732,13 @@ if let Some(value) = key.get_value::<MyType>(&MY_TYPE)? {
 
 ### Replies
 
-`RedisValue` has two new variants: `InsertionOrderedMap`, which replies with
-the entries in the order the module added them, and `Error(String)`, an error
-reply with an owned message, which can be an array element or a map value. An
-exhaustive `match` on `RedisValue` needs two more arms.
+`RedisValue` has three new variants: `InsertionOrderedMap`, which replies with
+the entries in the order the module added them; `Error(String)`, an error
+reply with an owned message, which can be an array element or a map value;
+and `NullArray`, a RESP2 null array (`*-1`) or RESP3 null (`_`) (#180).
+Use `NullArray` for stream-style absent arrays, including inside aggregates.
+`Null` remains a RESP2 null bulk string (`$-1`), and `None` and `()` still
+convert to `Null`. Exhaustive matches on `RedisValue` need three more arms.
 
 `RedisValueKey` has a new variant, `SimpleString`, for a map key or set element
 replied as a simple string. A map or set converted from a call reply holds it
@@ -810,6 +813,20 @@ These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
 
+- **Event loop callbacks and the module lifecycle.** With `redis_module!`,
+  `event_loop::add_one_shot` returns an error while the module loads or
+  unloads, so schedule one-shots from commands, events or workers rather than
+  `init` or `deinit`, and `MODULE UNLOAD` is refused while a one-shot is still
+  pending or a descriptor callback is running. A worker can get that error
+  while an unload is attempted and then refused; retry it. `event_loop::add`
+  returns an error during and after unload, and a successful unload stops
+  watching every descriptor still watched after `deinit`, as a failed load
+  does for those it added; the descriptors stay open. A callback that panics
+  is no longer watched in any direction it handles; before, it stayed
+  registered and was skipped on every event. Modules with their own
+  `RedisModule_OnLoad` are unaffected and must still remove watches and let
+  one-shots run before unloading.
+
 - **`event_handlers` subscribe after `init`.** `redis_module!` now subscribes
   the `event_handlers` keyspace handlers once `init` has succeeded, as the last
   step of the load, so events raised during `init` no longer reach them. Redis
@@ -849,8 +866,9 @@ text.
 - **Detached context after unload.** `MODULE_CONTEXT` is released when
   `redis_module!` unloads the module or its load fails, and the next load stores
   a fresh one. Until then `MODULE_CONTEXT.lock()` panics instead of using the
-  freed module's context, and event loop callbacks that Redis still runs are
-  skipped; a worker that outlives a reload uses the new load's context. Stop
+  freed module's context, and event loop one-shots that Redis still runs are
+  skipped (with `redis_module!` none can be pending at unload, and watches are
+  removed); a worker that outlives a reload uses the new load's context. Stop
   workers, including ones that log, before unloading. Calling `logging::setup()`
   again, as on a reload, succeeds instead of returning an error.
 - **Unload with pending blocking calls.** `MODULE UNLOAD` now fails while an

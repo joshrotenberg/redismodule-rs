@@ -11,6 +11,38 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Event loop lifecycle
+
+Redis keeps watched descriptors and pending one-shots across `MODULE UNLOAD`
+and still calls their callbacks, which are in the module image; the SDK's
+skip-without-a-context check only helps while that image stays mapped (#159).
+`redis_module!` now binds the event loop to the module's lifecycle. A
+successful unload stops watching every descriptor still watched after
+`deinit`, and a failed load those it added; the descriptors stay open. Redis
+has no way to cancel a one-shot, so unload is refused, before `deinit`, while
+one is pending or a descriptor callback is running, and `add_one_shot` is
+refused while the module loads or unloads, ordered against a concurrent unload
+so one of them backs out. Modules with their own `RedisModule_OnLoad` keep the
+unguarded behavior.
+
+A panicking fd callback poisoned its mutex, and every later event skipped it
+silently as if it were reentrant, so a readable callback that panicked before
+draining its descriptor kept the main thread busy. Such a callback now stops
+being watched, with a logged warning. Replacing or removing a callback dropped
+it while the registry was locked, so a destructor that added or removed a
+descriptor deadlocked; callbacks are now dropped after the registry is
+unlocked, and the last reference after a callback ran is dropped inside the
+panic guard. Upstream has no event loop wrapper.
+
+## Null-array replies
+
+`RedisValue::NullArray` uses `RedisModule_ReplyWithNullArray` at every SDK
+floor (#180). RESP2 clients receive `*-1`, distinct from `Null`'s `$-1`;
+RESP3 clients receive `_` for both. The variant also works as an array
+element or map value, so stream-style replies can represent absent entry
+fields without raw reply calls. Existing `None` and `()` conversions keep
+using `Null`. Exhaustive matches on `RedisValue` need the new arm.
+
 ## Failed-load event subscriptions
 
 Redis 6.x, 7.0.x and 7.2.0 to 7.2.3 do not remove keyspace or server-event

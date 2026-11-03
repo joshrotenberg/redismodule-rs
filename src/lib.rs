@@ -7,6 +7,7 @@ pub mod __private {
     pub use crate::configuration::lifecycle::{ConfigurationLoad, ConfigurationUnload};
     pub use crate::context::blocked::__command_reply_after_release as command_reply_after_release;
     pub use crate::context::call_reply::{BlockingCallLoadGuard, BlockingCallUnloadGuard};
+    pub use crate::context::event_loop::{EventLoopLoadGuard, EventLoopUnloadGuard};
     pub use crate::context::keyspace_events::keyspace_subscription_available;
     pub use crate::context::post_notification::{
         PostNotificationLoadGuard, PostNotificationUnloadGuard,

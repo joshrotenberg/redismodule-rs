@@ -508,6 +508,9 @@ macro_rules! redis_module {
                             return raw::Status::Err as c_int;
                         }
                     };
+                    // Redis would keep an event loop callback added by a load it
+                    // then rejects.
+                    let event_loop_load = $crate::__private::EventLoopLoadGuard::begin();
                     // SAFETY: Init succeeded and this scope is inside OnLoad.
                     let context = unsafe { $crate::RegistrationContext::from_context(&runtime_context) };
                     // A context left by an earlier load of a retained image
@@ -699,6 +702,7 @@ macro_rules! redis_module {
                     )?
 
                     timer_load.commit();
+                    event_loop_load.commit();
                     raw::Status::Ok as c_int
                 },
                 || raw::Status::Err as c_int,
@@ -757,6 +761,16 @@ macro_rules! redis_module {
                             return $crate::Status::Err as c_int;
                         }
                     };
+                    // Redis keeps pending one-shots, and watched descriptors,
+                    // across unload. The guard refuses new ones from deinit and
+                    // stops watching what is left when it commits.
+                    let event_loop_unload = match $crate::__private::EventLoopUnloadGuard::begin() {
+                        Ok(guard) => guard,
+                        Err(error) => {
+                            context.log_warning(&format!("{error}"));
+                            return $crate::Status::Err as c_int;
+                        }
+                    };
                     // Redis calls a pending unblock handler, and reads this
                     // module, when its call unblocks. The guard also refuses
                     // blocking calls from deinit.
@@ -778,6 +792,7 @@ macro_rules! redis_module {
                         return $crate::Status::Err as c_int;
                     }
                     timer_unload.commit();
+                    event_loop_unload.commit();
                     $crate::server_events::__clear_runtime_handlers();
                     // A later load of a retained image needs a fresh context.
                     // SAFETY: OnUnload holds the Redis lock and the module still exists.
