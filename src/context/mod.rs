@@ -592,10 +592,10 @@ impl Context {
     ///
     /// `ctx` must have a live association with this module and a client reply
     /// target (or a command key-position request). The Redis lock must be held
-    /// on the Redis main thread. This wrapper and references derived from it
-    /// must only be used while the native invocation is valid. Use [`EventContext::new`]
+    /// on this thread. This wrapper and references derived from it must only
+    /// be used while the native invocation is valid. Use [`EventContext::new`]
     /// for callbacks without a reply target and [`RuntimeContext::new`] for
-    /// locked worker contexts, including module-owned ones.
+    /// locked contexts without a module association.
     pub const unsafe fn new(ctx: *mut raw::RedisModuleCtx) -> Self {
         Self {
             event: unsafe { EventContext::new(ctx) },
@@ -1634,7 +1634,9 @@ impl RuntimeContext {
 
 impl EventContext {
     /// Lets Redis process events on its main thread through `RedisModule_Yield`.
-    /// Command contexts also expose this method. Call it periodically during a
+    /// Command contexts also expose this method. A command or event invoked
+    /// synchronously by a worker's call returns an error instead of yielding.
+    /// Call it periodically during a
     /// long-running command; Redis limits how often a call does any work, and
     /// does none until the command has run for `busy-reply-threshold`.
     ///
@@ -1693,8 +1695,17 @@ impl EventContext {
     /// # Errors
     ///
     /// Returns an error if the running Redis does not provide
-    /// `RedisModule_Yield` (before 7.0).
+    /// `RedisModule_Yield` (before 7.0), or if the current thread cannot be
+    /// verified as the Redis main thread. Thread verification supports Linux
+    /// and macOS; other platforms refuse yielding.
     pub fn yield_now(&self, mode: YieldMode, busy_reply: Option<&str>) -> Result<(), RedisError> {
+        // Native calls can invoke module callbacks synchronously on a worker;
+        // neither this view nor the thread which loaded the module proves it.
+        if !crate::configuration::lifecycle::is_main_thread() {
+            return Err(RedisError::Str(
+                "ERR yielding requires the Redis main thread",
+            ));
+        }
         let yield_api = unsafe { crate::__available_api!(RedisModule_Yield) };
         let flags = match mode {
             YieldMode::Events => raw::REDISMODULE_YIELD_FLAG_NONE,
@@ -1704,7 +1715,7 @@ impl EventContext {
         let busy_reply = busy_reply
             .as_ref()
             .map_or(ptr::null(), |text| text.as_ptr());
-        // SAFETY: this view runs on the Redis main thread. Redis reads
+        // SAFETY: the thread check above verifies main-thread use. Redis reads
         // busy_reply only during the call.
         unsafe { yield_api(self.ctx, flags as c_int, busy_reply) };
         Ok(())

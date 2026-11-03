@@ -457,6 +457,11 @@ access. No replacement worker-yield API is provided. Main-thread callbacks
 can still reenter while yielding, so release locks and borrowed key data that
 those callbacks could invalidate before calling it.
 
+A command or event callback can also run synchronously inside a worker's
+`call`. Its `yield_now` returns an error before entering Redis. Main-thread
+verification supports Linux and macOS; other platforms also return an error
+rather than assuming the callback runs on the Redis main thread.
+
 Both guard types borrow their owner and cannot outlive it. Their runtime views
 are neither `Send` nor `Sync` and cannot outlive the lock guard. A
 `ThreadSafeContext<BlockedClient>` retains its separate `reply` method, callable
@@ -468,12 +473,9 @@ association. `MODULE_CONTEXT.lock()` retains that association and supports it.
 Custom native integrations must choose their unsafe constructor deliberately:
 `Context::new` (and its `from_module_context` alias) now requires both a live
 module association and a client reply target or key-position request.
-`EventContext::new` requires module ownership but no client. Both it and
-`Context::new` require use on the Redis main thread; a locked worker must use
-`RuntimeContext::new`, even when its native context belongs to the module.
-`RuntimeContext::new` requires only a live context and the Redis lock. All
-require valid invocation and lock scope throughout use. Replace
-`Context::dummy` with `RuntimeContext::dummy`
+`EventContext::new` requires module ownership but no client; `RuntimeContext::new`
+requires only a live context and the Redis lock. All require valid invocation and
+lock scope throughout use. Replace `Context::dummy` with `RuntimeContext::dummy`
 for APIs that explicitly accept a null context, such as logging.
 
 Prefer `ThreadSafeContext::try_lock` or `MODULE_CONTEXT.try_lock()` when a

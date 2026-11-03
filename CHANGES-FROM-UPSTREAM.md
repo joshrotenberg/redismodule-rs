@@ -17,8 +17,10 @@ For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 (#156). It is no longer available through `RuntimeContext`, `WorkerContext`,
 `ContextGuard` or `DetachedContextGuard`: native yielding may release a
 worker's Redis lock while its borrowed data remains live. Main-thread calls
-keep the same flags, busy-reply handling and missing-API error. Unsafe
-`Context` and `EventContext` construction explicitly requires main-thread use.
+keep the same flags, busy-reply handling and missing-API error. Commands and
+events invoked synchronously by workers return an error before native yield.
+The existing OS main-thread query verifies Linux/macOS; other platforms fail
+closed rather than trusting a context's type or load-time caller.
 No replacement worker-yield API is added. Main-thread key aliasing remains
 separate work in #162.
 

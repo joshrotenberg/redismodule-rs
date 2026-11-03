@@ -54,9 +54,8 @@ impl RuntimeContext {
 // SAFETY: construction requires the lock for the entire use of this view.
 unsafe impl RedisLockIndicator for RuntimeContext {}
 
-/// A module-owned event invocation on the Redis main thread. Provides shared
-/// runtime operations and APIs that associate callbacks with the module,
-/// including timers and subscriptions.
+/// A module-owned event invocation. Provides shared runtime operations and APIs
+/// that associate callbacks with the module, including timers and subscriptions.
 /// Keyspace, server, timer, post-notification, and event-loop callbacks receive
 /// this view. It has no client reply, client blocking, or load-time registration.
 ///
@@ -113,10 +112,8 @@ impl EventContext {
     /// # Safety
     ///
     /// All requirements of [`RuntimeContext::new`] apply. In addition, `ctx`
-    /// must have a live native association with this module, and this wrapper
-    /// and references derived from it must only be used on the Redis main
-    /// thread. A locked worker must use [`RuntimeContext`] instead, even when
-    /// its native context belongs to the module.
+    /// must have a live native association with this module. In particular, a
+    /// context from `RedisModule_GetThreadSafeContext(NULL)` is not sufficient.
     pub const unsafe fn new(ctx: *mut raw::RedisModuleCtx) -> Self {
         Self {
             runtime: unsafe { RuntimeContext::new(ctx) },
