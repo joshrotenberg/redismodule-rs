@@ -135,7 +135,10 @@ macro_rules! __redis_command_callback {
                     // SAFETY: Redis supplies live argv/count for this callback.
                     let args = unsafe { $crate::decode_args(ctx, argv, argc) };
                     let response = $handler(&context, args);
-                    context.reply(response.map(|value| value.into())) as i32
+                    let response = $crate::__private::command_reply_after_release(
+                        response.map(|value| value.into()),
+                    );
+                    context.reply(response) as i32
                 };
                 // SAFETY: Redis passed this live command context.
                 unsafe { $crate::panic::run_command(ctx, command) }
