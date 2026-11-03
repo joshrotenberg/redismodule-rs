@@ -35,8 +35,12 @@ pub enum RedisValue {
     /// A RESP3 big number, given as its decimal digits with an optional
     /// leading `-`. A RESP2 client gets the digits as a bulk string, and so
     /// does every client of Redis before 7.0. Other text, including an empty
-    /// string or a leading `+`, is replied as an error, since RESP3 writes big
-    /// numbers without a length.
+    /// string or a leading `+`, is replied as the error `ERR big number reply
+    /// is not a decimal integer`, for every client, since RESP3 writes big
+    /// numbers without a length. In an array or map the error takes the big
+    /// number's place. A Lua script can return big number text that is not
+    /// digits, so a call reply converted to `RedisValue` can be refused this
+    /// way; [`crate::Context::reply_with_call_reply`] forwards it unchanged.
     BigNumber(String),
     /// RESP3 verbatim text with its three-letter format, such as `txt` or
     /// `mkd`. A RESP2 client gets the text as a bulk string. Redis before 7.0

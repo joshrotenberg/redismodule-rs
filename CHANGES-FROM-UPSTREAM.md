@@ -11,7 +11,7 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
-## Aligned aggregate replies
+## Reply stream alignment
 
 `Context::reply` writes an array or map header with the element count and then
 each element. A nested `RedisValue::NoReply` wrote nothing but was still
@@ -21,7 +21,7 @@ top-level `NoReply` still sends nothing (#153).
 
 `RedisValue::BigNumber` text went to `RedisModule_ReplyWithBigNumber` as is,
 and Redis writes a RESP3 big number without a length, so CR or LF in the text
-injected replies. Text other than an optional `-` followed by decimal digits is
+injected replies, at the top level as well as inside an aggregate. Text other than an optional `-` followed by decimal digits is
 now replied as an error, at every compatibility floor and for RESP2 clients
 too, so the result does not depend on the protocol. Upstream has the same
 behavior for both and no issue or pull request for either.

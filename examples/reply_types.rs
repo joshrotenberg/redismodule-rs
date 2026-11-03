@@ -2,9 +2,10 @@
 //! there the SDK sends what Redis 7 sends a RESP2 client.
 
 use redis_module::{
-    Context, NextArg, RedisResult, RedisString, RedisValue, redis_module, redisvalue::RedisValueKey,
+    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
+    redisvalue::RedisValueKey,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// `reply.bool`: true and false.
 fn reply_bool(_: &Context, _: Vec<RedisString>) -> RedisResult {
@@ -21,28 +22,37 @@ fn reply_big_number(_: &Context, _: Vec<RedisString>) -> RedisResult {
     ))
 }
 
-/// `reply.big_number_text text`: the text as a big number, then `after`. Text
-/// that is not a decimal integer makes the big number an error reply.
+/// `reply.big_number_text text [ALONE]`: the text as a big number, then
+/// `after`, or the big number alone. Text that is not a decimal integer makes
+/// the big number an error reply.
 fn reply_big_number_text(_: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);
     let text = args.next_string()?;
+    let alone = match args.next() {
+        Some(flag) if flag.as_slice().eq_ignore_ascii_case(b"alone") => true,
+        Some(_) => return Err(RedisError::Str("ERR syntax error")),
+        None => false,
+    };
     args.done()?;
+    if alone {
+        return Ok(RedisValue::BigNumber(text));
+    }
     Ok(RedisValue::Array(vec![
         RedisValue::BigNumber(text),
         RedisValue::SimpleStringStatic("after"),
     ]))
 }
 
-/// `reply.nested_no_reply`: `NoReply` as an array element and as a map value,
-/// where it is replied as null.
+/// `reply.nested_no_reply`: `NoReply` as an array element and as a value of
+/// each kind of map, where it is replied as null.
 fn reply_nested_no_reply(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    let key = || RedisValueKey::String("key".to_owned());
     Ok(RedisValue::Array(vec![
         RedisValue::Integer(1),
         RedisValue::NoReply,
-        RedisValue::InsertionOrderedMap(vec![(
-            RedisValueKey::String("key".to_owned()),
-            RedisValue::NoReply,
-        )]),
+        RedisValue::Map(HashMap::from([(key(), RedisValue::NoReply)])),
+        RedisValue::OrderedMap(BTreeMap::from([(key(), RedisValue::NoReply)])),
+        RedisValue::InsertionOrderedMap(vec![(key(), RedisValue::NoReply)]),
     ]))
 }
 

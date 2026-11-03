@@ -6666,7 +6666,13 @@ fn test_reply_elements_match_their_aggregate_length() -> Result<()> {
         };
         assert_eq!(
             nested,
-            Value::Array(vec![Value::Int(1), Value::Nil, map]),
+            Value::Array(vec![
+                Value::Int(1),
+                Value::Nil,
+                map.clone(),
+                map.clone(),
+                map
+            ]),
             "RESP{protocol}"
         );
         assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
@@ -6686,24 +6692,40 @@ fn test_reply_elements_match_their_aggregate_length() -> Result<()> {
                 "RESP{protocol} {text:?}"
             );
         }
-        for text in ["1\r\n+OK", "", "+1", "1.5", "12a"] {
-            let error = redis::cmd("reply.big_number_text")
-                .arg(text)
-                .query::<Value>(&mut con)
-                .expect_err("invalid big number text was replied as a number");
-            assert_eq!(error.code(), Some("ERR"), "RESP{protocol} {text:?}");
-            assert_eq!(
-                error.detail(),
-                Some("big number reply is not a decimal integer"),
-                "RESP{protocol} {text:?}"
-            );
-            assert_eq!(
-                redis::cmd("ECHO")
-                    .arg("aligned")
-                    .query::<String>(&mut con)?,
-                "aligned",
-                "RESP{protocol} {text:?}"
-            );
+        let alone: Value = redis::cmd("reply.big_number_text")
+            .arg(&["-42", "ALONE"])
+            .query(&mut con)?;
+        let expected = if typed {
+            Value::BigNumber(b"-42".to_vec())
+        } else {
+            bulk("-42")
+        };
+        assert_eq!(alone, expected, "RESP{protocol}");
+        for text in ["1\r\n+OK", "1\r", "1\n+OK", "", "-", "+1", "1.5", "12a"] {
+            for alone in [false, true] {
+                let mut cmd = redis::cmd("reply.big_number_text");
+                cmd.arg(text);
+                if alone {
+                    cmd.arg("ALONE");
+                }
+                let error = cmd
+                    .query::<Value>(&mut con)
+                    .expect_err("invalid big number text was replied as a number");
+                let case = format!("RESP{protocol} {text:?} alone={alone}");
+                assert_eq!(error.code(), Some("ERR"), "{case}");
+                assert_eq!(
+                    error.detail(),
+                    Some("big number reply is not a decimal integer"),
+                    "{case}"
+                );
+                assert_eq!(
+                    redis::cmd("ECHO")
+                        .arg("aligned")
+                        .query::<String>(&mut con)?,
+                    "aligned",
+                    "{case}"
+                );
+            }
         }
     }
     Ok(())

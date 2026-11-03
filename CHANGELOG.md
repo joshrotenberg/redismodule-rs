@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Aggregate replies send as many elements as their header announces (#153). A
-  `RedisValue::NoReply` array element or map value, which wrote nothing, is
-  replied as null. `RedisValue::BigNumber` text other than an optional `-` and
-  decimal digits, which RESP3 writes without a length so CR or LF in it could
-  inject replies, is replied as an error at every compatibility floor.
+- `Context::reply` no longer writes replies that shift the client's later
+  replies (#153). A `RedisValue::NoReply` array element or map value, which
+  wrote nothing although the aggregate counted it, is replied as null.
+  `RedisValue::BigNumber` text other than an optional `-` and decimal digits,
+  which RESP3 writes without a length so CR or LF in it could inject replies,
+  is replied as an error, for every client and at every compatibility floor.
 
 - **Breaking:** `yield_now` is now an `EventContext` method, also available
   through command contexts, instead of a shared `RuntimeContext` method
