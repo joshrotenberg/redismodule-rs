@@ -3661,11 +3661,9 @@ fn test_event_loop_unload_waits_for_one_shots_and_drops_watches() -> Result<()> 
         log.contains("eventloop deinit: ERR event loop one-shots cannot be added"),
         "{log}"
     );
-    // A watch left behind would call into the unloaded module now.
-    std::io::Write::write_all(
-        &mut std::fs::OpenOptions::new().write(true).open(&fifo)?,
-        b"after unload",
-    )?;
+    // A watch left behind would call into the unloaded module now. The open
+    // does not block: Redis still holds the read end the module left open.
+    std::io::Write::write_all(&mut open_fifo_writer(&fifo)?, b"after unload")?;
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     std::fs::remove_file(&fifo)?;
@@ -7051,10 +7049,22 @@ fn test_reply_elements_match_their_aggregate_length() -> Result<()> {
     Ok(())
 }
 
+/// Opens a FIFO for writing without blocking, which fails instead of hanging
+/// when no process holds its read end.
+fn open_fifo_writer(path: &std::path::Path) -> Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+        .with_context(|| format!("opening {} for writing", path.display()))
+}
+
 /// A load that fails after watching a descriptor stops watching it: Redis
 /// keeps a failed load's watched descriptors, so data arriving later would
-/// call into the closed image (on Linux, where it is unmapped, this crashes
-/// the server).
+/// call into the closed image. On Linux, where the image is unmapped, a watch
+/// left behind crashes the server; macOS keeps the image mapped, so there the
+/// test passes either way.
 #[test]
 fn test_failed_load_stops_watching_descriptors() -> Result<()> {
     let mut con = TestConnection::new("hello");
@@ -7068,10 +7078,8 @@ fn test_failed_load_stops_watching_descriptors() -> Result<()> {
         .arg("fail")
         .query::<()>(&mut con)
         .expect_err("the module refused its load");
-    std::io::Write::write_all(
-        &mut std::fs::OpenOptions::new().write(true).open(&fifo)?,
-        b"after the failed load",
-    )?;
+    // The failed load left the FIFO's read end open in Redis.
+    std::io::Write::write_all(&mut open_fifo_writer(&fifo)?, b"after the failed load")?;
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     std::fs::remove_file(&fifo)?;
