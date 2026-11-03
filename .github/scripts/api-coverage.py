@@ -117,7 +117,8 @@ AREAS = [
         (r"SetClientNameById", "context-free"),
     ]),
     ("Context state and replication", [
-        (r"GetContextFlags|AvoidReplicaTraffic|Yield|Replicate", "runtime"),
+        (r"GetContextFlags|AvoidReplicaTraffic|Replicate", "runtime"),
+        (r"Yield", "event"),
         (r"ReplicateVerbatim|AutoMemory", "command"),
     ]),
     ("Pub/Sub", [(r"PublishMessage(Shard)?", "runtime")]),

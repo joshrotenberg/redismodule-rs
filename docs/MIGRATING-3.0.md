@@ -446,6 +446,22 @@ runtime view ends, before a worker unlocks. Worker guards cannot create timers
 or subscribe to events. Configuration
 and command/type registration still require `RegistrationContext`.
 
+`yield_now` moved from `RuntimeContext` to `EventContext` (#156). Existing
+command and event calls keep their syntax. A helper that yields must take
+`&EventContext` or `&Context`, rather than the shared runtime view. Locked
+workers (`ContextGuard`, `DetachedContextGuard` and `WorkerContext`) cannot
+call it: Redis may release their lock inside a yield while borrowed keys or
+guarded state remain live. Finish using that data and drop the lock guard
+before allowing other threads to run; reacquire a fresh guard for later Redis
+access. No replacement worker-yield API is provided. Main-thread callbacks
+can still reenter while yielding, so release locks and borrowed key data that
+those callbacks could invalidate before calling it.
+
+A command or event callback can also run synchronously inside a worker's
+`call`. Its `yield_now` returns an error before entering Redis. Main-thread
+verification supports Linux and macOS; other platforms also return an error
+rather than assuming the callback runs on the Redis main thread.
+
 Both guard types borrow their owner and cannot outlive it. Their runtime views
 are neither `Send` nor `Sync` and cannot outlive the lock guard. A
 `ThreadSafeContext<BlockedClient>` retains its separate `reply` method, callable
@@ -763,6 +779,17 @@ These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
 
+- **Nested `NoReply` and big number text.** A `RedisValue::NoReply` array
+  element or map value is now replied as null; it used to write nothing, and
+  the client then read the next command's reply in its place. A top-level
+  `NoReply` still sends nothing. `RedisValue::BigNumber` text that is not an
+  optional `-` followed by decimal digits is now the error
+  `ERR big number reply is not a decimal integer` for every client. Before,
+  `BigNumber("3.14".into())` reached a RESP2 client as the bulk string `3.14`,
+  and text with CR or LF injected replies for RESP3 clients of Redis 7.0 and
+  later. Inside an array or map the error takes the big number's place, and
+  clients such as redis-rs then report the whole reply as an error. Send other
+  numeric text as a bulk string or a double instead.
 - **Detached context after unload.** `MODULE_CONTEXT` is released when
   `redis_module!` unloads the module or its load fails, and the next load stores
   a fresh one. Until then `MODULE_CONTEXT.lock()` panics instead of using the
