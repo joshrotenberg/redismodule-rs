@@ -3908,6 +3908,63 @@ fn check_client_blocking_rejections(commands: &[(&str, &[&str])], calls: &[&str]
     Ok(())
 }
 
+/// A plain blocked client gets exactly one reply: an error when its handle is
+/// released without one, the command's own error when the command fails after
+/// blocking, and only the first of two worker replies. Each reply is followed
+/// by another command on the same connection, which a missing or extra reply
+/// would answer wrongly or not at all.
+#[test]
+fn test_blocked_client_gets_exactly_one_reply() -> Result<()> {
+    let mut con = TestConnection::new("block");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    con.set_write_timeout(Some(Duration::from_secs(5)))?;
+
+    for command in [
+        "block.release_unreplied",
+        "block.worker_panics",
+        "block.release_then_no_reply",
+    ] {
+        let error = redis::cmd(command)
+            .query::<Value>(&mut con)
+            .expect_err("a released blocked client got a value");
+        assert_eq!(error.code(), Some("ERR"), "{command}");
+        assert_eq!(
+            error.detail(),
+            Some("the blocked client was released without a reply"),
+            "{command}"
+        );
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+
+    for (command, detail) in [
+        ("block.fail_after_block", "failed after blocking"),
+        (
+            "block.panic_after_block",
+            "command panicked: failed after blocking",
+        ),
+        ("block.worker_wrong_arity", "wrong number of arguments"),
+    ] {
+        let error = redis::cmd(command)
+            .query::<Value>(&mut con)
+            .expect_err("the command replied with a value");
+        assert_eq!(error.code(), Some("ERR"), "{command}");
+        assert_eq!(error.detail(), Some(detail), "{command}");
+        assert_eq!(
+            redis::cmd("ECHO")
+                .arg("aligned")
+                .query::<String>(&mut con)?,
+            "aligned",
+            "{command}"
+        );
+    }
+
+    let first: String = redis::cmd("block.reply_twice").query(&mut con)?;
+    assert_eq!(first, "first");
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    assert!(redis::cmd("block.second_reply_refused").query::<bool>(&mut con)?);
+    Ok(())
+}
+
 // This also runs against Redis 6.0 in CI to exercise its older context flags.
 #[test]
 fn test_direct_client_blocking_rejects_denied_invocations() -> Result<()> {
