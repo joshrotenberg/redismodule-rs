@@ -1,4 +1,5 @@
 use std::ffi::CStr;
+use std::sync::Mutex;
 
 use crate::{InfoContext, RedisResult, raw};
 use crate::{RedisError, context::EventContext};
@@ -72,13 +73,176 @@ pub enum ModuleChangeSubevent {
     Unloaded,
 }
 
-#[derive(Clone)]
+/// A static function handler for a typed server event.
+///
+/// Register with [`EventContext::subscribe_to_server_event`]. Payloads and
+/// contexts are borrowed only for the invocation; copy any data to retain it.
+#[derive(Clone, Copy)]
 pub enum ServerEventHandler {
+    /// Replication role changes. The historical variant name is preserved.
     RuleChanged(fn(&EventContext, ServerRole)),
     Loading(fn(&EventContext, LoadingSubevent)),
     Flush(fn(&EventContext, FlushSubevent)),
+    FlushInfo(fn(&EventContext, FlushSubevent, FlushInfo)),
+    SwapDb(fn(&EventContext, SwapDbInfo)),
     ModuleChange(fn(&EventContext, ModuleChangeSubevent)),
+    ConfigChanged(fn(&EventContext, &[&str])),
+    Cron(fn(&EventContext, u64)),
     Shutdown(fn(&EventContext)),
+}
+
+// Each native module image has its own registry. No user code runs under this
+// lock. EventContext proves the Redis lock, serializing native registration.
+static RUNTIME_HANDLERS: Mutex<Vec<ServerEventHandler>> = Mutex::new(Vec::new());
+
+impl ServerEventHandler {
+    fn same_handler(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::RuleChanged(a), Self::RuleChanged(b)) => std::ptr::fn_addr_eq(a, b),
+            (Self::Loading(a), Self::Loading(b)) => std::ptr::fn_addr_eq(a, b),
+            (Self::Flush(a), Self::Flush(b)) => std::ptr::fn_addr_eq(a, b),
+            (Self::FlushInfo(a), Self::FlushInfo(b)) => std::ptr::fn_addr_eq(a, b),
+            (Self::SwapDb(a), Self::SwapDb(b)) => std::ptr::fn_addr_eq(a, b),
+            (Self::ModuleChange(a), Self::ModuleChange(b)) => std::ptr::fn_addr_eq(a, b),
+            (Self::ConfigChanged(a), Self::ConfigChanged(b)) => std::ptr::fn_addr_eq(a, b),
+            (Self::Cron(a), Self::Cron(b)) => std::ptr::fn_addr_eq(a, b),
+            (Self::Shutdown(a), Self::Shutdown(b)) => std::ptr::fn_addr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    fn is_attribute_handler(self) -> bool {
+        match self {
+            Self::RuleChanged(f) => ROLE_CHANGED_SERVER_EVENTS_LIST
+                .iter()
+                .any(|g| std::ptr::fn_addr_eq(f, *g)),
+            Self::Loading(f) => LOADING_SERVER_EVENTS_LIST
+                .iter()
+                .any(|g| std::ptr::fn_addr_eq(f, *g)),
+            Self::Flush(f) => FLUSH_SERVER_EVENTS_LIST
+                .iter()
+                .any(|g| std::ptr::fn_addr_eq(f, *g)),
+            Self::FlushInfo(f) => FLUSH_INFO_SERVER_EVENTS_LIST
+                .iter()
+                .any(|g| std::ptr::fn_addr_eq(f, *g)),
+            Self::SwapDb(f) => SWAPDB_SERVER_EVENTS_LIST
+                .iter()
+                .any(|g| std::ptr::fn_addr_eq(f, *g)),
+            Self::ModuleChange(f) => MODULE_CHANGED_SERVER_EVENTS_LIST
+                .iter()
+                .any(|g| std::ptr::fn_addr_eq(f, *g)),
+            Self::ConfigChanged(f) => CONFIG_CHANGED_SERVER_EVENTS_LIST
+                .iter()
+                .any(|g| std::ptr::fn_addr_eq(f, *g)),
+            Self::Cron(f) => CRON_SERVER_EVENTS_LIST
+                .iter()
+                .any(|g| std::ptr::fn_addr_eq(f, *g)),
+            Self::Shutdown(f) => SHUTDOWN_SERVER_EVENTS_LIST
+                .iter()
+                .any(|g| std::ptr::fn_addr_eq(f, *g)),
+        }
+    }
+
+    fn native_subscription(self) -> (u64, raw::RedisModuleEventCallback) {
+        match self {
+            Self::RuleChanged(_) => (
+                raw::REDISMODULE_EVENT_REPLICATION_ROLE_CHANGED,
+                Some(role_changed_callback),
+            ),
+            Self::Loading(_) => (raw::REDISMODULE_EVENT_LOADING, Some(loading_event_callback)),
+            Self::Flush(_) => (raw::REDISMODULE_EVENT_FLUSHDB, Some(flush_event_callback)),
+            Self::FlushInfo(_) => (raw::REDISMODULE_EVENT_FLUSHDB, Some(flush_event_callback)),
+            Self::SwapDb(_) => (raw::REDISMODULE_EVENT_SWAPDB, Some(swapdb_event_callback)),
+            Self::ModuleChange(_) => (
+                raw::REDISMODULE_EVENT_MODULE_CHANGE,
+                Some(module_change_event_callback),
+            ),
+            Self::ConfigChanged(_) => (
+                raw::REDISMODULE_EVENT_CONFIG,
+                Some(config_change_event_callback),
+            ),
+            Self::Cron(_) => (raw::REDISMODULE_EVENT_CRON_LOOP, Some(cron_callback)),
+            Self::Shutdown(_) => (
+                raw::REDISMODULE_EVENT_SHUTDOWN,
+                Some(shutdown_event_callback),
+            ),
+        }
+    }
+}
+
+impl EventContext {
+    /// Adds a static handler to the SDK's server-event subscription.
+    ///
+    /// ```no_run
+    /// use redis_module::{EventContext, RedisError, server_events::ServerEventHandler};
+    /// fn tick(ctx: &EventContext, hz: u64) { ctx.log_notice(&format!("tick at {hz} Hz")); }
+    /// fn configure(ctx: &EventContext, enabled: bool) -> Result<(), RedisError> {
+    ///     if enabled { ctx.subscribe_to_server_event(ServerEventHandler::Cron(tick))?; }
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// Attribute handlers remain active. Re-registering the same function for
+    /// the same typed event is a no-op, including an attribute handler. Identity
+    /// uses function addresses; distinct functions with identical code may be
+    /// merged by the compiler and treated as one handler. Conversely, the same
+    /// function compiled in different codegen units may have different addresses;
+    /// pass the same function pointer when repeatable identity is needed.
+    ///
+    /// Attribute handlers run first, then runtime handlers in registration order.
+    /// Each handler has its own panic boundary. Dispatch snapshots registrations
+    /// before invoking handlers, so additions made by a handler start on the next
+    /// delivery (including a nested delivery). A failed native subscription adds
+    /// no handler. An unavailable API or unsupported event returns an error.
+    ///
+    /// Load, command and event callbacks can subscribe; locked workers cannot.
+    /// Handlers last until successful module unload. A rejected unload preserves
+    /// them; a failed load clears them. These lifecycle rules are wired by
+    /// [`crate::redis_module!`]. There are no captured closures or unsubscribe
+    /// tokens. Avoid modifying keys during events that prohibit it, such as flush
+    /// callbacks, and follow Redis's restrictions for the chosen event.
+    pub fn subscribe_to_server_event(&self, handler: ServerEventHandler) -> Result<(), RedisError> {
+        if handler.is_attribute_handler()
+            || RUNTIME_HANDLERS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .any(|existing| handler.same_handler(*existing))
+        {
+            return Ok(());
+        }
+        let (event, callback) = handler.native_subscription();
+        register_single_server_event_type(self, true, event, callback)?;
+        RUNTIME_HANDLERS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(handler);
+        Ok(())
+    }
+}
+
+fn runtime_handlers() -> Vec<ServerEventHandler> {
+    RUNTIME_HANDLERS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+/// Releases runtime registrations after a failed load or successful unload.
+/// Used by the module entrypoint macro while the Redis allocator is available.
+#[doc(hidden)]
+pub fn __clear_runtime_handlers() {
+    *RUNTIME_HANDLERS.lock().unwrap_or_else(|e| e.into_inner()) = Vec::new();
+}
+
+macro_rules! dispatch_runtime {
+    ($handlers:expr, $variant:ident, $ctx:expr, $label:literal $(, $arg:expr)*) => {
+        for handler in $handlers {
+            if let ServerEventHandler::$variant(callback) = handler {
+                crate::panic::run_callback($label, || callback($ctx $(, $arg)*), || ());
+            }
+        }
+    };
 }
 
 #[distributed_slice()]
@@ -121,9 +285,11 @@ extern "C" fn cron_callback(
     let data: &raw::RedisModuleCronLoopV1 = unsafe { &*(data as *mut raw::RedisModuleCronLoopV1) };
     let hz = data.hz as u64;
     let ctx = unsafe { EventContext::new(ctx) };
+    let handlers = runtime_handlers();
     CRON_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback("cron event handler", || callback(&ctx, hz), || ());
     });
+    dispatch_runtime!(handlers, Cron, &ctx, "cron event handler", hz);
 }
 
 extern "C" fn role_changed_callback(
@@ -138,6 +304,7 @@ extern "C" fn role_changed_callback(
         ServerRole::Replica
     };
     let ctx = unsafe { EventContext::new(ctx) };
+    let handlers = runtime_handlers();
     ROLE_CHANGED_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback(
             "role changed event handler",
@@ -145,6 +312,13 @@ extern "C" fn role_changed_callback(
             || (),
         );
     });
+    dispatch_runtime!(
+        handlers,
+        RuleChanged,
+        &ctx,
+        "role changed event handler",
+        new_role
+    );
 }
 
 extern "C" fn loading_event_callback(
@@ -161,6 +335,7 @@ extern "C" fn loading_event_callback(
         _ => LoadingSubevent::Failed,
     };
     let ctx = unsafe { EventContext::new(ctx) };
+    let handlers = runtime_handlers();
     LOADING_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback(
             "loading event handler",
@@ -168,6 +343,13 @@ extern "C" fn loading_event_callback(
             || (),
         );
     });
+    dispatch_runtime!(
+        handlers,
+        Loading,
+        &ctx,
+        "loading event handler",
+        loading_sub_event
+    );
 }
 
 extern "C" fn flush_event_callback(
@@ -188,6 +370,7 @@ extern "C" fn flush_event_callback(
         db: (data.dbnum != -1).then_some(data.dbnum),
     };
     let ctx = unsafe { EventContext::new(ctx) };
+    let handlers = runtime_handlers();
     FLUSH_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback(
             "flush event handler",
@@ -202,6 +385,21 @@ extern "C" fn flush_event_callback(
             || (),
         );
     });
+    for handler in handlers {
+        match handler {
+            ServerEventHandler::Flush(callback) => crate::panic::run_callback(
+                "flush event handler",
+                || callback(&ctx, flush_sub_event),
+                || (),
+            ),
+            ServerEventHandler::FlushInfo(callback) => crate::panic::run_callback(
+                "flush info event handler",
+                || callback(&ctx, flush_sub_event, info),
+                || (),
+            ),
+            _ => (),
+        }
+    }
 }
 
 extern "C" fn swapdb_event_callback(
@@ -218,9 +416,11 @@ extern "C" fn swapdb_event_callback(
         second: data.dbnum_second,
     };
     let ctx = unsafe { EventContext::new(ctx) };
+    let handlers = runtime_handlers();
     SWAPDB_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback("swapdb event handler", || callback(&ctx, info), || ());
     });
+    dispatch_runtime!(handlers, SwapDb, &ctx, "swapdb event handler", info);
 }
 
 extern "C" fn module_change_event_callback(
@@ -235,6 +435,7 @@ extern "C" fn module_change_event_callback(
         ModuleChangeSubevent::Unloaded
     };
     let ctx = unsafe { EventContext::new(ctx) };
+    let handlers = runtime_handlers();
     MODULE_CHANGED_SERVER_EVENTS_LIST
         .iter()
         .for_each(|callback| {
@@ -244,6 +445,13 @@ extern "C" fn module_change_event_callback(
                 || (),
             );
         });
+    dispatch_runtime!(
+        handlers,
+        ModuleChange,
+        &ctx,
+        "module changed event handler",
+        module_changed_sub_event
+    );
 }
 
 extern "C" fn shutdown_event_callback(
@@ -253,9 +461,11 @@ extern "C" fn shutdown_event_callback(
     _data: *mut ::std::os::raw::c_void,
 ) {
     let ctx = unsafe { EventContext::new(ctx) };
+    let handlers = runtime_handlers();
     SHUTDOWN_SERVER_EVENTS_LIST.iter().for_each(|callback| {
         crate::panic::run_callback("shutdown event handler", || callback(&ctx), || ());
     });
+    dispatch_runtime!(handlers, Shutdown, &ctx, "shutdown event handler");
 }
 
 extern "C" fn config_change_event_callback(
@@ -280,6 +490,7 @@ extern "C" fn config_change_event_callback(
         })
         .collect();
     let ctx = unsafe { EventContext::new(ctx) };
+    let handlers = runtime_handlers();
     CONFIG_CHANGED_SERVER_EVENTS_LIST
         .iter()
         .for_each(|callback| {
@@ -289,6 +500,13 @@ extern "C" fn config_change_event_callback(
                 || (),
             );
         });
+    dispatch_runtime!(
+        handlers,
+        ConfigChanged,
+        &ctx,
+        "config changed event handler",
+        config_names.as_slice()
+    );
 }
 
 fn register_single_server_event_type(
@@ -298,8 +516,11 @@ fn register_single_server_event_type(
     inner_callback: raw::RedisModuleEventCallback,
 ) -> Result<(), RedisError> {
     if has_handlers {
+        let subscribe = unsafe { raw::RedisModule_SubscribeToServerEvent }.ok_or(
+            RedisError::Str("ERR server-event subscription API is unavailable"),
+        )?;
         let res = unsafe {
-            crate::__available_api!(RedisModule_SubscribeToServerEvent)(
+            subscribe(
                 ctx.ctx,
                 raw::RedisModuleEvent {
                     id: server_event,
@@ -309,7 +530,7 @@ fn register_single_server_event_type(
             )
         };
         if res != raw::REDISMODULE_OK as i32 {
-            return Err(RedisError::Str("Failed subscribing to server event"));
+            return Err(RedisError::Str("ERR server-event subscription failed"));
         }
     }
 

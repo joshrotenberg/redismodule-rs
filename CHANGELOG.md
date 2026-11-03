@@ -7,7 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `EventContext::add_post_notification_job` returns `Status::Err` instead of
+  panicking when its native API is missing at a 7.2+ compatibility floor (#117).
+  Older floors keep their existing API error and all refused paths drop captures.
+
+- Clarify that ACL permission checks and scoped call-user selection can succeed
+  for an existing account marked `off` (#141). Deferred work must check enabled
+  state separately when disabling its owner should stop that work. Runtime
+  behavior, error strings, signatures and compatibility floors are unchanged.
+
+- Modules using `redis_module!` refuse unload before user deinit while Redis
+  owns an SDK post-notification job (#139). Ownership lasts through callback
+  execution and captured-data cleanup, including cancellation and panics.
+  Submissions during module load/unload return `Status::Err` and release
+  captures immediately, preventing callbacks from surviving a failed load.
+
 ### Added
+
+- The vendored header and committed bindings add
+  `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`), matching upstream PR 491
+  (#150). It marks standard RDB saves restored one key at a time. Existing
+  payload layout, flags, API pointers and compatibility floors are unchanged.
+
+- `RuntimeContext::canonical_key_for_slot` returns an owned copy of Redis's
+  exact native slot name on supporting servers (Redis 7.4+) (#146). Invalid
+  slots return `None`; unavailable APIs, unexpected null names and invalid
+  UTF-8 return errors at every floor. There is no automatic fallback. The
+  separate `cluster::key_for_slot` keeps its existing stable names.
+
+- `RuntimeContext::fill_random_bytes` and `fill_random_hex` fill caller-owned
+  slices using Redis's generator under the Redis lock (#144). Hex output is
+  lowercase ASCII, supports odd lengths and has no trailing NUL. Empty slices
+  succeed after checking availability; missing bindings return errors without
+  changing the buffer. Signatures are uniform at every compatibility floor.
+  The `random_fill` example demonstrates per-load IDs and locked worker access.
+
+- `RuntimeContext::api_available` safely queries the running server for a short
+  native API name (#117). Every context view exposes it; unknown/missing names
+  return false and interior NUL returns an error. Presence does not grant a
+  context permission to call the API. The `api_availability` example demonstrates
+  lookup and missing-API handling; `keyspace_to_stream` uses it at load time.
+
+- `EventContext::subscribe_to_server_event` adds typed static function handlers
+  at load time or during commands/events (#114). It preserves attribute handlers,
+  deduplicates function addresses, contains each handler's panics and snapshots
+  each delivery before invoking user code. Failed loads and successful unloads
+  release runtime registrations; rejected unloads retain them. The
+  `runtime_server_events` example demonstrates conditional subscription.
 
 - `ThreadSafeContext::try_lock` and `DetachedContext::try_lock` return their
   existing borrowed guards on success and `None` when the Redis lock cannot
@@ -328,7 +376,7 @@ Entries marked **Breaking** need a change in modules;
 - **Breaking:** `raw::export_shared_api` and `Context::export_shared_api` return `Status`.
 - **Breaking:** the opaque handle types in `raw` derive only `Debug`, not `Copy` and `Clone` (bindgen 0.73).
 - **Breaking:** `bindgen-runtime` is no longer a default feature. The bindings are pregenerated in `src/redisraw/bindings.rs` for 64-bit targets, so a default build needs no libclang; `bindgen-runtime` and `bindgen-static` regenerate them with bindgen 0.73, and CI checks that the committed file is current.
-- Error texts on the wire: wrong-type keys reply `WRONGTYPE`, a denied ACL key check replies `NOPERM`, and an unknown or disabled user replies `ERR the user does not exist or is disabled`.
+- Error texts on the wire: wrong-type keys reply `WRONGTYPE`, a denied ACL key check replies `NOPERM`, and a failed native user lookup replies `ERR the user does not exist or is disabled` (documentation corrected in #141; runtime behavior is unchanged).
 - A panic in a command replies `ERR command panicked: <message>`, and a panic in other callbacks is logged, instead of aborting the server.
 - A missing module API is reported by name (`RedisModule_X is not available in this Redis server`) instead of as an unwrap of `None`.
 - `redis_module!` fails the module load when a configuration registration fails, when `LoadConfigs` rejects a value, or when a module built with `system-allocator-fallback` already allocated from the system allocator.

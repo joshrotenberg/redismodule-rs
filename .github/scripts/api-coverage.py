@@ -39,8 +39,6 @@ OVERRIDES = {
               "`redis_module!` use it; no wrapper allocates through it."),
     "Free": ("internal", "`RedisAlloc` frees with it, and wrappers free buffers Redis returned "
              "(`RedisBuffer`, the key array of `get_command_keys`); no wrapper frees through it."),
-    "GetApi": ("internal", "the header's inline `RedisModule_InitAPI`, exported by "
-               "`src/redismodule.c`, resolves every API pointer through it."),
     "SetModuleAttribs": ("internal", "the header's inline `RedisModule_Init`, which "
                          "`redis_module!` calls through `src/redismodule.c`, calls it."),
     "IsModuleNameBusy": ("internal", "the header's inline `RedisModule_Init`, which "
@@ -65,7 +63,8 @@ AREAS = [
         (r"MallocSize\w*|MallocUsableSize|GetUsedMemoryRatio", "context-free"),
     ]),
     ("Module lifecycle", [
-        (r"GetApi|SetModuleAttribs|IsModuleNameBusy", "n/a"),
+        (r"GetApi", "runtime"),
+        (r"SetModuleAttribs|IsModuleNameBusy", "n/a"),
         (r"SetModuleOptions", "registration"),
         (r"GetModuleOptionsAll|GetContextFlagsAll|GetServerVersion|GetTypeMethodVersion",
          "context-free"),
@@ -124,8 +123,8 @@ AREAS = [
     ("Pub/Sub", [(r"PublishMessage(Shard)?", "runtime")]),
     ("Logging and diagnostics", [(r"Log|LatencyAddSample", "context-free"), (r"_Assert", "n/a")]),
     ("Time and randomness", [
-        (r"Milliseconds|(Monotonic|Cached)?Microseconds|GetRandom(Bytes|HexChars)",
-         "context-free"),
+        (r"Milliseconds|(Monotonic|Cached)?Microseconds", "context-free"),
+        (r"GetRandom(Bytes|HexChars)", "runtime"),
     ]),
     ("Dictionaries", [(r"CreateDict|FreeDict|Dict\w+", "context-free")]),
     ("INFO", [
@@ -158,7 +157,7 @@ AREAS = [
     ("Cluster", [
         (r"RegisterClusterMessageReceiver|SetClusterFlags", "registration"),
         (r"GetMyClusterID|GetClusterSize|FreeClusterNodesList|ClusterKeySlotC?"
-         r"|ClusterCanonicalKeyNameInSlot|ClusterCanAccessKeysInSlot", "context-free"),
+         r"|ClusterCanAccessKeysInSlot", "context-free"),
         (r"SendClusterMessage|GetClusterNode(Info|SlotRanges)|GetClusterNodesList|Cluster\w+",
          "runtime"),
     ]),
@@ -200,7 +199,6 @@ AREAS = [
 EQUIVALENTS = {
     "ClusterKeySlot": "`cluster::key_slot` computes it",
     "ClusterKeySlotC": "`cluster::key_slot` computes it",
-    "ClusterCanonicalKeyNameInSlot": "`cluster::key_for_slot` chooses a different name",
     "CreateStringFromLongLong": "format, then `RedisString::create`",
     "CreateStringFromULongLong": "format, then `RedisString::create`",
     "CreateStringFromDouble": "format, then `RedisString::create`",
@@ -247,6 +245,8 @@ for _refs, _names in [
     (["upstream PR 100"], "HashGet"),
     (["upstream PR 482"], "Scan ScanKey"),
     (["#89"], "ThreadSafeContextTryLock GetRandomHexChars ClusterCanonicalKeyNameInSlot"),
+    (["#146"], "ClusterCanonicalKeyNameInSlot"),
+    (["#144"], "GetRandomBytes GetRandomHexChars"),
     (["#55"], "ReplySetArrayLength ReplySetMapLength ReplySetSetLength"),
     (["#60"], "ConfigGet ConfigGetBool ConfigGetEnum ConfigGetNumeric ConfigGetType "
               "ConfigIteratorCreate ConfigIteratorNext ConfigIteratorRelease"),

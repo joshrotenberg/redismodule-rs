@@ -133,23 +133,28 @@ PRs 442 and 444 build on the command filters of upstream PR 437.
 
 | rank | gap | fit | evidence |
 |---|---|---|---|
-| 1 | `GetRandomHexChars`, and `GetRandomBytes` with it | context-free | #89: the downstream takes its per-load generation id from it, to avoid another dependency. A Rust random-number crate can replace it. |
-| 2 | `ClusterCanonicalKeyNameInSlot` | context-free | #89: the downstream picks a hash tag owned by the node with it on 7.4 and later, and with its own table on 7.2. `cluster::key_for_slot` works on every version but generates different names, which changes the downstream's stream names. Whether the port can accept that was not checked. |
-| 3 | Command filters, all eight APIs | registration for the filter; the callback needs a view of its own | upstream PR 437, opened from FalkorDB's fork; also upstream PR 168. |
-| 4 | `SetLRU`, `GetLRU`, `SetLFU`, `GetLFU` | key | upstream issue 443; upstream PR 444, opened from FalkorDB's fork. |
-| 5 | `RandomKey` | runtime | upstream issue 445; upstream PR 446, opened from FalkorDB's fork. |
-| 6 | Cluster messages and topology | registration, runtime and context-free | upstream issue 236; upstream issue 438, by the author of the FalkorDB pull requests. |
-| 7 | Module users and authentication | registration, command and context-free | upstream PR 354 (users and authentication); upstream issue 381 (`RegisterAuthCallback`). |
-| 8 | `GetKeyNameFromModuleKey` | key | upstream PR 469 and the closed upstream PR 436, which state no consumer. Their author also opened upstream PR 459, which says RediSearch needs its flag. |
-| 9 | `GetExpire`, `GetAbsExpire` | key | upstream PR 391. |
-| 10 | `RdbLoad`, `RdbSave` and the RDB streams | runtime | upstream issue 382. Its reply points to data-type RDB callbacks, which this SDK supports, not to these APIs. |
-| 11 | Sorted sets | key | upstream issue 235. |
-| 12 | Dictionaries | context-free | upstream PRs 169 and 228, both drafts by one author. With `RedisAlloc` as the global allocator, Rust maps already count toward Redis's memory. |
-| 13 | `EmitAOF` | callback (I/O) | upstream issue 74. |
-| 14 | Server configuration reads | runtime | #60, a design issue that first needs a read use case. |
+| 1 | Command filters, all eight APIs | registration for the filter; the callback needs a view of its own | upstream PR 437, opened from FalkorDB's fork; also upstream PR 168. |
+| 2 | `SetLRU`, `GetLRU`, `SetLFU`, `GetLFU` | key | upstream issue 443; upstream PR 444, opened from FalkorDB's fork. |
+| 3 | `RandomKey` | runtime | upstream issue 445; upstream PR 446, opened from FalkorDB's fork. |
+| 4 | Cluster messages and topology | registration, runtime and context-free | upstream issue 236; upstream issue 438, by the author of the FalkorDB pull requests. |
+| 5 | Module users and authentication | registration, command and context-free | upstream PR 354 (users and authentication); upstream issue 381 (`RegisterAuthCallback`). |
+| 6 | `GetKeyNameFromModuleKey` | key | upstream PR 469 and the closed upstream PR 436, which state no consumer. Their author also opened upstream PR 459, which says RediSearch needs its flag. |
+| 7 | `GetExpire`, `GetAbsExpire` | key | upstream PR 391. |
+| 8 | `RdbLoad`, `RdbSave` and the RDB streams | runtime | upstream issue 382. Its reply points to data-type RDB callbacks, which this SDK supports, not to these APIs. |
+| 9 | Sorted sets | key | upstream issue 235. |
+| 10 | Dictionaries | context-free | upstream PRs 169 and 228, both drafts by one author. With `RedisAlloc` as the global allocator, Rust maps already count toward Redis's memory. |
+| 11 | `EmitAOF` | callback (I/O) | upstream issue 74. |
 
-Ranks 1 to 2 are tier 1, 3 to 5 tier 2 and the rest tier 3, with this
-repository's design issue last.
+Ranks 1 to 3 are tier 2 and the rest are tier 3.
+The concrete-consumer canonical-name gap is covered by
+`RuntimeContext::canonical_key_for_slot` (#146). It preserves the native name
+and errors when the API is unavailable, leaving the port's existing Redis 7.2
+fallback explicit. `cluster::key_for_slot` retains its different, stable names.
+Random fills, previously rank 1, are now covered by the context-bound methods
+in #144. Redis documents its generator as not thread safe; these methods
+require an initialized runtime view holding the Redis lock. The decision in
+#60 keeps `CONFIG GET` through `call`; reconsider a read wrapper only for a
+concrete consumer.
 
 #90 files implementation issues only for gaps with a concrete consumer. Tier 1
 has one, the #89 port, and its gaps become issues once the port shows it
@@ -174,17 +179,19 @@ API pointers the downstream calls through `redis_module::raw`:
 | `AddACLCategory`, `GetCommand`, `SetCommandACLCategories` | `src/lib.rs` adds the `eventstream` ACL category and tags three commands with it, accepting the error a reload returns for an existing category | safe: `redis_module!`'s `acl_categories` accepts the `EBUSY` Redis returns for a category kept from an earlier load |
 | `AddPostNotificationJob` | `src/lib.rs` refuses to load without it | safe: `EventContext::add_post_notification_job` |
 | `SubscribeToKeyspaceEvents` | `src/lib.rs` subscribes with a mask chosen at load, through a raw callback that accepts non-UTF-8 event names | safe: `EventContext::subscribe_to_keyspace_events`; event names are decoded lossily |
-| `SubscribeToServerEvent` | `src/lib.rs` subscribes to the flush and SWAPDB events, whose data the old SDK did not deliver, to the configuration event, and to the cron event only when checkpointing is configured | safe: `#[flush_info_event_handler]`, `#[swapdb_event_handler]`, `#[config_changed_event_handler]` and `#[cron_event_handler]`. Handlers subscribe at load whenever they exist; no safe subscription can depend on configuration. |
+| `SubscribeToServerEvent` | `src/lib.rs` subscribes to the flush and SWAPDB events, whose data the old SDK did not deliver, to the configuration event, and to the cron event only when checkpointing is configured | safe: `#[flush_info_event_handler]`, `#[swapdb_event_handler]`, `#[config_changed_event_handler]` and `#[cron_event_handler]`. `EventContext::subscribe_to_server_event(ServerEventHandler)` also supports conditional static subscriptions at runtime while preserving attribute handlers (#114). |
 | `GetSelectedDb`, `SelectDb` | `src/capture.rs`, `src/commands.rs`, `src/config.rs` and `src/markers.rs` write to database 0 and restore the selection | safe: `RuntimeContext::get_selected_db`, `select_db` and `with_db` |
 | `Milliseconds` | `src/capture.rs` reads the server clock for stream trimming | safe: `redis_module::milliseconds` |
 | `GetThreadSafeContext`, `ThreadSafeContextUnlock`, `FreeThreadSafeContext` | `src/dispatch.rs` creates the writer thread's context and releases it | safe: `ThreadSafeContext` and its guard |
 | `ThreadSafeContextTryLock` | `src/dispatch.rs` locks without blocking in the experimental asynchronous write modes, so unload cannot deadlock | safe: `ThreadSafeContext::try_lock` and `DetachedContext::try_lock` (#113) |
-| `GetRandomHexChars` | `src/markers.rs` makes the generation id | none |
-| `ClusterCanonicalKeyNameInSlot` | `src/cluster.rs` picks a hash tag per slot on 7.4 and later | none; `cluster::key_for_slot` is a substitute that generates different names (rank 2) |
+| `GetRandomHexChars` | `src/markers.rs` makes the generation id | safe: `RuntimeContext::fill_random_hex` (#144) |
+| `ClusterCanonicalKeyNameInSlot` | `src/cluster.rs` picks a hash tag per slot on 7.4 and later | safe: `RuntimeContext::canonical_key_for_slot` (#146), preserving native names |
 | `NotifyKeyspaceEvent` | `examples/notifytest.rs`, a test module, sends event names that are not UTF-8 | safe: `RuntimeContext::notify_keyspace_event_bytes` |
 
-Two of these are gaps. The port can keep raw calls for them, so none blocks
-it; they are what #89 would record as remaining raw-API workarounds.
+Current SDK native-name lookup can replace the port's raw canonical-name call
+without changing its Redis 7.4+ names, while its Redis 7.2 fallback stays explicit.
+Random fills can replace its generation ID workaround. The pinned downstream
+source remains unchanged; adopting these APIs is a separate change.
 
 ## Requests upstream
 
@@ -342,8 +349,9 @@ path. `LatencyAddSample` is context-free.
 `milliseconds` is the only clock. `std::time` covers `Microseconds` and
 `MonotonicMicroseconds`. `CachedMicroseconds` returns the time Redis caches
 before each command and in its cron job, so that nested callbacks see one
-clock; it has no Rust equivalent. `GetRandomBytes` and `GetRandomHexChars` are
-context-free and ranked above.
+clock; it has no Rust equivalent. `RuntimeContext::fill_random_bytes` and
+`fill_random_hex` safely wrap `GetRandomBytes` and `GetRandomHexChars` (#144).
+Redis's generator is not thread safe, so both require a locked runtime view.
 
 ### Dictionaries
 
@@ -431,8 +439,9 @@ accessors. All fit the callback. `DefragContext::defrag_realloc` is `unsafe`.
 ### Configuration
 
 Module configurations are covered except `LoadDefaultConfigs` (8.0). The
-server configuration APIs (8.2) are unwrapped; #60 evaluates read
-helpers and `CONFIG GET` through `call` is the current path.
+server configuration APIs (8.2) are unwrapped. The decision in #60 keeps
+`CONFIG GET` through `call` as the supported read pattern; reconsider wrappers
+only when a concrete consumer demonstrates a need.
 
 ### Key metadata and Enterprise extensions
 
@@ -446,8 +455,8 @@ Redis OSS implementation to test against.
 <!-- api-coverage:begin -->
 <!-- Generated by .github/scripts/api-coverage.py; edit the script instead. -->
 
-`src/include/redismodule.h` declares 404 API pointers: 156 safe, 9 unsafe, 8
-internal, 231 none.
+`src/include/redismodule.h` declares 404 API pointers: 160 safe, 9 unsafe, 7
+internal, 228 none.
 
 It also has 5 declarations commented out, which have no binding and are not in
 the table: `CreateStringFromLongDouble`, `ReplyWithLongDouble`,
@@ -464,12 +473,12 @@ floor, or not in the Redis OSS sources.
 
 | floor | APIs | safe | unsafe | internal | none |
 |---|---|---|---|---|---|
-| 6.0 | 233 | 108 | 5 | 7 | 113 |
-| 6.2 | 258 | 120 | 6 | 7 | 125 |
-| 7.0 | 328 | 148 | 9 | 7 | 164 |
-| 7.2 | 348 | 154 | 9 | 7 | 178 |
-| 7.4 | 353 | 155 | 9 | 7 | 182 |
-| 8.0 | 362 | 156 | 9 | 7 | 190 |
+| 6.0 | 233 | 111 | 5 | 6 | 111 |
+| 6.2 | 258 | 123 | 6 | 6 | 123 |
+| 7.0 | 328 | 151 | 9 | 6 | 162 |
+| 7.2 | 348 | 157 | 9 | 6 | 176 |
+| 7.4 | 353 | 159 | 9 | 6 | 179 |
+| 8.0 | 362 | 160 | 9 | 6 | 187 |
 | no floor | 42 | 0 | 0 | 1 | 41 |
 
 ### Required above the lowest floor
@@ -509,7 +518,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
-| `GetApi` | 6.0 | 6.0 |  | internal (hand) |  | n/a |  |
+| `GetApi` | 6.0 | 6.0 | available | safe | `RuntimeContext::api_available` |  |  |
 | `SetModuleAttribs` | 6.0 | 6.0 |  | internal (hand) |  | n/a |  |
 | `IsModuleNameBusy` | 6.0 | 6.0 |  | internal (hand) |  | n/a |  |
 | `SetModuleOptions` | 6.0 | 6.0 | required | safe | `RegistrationContext::set_module_options` |  |  |
@@ -809,8 +818,8 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `MonotonicMicroseconds` | 7.0 | 7.0 |  | none |  | context-free; `std::time::Instant` |  |
 | `Microseconds` | 7.2 | 7.2 |  | none |  | context-free; `std::time::SystemTime` |  |
 | `CachedMicroseconds` | 7.2 | 7.2 |  | none |  | context-free |  |
-| `GetRandomBytes` | 6.0 | 6.0 |  | none |  | context-free |  |
-| `GetRandomHexChars` | 6.0 | 6.0 |  | none |  | context-free | #89 |
+| `GetRandomBytes` | 6.0 | 6.0 | available | safe | `RuntimeContext::fill_random_bytes` |  | #144 |
+| `GetRandomHexChars` | 6.0 | 6.0 | available | safe | `RuntimeContext::fill_random_hex` |  | #89, #144 |
 
 #### Dictionaries
 
@@ -864,7 +873,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
-| `SubscribeToServerEvent` | 6.0 | 6.0 | available | safe | `server_events::register_server_events` |  |  |
+| `SubscribeToServerEvent` | 6.0 | 6.0 | direct | safe | `EventContext::subscribe_to_server_event`, `server_events::register_server_events` |  |  |
 | `IsSubEventSupported` | 6.0 | 6.0 |  | none |  | context-free |  |
 
 #### Keyspace notifications
@@ -876,7 +885,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `UnsubscribeFromKeyspaceEvents` | 8.2 | none |  | none |  | event |  |
 | `SubscribeToKeyspaceEventsWithSubkeys` | 8.8 | none |  | none |  | event |  |
 | `UnsubscribeFromKeyspaceEventsWithSubkeys` | 8.8 | none |  | none |  | event |  |
-| `AddPostNotificationJob` | 7.2 | 7.2 | api!, direct | safe | `EventContext::add_post_notification_job` |  |  |
+| `AddPostNotificationJob` | 7.2 | 7.2 | direct | safe | `EventContext::add_post_notification_job` |  |  |
 | `AddPostNotificationJobForKey` | 8.10 | none |  | none |  | event |  |
 | `NotifyKeyspaceEvent` | 6.0 | 6.0 | required | safe | `RuntimeContext::notify_keyspace_event_bytes` |  |  |
 | `NotifyKeyspaceEventWithSubkeys` | 8.8 | none |  | none |  | runtime |  |
@@ -948,7 +957,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `ClusterEnableTrim` | 8.4 | none |  | none |  | runtime |  |
 | `ClusterKeySlot` | 7.4 | 7.4 |  | none |  | context-free; `cluster::key_slot` computes it |  |
 | `ClusterKeySlotC` | 8.4 | none |  | none |  | context-free; `cluster::key_slot` computes it |  |
-| `ClusterCanonicalKeyNameInSlot` | 7.4 | 7.4 |  | none |  | context-free; `cluster::key_for_slot` chooses a different name | #89 |
+| `ClusterCanonicalKeyNameInSlot` | 7.4 | 7.4 | available | safe | `RuntimeContext::canonical_key_for_slot` |  | #89, #146 |
 | `ClusterCanAccessKeysInSlot` | 8.4 | none |  | none |  | context-free |  |
 | `ClusterPropagateForSlotMigration` | 8.4 | none |  | none |  | runtime |  |
 | `ClusterGetLocalSlotRanges` | 8.4 | none |  | none |  | runtime |  |
@@ -1087,8 +1096,6 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 - `Free`, internal: `RedisAlloc` frees with it, and wrappers free buffers Redis
   returned (`RedisBuffer`, the key array of `get_command_keys`); no wrapper
   frees through it.
-- `GetApi`, internal: the header's inline `RedisModule_InitAPI`, exported by
-  `src/redismodule.c`, resolves every API pointer through it.
 - `SetModuleAttribs`, internal: the header's inline `RedisModule_Init`, which
   `redis_module!` calls through `src/redismodule.c`, calls it.
 - `IsModuleNameBusy`, internal: the header's inline `RedisModule_Init`, which

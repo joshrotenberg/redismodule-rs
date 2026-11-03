@@ -12,6 +12,255 @@ use redis_module::RedisValue;
 mod configuration_ownership;
 mod utils;
 
+#[test]
+fn test_canonical_slot_name_native_and_boundaries() -> Result<()> {
+    let mut con = TestConnection::new("canonical_slot_name");
+    for slot in [16384_u16, u16::MAX] {
+        assert_eq!(
+            redis::cmd("canonical.name")
+                .arg(slot)
+                .query::<Option<String>>(&mut con)?,
+            None
+        );
+    }
+    let available: bool = redis::cmd("canonical.available").query(&mut con)?;
+    if available {
+        assert_eq!(
+            redis::cmd("canonical.name")
+                .arg(0)
+                .query::<String>(&mut con)?,
+            "06S"
+        );
+        assert_eq!(redis::cmd("canonical.all").query::<i64>(&mut con)?, 16384);
+    } else {
+        let error = redis::cmd("canonical.name")
+            .arg(0)
+            .query::<String>(&mut con)
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("RedisModule_ClusterCanonicalKeyNameInSlot is not available"),
+            "{error}"
+        );
+    }
+    // The server-independent helper retains its separate, stable naming scheme.
+    assert_eq!(
+        redis_module::cluster::key_for_slot(0).as_deref(),
+        Some("{DLH}")
+    );
+    Ok(())
+}
+
+#[test]
+fn test_canonical_slot_name_diagnostics_and_recovery() -> Result<()> {
+    let mut con = TestConnection::new("canonical_slot_name");
+    for _ in 0..2 {
+        for (mode, message) in [
+            (
+                "missing",
+                "RedisModule_ClusterCanonicalKeyNameInSlot is not available",
+            ),
+            ("null", "canonical slot name is null"),
+            ("utf8", "invalid utf-8"),
+        ] {
+            let error = redis::cmd("canonical.diagnostic")
+                .arg(mode)
+                .query::<String>(&mut con)
+                .unwrap_err();
+            assert!(error.to_string().contains(message), "{mode}: {error}");
+        }
+        assert_eq!(
+            redis::cmd("canonical.diagnostic")
+                .arg("exact")
+                .query::<String>(&mut con)?,
+            "native:{exact}:name"
+        );
+        let available: bool = redis::cmd("canonical.available").query(&mut con)?;
+        let result = redis::cmd("canonical.name")
+            .arg(0)
+            .query::<String>(&mut con);
+        assert_eq!(result.is_ok(), available, "native binding restored");
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+#[test]
+fn test_canonical_slot_name_event_and_locked_worker_views() -> Result<()> {
+    let mut con = TestConnection::new("canonical_slot_name");
+    assert_eq!(redis::cmd("canonical.event_ok").query::<i64>(&mut con)?, 0);
+    redis::cmd("SET")
+        .arg(&["canonical:trigger", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("canonical.event_ok").query::<i64>(&mut con)?, 1);
+    redis::cmd("canonical.worker").query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "canonical worker lookup", || {
+        Ok(redis::cmd("canonical.finish").query::<i64>(&mut con)? == 1)
+    })?;
+    Ok(())
+}
+
+#[test]
+fn test_canonical_slot_name_worker_unload_and_reload() -> Result<()> {
+    let mut con = TestConnection::new("canonical_slot_name");
+    for _ in 0..2 {
+        redis::cmd("canonical.worker").query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "canonical_slot_name"])
+            .query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(utils::module_path("canonical_slot_name")?)
+            .query::<()>(&mut con)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_random_fill_lengths_hex_and_registration_generation() -> Result<()> {
+    let mut con = TestConnection::new("random_fill");
+    for len in [0, 1, 2, 17, 32, 33, 4096] {
+        let bytes: Vec<u8> = redis::cmd("random.bytes").arg(len).query(&mut con)?;
+        let hex: Vec<u8> = redis::cmd("random.hex").arg(len).query(&mut con)?;
+        assert_eq!(bytes.len(), len);
+        assert_eq!(hex.len(), len);
+        assert!(
+            hex.iter()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+        );
+    }
+    let generation: Vec<u8> = redis::cmd("random.generation").query(&mut con)?;
+    assert_eq!(generation.len(), 32);
+    assert!(
+        generation
+            .iter()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
+    );
+    assert_eq!(
+        redis::cmd("random.generation").query::<Vec<u8>>(&mut con)?,
+        generation
+    );
+    Ok(())
+}
+
+#[test]
+fn test_random_fill_missing_apis_preserve_output_and_recover() -> Result<()> {
+    let mut con = TestConnection::new("random_fill");
+    for (mode, api) in [("bytes", "GetRandomBytes"), ("hex", "GetRandomHexChars")] {
+        for _ in 0..2 {
+            let error: String = redis::cmd("random.missing").arg(mode).query(&mut con)?;
+            assert!(
+                error.contains(&format!("RedisModule_{api} is not available")),
+                "{error}"
+            );
+            let output: Vec<u8> = redis::cmd(&format!("random.{mode}"))
+                .arg(17)
+                .query(&mut con)?;
+            assert_eq!(output.len(), 17);
+        }
+    }
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+#[test]
+fn test_random_fill_event_and_locked_worker_views() -> Result<()> {
+    let mut con = TestConnection::new("random_fill");
+    assert_eq!(redis::cmd("random.event_ok").query::<i64>(&mut con)?, 0);
+    redis::cmd("SET")
+        .arg(&["random:trigger", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("random.event_ok").query::<i64>(&mut con)?, 1);
+    redis::cmd("random.worker").query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "random worker fill", || {
+        Ok(redis::cmd("random.finish").query::<i64>(&mut con)? == 1)
+    })?;
+    Ok(())
+}
+
+#[test]
+fn test_random_fill_worker_unload_and_reload() -> Result<()> {
+    let mut con = TestConnection::new("random_fill");
+    for _ in 0..2 {
+        redis::cmd("random.worker").query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "random_fill"])
+            .query::<()>(&mut con)?;
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(utils::module_path("random_fill")?)
+            .query::<()>(&mut con)?;
+        assert_eq!(
+            redis::cmd("random.generation")
+                .query::<Vec<u8>>(&mut con)?
+                .len(),
+            32
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn test_api_availability_queries_native_presence_and_rejects_nul() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    for (name, expected) in [
+        ("CreateString", 1),
+        ("AddPostNotificationJob", 1),
+        ("DefinitelyNotARedisModuleAPI", 0),
+        ("", 0),
+        ("createstring", 0),
+        ("RedisModule_CreateString", 0),
+        ("not_an_api_\u{2603}", 0),
+    ] {
+        let found: i64 = redis::cmd("api.available").arg(name).query(&mut con)?;
+        assert_eq!(found, expected, "{name:?}");
+    }
+    let error = redis::cmd("api.available")
+        .arg("CreateString\0ignored")
+        .query::<i64>(&mut con)
+        .unwrap_err();
+    assert!(error.to_string().contains("nul byte"), "{error}");
+    Ok(())
+}
+
+#[test]
+fn test_api_availability_missing_lookup_is_an_error_and_recovers() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    let error = redis::cmd("api.missing_lookup")
+        .query::<i64>(&mut con)
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("RedisModule_GetApi is not available"),
+        "{error}"
+    );
+    assert_eq!(
+        redis::cmd("api.available")
+            .arg("CreateString")
+            .query::<i64>(&mut con)?,
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn test_api_availability_missing_job_releases_captures_without_panicking() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    for _ in 0..2 {
+        let counts: Vec<i64> = redis::cmd("api.missing_job").query(&mut con)?;
+        assert_eq!(counts, [1, 0], "drop captures once, without running them");
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    assert!(!con.server_log()?.contains("panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "api_availability"])
+        .query::<()>(&mut con)?;
+    Ok(())
+}
+
 #[cfg(feature = "redis-7-2-examples")]
 #[test]
 fn test_notification_job_rejection_releases_captures() -> Result<()> {
@@ -62,6 +311,117 @@ mod notification_write_tests {
 
     fn stats(con: &mut TestConnection) -> Result<Vec<i64>> {
         Ok(redis::cmd("notify_stream.stats").query(con)?)
+    }
+
+    fn unload(con: &mut TestConnection) -> Result<()> {
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "keyspace_to_stream"])
+            .query::<()>(con)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_notification_jobs_refuse_queued_unload_before_deinit() -> Result<()> {
+        for mode in ["event", "run", "cancel", "panic"] {
+            let mut con = TestConnection::new("keyspace_to_stream");
+            redis::cmd("MULTI").query::<String>(&mut con)?;
+            if mode == "event" {
+                redis::cmd("SET")
+                    .arg(&["watched:queued", "value"])
+                    .query::<Value>(&mut con)?;
+            } else {
+                redis::cmd("notify_stream.job_probe")
+                    .arg(mode)
+                    .query::<Value>(&mut con)?;
+            }
+            redis::cmd("MODULE")
+                .arg(&["UNLOAD", "keyspace_to_stream"])
+                .query::<Value>(&mut con)?;
+            redis::cmd("EXEC")
+                .query::<Value>(&mut con)
+                .expect_err("unload accepted with a Redis-owned callback");
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+            assert!(
+                con.server_log()?
+                    .contains("pending or executing post-notification jobs")
+            );
+            if mode == "event" {
+                assert_eq!(entries(&mut con)?.len(), 1);
+            } else {
+                let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut con)?;
+                assert_eq!(counts, [1, i64::from(mode != "cancel")]);
+            }
+            // Refusal must not enter deinit and leave STOPPING set.
+            let before = stats(&mut con)?[1];
+            redis::cmd("SET")
+                .arg(&["watched:after-refusal", "value"])
+                .query::<()>(&mut con)?;
+            assert_eq!(stats(&mut con)?[1], before + 1);
+            unload(&mut con)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_notification_job_execution_and_panics_release_ownership() -> Result<()> {
+        for mode in ["unload", "panic", "drop-panic"] {
+            let mut con = TestConnection::new("keyspace_to_stream");
+            let accepted: Vec<i64> = redis::cmd("notify_stream.job_probe")
+                .arg(mode)
+                .query(&mut con)?;
+            assert_eq!(accepted, [1, 0]);
+            let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut con)?;
+            assert_eq!(counts, [1, 1]);
+            let log = con.server_log()?;
+            if mode == "unload" {
+                assert!(log.contains("pending or executing post-notification jobs"));
+            } else {
+                assert!(log.contains("probe panic") || log.contains("capture drop panic"));
+            }
+            unload(&mut con)?;
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        }
+        let primary = TestConnection::new("keyspace_to_stream");
+        let mut replica = primary.replica()?;
+        redis::cmd("notify_stream.job_probe")
+            .arg("drop-panic")
+            .query::<Value>(&mut replica)
+            .expect_err("rejected capture destructor should panic inside the command adapter");
+        let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut replica)?;
+        assert_eq!(counts, [1, 0]);
+        unload(&mut replica)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_notification_jobs_refuse_load_and_unload_submission_and_recover() -> Result<()> {
+        let mut con =
+            TestConnection::with_args("keyspace_to_stream", &["probe-load", "probe-unload"]);
+        let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut con)?;
+        assert_eq!(counts, [1, 0]);
+        assert!(con.server_log()?.contains("load job probe refused"));
+        unload(&mut con)?;
+        assert!(con.server_log()?.contains("unload job probe refused"));
+        let path = utils::module_path("keyspace_to_stream")?;
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(&path)
+            .arg("fail-load")
+            .query::<()>(&mut con)
+            .expect_err("probe fixture should reject its load");
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(path)
+            .arg("probe-load")
+            .query::<()>(&mut con)?;
+        let before: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut con)?;
+        let accepted: Vec<i64> = redis::cmd("notify_stream.job_probe").query(&mut con)?;
+        assert_eq!(accepted, [1, 0]);
+        let after: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut con)?;
+        assert_eq!(after, [before[0] + 1, before[1] + 1]);
+        unload(&mut con)?;
+        Ok(())
     }
 
     #[test]
@@ -4372,6 +4732,123 @@ fn test_server_event() -> Result<()> {
 
     assert!(res > 0);
 
+    Ok(())
+}
+
+#[test]
+fn test_runtime_server_event_fanout_and_panics() -> Result<()> {
+    let mut con = TestConnection::with_args("runtime_server_events", &["off"]);
+    let counts = |con: &mut TestConnection| -> Result<Vec<i64>> {
+        Ok(redis::cmd("runtime_server.counts").query(con)?)
+    };
+    assert_eq!(
+        counts(&mut con)?[1],
+        0,
+        "conditional cron handler is disabled"
+    );
+    redis::cmd("runtime_server.subscribe").query::<()>(&mut con)?;
+    redis::cmd("runtime_server.subscribe").query::<()>(&mut con)?;
+    let before = counts(&mut con)?;
+    utils::wait_until(Duration::from_secs(2), "both cron handlers", || {
+        let after = counts(&mut con)?;
+        let ticks = after[0] - before[0];
+        Ok(ticks > 0 && after[1] - before[1] == ticks)
+    })?;
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    assert_eq!(&counts(&mut con)?[2..], &[1, 1, 1, 0]);
+    assert_eq!(
+        redis::cmd("runtime_server.order").query::<Vec<i64>>(&mut con)?,
+        vec![0, 1, 2]
+    );
+    redis::cmd("runtime_server.flags")
+        .arg(&["yes", "no"])
+        .query::<()>(&mut con)?;
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    assert_eq!(&counts(&mut con)?[2..], &[2, 2, 2, 1]);
+    assert_eq!(
+        redis::cmd("runtime_server.order").query::<Vec<i64>>(&mut con)?,
+        vec![0, 1, 2, 3]
+    );
+    assert!(con.server_log()?.contains("flush event handler panicked"));
+    Ok(())
+}
+
+#[test]
+fn test_runtime_server_event_refusals_and_runtime_only_payload() -> Result<()> {
+    let mut con = TestConnection::new("runtime_server_events");
+    for (mode, message) in [
+        ("missing", "unavailable"),
+        ("rejected", "subscription failed"),
+    ] {
+        let error = redis::cmd("runtime_server.refuse")
+            .arg(mode)
+            .query::<()>(&mut con)
+            .unwrap_err();
+        assert!(error.to_string().contains(message), "{error}");
+    }
+    redis::cmd("SWAPDB").arg(&[2, 5]).query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("runtime_server.swaps").query::<i64>(&mut con)?,
+        0
+    );
+    for _ in 0..2 {
+        redis::cmd("runtime_server.subscribe_swap").query::<()>(&mut con)?;
+    }
+    redis::cmd("SWAPDB").arg(&[2, 5]).query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("runtime_server.swaps").query::<i64>(&mut con)?,
+        1
+    );
+    assert!(con.server_log()?.contains("runtime swap: 2 5"));
+    Ok(())
+}
+
+#[test]
+fn test_runtime_server_event_lifecycle() -> Result<()> {
+    let mut con = TestConnection::with_args("runtime_server_events", &["on"]);
+    let module = utils::module_path("runtime_server_events")?;
+    // A rejected unload must retain both the native adapter and its handlers.
+    redis::cmd("runtime_server.flags")
+        .arg(&["no", "yes"])
+        .query::<()>(&mut con)?;
+    assert!(
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "runtime_server_events"])
+            .query::<()>(&mut con)
+            .is_err()
+    );
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    let counts: Vec<i64> = redis::cmd("runtime_server.counts").query(&mut con)?;
+    assert_eq!(&counts[2..], &[1, 1, 1, 0]);
+    redis::cmd("runtime_server.flags")
+        .arg(&["no", "no"])
+        .query::<()>(&mut con)?;
+    for failed in [None, Some("fail"), Some("panic")] {
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", "runtime_server_events"])
+            .query::<()>(&mut con)?;
+        // No callback may remain in Redis after successful unload.
+        redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+        if let Some(mode) = failed {
+            assert!(
+                redis::cmd("MODULE")
+                    .arg(&["LOAD", &module, mode])
+                    .query::<()>(&mut con)
+                    .is_err()
+            );
+            redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+        }
+        redis::cmd("MODULE")
+            .arg(&["LOAD", &module, "off"])
+            .query::<()>(&mut con)?;
+        redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+        let counts: Vec<i64> = redis::cmd("runtime_server.counts").query(&mut con)?;
+        assert_eq!(
+            &counts[2..],
+            &[1, 0, 0, 0],
+            "runtime handlers survived a rejected load or successful unload"
+        );
+    }
     Ok(())
 }
 

@@ -471,6 +471,8 @@ macro_rules! redis_module {
                 return raw::Status::Err as c_int;
             }
 
+            // Keep submission refused through failed-load captured destructors.
+            let _post_notification_load = $crate::__private::PostNotificationLoadGuard::begin();
             // SAFETY: Init succeeded and this is the module's native OnLoad.
             let configuration_load = match unsafe { $crate::__private::ConfigurationLoad::begin(ctx) } {
                 Ok(load) => load,
@@ -680,6 +682,9 @@ macro_rules! redis_module {
             // Captured destructors run after init panic containment, never while
             // unwinding the load callback.
             configuration_load.finish(status);
+            if status != raw::Status::Ok as c_int {
+                $crate::server_events::__clear_runtime_handlers();
+            }
             if detached_stored && status != raw::Status::Ok as c_int {
                 // Redis frees a module whose load fails without calling OnUnload.
                 // SAFETY: OnLoad holds the Redis lock and the module still exists.
@@ -700,6 +705,15 @@ macro_rules! redis_module {
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
                     let context = unsafe { $crate::EventContext::new(ctx) };
+                    // Redis does not count these callbacks as blocked clients.
+                    // Refuse before destructive user deinit or other teardown.
+                    let _post_notification_unload = match $crate::__private::PostNotificationUnloadGuard::begin() {
+                        Ok(guard) => guard,
+                        Err(error) => {
+                            context.log_warning(&format!("{error}"));
+                            return $crate::Status::Err as c_int;
+                        }
+                    };
                     // Check native CONFIG quiescence before user deinit.
                     // SAFETY: This is the module's native OnUnload callback.
                     let configuration_unload = match unsafe { $crate::__private::ConfigurationUnload::begin(&context) } {
@@ -738,6 +752,7 @@ macro_rules! redis_module {
                         return $crate::Status::Err as c_int;
                     }
                     timer_unload.commit();
+                    $crate::server_events::__clear_runtime_handlers();
                     // A later load of a retained image needs a fresh context.
                     // SAFETY: OnUnload holds the Redis lock and the module still exists.
                     unsafe { $crate::MODULE_CONTEXT.__release() };

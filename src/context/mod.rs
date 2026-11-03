@@ -27,6 +27,7 @@ use self::thread_safe::RedisLockIndicator;
 
 mod call_user;
 pub use call_user::CallUserScope;
+pub(crate) mod post_notification;
 mod registration;
 mod views;
 pub use views::{EventContext, RuntimeContext, WorkerContext};
@@ -799,6 +800,140 @@ impl Context {
 }
 
 impl RuntimeContext {
+    /// Returns Redis's canonical name for `slot`, without adding braces or a prefix.
+    ///
+    /// Slots at or above [`crate::cluster::SLOTS`] return `Ok(None)` without
+    /// accessing the native API. For valid slots, an unavailable API (Redis
+    /// before 7.4), an unexpected null name or invalid UTF-8 is an error at every
+    /// compatibility floor. The result owns a copy of the native name.
+    ///
+    /// This follows the running server's table, without promising identical
+    /// names across server versions. It does not discover ownership or grant
+    /// permission. There is no automatic fallback: [`crate::cluster::key_for_slot`]
+    /// generates different, SDK-stable names and remains a separate choice.
+    /// Changing name generators for existing data can change stored key names.
+    ///
+    /// Registration, client, event and locked worker views expose this method.
+    /// The runtime view proves initialization and holds the Redis lock while
+    /// reading the binding and copying the name.
+    ///
+    /// ```no_run
+    /// fn stream_key(ctx: &redis_module::RuntimeContext, slot: u16)
+    ///     -> Result<Option<String>, redis_module::RedisError>
+    /// {
+    ///     Ok(ctx.canonical_key_for_slot(slot)?.map(|tag| format!("module:{{{tag}}}:events")))
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// redis_module::ThreadSafeContext::new().canonical_key_for_slot(0);
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// redis_module::MODULE_CONTEXT.canonical_key_for_slot(0);
+    /// ```
+    pub fn canonical_key_for_slot(&self, slot: u16) -> Result<Option<String>, RedisError> {
+        if slot >= crate::cluster::SLOTS {
+            return Ok(None);
+        }
+        let canonical =
+            unsafe { crate::__available_api!(RedisModule_ClusterCanonicalKeyNameInSlot) };
+        // SAFETY: the runtime view proves initialization and the Redis lock.
+        // Redis returns a borrowed NUL-terminated entry in its immutable slot
+        // table. Check null and copy it before returning; no pointer escapes.
+        let name = unsafe { canonical(slot.into()) };
+        if name.is_null() {
+            return Err(RedisError::Str("ERR canonical slot name is null"));
+        }
+        Ok(Some(unsafe { CStr::from_ptr(name) }.to_str()?.to_owned()))
+    }
+
+    /// Fills exactly `destination` with bytes from Redis's random generator.
+    ///
+    /// Does not allocate an output buffer. An empty buffer succeeds
+    /// without calling the generator, after checking that the API is available.
+    /// A missing native API returns an error without changing the buffer, at
+    /// every compatibility floor.
+    ///
+    /// Redis's generator is not thread safe. This runtime view proves that
+    /// Redis is initialized and its lock stays held throughout the call.
+    /// An unlocked worker-context owner does not expose this operation:
+    ///
+    /// ```compile_fail,E0599
+    /// let owner = redis_module::ThreadSafeContext::new();
+    /// owner.fill_random_bytes(&mut [0; 8]);
+    /// ```
+    ///
+    /// ```compile_fail,E0599
+    /// redis_module::MODULE_CONTEXT.fill_random_hex(&mut [0; 8]);
+    /// ```
+    pub fn fill_random_bytes(&self, destination: &mut [u8]) -> Result<(), RedisError> {
+        let random = unsafe { crate::__available_api!(RedisModule_GetRandomBytes) };
+        if !destination.is_empty() {
+            // SAFETY: the view holds the Redis lock; the exclusive slice
+            // supplies a writable buffer of exactly this length.
+            unsafe { random(destination.as_mut_ptr(), destination.len()) };
+        }
+        Ok(())
+    }
+
+    /// Fills exactly `destination` with lowercase ASCII hex characters (0-9, a-f).
+    ///
+    /// The length counts output characters, can be odd, and includes no trailing
+    /// NUL. Does not allocate an output buffer. Empty buffers succeed
+    /// after checking availability; a missing API leaves the buffer unchanged.
+    /// Like [`Self::fill_random_bytes`], this uses Redis's generator under the
+    /// runtime view's initialization and Redis-lock guarantees.
+    ///
+    /// ```no_run
+    /// fn generation(ctx: &redis_module::RuntimeContext) -> Result<[u8; 32], redis_module::RedisError> {
+    ///     let mut id = [0; 32];
+    ///     ctx.fill_random_hex(&mut id)?;
+    ///     Ok(id)
+    /// }
+    /// ```
+    pub fn fill_random_hex(&self, destination: &mut [u8]) -> Result<(), RedisError> {
+        let random = unsafe { crate::__available_api!(RedisModule_GetRandomHexChars) };
+        if !destination.is_empty() {
+            // SAFETY: as above. The native hex API takes char*, but writes
+            // exactly destination.len() bytes, with no C-string terminator.
+            unsafe { random(destination.as_mut_ptr().cast(), destination.len()) };
+        }
+        Ok(())
+    }
+
+    /// Whether the running server provides a native module API.
+    ///
+    /// Pass its case-sensitive short name, such as `AddPostNotificationJob`,
+    /// without the `RedisModule_` prefix. Unknown or unavailable names return
+    /// `false`; an interior NUL or an unavailable native lookup API is an error.
+    /// This queries the server, independently of the SDK's compatibility floor
+    /// and cached raw bindings. It reports presence, not whether this context
+    /// has permission or the capabilities to call that API.
+    ///
+    /// Like other runtime operations, this requires an initialized context and
+    /// the Redis lock. Client, registration, event and locked worker views all
+    /// expose this method through their runtime view.
+    ///
+    /// ```no_run
+    /// fn require_jobs(ctx: &redis_module::RuntimeContext) -> Result<(), redis_module::RedisError> {
+    ///     if !ctx.api_available("AddPostNotificationJob")? {
+    ///         return Err(redis_module::RedisError::Str("ERR post-notification jobs unavailable"));
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn api_available(&self, name: &str) -> Result<bool, RedisError> {
+        let name = CString::new(format!("RedisModule_{name}"))?;
+        let get_api = unsafe { crate::__available_api!(RedisModule_GetApi) };
+        let mut api: *mut c_void = ptr::null_mut();
+        // SAFETY: the runtime view proves initialization and the Redis lock.
+        // The C string lives through the lookup, and Redis writes one pointer
+        // into our local slot. No function pointer escapes or is invoked.
+        let status = unsafe { get_api(name.as_ptr(), ptr::addr_of_mut!(api).cast()) };
+        Ok(status == raw::REDISMODULE_OK as c_int && !api.is_null())
+    }
+
     /// Logs `message` at `level` with the module name.
     /// Embedded NUL bytes are written as `\0`, which reads the same as a literal
     /// backslash and zero; other text is passed literally.
@@ -1324,9 +1459,10 @@ impl RuntimeContext {
         Ok((status, errno))
     }
 
-    /// Verify the the given user has the give ACL permission on the given key.
-    /// Return Ok(()) if the user has the permissions or error (with relevant error message)
-    /// if the validation failed.
+    /// Checks the named account's ACL permissions on the given key.
+    /// Permission checks can succeed for an existing account marked `off`.
+    /// Check enabled state separately when deferred work must stop after its
+    /// account is disabled; this method checks rules rather than authentication.
     pub fn acl_check_key_permission(
         &self,
         user_name: &RedisString,
@@ -1408,10 +1544,14 @@ impl RuntimeContext {
     /// does. The arguments matter for the key permissions of the command and for
     /// rules on subcommands.
     ///
+    /// These native checks can authorize an existing account marked `off`.
+    /// Check enabled state separately when deferred work must stop after its
+    /// account is disabled; permission checks do not authenticate a client.
+    ///
     /// # Errors
     ///
     /// Returns an error starting with `NOPERM` if the user may not run the
-    /// command, and an error if the user does not exist or is disabled, `args`
+    /// command, and an error if the user lookup fails, `args`
     /// is empty, the command does not exist, or the running Redis does not
     /// provide the API (before 7.0).
     pub fn acl_check_command_permission(
@@ -1445,10 +1585,14 @@ impl RuntimeContext {
     /// `RedisModule_ACLCheckChannelPermissions` does. Unsubscribing is always
     /// allowed.
     ///
+    /// These native checks can authorize an existing account marked `off`.
+    /// Check enabled state separately when deferred work must stop after its
+    /// account is disabled; permission checks do not authenticate a client.
+    ///
     /// # Errors
     ///
     /// Returns an error starting with `NOPERM` if the user may not access the
-    /// channel, and an error if the user does not exist or is disabled, or the
+    /// channel, and an error if the user lookup fails or the
     /// running Redis does not provide the API (before 7.0).
     pub fn acl_check_channel_permission(
         &self,
@@ -1564,49 +1708,98 @@ impl EventContext {
         unsafe { raw::export_shared_api(self.ctx, func, name) }
     }
 
-    api!(
-        [RedisModule_AddPostNotificationJob],
-        /// Defers work from a keyspace notification until Redis permits writes.
-        /// Requires Redis 7.2+. The job receives a fresh event view in the
-        /// database selected when it was queued and runs as part of the same
-        /// execution unit, rather than on a worker thread or timer.
-        ///
-        /// Capture owned data: callback key bytes and context references must
-        /// not escape their invocation. Jobs can produce more notifications;
-        /// exclude output keys before scheduling to prevent feedback loops.
-        ///
-        /// Redis rejects submission while loading or on a readonly replica.
-        /// On rejection, the closure and its captures are dropped immediately.
-        /// On acceptance, Redis owns the job until execution and cleanup.
-        /// Callback panics are caught and logged by the SDK.
-        ///
-        /// With a 7.2+ compatibility floor the result is [`Status`]; older
-        /// floors return `APIResult<Status>` and can report a missing API.
-        /// Scheduling successfully does not promise the later write succeeds.
-        /// See the [notification write guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/KEYSPACE-NOTIFICATIONS.md)
-        /// for replication, role/loading gates, database scopes and teardown.
-        pub fn add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
-            &self,
-            callback: F,
-        ) -> Status {
-            let callback = Box::into_raw(Box::new(Some(callback)));
-            let status = unsafe {
-                RedisModule_AddPostNotificationJob(
-                    self.ctx,
-                    Some(post_notification_job::<F>),
-                    callback as *mut c_void,
-                    Some(post_notification_job_free_callback::<F>),
-                )
-            }
-            .into();
-            if status == Status::Err {
-                // Redis rejected the job before taking ownership. It will not
-                // invoke either callback, so release our closure and captures.
-                unsafe { drop(Box::from_raw(callback)) };
-            }
-            status
+    #[cfg(not(any(
+        feature = "min-redis-compatibility-version-6-0",
+        feature = "min-redis-compatibility-version-6-2",
+        feature = "min-redis-compatibility-version-7-0"
+    )))]
+    /// Defers work from a keyspace notification until Redis permits writes.
+    /// Requires Redis 7.2+. The job receives a fresh event view in the
+    /// database selected when it was queued and runs as part of the same
+    /// execution unit, rather than on a worker thread or timer.
+    ///
+    /// Capture owned data: callback key bytes and context references must
+    /// not escape their invocation. Jobs can produce more notifications;
+    /// exclude output keys before scheduling to prevent feedback loops.
+    ///
+    /// Redis rejects submission while loading or on a readonly replica.
+    /// On rejection, the closure and its captures are dropped immediately.
+    /// On acceptance, Redis owns the job until execution and cleanup.
+    /// Callback panics are caught and logged by the SDK.
+    /// Modules using `redis_module!` refuse unload until native cleanup
+    /// releases every accepted job, including empty/cancelled work. They
+    /// reject submission during load and unload, dropping captures immediately.
+    ///
+    /// With a 7.2+ compatibility floor the result is [`Status`]; older
+    /// floors return `APIResult<Status>` and can report a missing API.
+    /// At a 7.2+ floor, a missing API returns `Status::Err` instead of
+    /// panicking. Captures are released on either missing-API path.
+    /// Scheduling successfully does not promise the later write succeeds.
+    /// See the [notification write guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/KEYSPACE-NOTIFICATIONS.md)
+    /// for replication, role/loading gates, database scopes and teardown.
+    pub fn add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
+        &self,
+        callback: F,
+    ) -> Status {
+        self.try_add_post_notification_job(callback)
+            .unwrap_or(Status::Err)
+    }
+
+    /// Defers owned work from a keyspace notification until Redis permits writes.
+    /// Requires Redis 7.2+ at runtime. The fresh event view uses the database
+    /// selected when queued; the job runs in the same execution unit, not on a
+    /// worker or timer. Exclude output keys to avoid notification feedback loops.
+    ///
+    /// Older compatibility floors return an API error when the native API is
+    /// missing, and `Ok(Status::Err)` on refused submission. At 7.2+ floors the
+    /// return type is `Status`, with `Status::Err` for either case. Every refusal
+    /// immediately drops the closure and its captures. Accepted jobs are owned
+    /// by Redis until execution and cleanup, with callback panics caught/logged.
+    /// Generated module load/unload refuses new jobs; unload refuses until all
+    /// accepted jobs have been cleaned up, including empty/cancelled work.
+    /// Scheduling successfully does not promise the later write succeeds.
+    /// See the [notification write guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/KEYSPACE-NOTIFICATIONS.md).
+    #[cfg(any(
+        feature = "min-redis-compatibility-version-6-0",
+        feature = "min-redis-compatibility-version-6-2",
+        feature = "min-redis-compatibility-version-7-0"
+    ))]
+    pub fn add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
+        &self,
+        callback: F,
+    ) -> crate::apierror::APIResult<Status> {
+        self.try_add_post_notification_job(callback)
+    }
+
+    fn try_add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
+        &self,
+        callback: F,
+    ) -> crate::apierror::APIResult<Status> {
+        // Preserve the older-floor API error while checking before any
+        // ownership transfer, at every floor. The 7.2+ wrapper maps it to
+        // Status::Err instead of using the required-API panic path.
+        let add_job = unsafe { raw::RedisModule_AddPostNotificationJob }
+            .ok_or_else(|| "RedisModule_AddPostNotificationJob does not exists".to_owned())?;
+        let Some(callback) = post_notification::Job::new(callback) else {
+            return Ok(Status::Err);
+        };
+        let callback = Box::into_raw(Box::new(callback));
+        let status = unsafe {
+            add_job(
+                self.ctx,
+                Some(post_notification_job::<F>),
+                callback as *mut c_void,
+                Some(post_notification_job_free_callback::<F>),
+            )
         }
-    );
+        .into();
+        if status == Status::Err {
+            // Redis rejected the job before taking ownership. It will not
+            // invoke either callback, so release our closure and captures.
+            unsafe { drop(Box::from_raw(callback)) };
+        }
+        Ok(status)
+    }
 }
 
 impl ReplyContext {
@@ -1765,7 +1958,7 @@ impl ReplyContext {
 extern "C" fn post_notification_job_free_callback<F: FnOnce(&EventContext)>(pd: *mut c_void) {
     crate::panic::run_callback(
         "post notification job free",
-        || drop(unsafe { Box::from_raw(pd as *mut Option<F>) }),
+        || drop(unsafe { Box::from_raw(pd as *mut post_notification::Job<F>) }),
         || (),
     );
 }
@@ -1774,9 +1967,9 @@ extern "C" fn post_notification_job<F: FnOnce(&EventContext)>(
     ctx: *mut raw::RedisModuleCtx,
     pd: *mut c_void,
 ) {
-    let callback = unsafe { &mut *(pd as *mut Option<F>) };
+    let job = unsafe { &mut *(pd as *mut post_notification::Job<F>) };
     let ctx = unsafe { EventContext::new(ctx) };
-    callback.take().map_or_else(
+    job.callback.take().map_or_else(
         || {
             ctx.log(
                 RedisLogLevel::Warning,

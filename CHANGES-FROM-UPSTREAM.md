@@ -11,9 +11,89 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Native canonical slot names
+
+`RuntimeContext::canonical_key_for_slot` safely copies the running server's
+canonical slot name into an owned `String` (#146). Registration, client, event
+and locked worker views share the API. Invalid slots return `None` before
+native access. Valid slots return errors for an unavailable API (Redis before
+7.4), an unexpected null name or invalid UTF-8, at every compatibility floor.
+No native pointer escapes and no braces or prefix are added. Native names
+follow Redis's table without a new cross-version stability promise.
+
+There is no automatic fallback to `cluster::key_for_slot`, whose exact stable
+names and compatibility fixture are unchanged. Substituting that helper for
+native names can rename persisted keys. The concrete downstream consumer in
+#89 keeps its own explicit Redis 7.2 fallback; this change does not modify it.
+The example and native tests exercise exact bytes, every slot, older servers,
+missing bindings, context views and worker teardown. Upstream has no safe
+wrapper for this native API.
+
+## Context-bound random fills
+
+`RuntimeContext::fill_random_bytes` and `fill_random_hex` wrap Redis's native
+random generator with caller-owned mutable slices (#144). They are shared by
+registration, client, event and locked worker views. Redis documents the
+generator as not thread safe, so the runtime view supplies initialization and
+lock guarantees. The methods fill exactly the supplied slice, without an output
+allocation, and return a missing-binding error before mutation at every floor.
+Empty buffers succeed after checking availability; hex output consists of
+lowercase ASCII characters, including odd lengths, with no NUL terminator.
+The downstream port's per-load generation ID can use `fill_random_hex` in place
+of raw FFI. Native tests cover bounds, context views, missing bindings and worker
+teardown without probabilistic uniqueness assertions.
+
+The design decisions in #51 and #60 preserve owned Rust shared storage and
+`CONFIG GET` through `call`; no retained-native storage or configuration-read
+API is added.
+
+## Native API availability
+
+`RuntimeContext::api_available(&str)` queries Redis's native API registry for a
+case-sensitive short name, such as `AddPostNotificationJob` (#117). Registration,
+client, event and locked worker views share it. The context preserves initialized,
+locked access; the query returns presence, not permission or capability. Unknown
+names return false, interior NUL is an error, and the result is independent of
+the compile-time compatibility floor and cached raw bindings. Upstream has no
+safe context-bound query.
+
+`EventContext::add_post_notification_job` checks its binding before transferring
+callback ownership. A missing API returns `Status::Err` at 7.2+ floors instead of
+panicking; older floors retain their API error. Existing signatures stay intact
+and every refused path releases captures. Native tests hide the lookup and job
+bindings under the Redis lock to verify errors, cleanup and recovery at both
+floors. The `keyspace_to_stream` example checks availability safely during load.
+
+## Post-notification job lifetime
+
+The SDK retains lifecycle accounting for every job accepted by
+`add_post_notification_job` until Redis frees its callback data (#139).
+Generated module unload refuses before user deinit while jobs remain,
+including when application work was cancelled or the callback panicked.
+Submission during generated load/unload returns `Status::Err` and drops
+captures immediately. Failed loads and retained-image reloads cannot inherit
+queued callbacks. Signatures and compatibility floors are unchanged; upstream
+does not protect these jobs in its generated unload. Native tests exercise
+queued and executing jobs, cancellation, callback/destructor panics, native
+submission refusal and load/unload recovery.
+
+## Runtime server-event subscriptions
+
+`EventContext::subscribe_to_server_event` accepts a typed `ServerEventHandler`
+with a static function (#114). One SDK adapter per native event fans out to
+attribute handlers, then runtime handlers in registration order. Repeated
+function addresses are idempotent, including functions registered by attributes.
+Each callback contains panics independently and snapshots handlers before user
+code so reentrant registration is safe. Failed native subscription stores
+nothing. The `redis_module!` lifecycle clears the registry after failed loads
+and successful unloads, while rejected unloads preserve it. Captured closures
+and unsubscribe tokens are outside this API. Upstream offers attribute handlers
+only. The runtime example and integration tests cover conditional registration,
+fan-out, reentrant addition, panics and retained-image load/unload recovery.
+
 ## Redis OSS 8.x header declarations
 
-`src/include/redismodule.h` is upstream's header at `1c84d3d` plus what Redis
+`src/include/redismodule.h` is upstream's header at `a383429` plus what Redis
 OSS 8.10.2's `src/redismodule.h` declares and upstream's lacks, in OSS's text
 and at OSS's positions, so a later refresh from either header stays a small
 diff (#106). The committed bindings include the additions; the SDK adds no
@@ -63,8 +143,11 @@ The header still differs from OSS 8.10.2's:
 - It includes upstream's persistence-event payload
   `RedisModulePersistenceInfoV1` and its `RedisModulePersistenceInfo` alias,
   `REDISMODULE_PERSISTENCEINFO_VERSION` and
-  `REDISMODULE_PERSISTENCE_FLAG_SYNCER` from [upstream PR 490][p490]. OSS
-  8.10.2's header has none of these declarations. They add no API pointers.
+  `REDISMODULE_PERSISTENCE_FLAG_SYNCER` from [upstream PR 490][p490], plus
+  `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`) and its standard-RDB save
+  comment from [upstream PR 491][p491] (#150). OSS 8.10.2's header has none of
+  these declarations. They add no API pointers or compatibility-floor changes;
+  the new flag leaves the existing payload layout and syncer value unchanged.
 - Value 8 has two key type names: upstream's `REDISMODULE_KEYTYPE_GCRA`, from
   a Redis unstable snapshot, and OSS's `REDISMODULE_KEYTYPE_ARRAY`. OSS
   returns a GCRA type only when built with `ENABLE_GCRA`. `KeyType::Array`
@@ -313,6 +396,18 @@ metadata still fails compilation; diagnostic wording may differ.
     header differences above. The upstream review checked all 42 open pull
     requests on 2026-10-29; none had been updated since the previous review
     at 2026-10-22T20:45:00Z. The older pull request assessment stays in #101.
+  - [a383429](https://github.com/RedisLabsModules/redismodule-rs/commit/a383429360733936751bed5758648b01e48e7e55)
+    (2026-11-01, [upstream PR 491][p491]): adds
+    `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`) and its comment for standard
+    RDB saves restored one key at a time. Included in the header and committed
+    bindings by #150, alongside the persistence-event payload, version and syncer
+    flag. This additive declaration changes no API pointer, struct layout,
+    dispatch or compatibility floor.
+- The #148 review checked upstream master at `a383429` and all 42 open pull
+  requests on 2026-11-02 at 16:19:39 UTC. No open pull request had been updated
+  since the recorded cutoff of 2026-10-30T03:42:01Z. The earlier pull request
+  assessments remain unchanged. That review identified only the standard-RDB
+  constant for a new port; #150 now includes its declaration and binding.
 
 ## Upstream issues this fork fixes
 
@@ -374,6 +469,7 @@ in #114 and #55.
 | [487][p487], [488][p488] | Fix ServerInfo::field leak with a null context.; Fix ServerInfo field string leaks with and without auto-memory | closed; 488 merged | The same fix ([813cfa0]), and 488's `None` for a field name with a NUL byte ([9ea85f4]); see Base. |
 | [489][p489] | Add `REDISMODULE_OPTIONS_REQUIRE_LOADED_KEYS_IN_RAM` to redismodule.h | closed; merged | Included in the header and bindings, and exposed as `ModuleOptions::REQUIRE_LOADED_KEYS_IN_RAM`; see Base. |
 | [490][p490] | update redismodule.h with RedisModulePersistenceInfo | closed; merged | Included in the header and bindings: the persistence-event payload, version and syncer flag; see Base. |
+| [491][p491] | add `REDISMODULE_PERSISTENCE_FLAG_STDRDB` to `redismodule.h` | closed; merged | Included in the header and bindings by #150: the standard-RDB persistence flag and comment; payload layout and existing flags stay unchanged. |
 | [100][p100] | Added hash_get macro to allow getting multiple hash fields at once | open | Superseded by `RedisKey::hash_get_multi` and `HMGetResult`, which handle retained values and missing fields without exposing native variadic calls in a caller's macro expansion. No additional port. |
 | [168][p168] | add support for Command filter | open | Deferred with 437: no safe command-filter wrapper exists here. A port needs its own borrowed callback view and audited argument ownership, rather than public raw contexts. The API inventory ranks this gap third; no buildable downstream consumer is identified. |
 | [169][p169] | initial commit of dictionary support | open draft | Deferred: no SDK dictionary wrapper. The draft's native value pointers and iterator lifetimes need an ownership design; Rust collections remain available. Keep the gap in the API inventory until a concrete module needs a native dictionary. |
@@ -628,7 +724,7 @@ These compile unchanged but behave differently:
 | change | behavior change |
 |---|---|
 | [752b2a7], [dd25376] | Keys of the wrong type reply `WRONGTYPE` from `get_value`, the hash getters, `hash_set` and `hash_del`. |
-| [3cb2121] | A denied ACL key check replies `NOPERM ...`; an unknown or disabled user replies `ERR the user does not exist or is disabled`. |
+| [3cb2121] | A denied ACL key check replies `NOPERM ...`; a failed native user lookup replies `ERR the user does not exist or is disabled`. An existing account marked `off` can still pass native lookup and ACL-rule checks, so enabled state requires a separate check. |
 | [b29cd45], [41238c3] | `Context::call` returns `SimpleString` only for simple string replies, so a forwarded bulk reply reaches the client as a bulk string; a call that fails without the `E` flag returns an error. |
 | [7333dba] | Simple string and error replies replace CR, LF and NUL with spaces. |
 | [c478791] | A command that panics gets an error reply instead of aborting the server; other callbacks log the panic. |
@@ -834,3 +930,5 @@ These compile unchanged but behave differently:
 [p469]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/469
 [p482]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/482
 [p484]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/484
+
+[p491]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/491

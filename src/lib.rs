@@ -6,6 +6,9 @@ pub use crate::context::InfoContext;
 pub mod __private {
     pub use crate::configuration::lifecycle::{ConfigurationLoad, ConfigurationUnload};
     pub use crate::context::call_reply::{BlockingCallLoadGuard, BlockingCallUnloadGuard};
+    pub use crate::context::post_notification::{
+        PostNotificationLoadGuard, PostNotificationUnloadGuard,
+    };
     pub use crate::context::timer::{TimerLoadGuard, TimerUnloadGuard};
     pub use ::libc::EBUSY;
     pub use ::linkme;
