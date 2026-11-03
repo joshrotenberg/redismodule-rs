@@ -195,6 +195,11 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --features all-featur
 log path. The project recipes and their shared code are in `.cj/`;
 `cj doc gates` lists the options.
 
+On a checkout with `js/Cargo.toml`, build `redis-module-js` with the same profile
+and compatibility features before running its native tests. `cj run gates`
+includes these builds at both floors; [js/README.md](js/README.md) lists the
+standalone commands.
+
 - `call_blocking`, `BlockingCallOptions` and the `call` and
   `keyspace_to_stream` examples compile only at the Redis 7.2 or later API
   floors. Repeat the example build and tests with `--no-default-features
