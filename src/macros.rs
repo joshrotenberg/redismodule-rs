@@ -170,7 +170,11 @@ macro_rules! __redis_register_commands {
 ///
 /// The existing three-argument form subscribes immediately and returns a native
 /// error status from the enclosing function on failure. `redis_module!` uses
-/// that form for each entry in `event_handlers`.
+/// that form for each entry in `event_handlers`, after `init` succeeds: Redis
+/// before 7.2.4 keeps the keyspace subscriptions of a load that fails and has
+/// no API to remove them. Events raised during `init` therefore do not reach
+/// those handlers. A module that subscribes from `init` itself and then fails
+/// the load leaves that subscription behind on those servers.
 ///
 /// Both forms require an [`EventContext`](crate::EventContext), which SDK load
 /// and command contexts also expose. Worker guards cannot subscribe. Custom
@@ -476,6 +480,7 @@ macro_rules! redis_module {
 
             // Keep submission refused through failed-load captured destructors.
             let _post_notification_load = $crate::__private::PostNotificationLoadGuard::begin();
+            $crate::server_events::__begin_load_subscriptions();
             // SAFETY: Init succeeded and this is the module's native OnLoad.
             let configuration_load = match unsafe { $crate::__private::ConfigurationLoad::begin(ctx) } {
                 Ok(load) => load,
@@ -551,12 +556,6 @@ macro_rules! redis_module {
                         context.log_warning(&format!("{e}"));
                         return raw::Status::Err as c_int;
                     }
-
-                    $(
-                        $(
-                            $crate::redis_event_handler!(&context, $(raw::NotifyEvent::$event_type |)+ raw::NotifyEvent::empty(), $event_handler);
-                        )*
-                    )?
 
                     $(
                         // Bound once here: used inside the groups below, the
@@ -674,11 +673,33 @@ macro_rules! redis_module {
                         return raw::Status::Err as c_int;
                     }
 
+                    // Keyspace subscriptions come last: Redis before 7.2.4 keeps
+                    // them after a failed load and cannot remove them, so only
+                    // their API is checked before init.
+                    $(
+                        let keyspace_handlers: &[&str] = &[$( stringify!($event_handler) ),*];
+                        if !keyspace_handlers.is_empty() {
+                            if let Err(error) = $crate::__private::keyspace_subscription_available() {
+                                context.log_warning(&error.to_string());
+                                return raw::Status::Err as c_int;
+                            }
+                        }
+                    )?
+
                     $(
                         if $init_func(&context, &args) == $crate::Status::Err {
                             return $crate::Status::Err as c_int;
                         }
                     )*
+
+                    // RedisModule_SubscribeToKeyspaceEvents does not fail once its
+                    // APIs exist, which was checked before init. A failure here
+                    // would leave the earlier entries subscribed on those servers.
+                    $(
+                        $(
+                            $crate::redis_event_handler!(&context, $(raw::NotifyEvent::$event_type |)+ raw::NotifyEvent::empty(), $event_handler);
+                        )*
+                    )?
 
                     timer_load.commit();
                     event_loop_load.commit();
@@ -690,6 +711,8 @@ macro_rules! redis_module {
             // unwinding the load callback.
             configuration_load.finish(status);
             if status != raw::Status::Ok as c_int {
+                // SAFETY: this is the OnLoad context of a load that failed.
+                unsafe { $crate::server_events::__release_failed_load_subscriptions(ctx) };
                 $crate::server_events::__clear_runtime_handlers();
             }
             if detached_stored && status != raw::Status::Ok as c_int {

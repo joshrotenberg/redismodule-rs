@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and replaced or removed callbacks are dropped with the registry unlocked, so
   their destructors can add or remove descriptors.
 
+- A failed load no longer leaves native event subscriptions into the unloaded
+  module on Redis before 7.2.4, which keeps them itself (#158). The
+  `redis_module!` load removes the server-event subscriptions it made,
+  attribute and runtime handlers alike, and subscribes the `event_handlers`
+  keyspace handlers after `init` succeeds, since Redis has no API to remove
+  keyspace subscriptions before 8.2; their APIs are checked before `init`.
+  Events raised during `init` no longer reach those keyspace handlers.
+
 - A plain blocked client released without a reply no longer waits forever
   (#157). Dropping a `BlockedClient`, or its `ThreadSafeContext`, without a
   reply sends `ERR the blocked client was released without a reply`. When the
@@ -80,6 +88,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   captures immediately, preventing callbacks from surviving a failed load.
 
 ### Added
+
+- **Breaking:** `RedisValue::NullArray` replies as a null array in RESP2
+  (`*-1`) and null in RESP3 (`_`), including inside aggregates (#180).
+  `Null` still sends a RESP2 null bulk string; `None` and `()` conversions
+  keep using it. Exhaustive matches on `RedisValue` need a `NullArray` arm.
 
 - The vendored header and committed bindings add
   `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`), matching upstream PR 491

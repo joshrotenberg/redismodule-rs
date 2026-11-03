@@ -6769,6 +6769,72 @@ fn test_call_reply_status_and_collections() -> Result<()> {
     Ok(())
 }
 
+/// Check exact bytes because client decoders collapse both RESP2 null types.
+/// A following PING also detects missing elements or extra reply bytes.
+fn assert_null_reply_wire(
+    con: &TestConnection,
+    kind: &str,
+    resp2: &str,
+    resp3: &str,
+) -> Result<()> {
+    use std::io::{Read, Write};
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], con.port()));
+    let timeout = Duration::from_secs(5);
+    let mut stream = std::net::TcpStream::connect_timeout(&address, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    let mut parser = redis::Parser::new();
+    for protocol in [2, 3, 2] {
+        stream.write_all(&redis::cmd("HELLO").arg(protocol).get_packed_command())?;
+        parser.parse_value(&mut stream)?.extract_error()?;
+        let mut request = redis::cmd("reply.nulls").arg(kind).get_packed_command();
+        request.extend(redis::cmd("PING").get_packed_command());
+        stream.write_all(&request)?;
+        let expected = format!("{}+PONG\r\n", if protocol == 2 { resp2 } else { resp3 });
+        let mut reply = vec![0; expected.len()];
+        stream
+            .read_exact(&mut reply)
+            .with_context(|| format!("RESP{protocol} {kind} reply and following PING"))?;
+        assert_eq!(reply, expected.as_bytes(), "RESP{protocol} {kind}");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_null_array_reply_wire_types() -> Result<()> {
+    let con = TestConnection::new("reply_types");
+    for (kind, resp2, resp3) in [
+        ("bulk", "$-1\r\n", "_\r\n"),
+        ("array", "*-1\r\n", "_\r\n"),
+        ("empty", "*0\r\n", "*0\r\n"),
+    ] {
+        assert_null_reply_wire(&con, kind, resp2, resp3)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_null_array_nested_reply_alignment() -> Result<()> {
+    let mut con = TestConnection::new("reply_types");
+    let server: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let native_maps = server
+        .lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .context("INFO server reports redis_version")?
+        .trim()
+        .split('.')
+        .next()
+        .context("major version")?
+        .parse::<u32>()?
+        >= 7;
+    let resp2_map = "*2\r\n$3\r\nkey\r\n*-1\r\n";
+    let resp2 = format!("*7\r\n$-1\r\n*-1\r\n*0\r\n{resp2_map}{resp2_map}{resp2_map}+after\r\n");
+    let header = if native_maps { "%1" } else { "*2" };
+    let resp3_map = format!("{header}\r\n$3\r\nkey\r\n_\r\n");
+    let resp3 = format!("*7\r\n_\r\n_\r\n*0\r\n{resp3_map}{resp3_map}{resp3_map}+after\r\n");
+    assert_null_reply_wire(&con, "nested", &resp2, &resp3)
+}
+
 /// Redis before 7.0 has no module API for the RESP3 reply types, so there
 /// every client gets what Redis 7 sends a RESP2 client, and a verbatim reply
 /// keeps its type only in the `txt` format.
@@ -6951,6 +7017,58 @@ fn test_reply_elements_match_their_aggregate_length() -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// A load that fails after subscribing to keyspace and server events leaves
+/// no native subscription behind. Redis before 7.2.4 keeps a failed load's
+/// subscriptions itself, so a later event would call into the unloaded module;
+/// CI runs this against Redis 7.0.15 for that reason. A successful load then
+/// gets every handler.
+#[test]
+fn test_failed_load_leaves_no_event_subscriptions() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    let path = utils::module_path("failed_load")?;
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(&path)
+        .arg("fail")
+        .query::<()>(&mut con)
+        .expect_err("the module refused its load");
+    // Each of these would deliver an event to the failed load's handlers.
+    redis::cmd("SET")
+        .arg(&["failed_load:key", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SWAPDB")
+        .arg(&["0", "1"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SWAPDB")
+        .arg(&["0", "1"])
+        .query::<()>(&mut con)?;
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    // Several cron ticks at the default hz.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(&path)
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["failed_load:key", "value"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SWAPDB")
+        .arg(&["0", "1"])
+        .query::<()>(&mut con)?;
+    redis::cmd("FLUSHALL").query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "every handler to run", || {
+        let counts: Vec<i64> = redis::cmd("failed_load.counts").query(&mut con)?;
+        Ok(counts.iter().all(|count| *count > 0))
+    })?;
+    let counts: Vec<i64> = redis::cmd("failed_load.counts").query(&mut con)?;
+    assert_eq!(counts[0], 1, "one SET after the successful load");
+    assert_eq!(counts[1], 2, "one FLUSHALL's start and end");
+    assert_eq!(counts[3], 1, "one SWAPDB after the successful load");
     Ok(())
 }
 

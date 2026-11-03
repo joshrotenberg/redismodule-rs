@@ -732,10 +732,13 @@ if let Some(value) = key.get_value::<MyType>(&MY_TYPE)? {
 
 ### Replies
 
-`RedisValue` has two new variants: `InsertionOrderedMap`, which replies with
-the entries in the order the module added them, and `Error(String)`, an error
-reply with an owned message, which can be an array element or a map value. An
-exhaustive `match` on `RedisValue` needs two more arms.
+`RedisValue` has three new variants: `InsertionOrderedMap`, which replies with
+the entries in the order the module added them; `Error(String)`, an error
+reply with an owned message, which can be an array element or a map value;
+and `NullArray`, a RESP2 null array (`*-1`) or RESP3 null (`_`) (#180).
+Use `NullArray` for stream-style absent arrays, including inside aggregates.
+`Null` remains a RESP2 null bulk string (`$-1`), and `None` and `()` still
+convert to `Null`. Exhaustive matches on `RedisValue` need three more arms.
 
 `RedisValueKey` has a new variant, `SimpleString`, for a map key or set element
 replied as a simple string. A map or set converted from a call reply holds it
@@ -819,6 +822,17 @@ text.
   failed load does for those it added; the descriptors stay open. A callback
   that panics is no longer watched afterwards; before, it stayed registered
   and was skipped on every event.
+
+- **`event_handlers` subscribe after `init`.** `redis_module!` now subscribes
+  the `event_handlers` keyspace handlers once `init` has succeeded, as the last
+  step of the load, so events raised during `init` no longer reach them. Redis
+  before 7.2.4 keeps a failed load's keyspace subscriptions and has no API to
+  remove them, which this avoids. Subscribe from `init` with
+  `subscribe_to_keyspace_events` if a handler must see those events, at the
+  cost of that subscription surviving a later load failure on those servers.
+  Redis calls keyspace subscribers in subscription order, so handlers a module
+  subscribes from `init` now run before its `event_handlers` entries.
+
 - **Blocked clients get one reply.** Dropping a `BlockedClient`, or the
   `ThreadSafeContext` that holds it, without replying now sends
   `ERR the blocked client was released without a reply`; before, the client
