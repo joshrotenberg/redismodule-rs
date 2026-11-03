@@ -11,6 +11,25 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Failed-load event subscriptions
+
+Redis 6.x, 7.0.x and 7.2.0 to 7.2.3 do not remove keyspace or server-event
+subscriptions when `RedisModule_OnLoad` fails, though they remove commands,
+shared and used APIs and, from 7.0, configurations; Redis PR 12809 (7.2.4)
+added the missing unsubscribe. A load that failed after subscribing left the
+subscriptions pointing at the freed module and at code in an image Redis had
+closed, so the next matching event could crash the server (#158).
+
+The `redis_module!` load now records the server events it subscribes to, for
+attribute and runtime handlers, and removes exactly those when the load fails.
+Only those: on every Redis version, passing a null callback for an event the
+module never subscribed to adds a listener with a null callback. Keyspace
+subscriptions cannot be removed before Redis 8.2, so the load checks their
+APIs before `init` and subscribes the `event_handlers` entries after it, as its
+last step. A module that subscribes from `init` and then fails the load still
+leaves that subscription behind on those servers. Upstream subscribes in the
+same order as before and has no issue or pull request for this.
+
 ## Blocked-client replies
 
 `ThreadSafeContext<BlockedClient>::reply` writes to the blocked client's reply

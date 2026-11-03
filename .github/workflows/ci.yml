@@ -253,7 +253,7 @@ jobs:
           cargo build --no-default-features --features min-redis-compatibility-version-7-0 \
             --example configuration_ownership --example configuration \
             --example configuration_getter --example configuration_registration \
-            --example parsed_configuration --example hello
+            --example parsed_configuration --example hello --example failed_load
 
       - name: Test configuration ownership
         run: |
@@ -261,6 +261,14 @@ jobs:
           cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration configuration_ownership:: -- --list | tee "$RUNNER_TEMP/configuration-ownership-tests.txt"
           grep -E '^configuration_ownership::[^ ]+: test$' "$RUNNER_TEMP/configuration-ownership-tests.txt"
           cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration configuration_ownership::
+
+      - name: Test failed-load cleanup
+        # Redis before 7.2.4 keeps a failed load's event subscriptions itself.
+        run: |
+          test_name=test_failed_load_leaves_no_event_subscriptions
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/failed-load-tests.txt"
+          grep -Fx -- "$test_name: test" "$RUNNER_TEMP/failed-load-tests.txt"
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact
 
       - name: Test configuration behavior at the native API floor
         # Worker success/reload coverage needs the newer completion API. The
