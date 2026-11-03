@@ -6981,7 +6981,8 @@ fn test_alloc_alignment() -> Result<()> {
     let res: Vec<Vec<i64>> = redis::cmd("alloc_alignment.check")
         .query(&mut con)
         .with_context(|| "failed to run alloc_alignment.check")?;
-    assert_eq!(res.len(), 7);
+    assert_eq!(res.len(), 8);
+    assert_eq!(res[0][0], 16);
 
     let misaligned: Vec<_> = res.iter().filter(|entry| entry[2] != 0).collect();
     assert!(
@@ -6989,5 +6990,25 @@ fn test_alloc_alignment() -> Result<()> {
         "misaligned boxes as [align, size, count]: {misaligned:?}"
     );
 
+    Ok(())
+}
+
+#[test]
+fn test_alloc_fallible_reserve() -> Result<()> {
+    let mut con = TestConnection::new("alloc_alignment");
+    let available: bool = redis::cmd("alloc_alignment.available").query(&mut con)?;
+    if available {
+        let checks: Vec<i64> = redis::cmd("alloc_alignment.try_reserve").query(&mut con)?;
+        assert_eq!(
+            checks, [1; 8],
+            "allocation, growth, contents, alignment and zeroing"
+        );
+    } else {
+        let error = redis::cmd("alloc_alignment.try_reserve")
+            .query::<Vec<i64>>(&mut con)
+            .expect_err("the exhaustion probe must refuse an aborting allocator");
+        assert!(error.to_string().contains("requires TryAlloc"), "{error}");
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
