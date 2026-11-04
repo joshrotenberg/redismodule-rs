@@ -1,7 +1,48 @@
 use redis_module::{
-    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
+    Context, DetachedContextGuard, MODULE_CONTEXT, NextArg, RedisError, RedisResult, RedisString,
+    RedisValue, ThreadSafeContext, redis_module,
 };
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::thread;
+
+thread_local! {
+    /// A worker's lock guard, which a closure can reach without capturing it.
+    static HELD: RefCell<Option<DetachedContextGuard<'static>>> = const { RefCell::new(None) };
+}
+
+/// `string.lend_probe key`: a worker writes `kept` to `key` through
+/// `with_string_dma` and, inside the closure, tries to delete the key through a
+/// context it reaches from a thread local rather than a capture. Replies with
+/// whether the SDK refused that call.
+fn lend_probe(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let key_name = args.next_string()?;
+    args.done()?;
+    let blocked = ctx.block_client()?;
+    thread::spawn(move || {
+        let reply = ThreadSafeContext::with_blocked_client(blocked);
+        HELD.with(|held| *held.borrow_mut() = Some(MODULE_CONTEXT.lock()));
+        let outcome = HELD.with(|held| -> RedisResult {
+            let held = held.borrow();
+            let ctx = held.as_ref().expect("the guard was just stored");
+            let name = ctx.create_string(key_name.as_str());
+            let mut key = ctx.open_key_writable(&name);
+            let refused = key.with_string_dma(|data| {
+                let refused = HELD.with(|held| {
+                    let held = held.borrow();
+                    let ctx = held.as_ref().expect("the guard is still stored");
+                    ctx.call("DEL", &[key_name.as_str()]).is_err()
+                });
+                data.write(b"kept").map(|_| refused)
+            })??;
+            Ok(RedisValue::Bool(refused))
+        });
+        HELD.with(|held| held.borrow_mut().take());
+        reply.reply(outcome);
+    });
+    Ok(RedisValue::NoReply)
+}
 
 /// `string.collection_lookup kind query [keys ...]`: looks up a byte slice in
 /// native-string collections. Maps return the last matching input index or -1;
@@ -65,9 +106,13 @@ fn string_set(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let value = args.next_arg()?;
 
     let mut key = ctx.open_key_writable(&key_name);
-    let mut dma = key.as_string_dma()?;
-    dma.write(value.as_slice())
-        .map(|_| RedisValue::SimpleStringStatic("OK"))
+    // The closure borrows the argument's bytes, not the RedisString, which
+    // is not Send.
+    let bytes = value.as_slice();
+    key.with_string_dma(|data| {
+        data.write(bytes)
+            .map(|_| RedisValue::SimpleStringStatic("OK"))
+    })?
 }
 
 fn string_get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -81,7 +126,7 @@ fn string_get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let key = ctx.open_key(&key_name);
     let res = key
         .read()?
-        .map_or(RedisValue::Null, |v| RedisValue::StringBuffer(Vec::from(v)));
+        .map_or(RedisValue::Null, RedisValue::StringBuffer);
     Ok(res)
 }
 
@@ -138,5 +183,6 @@ redis_module! {
         ["string.create_nul", string_create_nul, "", 0, 0, 0, ""],
         ["string.collection_lookup", collection_lookup, "readonly", 0, 0, 0, ""],
         ["string.collection_order", collection_order, "readonly", 0, 0, 0, ""],
+        ["string.lend_probe", lend_probe, "write", 1, 1, 1, ""],
     ],
 }

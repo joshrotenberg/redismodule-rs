@@ -127,6 +127,25 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-04: merged SDK master `3d75b9d` into the branch as `df6a985`, then
+  `cf04774` as `dbfd99f`, on top of the branch's PR 192 (`eb3b46d`, #131:
+  wasm compilation in bounded helper processes). They bring SDK PRs 186
+  (#177: `Context::block_client_on_keys`), 188 (#167: Redis 6.0 servers
+  without the capability APIs), 191 (#165: unusual input and stored values
+  are rejected without panics or silent substitution), 194 (#178: command
+  containers and native subcommands) and 193 (#162: owned key reads, and
+  `get_value` and `as_string_dma` become `unsafe` beside scoped `with_value`
+  and `with_string_dma`). The host uses none of them, so no adaptation was
+  needed. The full `wasm/ci/check.sh` on `dbfd99f` ran on Rust 1.94.0 and
+  Redis 8.10.2: 512 tests passed and none failed (the host's 23 unit, 4
+  compiler and 25 library tests, the SDK's 85 unit, 212 integration and 142
+  doc tests, and 21 others), and the working tree, including the four
+  lockfiles, was unchanged afterwards. An earlier run on `df6a985`, at a load
+  average of about 100 to 115 from other builds, failed one test,
+  `compiler_process::tests::terminal_control_reset_neither_discards_valid_exit_nor_invents_proof`,
+  whose cleanup has a 30 ms deadline; it passed in five runs alone and in two
+  runs of the host's unit tests, and the run above passed it.
+
 - 2026-11-03: merged SDK master `1954850` into the branch as `839415e`, then
   `23c4e12` as `677e4ab`, and adapted the host in `5e99373`. They bring SDK
   PRs 187 (#168: CI exercises every compatibility floor and defrag coverage),

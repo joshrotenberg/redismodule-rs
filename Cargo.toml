@@ -141,6 +141,10 @@ name = "keys_pos"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "subcommands"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "registration"
 crate-type = ["cdylib"]
 
@@ -166,6 +170,10 @@ crate-type = ["cdylib"]
 
 [[example]]
 name = "block"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "key_blocking"
 crate-type = ["cdylib"]
 
 [[example]]

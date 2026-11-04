@@ -11,6 +11,99 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Scoped key data borrows
+
+Upstream's `RedisKey::read` returns a slice into the string value,
+`as_string_dma` a mutable view of it, and `get_value` a reference to a native
+type's value, each borrowing only the key handle. `Context::call`, opening the
+same key again, and string DMA through another handle (which can replace a
+shared value) all take `&self`, so safe code could delete, replace or move the
+value while still holding the borrow, a use after free (#162).
+
+`read` now copies, and `with_value`, `with_value_mut` and `with_string_dma`
+lend the data to a closure that must be `Send`. The context, key handles and
+`RedisString` are not `Sync`, so such a closure cannot hold them. A context can
+still be reached without a capture, for example a worker's lock guard kept in
+a thread local, so while the closure runs the SDK also refuses calls, key
+opening and scans, other key operations, `yield_now` and keyspace
+notifications on that thread. The borrowing forms are `unsafe` with their
+rules stated. A handle opened before another handle or a call deleted or
+replaced the same key's value still points at the freed value (#197).
+Upstream has no issue or pull request for this.
+
+## Command containers and subcommands
+
+Upstream has no wrapper for `RedisModule_CreateSubcommand`, and its command
+macros always supply a handler, so a container such as `XGROUP` needed raw
+bindings and a hand-written dispatcher without the SDK's panic guard (#178).
+`CommandBuilder::container` declares a container, `.subcommand` registers
+children with the same metadata and callback handling as top-level commands,
+and `.summary` and `.arity` set the command info `COMMAND DOCS` and
+`COMMAND INFO` report. Redis keeps a container's handler NULL and would call
+it for any call to a container without subcommands, and for a call its arity
+accepts without a subcommand, so registration refuses an empty container and a
+container arity of 1 or -1, and refuses containers before Redis 7.0. Redis
+grants a container's ACL categories to every subcommand, so a container cannot
+have categories; each subcommand sets its own.
+
+## Unusual input and stored values
+
+Command names containing NUL are refused before call or replication arguments
+are converted, rather than panicking through `CString::new(...).unwrap()`
+(#165). `RuntimeContext::replicate` returns the native `Status` so a caller can
+observe refusal; it previously discarded that result. Converting a native RESP3 map whose key is not a supported
+`RedisValueKey`, or a set with an unsupported member, returns an error value
+for that entire aggregate. Nested arrays and map values retain that error in
+the aggregate's slot. Native reply forwarding remains available for callers
+that need Redis's full representation.
+
+Configuration-change event names are decoded with replacement characters for
+invalid UTF-8, inside the callback's panic guard. `catch_panic` leaks caught
+payloads because user-defined payload destructors can panic themselves. Mutex
+configuration getters recover the guarded value from a poisoned lock, keeping
+`CONFIG GET` and `CONFIG REWRITE` from silently substituting fallback values.
+The poison flag itself is retained. `RedisModuleIO::read_string` rejects
+invalid UTF-8; binary RDB strings use `read_string_buffer`. Upstream has no
+issue or pull request for these changes.
+
+## Redis 6.0 capability fallbacks
+
+Keyspace subscriptions no longer require native flag enumeration (#167).
+When `RedisModule_GetKeyspaceNotificationFlagsAll` is unavailable on older
+Redis 6.0 servers, runtime subscriptions and `redis_module!` event handlers
+pass the requested mask unchanged. `NotifyEvent::all()` includes all flags
+known to the SDK; the server emits only events it implements. Native
+subscription support remains required before module initialization.
+
+`ThreadSafeContext::try_lock` and `DetachedContext::try_lock` return `None`
+when `RedisModule_ThreadSafeContextTryLock` is unavailable, preserving their
+nonblocking contract. Neither method falls back to a blocking acquisition.
+Later Redis 6.0 patch releases backport both APIs, so missing-binding probes
+cover the older-server paths as well as native version checks.
+
+## Clients blocked on keys
+
+`Context::block_client_on_keys` wraps key-based blocking with typed owned
+private data (#177). A ready callback returns no value to keep waiting, or a
+value/error to reply and unblock. Timeout, disconnect and null-handle paths
+release the waiter once. Callbacks and data destructors cannot unwind into
+Redis, including when a panic payload has a panicking destructor; owned
+callback snapshots and a nonblocking mutex also protect reentrant cleanup.
+
+`KeyBlockingTimeout` rejects negative and excessively large timeouts before
+native registration, leaving conservative clock headroom. Scripts,
+transactions and all module calls, including calls using `K`, receive
+`Denied(data)` for an immediate fallback. Only indexed network clients can
+wait, and an active SDK lifecycle binding is required: loading, unloading and
+unbound custom-loader invocations are refused before native registration.
+An existing lifecycle lease remains held through callbacks and captured data
+destructors. The SDK blocking APIs refuse a second registration on the same
+network client before it can overwrite the first native handle. The flag-aware
+API requests deletion wakeups where available and otherwise reports ordinary
+readiness behavior. Signaling and an independent owned copy of the callback's ready-key name are available as
+context methods. Redis's blocked-client count prevents unload while a key
+waiter remains. Upstream has no equivalent safe wrapper.
+
 ## Checked key positions
 
 `Context::key_at_pos` was a safe function, but `RedisModule_KeyAtPos` checks

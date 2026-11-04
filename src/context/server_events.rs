@@ -471,44 +471,54 @@ extern "C" fn shutdown_event_callback(
     dispatch_runtime!(handlers, Shutdown, &ctx, "shutdown event handler");
 }
 
+/// # Safety
+///
+/// Each entry in `data.config_names` must be a non-null, NUL-terminated name
+/// readable through this call, as supplied by Redis for a config-change event.
+unsafe fn config_change_names(data: &raw::RedisModuleConfigChange) -> Vec<String> {
+    (0..data.num_changes)
+        .map(|i| {
+            // SAFETY: the caller provides the native event's live names.
+            let name = unsafe { CStr::from_ptr(*data.config_names.add(i as usize)) };
+            name.to_string_lossy().into_owned()
+        })
+        .collect()
+}
+
 extern "C" fn config_change_event_callback(
     ctx: *mut raw::RedisModuleCtx,
     _eid: raw::RedisModuleEvent,
     _subevent: u64,
     data: *mut ::std::os::raw::c_void,
 ) {
-    let data: &raw::RedisModuleConfigChange =
-        unsafe { &*(data as *mut raw::RedisModuleConfigChange) };
-    let config_names: Vec<_> = (0..data.num_changes)
-        .map(|i| unsafe {
-            let name = *data.config_names.offset(i as isize);
-            CStr::from_ptr(name)
-        })
-        .collect();
-    let config_names: Vec<_> = config_names
-        .iter()
-        .map(|v| {
-            v.to_str()
-                .expect("Got a configuration name which is not a valid utf8")
-        })
-        .collect();
-    let ctx = unsafe { EventContext::new(ctx) };
-    let handlers = runtime_handlers();
-    CONFIG_CHANGED_SERVER_EVENTS_LIST
-        .iter()
-        .for_each(|callback| {
-            crate::panic::run_callback(
+    crate::panic::run_callback(
+        "config changed event",
+        || {
+            // SAFETY: Redis supplies the event payload and all name pointers
+            // for this callback. Name decoding is inside the panic guard too.
+            let data = unsafe { &*(data as *const raw::RedisModuleConfigChange) };
+            let names = unsafe { config_change_names(data) };
+            let config_names: Vec<_> = names.iter().map(String::as_str).collect();
+            let ctx = unsafe { EventContext::new(ctx) };
+            let handlers = runtime_handlers();
+            CONFIG_CHANGED_SERVER_EVENTS_LIST
+                .iter()
+                .for_each(|callback| {
+                    crate::panic::run_callback(
+                        "config changed event handler",
+                        || callback(&ctx, config_names.as_slice()),
+                        || (),
+                    );
+                });
+            dispatch_runtime!(
+                handlers,
+                ConfigChanged,
+                &ctx,
                 "config changed event handler",
-                || callback(&ctx, config_names.as_slice()),
-                || (),
+                config_names.as_slice()
             );
-        });
-    dispatch_runtime!(
-        handlers,
-        ConfigChanged,
-        &ctx,
-        "config changed event handler",
-        config_names.as_slice()
+        },
+        || (),
     );
 }
 
@@ -641,4 +651,30 @@ pub fn register_server_events(ctx: &EventContext) -> Result<(), RedisError> {
         Some(shutdown_event_callback),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod config_change_tests {
+    use super::config_change_names;
+    use crate::raw;
+
+    #[test]
+    fn configuration_event_names_keep_valid_text_and_replace_invalid_utf8() {
+        let mut pointers = [c"plain".as_ptr(), c"a\xffb".as_ptr()];
+        let data = raw::RedisModuleConfigChange {
+            version: 1,
+            num_changes: pointers.len() as u32,
+            config_names: pointers.as_mut_ptr(),
+        };
+        // SAFETY: both names are live C string literals through this call.
+        let names = unsafe { config_change_names(&data) };
+        assert_eq!(names, ["plain", "a\u{fffd}b"]);
+        let empty = raw::RedisModuleConfigChange {
+            version: 1,
+            num_changes: 0,
+            config_names: std::ptr::null_mut(),
+        };
+        // SAFETY: an empty event has no name pointers to read.
+        assert!(unsafe { config_change_names(&empty) }.is_empty());
+    }
 }

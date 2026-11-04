@@ -65,6 +65,14 @@ change because `serde_syn` is no longer involved.
 
 ## Changes the compiler reports
 
+### Replication returns a status
+
+`RuntimeContext::replicate` now returns `Status`: check `Status::Err` for a
+refused command name or native replication failure. Calls used as statements
+with a semicolon still compile. Code that required a `()` return, such as a
+function pointer or a unit-returning tail expression, must check or explicitly
+discard the status.
+
 ### Native data types implement `NativeType`
 
 A native data type is a Rust type that implements
@@ -124,10 +132,13 @@ static MY_TYPE: RedisType<MyType> =
   save or rewrite's child process is killed, which fails only that save and
   lets the server remove its partial file, and the server itself aborts, as
   for `SAVE` or `DUMP`.
-- `get_value` and `set_value` take `&RedisType<T>` and return or take `T`, so
-  the turbofish is no longer needed and reading a value as another type does
-  not compile. `T` must be `Send + 'static`: Redis can free values on a
-  background thread, as `UNLINK`, `FLUSHALL ASYNC` and, since Redis 7.4, a
+- `set_value` and the value accessors (`with_value` and `with_value_mut`, or
+  the `unsafe` `get_value`; see
+  [Key data borrows are scoped](#key-data-borrows-are-scoped)) take
+  `&RedisType<T>` and take or lend `T`, so the turbofish is no longer needed
+  and reading a value as another type does not compile. `T` must be
+  `Send + 'static`: Redis can free values on a background thread, as
+  `UNLINK`, `FLUSHALL ASYNC` and, since Redis 7.4, a
   plain `FLUSHALL` do. Hold shared data in an `Arc` rather than an `Rc`. A
   value that holds a `RedisString` needs a wrapper whose `unsafe impl Send`
   states why that is sound, as
@@ -146,6 +157,45 @@ static MY_TYPE: RedisType<MyType> =
 
 See [data_type.rs](../examples/data_type.rs) and
 [native_type.rs](../examples/native_type.rs).
+
+### Key data borrows are scoped
+
+Data borrowed from a key could be freed while still borrowed: the borrow tied
+it to the key handle only, and `Context::call`, opening the key again or
+another handle's string DMA could delete, replace or move the value (#162).
+The safe APIs now copy, or lend the data to a closure that must be `Send`, so
+it cannot hold the context, a key handle or a `RedisString`. While the
+closure runs, the SDK also refuses calls, key opening and scans, other key
+operations, `yield_now` and keyspace notifications on that thread, with an
+`ERR key data is lent to a closure` error, or a panic where the API returns no
+`Result`. The borrowing forms remain as `unsafe` functions whose safety
+sections state the rules.
+
+| 2.x and earlier 3.0 | 3.0 |
+|---|---|
+| `RedisKey::read() -> Result<Option<&[u8]>>` | `read() -> Result<Option<Vec<u8>>>`, or `unsafe read_borrowed()` |
+| `RedisKey::get_value(&TYPE) -> Option<&T>` | `with_value(&TYPE, \|value\| ...)`, or `unsafe get_value` |
+| `RedisKeyWritable::get_value(&TYPE) -> Option<&mut T>` | `with_value_mut(&TYPE, \|value\| ...)`, or `unsafe get_value` |
+| `RedisKeyWritable::as_string_dma() -> StringDMA` | `with_string_dma(\|data\| ...)`, or `unsafe as_string_dma` |
+
+```rust,ignore
+// earlier
+let mut key = ctx.open_key_writable(&name);
+if let Some(value) = key.get_value(&MY_TYPE)? {
+    value.count += 1;
+}
+key.as_string_dma()?.write(bytes)?;
+
+// 3.0
+let mut key = ctx.open_key_writable(&name);
+key.with_value_mut(&MY_TYPE, |value| value.count += 1)?;
+key.with_string_dma(|data| data.write(bytes).map(|_| ()))??;
+```
+
+The closures return a value (`Option<R>` for the value forms, since the key
+may be empty) but cannot return a reference into the key. A closure that needs
+a `RedisString`'s bytes borrows `as_slice()` before the call, since a
+`&[u8]` is `Send` and the `RedisString` is not.
 
 ### Timers use typed handles
 
@@ -256,6 +306,38 @@ sends `ERR the blocked client was released without a reply`; see "Blocked
 clients get one reply" under
 [Changes that compile unchanged](#changes-that-compile-unchanged), and
 [block.rs](../examples/block.rs).
+
+### Clients blocked on keys
+
+Use `Context::block_client_on_keys` for main-thread readiness callbacks rather
+than putting a key-blocked native handle in a `BlockedClient`. Redis owns this
+waiter and frees it after readiness, timeout or disconnect; no worker unblock
+handle is returned. Supply owned `Send + 'static` data, a `KeyBlockingTimeout`,
+a ready callback returning `Result<Option<RedisValue>, RedisError>` and a
+timeout callback returning `RedisResult`. `Ok(None)` means keep waiting;
+`Ok(Some(value))` or an error replies and unblocks. Callback `NoReply` becomes
+an error because a completed wait must send one reply.
+
+Return `RedisValue::NoReply` only for `KeyBlockingResult::Blocked`.
+`KeyBlockingResult::Denied(data)` preserves the data for a non-blocking reply
+inside a transaction, script or any module call, including one using `K`.
+Only indexed network clients can wait. The new API requires an active module
+loaded by `redis_module!` and a tracked SDK command callback; load/unload
+callbacks and custom loaders without that lifecycle binding are refused.
+Do not register another blocked handle for the same network client: all SDK
+blocking entry points refuse that attempt and retain the first waiter.
+Within an SDK-bound module, a raw command callback may invoke its handler
+through the unsafe SDK `panic::run_command` trampoline.
+
+`KeyBlockingTimeout::try_from(0_i64)` and `INFINITE` have no deadline; duration
+conversions round zero and submillisecond values up to one millisecond.
+Negative or excessive millisecond counts fail before native allocation.
+Requested deletion wakeups are enabled on Redis 7.2+ and fall back to ordinary
+readiness on older servers; the `Blocked` result reports the actual flag.
+The ready callback must recheck key state. `blocked_client_ready_key` copies
+Redis's borrowed name into a separate native owner, and `signal_key_as_ready`
+signals the calling client's selected database. See
+[key_blocking.rs](../examples/key_blocking.rs) for a complete example.
 
 ### Blocked-client contexts are not `Sync`
 
@@ -861,17 +943,8 @@ args.done()?;
   existing fields replaced or deleted, instead of a `Status` that read a
   replaced field as an error. `hash_set_by_string` and `hash_del_by_string`
   take the field as a `RedisString`, so it can hold any bytes.
-- `RedisKeyWritable::get_value` and `as_string_dma` take `&mut self`, so the
-  reference they return cannot outlive the key or alias another one. Bind the
-  key with `let mut`.
-
-```rust
-// 3.0
-let mut key = ctx.open_key_writable(&name);
-if let Some(value) = key.get_value(&MY_TYPE)? {
-    value.count += 1;
-}
-```
+- Data borrowed from a key is scoped; see
+  [Key data borrows are scoped](#key-data-borrows-are-scoped).
 
 ### Replies
 
@@ -953,6 +1026,34 @@ take `&Context` instead of a raw pointer.
   and `Clone`. Modules hold pointers to them, never values.
 
 ## Changes that compile unchanged
+
+### RDB text must be UTF-8
+
+`RedisModuleIO::read_string` now returns an error when the stored bytes are not
+valid UTF-8. Previously it replaced invalid bytes with U+FFFD, and a later save
+could persist the altered value. Read arbitrary bytes with
+`read_string_buffer` and choose an explicit decoding policy if the module's
+format permits lossy text.
+
+Converting native RESP3 maps and sets into `RedisValue` also returns an error
+value for an aggregate containing a key or member outside `RedisValueKey`'s
+supported scalar variants, instead of panicking. Forward the native call
+reply directly when its full representation is required.
+
+### Missing optional APIs on older Redis 6.0 servers
+
+`ThreadSafeContext::try_lock` and `MODULE_CONTEXT.try_lock()` return `None`
+when the native nonblocking lock API is missing, as well as when the lock is
+contended (#167). They never wait for a blocking acquisition. A module that
+requires nonblocking locking can check
+`ctx.api_available("ThreadSafeContextTryLock")` before starting its worker.
+
+Keyspace `event_handlers` and runtime subscriptions can load without native
+flag enumeration. They pass the requested mask unchanged in that case:
+`NotifyEvent::all()` means all flags known to this SDK, while the running
+server only emits events it implements. Servers that provide flag enumeration
+keep filtering unsupported bits. Native subscription support is still
+required before `init` runs.
 
 These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply

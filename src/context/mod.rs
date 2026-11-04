@@ -420,6 +420,9 @@ impl DetachedContext {
     /// call waited for the lock. A worker that outlives a reload locks the new
     /// load's context, so stop workers before the module unloads.
     pub fn lock(&self) -> DetachedContextGuard<'_> {
+        // This thread already holds the lock while key data is lent, so
+        // locking again would deadlock the server.
+        crate::key::panic_while_lent();
         let c = self.ctx.load(Ordering::Acquire);
         assert!(!c.is_null(), "Detached context has not been initialized");
         // Redis only takes the lock here; it does not read the context.
@@ -430,9 +433,11 @@ impl DetachedContext {
 
     /// Attempts to acquire the Redis lock without waiting.
     ///
-    /// Returns `None` if the lock cannot be acquired immediately. On success,
-    /// returns the same borrowed worker guard as [`Self::lock`]; dropping it
-    /// releases the lock. Workers can check a stop flag between attempts so
+    /// Returns `None` if the lock cannot be acquired immediately or the server
+    /// has no nonblocking-lock API (older Redis 6.0 servers). It never falls
+    /// back to waiting. On success, returns the same borrowed worker guard as
+    /// [`Self::lock`]; dropping it releases the lock. Workers can check a stop
+    /// flag between attempts so
     /// `MODULE UNLOAD` can join them while holding the Redis lock. Stop workers
     /// before unloading the module, as with [`Self::lock`].
     ///
@@ -457,7 +462,8 @@ impl DetachedContext {
         let c = self.ctx.load(Ordering::Acquire);
         assert!(!c.is_null(), "Detached context has not been initialized");
         // Like Lock, TryLock does not read the context in supported servers.
-        let status = unsafe { crate::__required_api!(RedisModule_ThreadSafeContextTryLock)(c) };
+        let try_lock = unsafe { raw::RedisModule_ThreadSafeContextTryLock }?;
+        let status = unsafe { try_lock(c) };
         if raw::Status::from(status) != raw::Status::Ok {
             return None;
         }
@@ -1092,10 +1098,23 @@ impl RuntimeContext {
         fmt: *const c_char,
         args: T,
     ) -> R {
+        // A closure holding key data could change that key through a call.
+        if crate::key::key_data_lent() {
+            return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                crate::key::LENT_ERROR.into(),
+            ))));
+        }
+        let cmd = match CString::new(command) {
+            Ok(command) => command,
+            Err(_) => {
+                return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                    "ERR command name contains a NUL byte".into(),
+                ))));
+            }
+        };
         let mut call_args: StrCallArgs = args.into();
         let final_args = call_args.args_mut();
 
-        let cmd = CString::new(command).unwrap();
         // RedisModule_Call returns null both for a dry run that would succeed
         // and, without the E flag, for a call that failed; errno tells them
         // apart, so clear it first.
@@ -1216,7 +1235,7 @@ impl RuntimeContext {
     /// let bytes = {
     ///     let guard = owner.lock();
     ///     let key = guard.open_key(name);
-    ///     key.read()?.map(<[u8]>::to_vec)
+    ///     key.read()?
     /// };
     /// # Ok(bytes) }
     /// ```
@@ -1313,9 +1332,12 @@ impl RuntimeContext {
         unsafe { RedisKeyWritable::open_with_flags(self.ctx, key, flags) }
     }
 
-    /// Replicate command to the replica and AOF.
-    pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) {
-        raw::replicate(self.ctx, command, args);
+    /// Replicate a command to the replica and AOF.
+    ///
+    /// Returns [`Status::Err`](raw::Status::Err) if the command name contains
+    /// NUL or Redis refuses the replication. Arguments remain binary-safe.
+    pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> raw::Status {
+        raw::replicate(self.ctx, command, args)
     }
 
     /// How much memory Redis uses relative to its `maxmemory` setting, through
@@ -1367,6 +1389,10 @@ impl RuntimeContext {
         event: &[u8],
         keyname: &RedisString,
     ) -> Result<(), RedisError> {
+        // Subscribers run synchronously and could change the lent key.
+        if crate::key::key_data_lent() {
+            return Err(RedisError::Str(crate::key::LENT_ERROR));
+        }
         let event = CString::new(event)
             .map_err(|_| RedisError::Str("ERR keyspace event name contains a NUL byte"))?;
         let status: Status = unsafe {
@@ -1788,6 +1814,10 @@ impl EventContext {
     /// verified as the Redis main thread. Thread verification supports Linux
     /// and macOS; other platforms refuse yielding.
     pub fn yield_now(&self, mode: YieldMode, busy_reply: Option<&str>) -> Result<(), RedisError> {
+        // Other clients' commands run during a yield.
+        if crate::key::key_data_lent() {
+            return Err(RedisError::Str(crate::key::LENT_ERROR));
+        }
         // Native calls can invoke module callbacks synchronously on a worker;
         // neither this view nor the thread which loaded the module proves it.
         if !crate::configuration::lifecycle::is_main_thread() {
