@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Breaking:** `Context::key_at_pos` returns `Result<(), RedisError>` and
+  refuses a position that is not an argument position of the running command
+  (#161). Redis checked only that the position is positive and later read the
+  argument at it, so an off-by-one in a getkeys-api handler read past the
+  arguments in `COMMAND GETKEYS` and cluster routing. The SDK's command
+  callbacks record the argument count; from a callback registered without
+  them, use the new `unsafe fn key_at_pos_unchecked`.
+
 - Event loop callbacks no longer outlive their module or loop forever after a
   panic (#159). With `redis_module!`, a successful unload stops watching every
   descriptor still watched after `deinit` and a failed load those it added,

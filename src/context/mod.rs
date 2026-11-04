@@ -575,6 +575,36 @@ impl<'a> StrCallArgs<'a> {
     }
 }
 
+thread_local! {
+    /// The argument count of the SDK command callback running on this thread,
+    /// or -1 outside one, for [`Context::key_at_pos`]. A `Cell<c_int>` has no
+    /// destructor, which would keep glibc from unloading the module.
+    static COMMAND_ARGC: std::cell::Cell<c_int> = const { std::cell::Cell::new(-1) };
+}
+
+/// Records the running SDK command callback's argument count until dropped,
+/// restoring the previous one for a command that another command called.
+/// Used by the SDK's command callbacks.
+#[doc(hidden)]
+pub struct CommandArgcScope {
+    previous: c_int,
+}
+
+impl CommandArgcScope {
+    #[must_use]
+    pub fn begin(argc: c_int) -> Self {
+        Self {
+            previous: COMMAND_ARGC.replace(argc),
+        }
+    }
+}
+
+impl Drop for CommandArgcScope {
+    fn drop(&mut self) {
+        COMMAND_ARGC.set(self.previous);
+    }
+}
+
 impl Context {
     /// Runs a call-user scope while preserving client capabilities.
     /// See [`RuntimeContext::with_call_user`] for restoration and error behavior.
@@ -638,12 +668,53 @@ impl Context {
         (unsafe { crate::__required_api!(RedisModule_IsKeysPositionRequest)(self.ctx) }) != 0
     }
 
+    /// Reports the argument at `pos` as one of the command's keys, in a
+    /// keys-position request (see [`Self::is_keys_position_request`]).
+    /// Position 0 is the command name, so keys start at 1.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error, without telling Redis, if `pos` is not an argument
+    /// position of the running command (1 to its argument count minus one),
+    /// or if the running callback was not registered through the SDK, which
+    /// records the argument count of the command callbacks it generates.
+    /// Redis checks only that `pos` is positive and later reads the argument
+    /// at it, so a position past the arguments would read past them; from a
+    /// callback registered another way, use [`Self::key_at_pos_unchecked`].
+    ///
     /// # Panics
     ///
     /// Will panic if `RedisModule_KeyAtPos` is missing in redismodule.h
-    pub fn key_at_pos(&self, pos: i32) {
-        // TODO: This will crash redis if `pos` is out of range.
-        // Think of a way to make this safe by checking the range.
+    pub fn key_at_pos(&self, pos: i32) -> Result<(), RedisError> {
+        let argc = COMMAND_ARGC.get();
+        if argc < 0 {
+            return Err(RedisError::Str(
+                "ERR key positions can only be checked in an SDK command callback",
+            ));
+        }
+        if pos < 1 || pos >= argc {
+            return Err(RedisError::String(format!(
+                "ERR key position {pos} is not an argument position of the command (1 to {})",
+                argc - 1
+            )));
+        }
+        // SAFETY: pos is an argument position of the running command.
+        unsafe { self.key_at_pos_unchecked(pos) };
+        Ok(())
+    }
+
+    /// Reports the argument at `pos` as one of the command's keys without
+    /// checking the position, as [`Self::key_at_pos`] does.
+    ///
+    /// # Safety
+    ///
+    /// `pos` must be between 1 and the running command's argument count
+    /// minus one: Redis reads the argument at it without a bound check.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if `RedisModule_KeyAtPos` is missing in redismodule.h
+    pub unsafe fn key_at_pos_unchecked(&self, pos: i32) {
         unsafe {
             crate::__required_api!(RedisModule_KeyAtPos)(self.ctx, pos as c_int);
         }

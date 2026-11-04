@@ -11,6 +11,19 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Checked key positions
+
+`Context::key_at_pos` was a safe function, but `RedisModule_KeyAtPos` checks
+only that the position is positive, and Redis then reads the argument at each
+reported position: `COMMAND GETKEYS` replies with `argv[pos + 2]`, and cluster
+routing hashes `argv[pos]`. An off-by-one in a getkeys-api handler read past
+the argument vector (#161); upstream marks it with a TODO. The SDK's command
+callbacks now record the running command's argument count, and
+**Breaking:** `key_at_pos` returns `Result<(), RedisError>`, refusing a
+position outside 1 to the count minus one, or any position outside an SDK
+command callback. `unsafe fn key_at_pos_unchecked` keeps the old behavior for
+callbacks registered another way.
+
 ## Event loop lifecycle
 
 Redis keeps watched descriptors and pending one-shots across `MODULE UNLOAD`
