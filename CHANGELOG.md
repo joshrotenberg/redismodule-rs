@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keyspace subscriptions and nonblocking context locks tolerate missing Redis
+  6.2 capability APIs on older Redis 6.0 servers (#167). Without flag
+  enumeration, keyspace handlers request their mask unchanged, including all
+  SDK-known bits for `NotifyEvent::all()`. Both `try_lock` methods return
+  `None` when the native nonblocking lock API is unavailable; they do not
+  acquire a blocking lock instead.
+
 - The `module_config_get` and `module_config_set` commands that
   `redis_module!` registers require the same permissions as `CONFIG` (#160).
   They are registered with `CONFIG`'s flags (`admin deny-script allow-loading

@@ -98,9 +98,6 @@ impl EventContext {
 /// load before `init` instead.
 #[doc(hidden)]
 pub fn keyspace_subscription_available() -> Result<(), RedisError> {
-    unsafe { raw::RedisModule_GetKeyspaceNotificationFlagsAll }.ok_or(RedisError::Str(
-        "ERR keyspace notification flags API is unavailable",
-    ))?;
     unsafe { raw::RedisModule_SubscribeToKeyspaceEvents }.ok_or(RedisError::Str(
         "ERR keyspace subscription API is unavailable",
     ))?;
