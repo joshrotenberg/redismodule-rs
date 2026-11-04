@@ -210,7 +210,13 @@ impl Drop for Invocation<'_> {
 /// `mode` for its calls, yielding to Redis at each epoch. Every guest run, a
 /// call or an instantiation, goes through here, and `run` gets the store only
 /// as a `StoreContextMut`, so it cannot swap the store out of the invocation.
-fn invoke<R>(
+///
+/// # Safety
+///
+/// `ctx` must come from the running command's `&Context`, borrowed for at
+/// least this call: the guest's imports and the epoch callback dereference it
+/// (`CallState::ctx`) until `invoke` returns or unwinds.
+unsafe fn invoke<R>(
     store: &mut Store<CallState>,
     ctx: NonNull<Context>,
     mode: Mode,
@@ -353,9 +359,12 @@ impl Instance {
         store.epoch_deadline_callback(|store| busy::on_epoch(store.data().ctx()));
         // Instantiating can run guest code, so it runs like a call, in loading
         // mode.
-        let library = invoke(&mut store, NonNull::from(ctx), Mode::loading(), |store| {
-            pre.instantiate(store)
-        });
+        // SAFETY: ctx is the command's context, borrowed for this call.
+        let library = unsafe {
+            invoke(&mut store, NonNull::from(ctx), Mode::loading(), |store| {
+                pre.instantiate(store)
+            })
+        };
         Ok(Self {
             store,
             library: library?,
@@ -372,9 +381,12 @@ impl Instance {
         f: impl FnOnce(&Library, StoreContextMut<'_, CallState>) -> anyhow::Result<R>,
     ) -> anyhow::Result<R> {
         let library = &self.library;
-        invoke(&mut self.store, NonNull::from(ctx), mode, |store| {
-            f(library, store)
-        })
+        // SAFETY: ctx is the command's context, borrowed for this call.
+        unsafe {
+            invoke(&mut self.store, NonNull::from(ctx), mode, |store| {
+                f(library, store)
+            })
+        }
     }
 }
 
@@ -827,16 +839,22 @@ mod tests {
             })
             .unwrap();
         let mut store = Store::new(&engine, CallState::new());
-        let instance = invoke(&mut store, context(), Mode::loading(), |store| {
-            linker.instantiate(store, &module)
-        })
-        .unwrap();
+        let instance =
+            invoke_in_test(&mut store, |store| linker.instantiate(store, &module)).unwrap();
         assert!(store.data().ctx.is_none(), "after instantiating");
         (store, instance)
     }
 
-    fn context() -> NonNull<Context> {
-        NonNull::dangling()
+    /// `invoke` with a dangling context, which only the test guest's import
+    /// and `CallState::ctx` look at, and only to see whether one is set.
+    fn invoke_in_test<R>(
+        store: &mut Store<CallState>,
+        run: impl FnOnce(StoreContextMut<'_, CallState>) -> R,
+    ) -> R {
+        // SAFETY: nothing dereferences the context: the test guest's only
+        // import checks whether it is set, the store has no epoch callback,
+        // and no test calls an import that uses it inside an invocation.
+        unsafe { invoke(store, NonNull::dangling(), Mode::loading(), run) }
     }
 
     fn run(
@@ -844,7 +862,7 @@ mod tests {
         instance: &wasmtime::Instance,
         name: &str,
     ) -> anyhow::Result<()> {
-        invoke(store, context(), Mode::loading(), |mut store| {
+        invoke_in_test(store, |mut store| {
             assert!(store.data().ctx.is_some());
             let function = instance.get_typed_func::<(), ()>(&mut store, name)?;
             function.call(&mut store, ())
@@ -855,19 +873,12 @@ mod tests {
     fn every_exit_from_an_invocation_clears_the_context() {
         let (mut store, instance) = guest();
 
-        invoke(&mut store, context(), Mode::loading(), |store| {
-            assert!(store.data().ctx.is_some());
-        });
+        invoke_in_test(&mut store, |store| assert!(store.data().ctx.is_some()));
         assert!(store.data().ctx.is_none(), "after a return");
 
-        let failed = invoke(
-            &mut store,
-            context(),
-            Mode::loading(),
-            |_| -> anyhow::Result<()> {
-                Err(CallError("ERR this function always fails".into()).into())
-            },
-        );
+        let failed = invoke_in_test(&mut store, |_| -> anyhow::Result<()> {
+            Err(CallError("ERR this function always fails".into()).into())
+        });
         assert!(failed.is_err());
         assert!(store.data().ctx.is_none(), "after an error");
 
@@ -897,8 +908,8 @@ mod tests {
 
     #[test]
     fn a_host_import_after_the_invocation_returned_cannot_reach_the_context() {
-        let (mut store, instance) = guest();
-        let _ = run(&mut store, &instance, "trap");
+        let (mut store, _) = guest();
+        invoke_in_test(&mut store, |store| assert!(store.data().ctx.is_some()));
         let state = store.data_mut();
         let reached = catch_unwind(AssertUnwindSafe(|| {
             state.log(LogLevel::Notice, "after the invocation".into());
