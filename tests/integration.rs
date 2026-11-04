@@ -5338,35 +5338,31 @@ fn test_configuration() -> Result<()> {
 fn test_module_config_wrappers_require_config_permissions() -> Result<()> {
     let mut con = TestConnection::new("configuration");
 
-    for category in ["admin", "dangerous"] {
-        let commands: Vec<String> = redis::cmd("ACL").arg(&["CAT", category]).query(&mut con)?;
-        for wrapper in ["configuration.config_get", "configuration.config_set"] {
-            assert!(
-                commands.iter().any(|command| command == wrapper),
-                "{wrapper} is not in @{category}"
-            );
-        }
+    // A user granted only @admin, or only @dangerous, can use the wrappers:
+    // both categories include CONFIG, and the wrappers are in both. (ACL CAT
+    // lists module commands only from Redis 8.0.)
+    for category in ["+@admin", "+@dangerous"] {
+        let user = format!("only{category}");
+        redis::cmd("ACL")
+            .arg(&[
+                "SETUSER",
+                user.as_str(),
+                "on",
+                "nopass",
+                "~*",
+                "-@all",
+                category,
+            ])
+            .query::<()>(&mut con)?;
+        let mut user_con = con.connection()?;
+        redis::cmd("AUTH")
+            .arg(&[user.as_str(), "unused"])
+            .query::<()>(&mut user_con)?;
+        let value: Vec<String> = redis::cmd("configuration.config_get")
+            .arg("i64")
+            .query(&mut user_con)?;
+        assert_eq!(value, ["configuration.i64", "10"], "{user}");
     }
-    // A user with @admin, which includes CONFIG, can use the wrappers.
-    redis::cmd("ACL")
-        .arg(&[
-            "SETUSER",
-            "admin-only",
-            "on",
-            "nopass",
-            "~*",
-            "-@all",
-            "+@admin",
-        ])
-        .query::<()>(&mut con)?;
-    let mut admin_con = con.connection()?;
-    redis::cmd("AUTH")
-        .arg(&["admin-only", "unused"])
-        .query::<()>(&mut admin_con)?;
-    let value: Vec<String> = redis::cmd("configuration.config_get")
-        .arg("i64")
-        .query(&mut admin_con)?;
-    assert_eq!(value, ["configuration.i64", "10"]);
 
     let value: Vec<String> = redis::cmd("configuration.config_get")
         .arg("i64")

@@ -820,7 +820,9 @@ text.
   `CONFIG GET` or `CONFIG SET`. Users who could run them without `CONFIG`
   permission now get `NOPERM` (on Redis 7.0, `ERR acl verification failed`);
   grant `@admin`, or the wrapper and `+config|get` and `+config|set`, to users
-  who should read or change the module's configurations. A module calling its
+  who should read or change the module's configurations. On Redis 7.0, where
+  ACL categories do not cover module commands, allow the wrapper by name and
+  `+config|get` and `+config|set`. A module calling its
   own wrapper through `ctx.call`, or calling `module_config_get` or
   `module_config_set` from a timer or thread-safe context, now gets an error,
   since there is no user to check; call `CONFIG` directly there.
