@@ -1819,6 +1819,14 @@ fn test_command_builder_invalid_definitions_fail_the_load() {
         ("subcommand-key-range", "invalid command key range"),
         ("subcommand-arity-one", "cannot be 1"),
         ("container-empty", "needs at least one subcommand"),
+        (
+            "tip-space",
+            "command tip must be non-empty and contain no space",
+        ),
+        (
+            "key-spec-invalid",
+            "Redis refused the command info of builder.invalid",
+        ),
         ("container-acl", "container cannot have ACL categories"),
         (
             "container-optional-acl",
@@ -3703,6 +3711,99 @@ fn test_subcommands_command_metadata() -> Result<()> {
         .arg(&["GETKEYS", "subcmd.kv", "get", "other"])
         .query(&mut con)?;
     assert_eq!(keys, ["other"]);
+    Ok(())
+}
+
+/// Every field of the command info a builder sets reaches Redis in its one
+/// `SetCommandInfo` call: `COMMAND DOCS` reports the summary, complexity,
+/// since, history and arguments, and `COMMAND INFO` the tips and key specs.
+#[test]
+fn test_command_builder_sets_every_command_info_field() -> Result<()> {
+    let mut con = TestConnection::new("subcommands");
+    let docs: Value = redis::cmd("COMMAND")
+        .arg(&["DOCS", "subcmd.documented"])
+        .query(&mut con)?;
+    let mut strings = Vec::new();
+    reply_strings(&docs, &mut strings);
+    for expected in [
+        "Reads a key",
+        "O(1)",
+        "1.0.0",
+        "1.1.0",
+        "Reads the value as a copy",
+        "1.2.0",
+        "Refuses extra arguments",
+        "key",
+        "The key to read",
+    ] {
+        assert!(
+            strings.iter().any(|s| s == expected),
+            "{expected}: {strings:?}"
+        );
+    }
+    let info = command_info(&mut con, "subcmd.documented")?;
+    let mut strings = Vec::new();
+    reply_strings(&Value::Array(info), &mut strings);
+    for expected in [
+        "nondeterministic_output",
+        "request_policy:all_shards",
+        "the key it reads",
+        "RO",
+        "access",
+    ] {
+        assert!(
+            strings.iter().any(|s| s == expected),
+            "{expected}: {strings:?}"
+        );
+    }
+    Ok(())
+}
+
+/// Key specs carry the flags a key range cannot: `COMMAND GETKEYSANDFLAGS`
+/// reports each subcommand's own, and a user limited to reading keys
+/// (`%R~*`) can run the read-only subcommand but not the overwriting one.
+#[test]
+fn test_command_builder_key_spec_flags_decide_acl_key_access() -> Result<()> {
+    let mut con = TestConnection::new("subcommands");
+    let flags = |con: &mut TestConnection, args: &[&str]| -> Result<Vec<String>> {
+        let reply: Value = redis::cmd("COMMAND")
+            .arg("GETKEYSANDFLAGS")
+            .arg(args)
+            .query(con)?;
+        let mut strings = Vec::new();
+        reply_strings(&reply, &mut strings);
+        Ok(strings)
+    };
+    assert_eq!(
+        flags(&mut con, &["subcmd.kv", "set", "k", "v"])?,
+        ["k", "OW", "update"]
+    );
+    assert_eq!(
+        flags(&mut con, &["subcmd.kv", "get", "k"])?,
+        ["k", "RO", "access"]
+    );
+
+    redis::cmd("SET").arg(&["k", "v"]).query::<()>(&mut con)?;
+    redis::cmd("ACL")
+        .arg(&["SETUSER", "reader", "on", "nopass", "%R~*", "+@all"])
+        .query::<()>(&mut con)?;
+    let mut reader = con.connection()?;
+    redis::cmd("AUTH")
+        .arg(&["reader", "unused"])
+        .query::<()>(&mut reader)?;
+    let value: String = redis::cmd("subcmd.kv")
+        .arg(&["get", "k"])
+        .query(&mut reader)?;
+    assert_eq!(value, "v");
+    let value: String = redis::cmd("subcmd.documented")
+        .arg("k")
+        .query(&mut reader)?;
+    assert_eq!(value, "v");
+    let error = redis::cmd("subcmd.kv")
+        .arg(&["set", "k", "w"])
+        .query::<Value>(&mut reader)
+        .expect_err("a read-only key user overwrote a key");
+    assert_eq!(error.code(), Some("NOPERM"), "{error}");
     Ok(())
 }
 

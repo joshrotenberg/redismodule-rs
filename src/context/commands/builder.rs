@@ -1,4 +1,7 @@
-use super::{COMMNAD_INFO_VERSION, CommandCallback, command_flags_valid};
+use super::{
+    COMMNAD_INFO_VERSION, CommandCallback, KeySpec, RedisModuleCommandArg, command_flags_valid,
+    free_command_arg, free_redis_key_spec, get_redis_command_args, get_redis_key_spec,
+};
 use crate::RegistrationContext;
 use crate::{AclCategory, RedisError, Status, raw};
 use bitflags::bitflags;
@@ -148,9 +151,34 @@ pub struct CommandBuilder {
     keys: Option<KeyRange>,
     required_acl: AclCategory,
     optional_acl: Option<AclCategory>,
-    summary: Option<String>,
-    arity: Option<i32>,
+    info: Info,
     subcommands: Vec<CommandBuilder>,
+}
+
+/// The command info a definition sends in its one `SetCommandInfo` call.
+#[derive(Default)]
+struct Info {
+    summary: Option<String>,
+    complexity: Option<String>,
+    since: Option<String>,
+    history: Vec<(String, String)>,
+    tips: Vec<String>,
+    arity: Option<i32>,
+    key_specs: Vec<KeySpec>,
+    args: Vec<RedisModuleCommandArg>,
+}
+
+impl Info {
+    fn is_empty(&self) -> bool {
+        self.summary.is_none()
+            && self.complexity.is_none()
+            && self.since.is_none()
+            && self.history.is_empty()
+            && self.tips.is_empty()
+            && self.arity.is_none()
+            && self.key_specs.is_empty()
+            && self.args.is_empty()
+    }
 }
 
 impl CommandBuilder {
@@ -168,8 +196,7 @@ impl CommandBuilder {
             keys: None,
             required_acl: AclCategory::None,
             optional_acl: None,
-            summary: None,
-            arity: None,
+            info: Info::default(),
             subcommands: Vec::new(),
         }
     }
@@ -198,10 +225,42 @@ impl CommandBuilder {
         self
     }
 
-    /// Sets the summary that `COMMAND DOCS` reports. Registration fails before
+    /// Sets the summary that `COMMAND DOCS` reports. This and the other
+    /// command-info setters (`complexity`, `since`, `history`, `tip`,
+    /// `arity`, `key_spec`, `arg`) go to Redis in one `RedisModule_SetCommandInfo`
+    /// call, which Redis accepts once per command; registration fails before
     /// Redis 7.0, which has no command info.
     pub fn summary(mut self, summary: impl Into<String>) -> Self {
-        self.summary = Some(summary.into());
+        self.info.summary = Some(summary.into());
+        self
+    }
+
+    /// Sets the time complexity that `COMMAND DOCS` reports, such as `O(1)`.
+    pub fn complexity(mut self, complexity: impl Into<String>) -> Self {
+        self.info.complexity = Some(complexity.into());
+        self
+    }
+
+    /// Sets the module version that added the command, which `COMMAND DOCS`
+    /// reports.
+    pub fn since(mut self, version: impl Into<String>) -> Self {
+        self.info.since = Some(version.into());
+        self
+    }
+
+    /// Adds a history entry, the version and what changed in it, which
+    /// `COMMAND DOCS` reports; repeated calls accumulate in order.
+    pub fn history(mut self, since: impl Into<String>, changes: impl Into<String>) -> Self {
+        self.info.history.push((since.into(), changes.into()));
+        self
+    }
+
+    /// Adds a command tip, such as `nondeterministic_output` or
+    /// `request_policy:all_shards`, which `COMMAND INFO` reports; repeated
+    /// calls accumulate. A tip cannot contain a space, since Redis splits
+    /// tips on spaces.
+    pub fn tip(mut self, tip: impl Into<String>) -> Self {
+        self.info.tips.push(tip.into());
         self
     }
 
@@ -210,10 +269,27 @@ impl CommandBuilder {
     /// the minimum. For a subcommand it counts the container and subcommand
     /// names, so it cannot be 1. A container's arity must require a
     /// subcommand (2 or more, or -2 or less; the default is -2), since Redis
-    /// would otherwise run its missing handler. Registration fails before
-    /// Redis 7.0, which has no command info.
+    /// would otherwise run its missing handler.
     pub fn arity(mut self, arity: i32) -> Self {
-        self.arity = Some(arity);
+        self.info.arity = Some(arity);
+        self
+    }
+
+    /// Adds a key spec; repeated calls accumulate in order. Key specs replace
+    /// the key range's single spec in `COMMAND INFO`, `COMMAND GETKEYSANDFLAGS`
+    /// and key extraction, and their flags decide what `%R~` and `%W~` ACL
+    /// key patterns allow: a range's spec allows only a user with full access
+    /// to the keys. The types are those `#[command]` takes through `key_spec`.
+    pub fn key_spec(mut self, spec: KeySpec) -> Self {
+        self.info.key_specs.push(spec);
+        self
+    }
+
+    /// Adds an argument description, which `COMMAND DOCS` reports; repeated
+    /// calls accumulate in order. A key argument's `key_spec_index` refers to
+    /// the definition's key specs.
+    pub fn arg(mut self, arg: RedisModuleCommandArg) -> Self {
+        self.info.args.push(arg);
         self
     }
 
@@ -295,7 +371,7 @@ impl CommandBuilder {
             let name =
                 register_base_command(ctx, &self.name, &prepared.flags, self.callback, self.keys)?;
             set_acl_categories(ctx, &name, &prepared.required, prepared.optional.as_deref())?;
-            return set_command_info(ctx, &name, self.summary.as_deref(), self.arity);
+            return set_command_info(ctx, &name, self.info);
         }
         self.register_container(ctx)
     }
@@ -324,7 +400,7 @@ impl CommandBuilder {
         // Redis runs a container's handler, which it does not have, for a
         // call its arity accepts without a subcommand, and for any call to a
         // container without subcommands.
-        if matches!(self.arity, Some(1 | -1)) {
+        if matches!(self.info.arity, Some(1 | -1)) {
             return Err(RedisError::Str(
                 "ERR a command container's arity must require a subcommand (2 or more, or -2 or less)",
             ));
@@ -403,9 +479,9 @@ impl CommandBuilder {
                 &prepared.required,
                 prepared.optional.as_deref(),
             )?;
-            set_command_info(ctx, &full_name, child.summary.as_deref(), child.arity)?;
+            set_command_info(ctx, &full_name, child.info)?;
         }
-        set_command_info(ctx, &name, self.summary.as_deref(), self.arity)
+        set_command_info(ctx, &name, self.info)
     }
 
     /// Checks a container's child and returns its name and prepared metadata.
@@ -432,7 +508,7 @@ impl CommandBuilder {
         }
         // A subcommand's arguments always include the container's name and
         // its own, so an arity of exactly 1 could never be met.
-        if self.arity == Some(1) {
+        if self.info.arity == Some(1) {
             return Err(RedisError::Str(
                 "ERR a subcommand's arity counts the container and subcommand names and cannot be 1",
             ));
@@ -442,7 +518,7 @@ impl CommandBuilder {
 
     /// Validates the key range and flags and resolves the ACL categories.
     fn prepare(&self, ctx: &RegistrationContext<'_>) -> Result<Prepared, RedisError> {
-        if self.arity == Some(0) {
+        if self.info.arity == Some(0) {
             return Err(RedisError::Str("ERR a command arity must not be 0"));
         }
         if self.legacy_flags.is_none() {
@@ -505,43 +581,91 @@ const INVALID_NAME_BYTES: &[u8] = b" \r\n|@=,";
 const SUBCOMMANDS_NEED_7_0: &str =
     "ERR command containers and subcommands need Redis 7.0 or later (RedisModule_CreateSubcommand)";
 
-/// Sets `name`'s summary and arity, if given, through `SetCommandInfo`.
+/// Sends `name`'s command info, if any, in one `SetCommandInfo` call.
 fn set_command_info(
     ctx: &RegistrationContext<'_>,
     name: &CStr,
-    summary: Option<&str>,
-    arity: Option<i32>,
+    info: Info,
 ) -> Result<(), RedisError> {
-    if summary.is_none() && arity.is_none() {
+    if info.is_empty() {
         return Ok(());
     }
     let set_info = unsafe { raw::RedisModule_SetCommandInfo }.ok_or(RedisError::Str(
-        "ERR command summaries and arities need Redis 7.0 or later (RedisModule_SetCommandInfo)",
+        "ERR command info needs Redis 7.0 or later (RedisModule_SetCommandInfo)",
     ))?;
-    let summary = summary.map(CString::new).transpose()?;
+    if info
+        .tips
+        .iter()
+        .any(|tip| tip.is_empty() || tip.contains(' '))
+    {
+        return Err(RedisError::Str(
+            "ERR a command tip must be non-empty and contain no space",
+        ));
+    }
+    let text = |value: Option<String>| value.map(CString::new).transpose();
+    let summary = text(info.summary)?;
+    let complexity = text(info.complexity)?;
+    let since = text(info.since)?;
+    let tips = (!info.tips.is_empty())
+        .then(|| CString::new(info.tips.join(" ")))
+        .transpose()?;
+    let history = info
+        .history
+        .into_iter()
+        .map(|(since, changes)| Ok((CString::new(since)?, CString::new(changes)?)))
+        .collect::<Result<Vec<_>, RedisError>>()?;
     let get = unsafe { crate::__available_api!(RedisModule_GetCommand) };
     let command = unsafe { get(ctx.get_raw(), name.as_ptr()) };
     if command.is_null() {
         return Err(RedisError::Str("ERR registered command was not found"));
     }
-    let info = raw::RedisModuleCommandInfo {
+    let mut history_entries: Vec<raw::RedisModuleCommandHistoryEntry> = history
+        .iter()
+        .map(|(since, changes)| raw::RedisModuleCommandHistoryEntry {
+            since: since.as_ptr(),
+            changes: changes.as_ptr(),
+        })
+        .collect();
+    if !history_entries.is_empty() {
+        history_entries.push(raw::RedisModuleCommandHistoryEntry {
+            since: ptr::null(),
+            changes: ptr::null(),
+        });
+    }
+    // The key specs and args leak their strings into the raw structs until
+    // they are freed below, after Redis copies them.
+    let key_specs = (!info.key_specs.is_empty()).then(|| get_redis_key_spec(info.key_specs));
+    let mut args = get_redis_command_args(info.args);
+    let pointer = |value: &Option<CString>| value.as_ref().map_or(ptr::null(), |v| v.as_ptr());
+    let raw_info = raw::RedisModuleCommandInfo {
         version: &COMMNAD_INFO_VERSION,
-        summary: summary
+        summary: pointer(&summary),
+        complexity: pointer(&complexity),
+        since: pointer(&since),
+        history: if history_entries.is_empty() {
+            ptr::null_mut()
+        } else {
+            history_entries.as_mut_ptr()
+        },
+        tips: pointer(&tips),
+        arity: info.arity.unwrap_or(0),
+        key_specs: key_specs
             .as_ref()
-            .map_or(ptr::null(), |summary| summary.as_ptr()),
-        complexity: ptr::null(),
-        since: ptr::null(),
-        history: ptr::null_mut(),
-        tips: ptr::null(),
-        arity: arity.unwrap_or(0),
-        key_specs: ptr::null_mut(),
-        args: ptr::null_mut(),
+            .map_or(ptr::null_mut(), |specs| specs.as_ptr().cast_mut()),
+        args: args
+            .as_mut()
+            .map_or(ptr::null_mut(), |args| args.as_mut_ptr()),
     };
     // SAFETY: command is this module's registered command, and the info and
-    // its strings outlive the call, which copies them.
-    if unsafe { set_info(command, &info) } != Status::Ok as i32 {
+    // everything it points to outlive the call, which copies them.
+    let status = unsafe { set_info(command, &raw_info) };
+    if let Some(key_specs) = key_specs {
+        free_redis_key_spec(key_specs);
+    }
+    args.unwrap_or_default().iter().for_each(free_command_arg);
+    if status != Status::Ok as i32 {
         return Err(RedisError::String(format!(
-            "ERR failed to set the summary or arity of command {}",
+            "ERR Redis refused the command info of {} (an invalid key spec or argument, or info already set)",
             name.to_string_lossy()
         )));
     }

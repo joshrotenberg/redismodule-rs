@@ -449,6 +449,24 @@ pub fn get_redis_key_spec(key_spec: Vec<KeySpec>) -> Vec<raw::RedisModuleCommand
     redis_key_spec
 }
 
+/// Frees the strings [`get_redis_key_spec`] leaked into `key_specs`, once Redis
+/// has copied them.
+pub(crate) fn free_redis_key_spec(key_specs: Vec<raw::RedisModuleCommandKeySpec>) {
+    for spec in key_specs {
+        if !spec.notes.is_null() {
+            drop(unsafe { CString::from_raw(spec.notes as *mut c_char) });
+        }
+        if spec.begin_search_type
+            == raw::RedisModuleKeySpecBeginSearchType_REDISMODULE_KSPEC_BS_KEYWORD
+        {
+            let keyword = unsafe { spec.bs.keyword.keyword };
+            if !keyword.is_null() {
+                drop(unsafe { CString::from_raw(keyword as *mut c_char) });
+            }
+        }
+    }
+}
+
 fn convert_command_arg_to_raw(arg: &RedisModuleCommandArg) -> raw::RedisModuleCommandArg {
     let name = CString::new(arg.name.as_str()).unwrap().into_raw();
     let token = arg
@@ -518,7 +536,7 @@ pub fn get_redis_command_args(
     Some(raw_args)
 }
 
-fn free_command_arg(arg: &raw::RedisModuleCommandArg) {
+pub(crate) fn free_command_arg(arg: &raw::RedisModuleCommandArg) {
     if !arg.name.is_null() {
         drop(unsafe { CString::from_raw(arg.name as *mut c_char) });
     }
@@ -643,17 +661,7 @@ api! {[
             }
 
             // the only CString pointers which are not freed are those of the key_specs, lets free them here.
-            key_specs.into_iter().for_each(|v|{
-                if !v.notes.is_null() {
-                    drop(unsafe{CString::from_raw(v.notes as *mut c_char)});
-                }
-                if v.begin_search_type == raw::RedisModuleKeySpecBeginSearchType_REDISMODULE_KSPEC_BS_KEYWORD {
-                    let keyword = unsafe{v.bs.keyword.keyword};
-                    if !keyword.is_null() {
-                        drop(unsafe{CString::from_raw(v.bs.keyword.keyword as *mut c_char)});
-                    }
-                }
-            });
+            free_redis_key_spec(key_specs);
 
             args.unwrap_or_default().iter().for_each(free_command_arg);
 
