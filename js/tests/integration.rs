@@ -990,6 +990,22 @@ fn queued_drain_refuses_unload_even_after_unwatch() -> Result<()> {
     Ok(())
 }
 
+/// Test connections wait for a command slower than the startup probe's
+/// timeout: DEBUG SLEEP stands in for SAVE, MODULE LOAD or DEBUG RELOAD on a
+/// busy runner.
+#[test]
+fn test_connections_wait_for_slow_commands() -> Result<()> {
+    let mut con = server()?;
+    redis::cmd("DEBUG")
+        .arg(&["SLEEP", "0.5"])
+        .query::<()>(&mut con)?;
+    let mut other = con.connection()?;
+    redis::cmd("DEBUG")
+        .arg(&["SLEEP", "0.5"])
+        .query::<()>(&mut other)?;
+    Ok(())
+}
+
 #[test]
 fn lazy_expiration_counts_once_and_persisted_effects_survive_empty_registration_reload()
 -> Result<()> {
