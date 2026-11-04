@@ -22,8 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refuses a container before 7.0, without subcommands, with keys, with ACL
   categories (Redis grants them to every subcommand), or with an arity that
   accepts a call without a subcommand. It refuses a child that is a container,
-  has children, repeats another child's name ignoring case, has an empty name
-  or one containing `|`, or has an arity of 1. See `examples/subcommands.rs`.
+  has children, repeats another child's name ignoring case, has an empty name,
+  or has an arity of 1, and a container or child name with a space, line
+  break or any of `|@=,`, which Redis 7.2 and later refuse. See `examples/subcommands.rs`.
 
 ### Fixed
 

@@ -304,8 +304,19 @@ impl CommandBuilder {
         if self.keys.is_some() {
             return Err(RedisError::Str("ERR a command container cannot have keys"));
         }
+        // Redis 7.0 accepts these in a command name but cannot then look the
+        // container up; 7.2 and later refuse them.
+        if self
+            .name
+            .iter()
+            .any(|byte| INVALID_NAME_BYTES.contains(byte))
+        {
+            return Err(RedisError::Str(
+                "ERR a command container name cannot contain spaces, line breaks or any of |@=,",
+            ));
+        }
         // Redis grants a container's categories to every subcommand.
-        if !matches!(self.required_acl, AclCategory::None) || self.optional_acl.is_some() {
+        if !self.required_acl.to_string().is_empty() || self.optional_acl.is_some() {
             return Err(RedisError::Str(
                 "ERR a command container cannot have ACL categories: Redis grants them to every subcommand",
             ));
@@ -409,9 +420,14 @@ impl CommandBuilder {
             return Err(RedisError::Str("ERR a subcommand cannot have subcommands"));
         }
         let child = CString::new(self.name.as_slice())?;
-        if child.as_bytes().is_empty() || child.as_bytes().contains(&b'|') {
+        if child.as_bytes().is_empty()
+            || child
+                .as_bytes()
+                .iter()
+                .any(|byte| INVALID_NAME_BYTES.contains(byte))
+        {
             return Err(RedisError::Str(
-                "ERR a subcommand name must be non-empty and contain no '|'",
+                "ERR a subcommand name must be non-empty and cannot contain spaces, line breaks or any of |@=,",
             ));
         }
         // A subcommand's arguments always include the container's name and
@@ -482,6 +498,9 @@ struct Prepared {
     required: CString,
     optional: Option<CString>,
 }
+
+/// Bytes Redis 7.2 and later refuse in a command name (`isCommandNameValid`).
+const INVALID_NAME_BYTES: &[u8] = b" \r\n|@=,";
 
 const SUBCOMMANDS_NEED_7_0: &str =
     "ERR command containers and subcommands need Redis 7.0 or later (RedisModule_CreateSubcommand)";

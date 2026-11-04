@@ -57,53 +57,57 @@ fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> St
         return Status::Ok;
     };
     let command = redis_command!("builder.invalid", ping);
-    let command = match mode.try_as_str().unwrap() {
-        "key-zero" => command.key(0),
-        "key-negative" => command.key(-1),
-        "step-zero" => command.keys(KeyRange::new(1).last(-1).step(0)),
-        "step-negative" => command.keys(KeyRange::new(1).last(-1).step(-2)),
-        "last-before-first" => command.keys(KeyRange::new(3).last(2)),
-        "last-zero" => command.keys(KeyRange::new(1).last(0)),
-        "unknown-flags" => command.flags(CommandFlags::from_bits_retain(1 << 31)),
-        "required-acl" => command.acl_categories("nonexistent_builder_category"),
-        "required-custom-acl" => command.acl_categories("builder_custom"),
-        "optional-empty" => command.optional_acl_categories(""),
-        "nul-acl" => command.acl_categories("read\0write"),
-        "empty-name" => redis_command!("", ping),
-        "nul-name" => redis_command!("builder\0invalid", ping),
-        "duplicate" => redis_command!("builder.ping", ping),
-        "arity-zero" => command.arity(0),
-        "subcommand-on-command" => command.subcommand(redis_command!("child", ping)),
-        "container-keys" => CommandBuilder::container("builder.container").key(1),
-        "container-arity-one" => CommandBuilder::container("builder.container").arity(1),
-        "container-arity-minus-one" => CommandBuilder::container("builder.container").arity(-1),
-        "nested-container" => CommandBuilder::container("builder.container")
-            .subcommand(CommandBuilder::container("inner")),
-        "nested-subcommand" => CommandBuilder::container("builder.container").subcommand(
-            redis_command!("child", ping).subcommand(redis_command!("grandchild", ping)),
-        ),
-        "subcommand-pipe" => {
-            CommandBuilder::container("builder.container").subcommand(redis_command!("a|b", ping))
-        }
-        "subcommand-empty" => {
-            CommandBuilder::container("builder.container").subcommand(redis_command!("", ping))
-        }
-        "subcommand-duplicate" => CommandBuilder::container("builder.container")
-            .subcommand(redis_command!("child", ping))
-            .subcommand(redis_command!("CHILD", ping)),
-        "subcommand-key-range" => CommandBuilder::container("builder.container")
-            .subcommand(redis_command!("child", ping).key(0)),
-        "subcommand-arity-one" => CommandBuilder::container("builder.container")
-            .subcommand(redis_command!("child", ping).arity(1)),
-        "container-empty" => CommandBuilder::container("builder.container"),
-        "container-acl" => CommandBuilder::container("builder.container")
-            .acl_categories("read")
-            .subcommand(redis_command!("child", ping)),
-        "container-optional-acl" => CommandBuilder::container("builder.container")
-            .optional_acl_categories("read")
-            .subcommand(redis_command!("child", ping)),
-        _ => return Status::Err,
-    };
+    let command =
+        match mode.try_as_str().unwrap() {
+            "key-zero" => command.key(0),
+            "key-negative" => command.key(-1),
+            "step-zero" => command.keys(KeyRange::new(1).last(-1).step(0)),
+            "step-negative" => command.keys(KeyRange::new(1).last(-1).step(-2)),
+            "last-before-first" => command.keys(KeyRange::new(3).last(2)),
+            "last-zero" => command.keys(KeyRange::new(1).last(0)),
+            "unknown-flags" => command.flags(CommandFlags::from_bits_retain(1 << 31)),
+            "required-acl" => command.acl_categories("nonexistent_builder_category"),
+            "required-custom-acl" => command.acl_categories("builder_custom"),
+            "optional-empty" => command.optional_acl_categories(""),
+            "nul-acl" => command.acl_categories("read\0write"),
+            "empty-name" => redis_command!("", ping),
+            "nul-name" => redis_command!("builder\0invalid", ping),
+            "duplicate" => redis_command!("builder.ping", ping),
+            "arity-zero" => command.arity(0),
+            "subcommand-on-command" => command.subcommand(redis_command!("child", ping)),
+            "container-keys" => CommandBuilder::container("builder.container").key(1),
+            "container-arity-one" => CommandBuilder::container("builder.container").arity(1),
+            "container-arity-minus-one" => CommandBuilder::container("builder.container").arity(-1),
+            "nested-container" => CommandBuilder::container("builder.container")
+                .subcommand(CommandBuilder::container("inner")),
+            "nested-subcommand" => CommandBuilder::container("builder.container").subcommand(
+                redis_command!("child", ping).subcommand(redis_command!("grandchild", ping)),
+            ),
+            "subcommand-pipe" => CommandBuilder::container("builder.container")
+                .subcommand(redis_command!("a|b", ping)),
+            "subcommand-empty" => {
+                CommandBuilder::container("builder.container").subcommand(redis_command!("", ping))
+            }
+            "subcommand-duplicate" => CommandBuilder::container("builder.container")
+                .subcommand(redis_command!("child", ping))
+                .subcommand(redis_command!("CHILD", ping)),
+            "subcommand-key-range" => CommandBuilder::container("builder.container")
+                .subcommand(redis_command!("child", ping).key(0)),
+            "subcommand-arity-one" => CommandBuilder::container("builder.container")
+                .subcommand(redis_command!("child", ping).arity(1)),
+            "container-empty" => CommandBuilder::container("builder.container"),
+            "container-name" => CommandBuilder::container("builder|container")
+                .subcommand(redis_command!("child", ping)),
+            "subcommand-name" => CommandBuilder::container("builder.container")
+                .subcommand(redis_command!("child name", ping)),
+            "container-acl" => CommandBuilder::container("builder.container")
+                .acl_categories("read")
+                .subcommand(redis_command!("child", ping)),
+            "container-optional-acl" => CommandBuilder::container("builder.container")
+                .optional_acl_categories("read")
+                .subcommand(redis_command!("child", ping)),
+            _ => return Status::Err,
+        };
     match command.register(ctx) {
         Ok(()) => Status::Ok,
         Err(error) => {
