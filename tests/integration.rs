@@ -7944,3 +7944,86 @@ fn test_key_blocking_real_client_during_yielded_unload_is_refused() -> Result<()
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
+
+#[test]
+fn test_key_blocking_repeated_registration_preserves_the_first_waiter() -> Result<()> {
+    for command in ["keyblock.double_key", "keyblock.key_then_plain"] {
+        let mut con = TestConnection::new("key_blocking");
+        let key = "keyblock:twice";
+        let mut client = KeyBlockingWire::connect(&con)?;
+        client.send(redis::cmd(command).arg((0, 1, "normal", key)))?;
+        let rejected_data = i64::from(command == "keyblock.double_key");
+        key_blocking_live(&mut con, 1, rejected_data)?;
+        assert_eq!(key_blocking_stats(&mut con)?[5], 1, "{command}");
+        redis::cmd("RPUSH")
+            .arg((key, "first waiter"))
+            .query::<usize>(&mut con)?;
+        assert_eq!(
+            client.read()?,
+            Value::Array(vec![
+                Value::BulkString(key.as_bytes().to_vec()),
+                Value::Array(vec![Value::BulkString(b"first waiter".to_vec())]),
+            ])
+        );
+        client.ping()?;
+        key_blocking_live(&mut con, 0, rejected_data + 1)?;
+        redis::cmd("MODULE")
+            .arg(("UNLOAD", "key_blocking"))
+            .query::<String>(&mut con)?;
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    let mut con = TestConnection::new("key_blocking");
+    assert_eq!(
+        redis::cmd("keyblock.plain_then_key")
+            .arg((0, 1, "normal", "keyblock:plain-first"))
+            .query::<String>(&mut con)?,
+        "OK"
+    );
+    key_blocking_live(&mut con, 0, 1)?;
+    assert_eq!(key_blocking_stats(&mut con)?[5], 1);
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "key_blocking"))
+        .query::<String>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_example_guards_early_and_denied_destructors() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    redis::cmd("RPUSH")
+        .arg(("keyblock:already-ready", "ready"))
+        .query::<usize>(&mut con)?;
+    assert!(matches!(
+        redis::cmd("keyblock.wait")
+            .arg((0, 1, "panic-drop", "keyblock:already-ready"))
+            .query::<Value>(&mut con)?,
+        Value::Array(_)
+    ));
+    key_blocking_live(&mut con, 0, 1)?;
+    redis::cmd("SET")
+        .arg(("keyblock:wrong-type", "string"))
+        .query::<String>(&mut con)?;
+    assert!(
+        redis::cmd("keyblock.wait")
+            .arg((0, 1, "panic-drop", "keyblock:wrong-type"))
+            .query::<Value>(&mut con)
+            .is_err()
+    );
+    key_blocking_live(&mut con, 0, 2)?;
+    assert_eq!(
+        redis::cmd("EVAL")
+            .arg("return redis.call('keyblock.wait', '0', '1', 'panic-drop', KEYS[1])")
+            .arg(1)
+            .arg("keyblock:denied-drop")
+            .query::<Value>(&mut con)?,
+        Value::Nil
+    );
+    key_blocking_live(&mut con, 0, 3)?;
+    assert_eq!(&key_blocking_stats(&mut con)?[2..4], &[0, 0]);
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "key_blocking"))
+        .query::<String>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}

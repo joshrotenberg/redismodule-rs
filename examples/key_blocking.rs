@@ -19,6 +19,7 @@ static DELETE_FLAG: AtomicBool = AtomicBool::new(false);
 static LOAD_TEST: AtomicBool = AtomicBool::new(false);
 static UNLOAD_TEST: AtomicBool = AtomicBool::new(false);
 static LOAD_ATTEMPT: AtomicBool = AtomicBool::new(false);
+static SECOND_REJECTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy)]
 enum Mode {
@@ -51,6 +52,13 @@ impl Drop for Waiter {
         if matches!(self.mode, Mode::PanicDrop) {
             std::panic::panic_any(BadPanicPayload);
         }
+    }
+}
+
+fn drop_waiter(waiter: Waiter) {
+    if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(waiter))) {
+        // Match the SDK boundary: panic payload destructors may panic too.
+        std::mem::forget(payload);
     }
 }
 
@@ -128,8 +136,16 @@ fn wait(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         mode,
     };
     LIVE.fetch_add(1, Ordering::SeqCst);
-    if let Some(reply) = read_ready(ctx, &waiter)? {
-        return Ok(reply);
+    match read_ready(ctx, &waiter) {
+        Ok(Some(reply)) => {
+            drop_waiter(waiter);
+            return Ok(reply);
+        }
+        Err(error) => {
+            drop_waiter(waiter);
+            return Err(error);
+        }
+        Ok(None) => {}
     }
     let keys: Vec<_> = keys.iter().collect();
     let outcome = ctx.block_client_on_keys(&keys, timeout, true, waiter, on_ready, on_timeout);
@@ -143,9 +159,45 @@ fn wait(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         }
         KeyBlockingResult::Denied(waiter) => {
             // Native blocking reads are non-blocking in MULTI and scripts.
-            Ok(read_ready(ctx, &waiter)?.unwrap_or(RedisValue::NullArray))
+            let reply =
+                read_ready(ctx, &waiter).map(|value| value.unwrap_or(RedisValue::NullArray));
+            drop_waiter(waiter);
+            reply
         }
     }
+}
+
+fn double_key(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let first = wait(ctx, args.clone())?;
+    if first == RedisValue::NoReply {
+        SECOND_REJECTED.store(
+            wait(ctx, args).is_err_and(|error| error.to_string().contains("already blocked")),
+            Ordering::SeqCst,
+        );
+    }
+    Ok(first)
+}
+
+fn plain_then_key(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let first = ctx.block_client()?;
+    SECOND_REJECTED.store(
+        wait(ctx, args).is_err_and(|error| error.to_string().contains("already blocked")),
+        Ordering::SeqCst,
+    );
+    drop(first);
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
+fn key_then_plain(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let first = wait(ctx, args)?;
+    if first == RedisValue::NoReply {
+        SECOND_REJECTED.store(
+            ctx.block_client()
+                .is_err_and(|error| error.to_string().contains("already blocked")),
+            Ordering::SeqCst,
+        );
+    }
+    Ok(first)
 }
 
 fn signal(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -303,6 +355,7 @@ fn stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
         READY.load(Ordering::SeqCst),
         TIMEOUTS.load(Ordering::SeqCst),
         i64::from(DELETE_FLAG.load(Ordering::SeqCst)),
+        i64::from(SECOND_REJECTED.load(Ordering::SeqCst)),
     ]
     .into())
 }
@@ -328,6 +381,9 @@ redis_module! {
             } else {
                 CommandFlags::READ_ONLY
             }),
+        ["keyblock.double_key", double_key, "readonly", 4, -1, 1, ""],
+        ["keyblock.plain_then_key", plain_then_key, "readonly", 4, -1, 1, ""],
+        ["keyblock.key_then_plain", key_then_plain, "readonly", 4, -1, 1, ""],
         ["keyblock.signal", signal, "readonly", 1, 1, 1, ""],
         ["keyblock.call_wait", call_wait, "readonly", 1, 1, 1, ""],
         ["keyblock.call_wait_k", call_wait_k, "readonly", 1, 1, 1, ""],

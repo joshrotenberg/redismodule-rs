@@ -27,7 +27,8 @@ transactions and all module calls, including calls using `K`, receive
 wait, and an active SDK lifecycle binding is required: loading, unloading and
 unbound custom-loader invocations are refused before native registration.
 An existing lifecycle lease remains held through callbacks and captured data
-destructors. The flag-aware API requests deletion wakeups where
+destructors. The SDK blocking APIs refuse a second registration on the same
+network client before it can overwrite the first native handle. The flag-aware API requests deletion wakeups where
 available and otherwise reports ordinary readiness behavior. Signaling and
 an independent owned copy of the callback's ready-key name are available as
 context methods. Redis's blocked-client count prevents unload while a key

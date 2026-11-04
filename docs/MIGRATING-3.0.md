@@ -160,6 +160,8 @@ inside a transaction, script or any module call, including one using `K`.
 Only indexed network clients can wait. The new API requires an active module
 loaded by `redis_module!` and a tracked SDK command callback; load/unload
 callbacks and custom loaders without that lifecycle binding are refused.
+Do not register another blocked handle for the same network client: all SDK
+blocking entry points refuse that attempt and retain the first waiter.
 Within an SDK-bound module, a raw command callback may invoke its handler
 through the unsafe SDK `panic::run_command` trampoline.
 

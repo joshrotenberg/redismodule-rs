@@ -127,8 +127,8 @@ impl Context {
     /// # Errors
     ///
     /// Rejects invocations with no client, scripts, transactions, module calls
-    /// without blocking permission, and blocked-client reply/timeout callbacks,
-    /// before calling Redis's blocking API. Also returns an error if a required
+    /// without blocking permission, already-blocked network clients, and
+    /// blocked-client reply/timeout callbacks before calling Redis's blocking API. Also returns an error if a required
     /// API is unavailable or the native call unexpectedly returns a null handle.
     ///
     /// ```no_run
@@ -157,6 +157,11 @@ impl Context {
 
     fn validate_blocking_context(&self) -> Result<(), RedisError> {
         if self.blocking_context_allowed()? {
+            if self.indexed_network_client_info()?.is_some_and(|info| {
+                info.flags & u64::from(raw::REDISMODULE_CLIENTINFO_FLAG_BLOCKED) != 0
+            }) {
+                return Err(RedisError::Str("ERR this client is already blocked"));
+            }
             Ok(())
         } else {
             Err(RedisError::Str(
@@ -200,6 +205,48 @@ impl Context {
         Ok(true)
     }
 
+    // Get metadata only after an actual network client has been established.
+    // None means an internal/module client or a client whose identity is not
+    // available. The caller holds the Redis lock throughout the proof/read.
+    fn indexed_network_client_info(
+        &self,
+    ) -> Result<Option<raw::RedisModuleClientInfoV1>, RedisError> {
+        let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
+        let client_info = unsafe { crate::__available_api!(RedisModule_GetClientInfoById) };
+        let id = unsafe { client_id(self.ctx) };
+        if id == 0 || unsafe { client_info(ptr::null_mut(), id) } != raw::REDISMODULE_OK as c_int {
+            return Ok(None);
+        }
+        // Valkey 9.1's info lookup also finds its executing temporary client.
+        // Its username lookup still requires the actual client index. Do not
+        // ask for full info before this: fake clients have a null connection.
+        // Redis 6.0 lacks the username API and its info lookup is index-only.
+        if let Some(user_name) = unsafe { raw::RedisModule_GetClientUserNameById } {
+            let free = unsafe { crate::__available_api!(RedisModule_FreeString) };
+            // This API requires a live producer context for auto-memory.
+            // Free through the same context to remove any auto-memory entry.
+            let user = unsafe { user_name(self.ctx, id) };
+            if user.is_null() {
+                return Ok(None);
+            }
+            unsafe { free(self.ctx, user) };
+        }
+        let mut info = raw::RedisModuleClientInfoV1 {
+            version: 1,
+            flags: 0,
+            id: 0,
+            addr: [0; 46],
+            port: 0,
+            db: 0,
+        };
+        if unsafe { client_info((&mut info as *mut raw::RedisModuleClientInfoV1).cast(), id) }
+            != raw::REDISMODULE_OK as c_int
+        {
+            return Err(RedisError::Str("ERR Redis did not return client metadata"));
+        }
+        Ok(Some(info))
+    }
+
     /// Blocks the client until [`ReplyingBlockedClient::unblock`] hands over a
     /// value, usually from another thread, or until `timeout` passes.
     ///
@@ -214,8 +261,8 @@ impl Context {
     ///
     /// Returns an error, without blocking, if the context cannot block: it has
     /// no client, it runs a command inside `MULTI`, a script, or a call without
-    /// the `K` flag, or it is the reply or timeout callback of another blocked
-    /// client. Also returns an error if `timeout` is out of range, or the
+    /// the `K` flag, the network client is already blocked, or it is the reply
+    /// or timeout callback of another blocked client. Also returns an error if `timeout` is out of range, or the
     /// running Redis lacks an API this needs (`RedisModule_BlockClientSetPrivateData`
     /// arrived in Redis 7.2).
     pub fn block_client_on_reply<T: Send + 'static>(
@@ -488,7 +535,8 @@ impl Context {
     /// # Errors
     ///
     /// Requires an SDK command callback, a real client, nonempty keys and the
-    /// native APIs used by the waiter. Reply/timeout callbacks cannot reblock.
+    /// native APIs used by the waiter. A client already blocked by any SDK
+    /// handle cannot block again; reply/timeout callbacks cannot reblock.
     /// Denied blocking permission returns [`KeyBlockingResult::Denied`] before
     /// native blocking, preserving `data` for a normal reply. An unexpected
     /// null native handle is an error and releases the private data.
@@ -509,26 +557,13 @@ impl Context {
             return Ok(KeyBlockingResult::Denied(data.take()));
         }
         // A module-call client may carry K but it is not a real network client.
-        // Exclude all of them, including nested calls during module loading.
-        let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
-        let client_info = unsafe { crate::__available_api!(RedisModule_GetClientInfoById) };
-        let id = unsafe { client_id(self.ctx) };
-        if unsafe { client_info(ptr::null_mut(), id) } != raw::REDISMODULE_OK as c_int {
+        // Prove identity before reading metadata; compatible servers can return
+        // an executing fake client from their ID-only lookup.
+        let Some(info) = self.indexed_network_client_info()? else {
             return Ok(KeyBlockingResult::Denied(data.take()));
-        }
-        // Valkey 9.1's info lookup also finds its executing temporary client.
-        // Its username lookup still requires the actual client index. Do not
-        // ask for full info: that path dereferences a fake client's null conn.
-        // Redis 6.0 lacks the username API and its info lookup is index-only.
-        if let Some(user_name) = unsafe { raw::RedisModule_GetClientUserNameById } {
-            let free = unsafe { crate::__available_api!(RedisModule_FreeString) };
-            // This API requires a live producer context for auto-memory.
-            // Free through the same context to remove any auto-memory entry.
-            let user = unsafe { user_name(self.ctx, id) };
-            if user.is_null() {
-                return Ok(KeyBlockingResult::Denied(data.take()));
-            }
-            unsafe { free(self.ctx, user) };
+        };
+        if info.flags & u64::from(raw::REDISMODULE_CLIENTINFO_FLAG_BLOCKED) != 0 {
+            return Err(RedisError::Str("ERR this client is already blocked"));
         }
         // An auth/load context can be rejected by native blocking only after
         // it has allocated a handle. Only tracked command invocations are
