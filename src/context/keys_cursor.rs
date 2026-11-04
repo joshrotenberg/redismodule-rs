@@ -3,7 +3,6 @@ use crate::key::RedisKey;
 use crate::raw;
 use crate::redismodule::RedisString;
 use std::ffi::c_void;
-use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
 pub struct KeysCursor {
@@ -25,9 +24,7 @@ extern "C" fn scan_callback<C: FnMut(&RuntimeContext, &RedisString, Option<&Redi
     } else {
         // Safety: The returned `RedisKey` does not outlive this callbacks and so by necessity
         // the pointers passed in as parameters are valid for its entire lifetime.
-        Some(ManuallyDrop::new(unsafe {
-            RedisKey::from_raw_parts(ctx, key)
-        }))
+        Some(unsafe { RedisKey::borrowed(ctx, key) })
     };
     let callback = unsafe { &mut *(private_data.cast::<C>()) };
     crate::panic::defer_panic(|| callback(&context, &key_name, redis_key.as_deref()));
@@ -49,6 +46,8 @@ impl KeysCursor {
     ) -> bool {
         // A scan can expire keys, the lent one included.
         crate::key::panic_while_lent();
+        // Expiring keys frees their values, so close the open ones first.
+        crate::key::keyspace_will_change(None).unwrap_or_else(|error| panic!("{error}"));
         let res = unsafe {
             crate::__required_api!(RedisModule_Scan)(
                 ctx.ctx,

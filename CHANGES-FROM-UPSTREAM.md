@@ -52,6 +52,20 @@ rules stated. A handle opened before another handle or a call deleted or
 replaced the same key's value still points at the freed value (#197).
 Upstream has no issue or pull request for this.
 
+## Key handles across keyspace changes
+
+An open native key caches the value Redis looked up when it opened. Upstream's
+`RedisKey` and `RedisKeyWritable` keep that pointer for their whole life, so a
+call that deletes or rewrites the key, string DMA through a second handle
+(which replaces an int- or embstr-encoded value), a pop that empties a list,
+or `yield_now` left a handle pointing at freed memory, and dropping it closed
+the native key, which reads `key->value->type` (#197). The fork registers the
+keys it opens on each thread and closes them before any such operation, while
+their values are still valid, and re-opens a closed key on its next use. A
+stream iterator panics after a change instead of continuing on a freed
+iterator, a key scan callback cannot change the keyspace, and handles built
+from raw parts panic when used after a change.
+
 ## The lists example
 
 Upstream's `lists` example writes through the key API, which Redis does not

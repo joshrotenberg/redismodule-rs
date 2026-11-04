@@ -38,6 +38,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Key handles stay valid when something else changes their key (#197). An
+  open native key caches the value Redis looked up, and a call, `yield_now`,
+  a keyspace notification or scan, or string DMA, a write, delete, pop or trim
+  through another handle could free that value: the handle then read and wrote
+  freed memory, and closing it did too. The SDK now registers every key it
+  opens on its thread and closes them all before such an operation, while the
+  values are still valid; a closed handle re-opens on its next use, with the
+  same name, mode, flags and database, and sees the key as a fresh open
+  would. Each open costs one small allocation for its registry entry.
+  **Breaking:**
+  - A `StreamIterator` panics on its next step after a keyspace change,
+    since it cannot re-open; start a new one after the change.
+  - A `ScanKeyCursor` callback cannot change the keyspace: calls, `yield_now`
+    and writes there return `ERR a key scan callback is running`, because
+    Redis keeps scanning the key after the callback.
+  - Handles built with `RedisKey::from_raw_parts`, and the handles scan
+    callbacks receive, panic when used after a keyspace change.
+  - `RedisKey` and `RedisKeyWritable` are no longer `RefUnwindSafe`.
+
 - SDK-generated error replies consistently start with `ERR` or a specific
   Redis error code (#166), including argument parsing, key operations,
   configuration, registration and API-availability errors. Forwarded server

@@ -27,9 +27,15 @@ pub struct StreamRecord {
 /// Iterates the entries of a stream key. Dropping it stops the iterator, after
 /// which the key can start another one. The key borrow also keeps its opening
 /// runtime context alive and locked.
+///
+/// A keyspace change while it iterates, such as a call in the loop body,
+/// closes the key under it (see [`RedisKey`]), and the next step panics:
+/// start a new iterator after the change.
 #[derive(Debug)]
 pub struct StreamIterator<'key> {
     key: &'key RedisKey<'key>,
+    /// The key's token when the iterator started.
+    token: u64,
     stop: StopFn,
     next_id: NextIdFn,
     next_field: NextFieldFn,
@@ -62,9 +68,10 @@ impl<'key> StreamIterator<'key> {
             0
         };
 
+        let native = key.native.current();
         let res = unsafe {
             start(
-                key.key_inner,
+                native,
                 flags,
                 from.as_mut().map_or(ptr::null_mut(), |v| v),
                 to.as_mut().map_or(ptr::null_mut(), |v| v),
@@ -73,6 +80,7 @@ impl<'key> StreamIterator<'key> {
         if Status::Ok == res.into() {
             Ok(StreamIterator {
                 key,
+                token: key.native.token(),
                 stop,
                 next_id,
                 next_field,
@@ -91,15 +99,15 @@ impl<'key> Iterator for StreamIterator<'key> {
         let mut num_fields: c_long = 0;
         let mut field_name: *mut raw::RedisModuleString = ptr::null_mut();
         let mut field_val: *mut raw::RedisModuleString = ptr::null_mut();
-        if Status::Ok
-            != unsafe { (self.next_id)(self.key.key_inner, &mut id, &mut num_fields) }.into()
-        {
+        let native = self.key.native.unchanged_since(self.token).expect(
+            "the stream's key was closed by a keyspace change while iterating it; start a new iterator",
+        );
+        if Status::Ok != unsafe { (self.next_id)(native, &mut id, &mut num_fields) }.into() {
             return None;
         }
         let mut fields = Vec::new();
         while Status::Ok
-            == unsafe { (self.next_field)(self.key.key_inner, &mut field_name, &mut field_val) }
-                .into()
+            == unsafe { (self.next_field)(native, &mut field_name, &mut field_val) }.into()
         {
             fields.push((
                 unsafe { RedisString::from_redis_module_string(self.key.ctx, field_name) },
@@ -112,7 +120,10 @@ impl<'key> Iterator for StreamIterator<'key> {
 
 impl<'key> Drop for StreamIterator<'key> {
     fn drop(&mut self) {
-        // Stop, not Delete: StreamIteratorDelete removes the current entry.
-        unsafe { (self.stop)(self.key.key_inner) };
+        // Closing the key ended the native iterator with it.
+        if let Some(native) = self.key.native.unchanged_since(self.token) {
+            // Stop, not Delete: StreamIteratorDelete removes the current entry.
+            unsafe { (self.stop)(native) };
+        }
     }
 }

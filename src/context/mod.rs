@@ -1104,6 +1104,12 @@ impl RuntimeContext {
                 crate::key::LENT_ERROR.into(),
             ))));
         }
+        // The command can delete, replace or move any key's value.
+        if let Err(error) = crate::key::keyspace_will_change(None) {
+            return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                error.to_string(),
+            ))));
+        }
         let cmd = match CString::new(command) {
             Ok(command) => command,
             Err(_) => {
@@ -1393,6 +1399,8 @@ impl RuntimeContext {
         if crate::key::key_data_lent() {
             return Err(RedisError::Str(crate::key::LENT_ERROR));
         }
+        // Their calls can change any key's value.
+        crate::key::keyspace_will_change(None)?;
         let event = CString::new(event)
             .map_err(|_| RedisError::Str("ERR keyspace event name contains a NUL byte"))?;
         let status: Status = unsafe {
@@ -1818,6 +1826,7 @@ impl EventContext {
         if crate::key::key_data_lent() {
             return Err(RedisError::Str(crate::key::LENT_ERROR));
         }
+        crate::key::keyspace_will_change(None)?;
         // Native calls can invoke module callbacks synchronously on a worker;
         // neither this view nor the thread which loaded the module proves it.
         if !crate::configuration::lifecycle::is_main_thread() {
