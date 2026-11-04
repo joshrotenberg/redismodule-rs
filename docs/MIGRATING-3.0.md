@@ -822,10 +822,10 @@ text.
   grant `@admin`, or the wrapper and `+config|get` and `+config|set`, to users
   who should read or change the module's configurations. On Redis 7.0, where
   ACL categories do not cover module commands, allow the wrapper by name and
-  `+config|get` and `+config|set`. A module calling its
-  own wrapper through `ctx.call`, or calling `module_config_get` or
-  `module_config_set` from a timer or thread-safe context, now gets an error,
-  since there is no user to check; call `CONFIG` directly there.
+  `+config|get` and `+config|set`. A module calling its own wrapper through
+  `ctx.call`, or calling `module_config_get` or `module_config_set` from a
+  timer or thread-safe context, now gets an error, since there is no user to
+  check; call `CONFIG` directly there.
 
 - **Event loop callbacks and the module lifecycle.** With `redis_module!`,
   `event_loop::add_one_shot` returns an error while the module loads or

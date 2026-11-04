@@ -5337,6 +5337,11 @@ fn test_configuration() -> Result<()> {
 #[test]
 fn test_module_config_wrappers_require_config_permissions() -> Result<()> {
     let mut con = TestConnection::new("configuration");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version = redis_module::Context::version_from_info(RedisValue::BulkString(info))?;
+    if (version.major, version.minor) < (7, 2) {
+        return Ok(());
+    }
 
     // A user granted only @admin, or only @dangerous, can use the wrappers:
     // both categories include CONFIG, and the wrappers are in both. (ACL CAT
