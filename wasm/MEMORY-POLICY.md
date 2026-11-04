@@ -106,12 +106,16 @@ new budget configuration, allocator switch, or unsafe memory creator.
 
 ## Implementation follow-ups
 
-Implement bounded compiler isolation first in
-[issue 131](https://github.com/joshrotenberg/redismodule-rs/issues/131), then
-aggregate guest/code admission in
-[issue 132](https://github.com/joshrotenberg/redismodule-rs/issues/132).
-Each issue records the design work required for its protocol or configuration
-and the acceptance tests required before shipping the implementation.
+Bounded compiler isolation in
+[issue 131](https://github.com/joshrotenberg/redismodule-rs/issues/131) is
+implemented by [PR 192](https://github.com/joshrotenberg/redismodule-rs/pull/192).
+The owner settled aggregate guest/code admission in
+[issue 132](https://github.com/joshrotenberg/redismodule-rs/issues/132#issuecomment-6618684501):
+two MEMORY-unit byte configurations, each defaulting to `1gb`, guest page
+admission before growth, and full-image admission before retention. The
+[README](README.md#memory) describes their counted sizes, lowering behavior,
+ownership and replay behavior. Process/RSS ceilings remain separate from
+these logical guest and page-rounded mapped-image reservations.
 
 ## Retention and release
 

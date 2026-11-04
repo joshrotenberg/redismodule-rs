@@ -4,13 +4,17 @@ use std::hash::{Hash, Hasher};
 use wasmtime::{Config, Engine};
 
 pub fn engine() -> anyhow::Result<Engine> {
+    Engine::new(&config())
+}
+
+pub(crate) fn config() -> Config {
     let mut config = Config::new();
     config.wasm_component_model(true);
     // Preserve the host's Redis signal-handler and epoch policies exactly.
     config.signals_based_traps(false);
     config.epoch_interruption(true);
     config.wasm_backtrace(false);
-    Engine::new(&config)
+    config
 }
 
 /// No randomized hash state: identical builds/configurations in two processes
@@ -29,4 +33,21 @@ pub fn fingerprint(engine: &Engine) -> [u8; 32] {
     env!("WASM_COMPILER_BUILD").hash(&mut hash);
     engine.precompile_compatibility_hash().hash(&mut hash);
     hash.0.finalize().into()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn shared_memory_is_rejected_rather_than_bypassing_the_resource_limiter() {
+        let engine = super::engine().unwrap();
+        // Valid core wasm: (module (memory 1 1 shared)). ResourceLimiter does
+        // not cover shared memory, so keep the pinned no-threads validation.
+        let bytes = b"\0asm\x01\0\0\0\x05\x04\x01\x03\x01\x01";
+        let error = wasmtime::Module::new(&engine, bytes).err().unwrap();
+        let text = format!("{error:#}");
+        assert!(
+            text.contains("shared") || text.contains("threads"),
+            "{text}"
+        );
+    }
 }

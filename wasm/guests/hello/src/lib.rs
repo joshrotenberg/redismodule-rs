@@ -101,14 +101,23 @@ impl Guest for Hello {
         FUNCTIONS
             .iter()
             .map(|&(name, flags)| Function {
-                name: name.into(),
+                name: if cfg!(feature = "admission-test-prefix") {
+                    format!("budget_{name}")
+                } else {
+                    name.into()
+                },
                 flags,
             })
             .collect()
     }
 
     fn invoke(name: String, keys: Vec<Vec<u8>>, args: Vec<Vec<u8>>) -> Vec<Node> {
-        run(&name, &keys, &args).into_nodes()
+        let name = if cfg!(feature = "admission-test-prefix") {
+            name.strip_prefix("budget_").unwrap_or(&name)
+        } else {
+            &name
+        };
+        run(name, &keys, &args).into_nodes()
     }
 }
 

@@ -35,6 +35,7 @@ use redis_module::{
 };
 use redis_module_macros::command;
 
+mod budget;
 mod busy;
 mod code;
 mod compiler;
@@ -47,6 +48,7 @@ mod compiler_watch;
 mod dump;
 mod flags;
 mod host;
+mod image;
 mod memory;
 mod persist;
 mod reply;
@@ -584,6 +586,8 @@ redis_module! {
     ],
     configurations: [
         i64: [
+            ["guest-memory-budget", &budget::GUEST, budget::DEFAULT_BUDGET, 0, i64::MAX, ConfigurationFlags::MEMORY, None],
+            ["code-budget", &budget::CODE, budget::DEFAULT_BUDGET, 0, i64::MAX, ConfigurationFlags::MEMORY, None],
             ["compiler-memory", &compiler::MEMORY, compiler::DEFAULT_MEMORY, 64 << 20, 16 << 30, ConfigurationFlags::MEMORY | ConfigurationFlags::IMMUTABLE, None],
             ["compiler-cpu-seconds", &compiler::CPU, compiler::DEFAULT_CPU, 1, 600, ConfigurationFlags::IMMUTABLE, None],
             ["compiler-wall-seconds", &compiler::WALL, compiler::DEFAULT_WALL, 1, 1200, ConfigurationFlags::IMMUTABLE, None],

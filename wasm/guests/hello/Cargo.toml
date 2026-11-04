@@ -15,6 +15,10 @@ crate-type = ["cdylib"]
 wit-bindgen = "0.44"
 redis-wasm-guest = { path = "../../guest-sdk" }
 
+[features]
+# A second real library for the host's aggregate-admission regressions.
+admission-test-prefix = []
+
 [profile.release]
 opt-level = "s"
 lto = true
