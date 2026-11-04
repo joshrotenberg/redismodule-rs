@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Complete the module-author rustdoc for key reads, hash fields, list writes,
+  expiry, native call replies and server events (#169). Cursor examples now
+  compile against the current API, macro input syntax uses the current callback
+  contract, and guide references follow the pinned dependency source. Both macro
+  packages include the BSD license and fork maintainer metadata; the pre-release
+  checklist also updates the shipping recipe's source pin.
+
 - Integration tests load the `lists` and `load_unload` examples and run
   `export_shared_api`, `replicate_verbatim`, `reply_with_key` and
   `list_push_head`, which nothing ran before (#168). New `shared_api` and
@@ -37,6 +44,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   break or any of `|@=,`, which Redis 7.2 and later refuse. See `examples/subcommands.rs`.
 
 ### Fixed
+
+- SDK-generated error replies consistently start with `ERR` or a specific
+  Redis error code (#166), including argument parsing, key operations,
+  configuration, registration and API-availability errors. Forwarded server
+  errors and explicit module-provided messages keep their codes and text.
+- `RedisKeyWritable::set_expire` rejects durations whose signed millisecond
+  deadline overflows, preserving the old value and expiry (#166). Redis 6.2+
+  receives the checked absolute deadline. Redis 6.0 keeps a checked relative
+  fallback, whose later native clock reading still has an extreme-boundary
+  clock-change limitation.
+- Array, map and set call-reply `Display` separates every element (#166).
+- **Breaking:** typed enum configurations reject `ConfigurationFlags::BITFLAGS`
+  during registration, since their setter cannot represent combined flags
+  (#166). Module-argument enum names now ignore ASCII case, as Redis does.
+- The SDK's crash-info dispatcher no longer captures or symbolizes a Rust
+  backtrace (#166). Module INFO callbacks still run with the original
+  crash-report flag; their own crash-path restrictions continue to apply.
 
 - **Breaking:** safe code can no longer change a key while holding data
   borrowed from it (#162). `RedisKey::read` returns an owned `Vec<u8>`;

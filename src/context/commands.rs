@@ -91,7 +91,7 @@ impl TryFrom<&str> for KeySpecFlags {
             "incomplete" => Ok(KeySpecFlags::INCOMPLETE),
             "variable_flags" => Ok(KeySpecFlags::VARIABLE_FLAGS),
             _ => Err(RedisError::String(format!(
-                "Value {value} is not a valid key spec flag."
+                "ERR Value {value} is not a valid key spec flag."
             ))),
         }
     }
@@ -333,7 +333,7 @@ impl TryFrom<&str> for CommandArgFlags {
             "multiple" => Ok(CommandArgFlags::MULTIPLE),
             "multiple_token" => Ok(CommandArgFlags::MULTIPLE_TOKEN),
             _ => Err(RedisError::String(format!(
-                "Value {value} is not a valid command arg flag."
+                "ERR Value {value} is not a valid command arg flag."
             ))),
         }
     }
@@ -575,7 +575,7 @@ api! {[
 
             if command.is_null() {
                 return Err(RedisError::String(format!(
-                    "Failed finding command {} after registration.",
+                    "ERR Failed finding command {} after registration.",
                     command_info.name
                 )));
             }
@@ -585,14 +585,14 @@ api! {[
                 // API up only here, so commands without categories load on 7.0.
                 let Some(set_acl_categories) = (unsafe { raw::RedisModule_SetCommandACLCategories }) else {
                     return Err(RedisError::String(format!(
-                        "Command {} declares ACL categories, which need Redis 7.2 or later.",
+                        "ERR Command {} declares ACL categories, which need Redis 7.2 or later.",
                         command_info.name
                     )));
                 };
-                let acl_categories = CString::new(acl_categories.join(" ")).map_err(|e| RedisError::String(e.to_string()))?;
+                let acl_categories = CString::new(acl_categories.join(" ")).map_err(RedisError::from_error)?;
                 if unsafe { set_acl_categories(command, acl_categories.as_ptr()) } == raw::Status::Err as i32 {
                     return Err(RedisError::String(format!(
-                        "Failed setting ACL categories for command {}.",
+                        "ERR Failed setting ACL categories for command {}.",
                         command_info.name
                     )));
                 }
@@ -637,7 +637,7 @@ api! {[
 
             if unsafe { RedisModule_SetCommandInfo(command, &mut redis_command_info as *mut raw::RedisModuleCommandInfo) } == raw::Status::Err as i32 {
                 return Err(RedisError::String(format!(
-                    "Failed setting info for command {}.",
+                    "ERR Failed setting info for command {}.",
                     command_info.name
                 )));
             }

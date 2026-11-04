@@ -112,7 +112,7 @@ impl DefragContext {
         if res == Status::Ok {
             Ok(cursor)
         } else {
-            Err(RedisError::Str("Could not get cursor value"))
+            Err(RedisError::Str("ERR Could not get cursor value"))
         }
     }
 
@@ -240,7 +240,7 @@ pub fn register_defrag_functions(ctx: &EventContext) -> Result<(), RedisError> {
             Some(register) => {
                 let res = unsafe { register(ctx.ctx, Some(defrag_function)) };
                 if res != raw::REDISMODULE_OK as i32 {
-                    return Err(RedisError::Str("Failed register defrag function"));
+                    return Err(RedisError::Str("ERR Failed register defrag function"));
                 }
             }
             None => ctx.log_warning(
@@ -260,7 +260,7 @@ pub fn register_defrag_functions(ctx: &EventContext) -> Result<(), RedisError> {
                     )
                 };
                 if res != raw::REDISMODULE_OK as i32 {
-                    return Err(RedisError::Str("Failed register defrag callbacks"));
+                    return Err(RedisError::Str("ERR Failed register defrag callbacks"));
                 }
             }
             None => ctx.log_warning(

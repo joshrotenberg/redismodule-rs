@@ -2,7 +2,7 @@ use crate::raw;
 use std::ffi::{CStr, CString};
 use std::ptr;
 
-const NOT_INITIALISED_MESSAGE: &str = "Redis module hasn't been initialised.";
+const NOT_INITIALISED_MESSAGE: &str = "ERR Redis module hasn't been initialised.";
 
 /// [RedisLogLevel] is a level of logging which can be used when
 /// logging with Redis. See [raw::RedisModule_Log] and the official
@@ -208,7 +208,7 @@ pub mod standard_log_implementation {
         }
         // SAFETY: the module's detached context lives as long as the module.
         unsafe { setup_for_context(pointer) }
-            .map_err(|e| RedisError::String(format!("Couldn't set up the logger: {e}")))
+            .map_err(|e| RedisError::String(format!("ERR Couldn't set up the logger: {e}")))
     }
 
     /// The same as [setup] but sets the custom module context.

@@ -149,7 +149,7 @@ impl<'load> RegistrationContext<'load> {
                 let error = std::io::Error::last_os_error();
                 if error.raw_os_error() != Some(libc::EBUSY) {
                     return Err(RedisError::String(format!(
-                        "Error: failed to add ACL category `{name}`"
+                        "ERR Error: failed to add ACL category `{name}`"
                     )));
                 }
             }

@@ -78,7 +78,7 @@ impl<'key> StreamIterator<'key> {
                 next_field,
             })
         } else {
-            Err(RedisError::Str("Failed creating stream iterator"))
+            Err(RedisError::Str("ERR Failed creating stream iterator"))
         }
     }
 }
