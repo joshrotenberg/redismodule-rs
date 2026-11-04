@@ -31,7 +31,7 @@ fn get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 fn keys(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     if ctx.is_keys_position_request() {
         for position in (1..args.len()).step_by(2) {
-            ctx.key_at_pos(position as i32);
+            ctx.key_at_pos(position as i32)?;
         }
         return Ok(RedisValue::NoReply);
     }

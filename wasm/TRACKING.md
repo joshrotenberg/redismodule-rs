@@ -115,6 +115,21 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-03: merged SDK master `1954850` into the branch as `839415e`, then
+  `23c4e12` as `677e4ab`, and adapted the host in `5e99373`. They bring SDK
+  PRs 187 (#168: CI exercises every compatibility floor and defrag coverage),
+  183 (#160: the configuration wrappers check CONFIG permissions), 190 (#169:
+  SDK orientation and `links = "redismodule"`), 184 (#154 and #155: typed
+  native data types) and 185 (#161: `key_at_pos` refuses a position past the
+  command's arguments). The host's aux-only `wasm-libs` type now implements
+  `NativeType` and `AuxData` and is a `static RedisType<Libraries>` with
+  `with_aux()`; its aux save and load take `RdbWriter` and `RdbReader`, and
+  its getkeys handler returns `key_at_pos`'s refusal. The full
+  `wasm/ci/check.sh` ran on Rust 1.94.0 and Redis 8.10.2: 457 tests passed and
+  none failed (the host's 7 unit and 21 library tests, the SDK's 75 unit, 194
+  integration and 139 doc tests, and 21 others), and the working tree,
+  including the four lockfiles, was unchanged afterwards.
+
 - 2026-11-03: merged SDK master `70420ce` into the branch as `265ddf4`. It
   brings SDK PRs 181 (#180: `RedisValue::NullArray`) and 182 (#159: event
   loop watches and one-shots bound to the module lifecycle); the host uses

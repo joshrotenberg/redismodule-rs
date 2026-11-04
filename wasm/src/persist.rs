@@ -15,15 +15,16 @@
 //! data type is not registered, so Redis can unload the module, and libraries
 //! live only in memory, untouched by loading.
 
-use std::ffi::c_int;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::{Context as _, bail};
-use redis_module::native_types::RedisType;
+use redis_module::error::Error;
+use redis_module::io::{RdbReader, RdbWriter};
+use redis_module::native_types::{AuxData, AuxTriggers, AuxWhen, NativeType, RedisType};
 use redis_module::server_events::LoadingSubevent;
-use redis_module::{EventContext, RedisModuleIO, logging, raw};
+use redis_module::{EventContext, logging};
 use redis_module_macros::loading_event_handler;
 
 use crate::flags;
@@ -41,32 +42,35 @@ pub(crate) fn enabled() -> bool {
 /// no function flags.
 const ENCODING_VERSION: i32 = 1;
 
-/// The data type the libraries are saved under.
-pub(crate) static LIBRARIES: RedisType = RedisType::new(
-    "wasm-libs",
-    ENCODING_VERSION,
-    raw::RedisModuleTypeMethods {
-        version: raw::REDISMODULE_TYPE_METHOD_VERSION as u64,
-        rdb_load: None,
-        rdb_save: None,
-        aof_rewrite: None,
-        mem_usage: None,
-        digest: None,
-        free: None,
-        aux_load: Some(aux_load),
-        aux_save: Some(aux_save),
-        aux_save_triggers: raw::Aux::Before as c_int,
-        free_effort: None,
-        unlink: None,
-        copy: None,
-        defrag: None,
-        mem_usage2: None,
-        free_effort2: None,
-        unlink2: None,
-        copy2: None,
-        aux_save2: Some(aux_save2),
-    },
-);
+/// The data type the libraries are saved under, as its aux data. No key holds
+/// a value of it, so its per-value callbacks never run.
+pub(crate) struct Libraries;
+
+impl NativeType for Libraries {
+    fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> {
+        Err(Error::generic("no key holds a wasm-libs value"))
+    }
+
+    fn rdb_save(&self, _: &mut RdbWriter) {}
+}
+
+impl AuxData for Libraries {
+    const AUX_SAVE_TRIGGERS: AuxTriggers = AuxTriggers::BEFORE_RDB;
+
+    fn aux_save(io: &mut RdbWriter, _when: AuxWhen) {
+        save(io);
+    }
+
+    fn aux_load(io: &mut RdbReader, encver: i32, _when: AuxWhen) -> Result<(), Error> {
+        load(io, encver).map_err(|e| {
+            logging::log_warning(format!("wasm: loading libraries failed: {e:#}"));
+            Error::generic(&format!("{e:#}"))
+        })
+    }
+}
+
+pub(crate) static LIBRARIES: RedisType<Libraries> =
+    RedisType::new("wasm-libs", ENCODING_VERSION).with_aux();
 
 /// Clears the libraries when Redis starts loading an RDB or AOF, which
 /// replaces them. An RDB with no libraries has no aux data for this module
@@ -87,23 +91,12 @@ fn on_loading(_ctx: &EventContext, event: LoadingSubevent) {
 }
 
 /// Saves the libraries: their count, then each library's name, component and
-/// functions, each a name and its flags. Redis before 7.2 calls this one.
-unsafe extern "C" fn aux_save(rdb: *mut raw::RedisModuleIO, _when: c_int) {
-    // SAFETY: Redis passes the RDB it is saving, for this call only.
-    save(&mut unsafe { RedisModuleIO::new(rdb) }, false);
-}
-
-/// Like `aux_save`, but saves nothing when there are no libraries, so that a
-/// server without the module can load the RDB.
-unsafe extern "C" fn aux_save2(rdb: *mut raw::RedisModuleIO, _when: c_int) {
-    // SAFETY: as for aux_save.
-    save(&mut unsafe { RedisModuleIO::new(rdb) }, true);
-}
-
-fn save(rdb: &mut RedisModuleIO, skip_if_empty: bool) {
+/// functions, each a name and its flags. With no libraries it saves nothing,
+/// so a server without the module can load the RDB.
+fn save(rdb: &mut RdbWriter) {
     let host = crate::host();
     let libraries: Vec<_> = host.iter().flat_map(Host::saved).collect();
-    if libraries.is_empty() && skip_if_empty {
+    if libraries.is_empty() {
         return;
     }
     rdb.write_unsigned(libraries.len() as u64);
@@ -118,19 +111,8 @@ fn save(rdb: &mut RedisModuleIO, skip_if_empty: bool) {
     }
 }
 
-unsafe extern "C" fn aux_load(rdb: *mut raw::RedisModuleIO, encver: c_int, _when: c_int) -> c_int {
-    // SAFETY: Redis passes the RDB it is loading, for this call only.
-    match load(&mut unsafe { RedisModuleIO::new(rdb) }, encver) {
-        Ok(()) => raw::Status::Ok as c_int,
-        Err(e) => {
-            logging::log_warning(format!("wasm: loading libraries failed: {e:#}"));
-            raw::Status::Err as c_int
-        }
-    }
-}
-
 /// Reads the libraries `save` wrote, then compiles and adds each one.
-fn load(rdb: &mut RedisModuleIO, encver: c_int) -> anyhow::Result<()> {
+fn load(rdb: &mut RdbReader, encver: i32) -> anyhow::Result<()> {
     if !(0..=ENCODING_VERSION).contains(&encver) {
         bail!("unknown encoding version {encver}");
     }

@@ -77,6 +77,13 @@ jobs:
       - name: Test
         run: cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
 
+      - name: Check compile-fail error codes at each floor
+        # One pinned-toolchain Linux Redis job for every API floor family.
+        if: matrix.os == 'ubuntu-latest' && matrix.server == 'redis' && (matrix.version == '7.2.16' || matrix.version == '7.4.11' || matrix.version == '8.10.2')
+        env:
+          RUSTC_BOOTSTRAP: "1"
+        run: cargo test --workspace --doc --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
+
       - name: Test macro parsers
         run: cargo test -p redis-module-macros -p redis-module-macros-internals
 
@@ -119,7 +126,13 @@ jobs:
   legacy-blocking:
     # The full integration suite needs newer APIs. This focused regression
     # exercises client decoding, blocking and timer protection on the oldest runtime.
-    name: Blocking and timer lifecycle (Redis 6.0.20)
+    name: Blocking and timer lifecycle (Redis ${{ matrix.version }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {version: "6.0.20", floor: "6-0"}
+          - {version: "6.2.24", floor: "6-2"}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -133,11 +146,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/sdk-server
-          key: sdk-server-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-image.outputs.image }}-redis-6.0.20-${{ hashFiles('.github/servers.json', '.github/scripts/build-server.py') }}
+          key: sdk-server-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-image.outputs.image }}-redis-${{ matrix.version }}-${{ hashFiles('.github/servers.json', '.github/scripts/build-server.py') }}
 
       - name: Build or verify server
         run: |
-          python3 .github/scripts/build-server.py redis-6.0.20 "$RUNNER_TEMP/sdk-server"
+          python3 .github/scripts/build-server.py redis-${{ matrix.version }} "$RUNNER_TEMP/sdk-server"
           echo "TEST_REDIS_SERVER_BIN=$RUNNER_TEMP/sdk-server/redis-server" >> "$GITHUB_ENV"
 
       - name: Install toolchain
@@ -148,7 +161,7 @@ jobs:
           TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
           RUST_TEST_THREADS: "4"
         run: |
-          cargo build --example hello --example call_reply --example reply_types --example data_type --example try_lock --no-default-features --features min-redis-compatibility-version-6-0
+          cargo build --example hello --example call_reply --example reply_types --example data_type --example try_lock --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
           # Configuration APIs and bind-error diagnostics differ on 6.0;
           # retain those harness cases in the full server matrix above.
           for test_name in \
@@ -156,9 +169,9 @@ jobs:
             connection_tests::test_harness_unresponsive_listener_is_bounded \
             connection_tests::test_harness_rejects_a_different_process_on_the_port
           do
-            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test utils "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-transport-tests.txt"
+            cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test utils "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-transport-tests.txt"
             grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-transport-tests.txt"
-            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test utils "$test_name" -- --exact
+            cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test utils "$test_name" -- --exact
           done
           for test_name in \
             test_harness_pipeline_error_drains_remaining_replies \
@@ -171,23 +184,23 @@ jobs:
             test_context_try_lock_contention_release_and_unload \
             test_call_protocol_resets_to_resp2_without_newer_format_flags
           do
-            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-client-tests.txt"
+            cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-client-tests.txt"
             grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-client-tests.txt"
-            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact
+            cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact
           done
 
       - name: Test direct client blocking
         env:
           TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
         run: |
-          cargo build --example block --no-default-features --features min-redis-compatibility-version-6-0
+          cargo build --example block --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
           for test_name in \
             test_direct_client_blocking_rejects_denied_invocations \
             test_blocked_client_gets_exactly_one_reply
           do
-            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-blocking-tests.txt"
+            cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-blocking-tests.txt"
             grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-blocking-tests.txt"
-            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact
+            cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact
           done
 
       - name: Test typed timer lifecycle
@@ -195,7 +208,7 @@ jobs:
           TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
           RUST_TEST_THREADS: "4"
         run: |
-          cargo build --example timer --no-default-features --features min-redis-compatibility-version-6-0
+          cargo build --example timer --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
           for test_name in \
             test_typed_timer_cancellation_recovers_data_and_drops_captures_once \
             test_typed_timer_cancellation_destructor_panic_finishes_ownership \
@@ -204,16 +217,16 @@ jobs:
             test_typed_timer_init_rejects_creation_and_releases_owned_values \
             test_typed_timer_unload_phase_rejects_creation_and_restores_after_refusal
           do
-            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-timer-tests.txt"
+            cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-timer-tests.txt"
             grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-timer-tests.txt"
-            cargo test --no-default-features --features min-redis-compatibility-version-6-0 --test integration "$test_name" -- --exact
+            cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact
           done
 
       - name: Upload failure logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: logs-legacy-blocking
+          name: logs-legacy-blocking-${{ matrix.version }}
           path: |
             target/**/integration-test/**
             ${{ runner.temp }}/sdk-server-build.log
@@ -310,6 +323,99 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  defrag:
+    name: Active defrag (Redis 8.10.2, jemalloc)
+    runs-on: ubuntu-latest
+    env:
+      TEST_REDIS_REQUIRE_DEFRAG: "1"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Read runner image
+        id: runner-image
+        run: echo "image=${ImageOS:?}-${ImageVersion:?}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache server binary
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/sdk-server
+          key: sdk-server-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.runner-image.outputs.image }}-redis-8.10.2-jemalloc-${{ hashFiles('.github/servers.json', '.github/scripts/build-server.py') }}
+
+      - name: Build or verify jemalloc server
+        run: |
+          python3 .github/scripts/build-server.py redis-8.10.2 "$RUNNER_TEMP/sdk-server" --allocator jemalloc
+          echo "TEST_REDIS_SERVER_BIN=$RUNNER_TEMP/sdk-server/redis-server" >> "$GITHUB_ENV"
+
+      - name: Install toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Exercise native defrag callbacks
+        run: |
+          cargo build --example data_type
+          cargo test --test integration test_defrag -- --exact --list | tee "$RUNNER_TEMP/defrag-tests.txt"
+          grep -Fx -- 'test_defrag: test' "$RUNNER_TEMP/defrag-tests.txt"
+          cargo test --test integration test_defrag -- --exact --nocapture
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-defrag
+          path: |
+            target/**/integration-test/**
+            ${{ runner.temp }}/sdk-server-build.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  fuzz:
+    name: Bounded parser fuzz and allocator controls
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install pinned fuzz toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly-2026-08-01
+          components: rust-src
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Run bounded AddressSanitizer fuzz checks
+        working-directory: examples/module-testing
+        run: |
+          mkdir -p fuzz/corpus/limit
+          cp seeds/* fuzz/corpus/limit/
+          cargo +nightly-2026-08-01 fuzz run limit --sanitizer address -- -runs=10000 -max_len=128 -timeout=2 -max_total_time=30 -seed=1
+          cargo +nightly-2026-08-01 fuzz run limit --sanitizer address --features system-fallback -- -runs=10000 -max_len=128 -timeout=2 -max_total_time=30 -seed=1
+
+      - name: Check disabled allocator fallback refuses startup
+        working-directory: examples/module-testing
+        run: |
+          ulimit -c 0
+          if cargo +nightly-2026-08-01 fuzz run limit --features sdk-allocator -- -runs=1 -timeout=2 > allocator-refusal.log 2>&1; then
+            echo 'Expected the unavailable Redis allocator to refuse startup' >&2
+            exit 1
+          fi
+          grep -F "Critical error: the Redis Allocator isn't available" allocator-refusal.log
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-fuzz
+          path: |
+            examples/module-testing/fuzz/artifacts/**
+            examples/module-testing/fuzz/corpus/**
+            examples/module-testing/allocator-refusal.log
+            examples/module-testing/Cargo.lock
+            examples/module-testing/fuzz/Cargo.lock
+          if-no-files-found: ignore
+          retention-days: 7
+
   bindings:
     # Generates the bindings with bindgen and fails if they differ from the
     # committed ones. One runner, so the result does not depend on each
@@ -373,7 +479,9 @@ jobs:
 
       - name: Check
         run: |
-          cargo check --workspace --all-targets
+          for floor in 6-0 6-2 7-0 7-2 7-4 8-0; do
+            cargo check --workspace --all-targets --no-default-features --features min-redis-compatibility-version-$floor
+          done
           cargo test -p redis-module-macros -p redis-module-macros-internals
 
       - name: Unit tests

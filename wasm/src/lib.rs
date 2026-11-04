@@ -230,9 +230,10 @@ fn declare_keys(ctx: &Context, args: &[RedisString]) -> RedisResult {
         .get(2)
         .and_then(|n| n.to_string_lossy().parse::<usize>().ok())
         .unwrap_or(0);
-    // A position past the arguments would crash Redis.
+    // A position past the arguments would crash Redis; the SDK also refuses
+    // one.
     for pos in 3..args.len().min(3usize.saturating_add(numkeys)) {
-        ctx.key_at_pos(i32::try_from(pos).unwrap_or(i32::MAX));
+        ctx.key_at_pos(i32::try_from(pos).unwrap_or(i32::MAX))?;
     }
     Ok(RedisValue::NoReply)
 }

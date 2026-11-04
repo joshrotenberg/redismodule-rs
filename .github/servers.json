@@ -3,6 +3,10 @@
     "url": "https://download.redis.io/releases/redis-6.0.20.tar.gz",
     "sha256": "173d4c5f44b5d7186da96c4adc5cb20e8018b50ec3a8dfe0d191dbbab53952f0"
   },
+  "redis-6.2.24": {
+    "url": "https://download.redis.io/releases/redis-6.2.24.tar.gz",
+    "sha256": "c3f112749c7cb108597713469cc9beed305e91f036fba313ce8dcbad829f5821"
+  },
   "redis-7.0.15": {
     "url": "https://download.redis.io/releases/redis-7.0.15.tar.gz",
     "sha256": "98066f5363504b26c34dd20fbcc3c957990d764cdf42576c836fc021073f4341"
