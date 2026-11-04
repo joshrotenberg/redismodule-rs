@@ -258,7 +258,7 @@ seed_lock wasm/ci/locks/hello.lock wasm/guests/hello/Cargo.lock
 if [ "$(uname)" = Darwin ]; then ext=dylib; else ext=so; fi
 module=$target/$DEMO_PROFILE/libredis_module_wasm.$ext
 
-note "cargo build $profile_flag -p redis-module-wasm (the first build compiles wasmtime and takes minutes)"
+note "cargo build${profile_flag:+ $profile_flag} -p redis-module-wasm (the first build compiles wasmtime and takes minutes)"
 cargo build --quiet $profile_flag -p redis-module-wasm
 cargo build --quiet $profile_flag -p redis-module-wasm --example componentize
 [ -x "$target/$DEMO_PROFILE/redis-wasm-compiler" ] || die "the compiler helper was not built next to the module"

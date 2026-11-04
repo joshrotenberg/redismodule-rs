@@ -10,16 +10,16 @@ the two can be made from evidence.
 
 - **This host**: `experiment/wasm-host` and its code in [`src/`](src), its
   integration tests in [`tests/library.rs`](tests/library.rs) (named below by
-  test function), [TRACKING.md](TRACKING.md) (items such as H11 and the
-  module API gaps G1 to G8), [MEMORY-POLICY.md](MEMORY-POLICY.md) and the
-  benchmark in [`bench/`](bench).
+  test function), [TRACKING.md](TRACKING.md) (items such as H11 and the module
+  API gaps G1 to G8), [MEMORY-POLICY.md](MEMORY-POLICY.md) and the benchmark
+  in [`bench/`](bench).
 - **Redis**: the public source at tag
   [`8.10.2`](https://github.com/redis/redis/tree/8.10.2) (`498ecd0`), the
-  release CI tests against and the [demo](demo/demo.sh) was run with. Paths and line
-  numbers below are at that tag. "Core" means the scripting framework Lua
-  uses there: `src/functions.c` and `src/function_lua.c` for `FUNCTION` and
-  `FCALL`, `src/eval.c` for `EVAL`, and `src/script.c` and `src/script_lua.c`,
-  which both share.
+  release CI tests against and the [demo](demo/demo.sh) was run with. Paths
+  and line numbers below are at that tag. "Core" means the scripting framework
+  Lua uses there: `src/functions.c` and `src/function_lua.c` for `FUNCTION`
+  and `FCALL`, `src/eval.c` for `EVAL`, and `src/script.c` and
+  `src/script_lua.c`, which both share.
 - **Shutdown runs**: four runs on Redis 8.10.2 with a Lua script, made for
   this document (see [Long-running functions](#long-running-functions)).
 
@@ -43,7 +43,9 @@ What a module cannot get is integration with what Redis already has for
 scripts. `FCALL`, `FUNCTION`, `SCRIPT KILL` and the tools built on them do not
 see wasm libraries; two checks Lua makes before a script starts have no direct
 module API; and a rewritten AOF without its RDB preamble loses the libraries.
-An engine in core gets these from the existing framework. Two more things are
+A `FUNCTION` engine in core gets these from the existing framework, with
+`FUNCTION KILL`; `EVAL` and `SCRIPT KILL` accept only Lua today, so they would
+need more core work (inferred). Two more things are
 out of a module's reach and not in the framework either: a function that is a
 command of its own, and memory outside the Redis allocator counted in
 `used_memory`. Core could add them in tree (inferred); a module would need new
@@ -51,7 +53,8 @@ module APIs.
 
 Core pays with coupling: every Redis build would carry the runtime and its
 toolchain, and the runtime's version would move with Redis releases (inferred).
-The module loads into a stock Redis 7.2 or later as it is, on its own release cycle, at
+The module loads into a stock Redis 7.2 or later as it is (the current build
+is checked on 8.10.2), on its own release cycle, at
 the cost of a second deployable binary and of being absent wherever it was
 not loaded.
 
@@ -73,8 +76,10 @@ documented above `RM_Call` in `src/module.c` (lines 6751 to 6830):
 | `M` | Refuses `deny-oom` commands over `maxmemory` | A function without `allow-oom` | `allow-oom` |
 
 The replies are RESP3 unless the guest asks for RESP2 with `set-resp`, so a
-guest sees each reply's type. Tests: `call_pcall_acl_check_and_set_resp_work_as_in_lua`,
-`function_flags_work_as_in_lua`, `a_replica_gets_the_libraries_and_their_changes`.
+guest sees each reply's type. Tests:
+`call_pcall_acl_check_and_set_resp_work_as_in_lua`,
+`function_flags_work_as_in_lua`,
+`a_replica_gets_the_libraries_and_their_changes`.
 
 Lua can also change where a script's effects go with `redis.set_repl`
 (`scriptSetRepl`, `src/script.c` line 599). The host offers no such import,
@@ -82,19 +87,19 @@ but the module API would allow one: `RM_Call` without `!`, or with `!` and
 `A` (replicas only) or `R` (the AOF only), covers each choice (`src/module.c`
 lines 6765 to 6767).
 
-Two of Lua's checks have no module API:
+Two of Lua's write checks have no direct counterpart in the module API:
 
 - **G5.** Lua's `scriptPrepareForRun` (`src/script.c` line 192) refuses a
   script that may write before it starts when writes would fail for a disk
   error (`MISCONF`) or for too few replicas (`NOREPLICAS`), at lines 230 to
-  255. No direct module API reports either state, so a wasm function that
-  may write starts, and its first write fails in `S` mode with the same error
-  code (the message differs). A dry run would come close: `RM_Call` with `D`
-  and `S` (`src/module.c` lines 6798 to 6801) runs the script-mode write
-  checks (lines 7032 to 7066) and returns before the command runs (line
-  7144), so the host could check both states before a function starts with a
-  synthetic write command, whose own ACL, memory and cluster checks would
-  apply too. The host does not do this.
+  255. No direct module API reports either state, so a wasm function that may
+       write starts, and its first write fails in `S` mode with the same error
+       code (for `MISCONF` the message differs). A dry run would come close:
+       `RM_Call` with `D` and `S` (`src/module.c` lines 6798 to 6801) runs the
+       script-mode write checks (lines 7032 to 7066) and returns before the
+       command runs (line 7144), so the host could check both states before a
+       function starts with a synthetic write command, whose own ACL, memory
+       and cluster checks would apply too. The host does not do this.
 - **G6.** A read-only Lua script also refuses commands flagged
   `may_replicate`. That flag is hidden from `COMMAND INFO` ("Hidden on
   purpose", `src/server.c` line 5369) and no module API returns a command's
@@ -139,7 +144,8 @@ The RDB keeps each library's name, component and function flags as module aux
 data, saved before the keyspace ([`src/persist.rs`](src/persist.rs)). Loading
 compiles the components again in the background and runs no guest code; with
 the 11 MB JavaScript library saved, a server was ready in 0.11 to 0.12 s
-instead of 1.56 to 1.67 s (H17). Tests: `libraries_survive_a_reload_and_a_restart`,
+instead of 1.56 to 1.67 s (H17). Tests:
+`libraries_survive_a_reload_and_a_restart`,
 `libraries_survive_a_restart_with_the_aof`,
 `a_restart_serves_while_saved_libraries_compile`.
 
@@ -163,16 +169,17 @@ Aux data costs three things that `FUNCTION` libraries do not pay:
 ### Replication
 
 `WASM.LOAD`, `WASM.DELETE`, `WASM.FLUSH` and `WASM.RESTORE` replicate as they
-are, and a function's writes replicate as their effects through `!`. A
-replica compiles a replicated load on a thread while its link to the primary
-waits, so it keeps serving reads (`a_replica_gets_the_libraries_and_their_changes`,
+are, and a function's writes replicate as their effects through `!`. A replica
+compiles a replicated load on a thread while its link to the primary waits, so
+it keeps serving reads (`a_replica_gets_the_libraries_and_their_changes`,
 `a_replica_runs_functions_by_their_flags`).
 
-Every replica needs the module and its compiler helper. A replica that
-refuses a replicated load, for example over a memory budget, keeps applying
-and acknowledging the rest of the stream, so `PING`, link status and `WAIT`
-do not show whether the libraries match; compare `WASM.LIST` across nodes
-(README, Memory; `admission_replica_refusal_retains_old_globals_and_fresh_full_sync_repairs`).
+Every replica needs the module and its compiler helper. A replica that refuses
+a replicated load, for example over a memory budget, keeps applying and
+acknowledging the rest of the stream, so `PING`, link status and `WAIT` do not
+show whether the libraries match; compare `WASM.LIST` across nodes (README,
+Memory;
+`admission_replica_refusal_retains_old_globals_and_fresh_full_sync_repairs`).
 
 ### Long-running functions
 
@@ -196,10 +203,11 @@ script, and reply `NOTBUSY` when there is none (`src/script.c` lines 362 to
 `-BUSY` reply names `WASM.KILL` instead.
 
 The epoch checks have a cost. Against a build that differed only in having
-epoch interruption off (a local edit, not committed), `bench/run.sh` timed the sieve (`primes`) took 17.08 to 18.06 µs
-a call against 38.96 to 41.77 µs with it, 2.27 times as long, and calls into
-Redis and replies changed by 0 to 5% (TRACKING.md, Log, 2026-10-27; three
-interleaved runs per build on an Apple M3, in `bench/results/2026-10-27/`).
+epoch interruption off (a local edit, not committed), `bench/run.sh` timed the
+sieve (`primes`) at 17.08 to 18.06 µs a call against 38.96 to 41.77 µs with
+it, 2.27 times as long, and calls into Redis and replies changed by 0 to 5%
+(TRACKING.md, Log, 2026-10-27; three interleaved runs per build on an Apple
+M3, in `bench/results/2026-10-27/`).
 
 One shutdown behavior is Redis's, shared with Lua. Without `NOW`, `SHUTDOWN`
 waits for lagging replicas, up to `shutdown-timeout`, before it exits
@@ -208,10 +216,12 @@ deadline, and whether the replicas caught up, in `serverCron` (lines 1647 to
 1650). While a script or a module command yields, Redis runs file events and
 its sleep hooks, then `whileBlockedCron` (`processEventsWhileBlocked`,
 `src/networking.c` lines 5671 to 5705), not `serverCron`, and
-`whileBlockedCron` (`src/server.c` line 1881) checks neither. Once a shutdown waits, another
-`SHUTDOWN` does nothing (`prepareForShutdown` returns at line 4993). The runs
-made for this document, on Redis 8.10.2 with a replica stopped with `SIGSTOP`,
-a write so that it lags, and an `EVAL` that wrote and then looped:
+`whileBlockedCron` (`src/server.c` line 1881) checks neither. Once a shutdown
+waits, another `SHUTDOWN` does nothing (`prepareForShutdown` returns at line
+4993), except `SHUTDOWN ABORT`, which `shutdownCommand` handles first
+(`src/db.c` lines 2219 to 2225). The runs made for this document, on Redis
+8.10.2 with a replica stopped with `SIGSTOP`, a write so that it lags, and an
+`EVAL` that wrote and then looped:
 
 - `SHUTDOWN NOSAVE` had not returned after 25 s, and a second
   `SHUTDOWN NOSAVE NOW` sent after it did not stop the server either;
@@ -240,11 +250,12 @@ address-space limit, a CPU limit and a wall timeout, one compile at a time
 behind a bounded queue. Two things in it come from sharing a process with
 Redis:
 
-- While Redis has a fork child of its own, for `BGSAVE` or an AOF rewrite,
-  it reaps any child process with `waitpid(-1)` in `checkChildrenDone`
+- While Redis has a fork child of its own, for `BGSAVE` or an AOF rewrite, it
+  reaps any child process with `waitpid(-1)` in `checkChildrenDone`
   (`src/server.c` lines 1421 to 1425, called at lines 1699 to 1703), so it
-  could take the exit status of a helper the module started directly. A small launcher process owns the
-  compiler and waits for it (`src/compiler_launcher.rs`).
+  could take the exit status of a helper the module started directly. A small
+  launcher process owns the compiler and waits for it
+  (`src/compiler_launcher.rs`).
 - Redis forks for `BGSAVE` and AOF rewrites, and the children inherit open
   descriptors, so the end of a compile cannot be signalled by a pipe closing.
   The host sends an explicit cancel message and proves the processes exited
@@ -267,12 +278,12 @@ and reports both in `INFO wasm`.
 Core reports an engine's memory through the engine's `get_used_memory`
 callback (`src/functions.h`), summed in `src/functions.c` line 1090 and shown
 as `used_memory_vm_functions` in `INFO memory` (`src/server.c` line 6559), and
-could count linear memory in `used_memory` too (inferred). Counting is not enough on its
-own: in issue 68's probes, a large load under `allkeys-lru` with concurrent
-writes evicted all 16 preloaded 1 MiB keys, and a build that counted guest
-memory let a guest's growth do the same (MEMORY-POLICY.md, Evidence). An
-engine in core would need an admission budget like PR 198's as well
-(inferred).
+could count linear memory in `used_memory` too (inferred). Counting is not
+enough on its own: in issue 68's probes, a large load under `allkeys-lru` with
+concurrent writes evicted all 16 preloaded 1 MiB keys, and a build that
+counted guest memory let a guest's growth do the same (MEMORY-POLICY.md,
+Evidence). An engine in core would need an admission budget like PR 198's as
+well (inferred).
 
 ### Faults and signals
 
@@ -375,14 +386,16 @@ In core:
   instantiation and calls do not.
 - **Signals.** G7, above: the host gives up guard-page bounds checks because
   it cannot keep its fault handlers.
-- **Allocator.** The host's lasting heap uses the Redis allocator, which
-  aborts the server when an allocation fails: `RM_Alloc` uses `zmalloc`
-  (`src/module.c` line 565), and the server's out-of-memory handler panics
-  (`redisOutOfMemoryHandler`, `src/server.c` lines 7834 to 7839, installed at
-  line 8112). MEMORY-POLICY.md, policy 4, makes the
-  same point for linear memory under that allocator: wasmtime could not turn
-  such a failure into a guest error. Linear memory and
-  code are separate mappings, bounded by the budgets.
+- **Allocator.** The host's lasting heap goes through the SDK's `RedisAlloc`,
+  which uses `RedisModule_TryAlloc` on Redis 7.0 and later
+  ([`src/alloc.rs`](../src/alloc.rs), `RedisAlloc`; `src/module.c` lines 568
+  to 572), so a failed allocation returns null. Rust's infallible
+  allocations, most of them, then abort the process; only fallible ones such
+  as `try_reserve` fail cleanly. Without `TryAlloc`, `RM_Alloc` panics the
+  server (`src/module.c` lines 556 to 565; `redisOutOfMemoryHandler`,
+  `src/server.c` lines 7834 to 7839). Either way, an allocation failure in
+  the host mostly ends the server. Linear memory and code are separate
+  mappings, bounded by the budgets.
 - **Runaway guests.** A loop that has not written is stopped by `WASM.KILL`;
   one that has is `UNKILLABLE`, and `SHUTDOWN NOSAVE NOW` stops the server.
   That is Lua's model.
@@ -422,10 +435,10 @@ What the numbers say about module against core:
 - Keeping one instance per library, instead of one per call, brought a call
   from 22 µs to 2.65 µs (H2).
 - The epoch checks behind `-BUSY` and `WASM.KILL` cost 2.27 times on a tight
-  loop and 0 to 5% elsewhere ([Long-running functions](#long-running-functions)).
-  The explicit bounds checks cost 22% on the sieve as it was then written
-  (H11); that one is a module cost, since core could keep signal handlers
-  (inferred).
+  loop and 0 to 5% elsewhere ([Long-running
+  functions](#long-running-functions)). The explicit bounds checks cost 22% on
+  the sieve as it was then written (H11); that one is a module cost, since
+  core could keep signal handlers (inferred).
 
 The demo's JavaScript load is not a benchmark: through the debug build's
 helper, on an Apple M3 busy with other work (load average 23 to 35), it took
