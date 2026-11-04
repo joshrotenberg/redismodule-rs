@@ -73,9 +73,10 @@ fn alloc_set(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let mut key = ctx.open_key_writable(&key);
 
-    if let Some(value) = key.get_value(&MY_REDIS_TYPE)? {
+    let updated = key.with_value_mut(&MY_REDIS_TYPE, |value| {
         value.data = "B".repeat(size as usize);
-    } else {
+    })?;
+    if updated.is_none() {
         let value = MyType {
             data: "A".repeat(size as usize),
         };
@@ -91,12 +92,9 @@ fn alloc_get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let key = ctx.open_key(&key);
 
-    let value = match key.get_value(&MY_REDIS_TYPE)? {
-        Some(value) => value.data.as_str().into(),
-        None => ().into(),
-    };
-
-    Ok(value)
+    Ok(key
+        .with_value(&MY_REDIS_TYPE, |value| value.data.clone())?
+        .map_or(RedisValue::Null, RedisValue::from))
 }
 
 fn alloc_defragstats(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {

@@ -288,6 +288,9 @@ impl<B: Send> ThreadSafeContext<B> {
     /// All other APIs require locking the context, so we wrap it in a way
     /// similar to `std::sync::Mutex`.
     pub fn lock(&self) -> ContextGuard<'_> {
+        // This thread already holds the lock while key data is lent, so
+        // locking again would deadlock the server.
+        crate::key::panic_while_lent();
         unsafe { crate::__required_api!(RedisModule_ThreadSafeContextLock)(self.ctx) };
         // SAFETY: the native call acquired the Redis lock on this thread.
         unsafe { self.guard_after_lock() }

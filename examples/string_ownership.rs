@@ -423,10 +423,8 @@ fn rdb_get(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
     args.done()?;
     let handle = ctx.open_key(&key);
     Ok(handle
-        .get_value(&OWNER_TYPE)?
-        .map_or(RedisValue::Null, |s| {
-            RedisValue::StringBuffer(s.0.as_slice().to_vec())
-        }))
+        .with_value(&OWNER_TYPE, |s| s.0.as_slice().to_vec())?
+        .map_or(RedisValue::Null, RedisValue::StringBuffer))
 }
 fn transfer(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
     let mut args = argv.into_iter().skip(1);

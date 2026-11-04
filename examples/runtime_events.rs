@@ -95,7 +95,7 @@ fn worker_runtime(ctx: &redis_module::RuntimeContext) -> RedisResult {
     ctx.with_db(3, |ctx| -> RedisResult {
         ctx.call("SET", &["worker:runtime", "value"])?;
         let name = ctx.create_string("worker:runtime");
-        let value = ctx.open_key(&name).read()?.unwrap().to_vec();
+        let value = ctx.open_key(&name).read()?.unwrap();
         let cursor = redis_module::KeysCursor::new();
         let mut found = false;
         let mut visit = |ctx: &redis_module::RuntimeContext,
@@ -197,18 +197,17 @@ fn owned_key_data(ctx: &redis_module::RuntimeContext, auto_memory: bool) -> Redi
     let name = ctx.create_string("worker:scoped:key");
     {
         let mut key = ctx.open_key_writable(&name);
-        key.as_string_dma()?.write(b"\0\xffvalue")?;
+        key.with_string_dma(|data| data.write(b"\0\xffvalue").map(|_| ()))??;
     }
     {
         let mut key = ctx.open_key_writable_with_flags(&name, KeyFlags::empty());
-        key.as_string_dma()?.append(b"!")?;
+        key.with_string_dma(|data| data.append(b"!").map(|_| ()))??;
     }
-    let bytes = ctx.open_key(&name).read()?.unwrap().to_vec();
+    let bytes = ctx.open_key(&name).read()?.unwrap();
     let flagged_bytes = ctx
         .open_key_with_flags(&name, KeyFlags::empty())
         .read()?
-        .unwrap()
-        .to_vec();
+        .unwrap();
 
     ctx.call("HSET", &["worker:scoped:hash", "field", "value"])?;
     let hash_name = ctx.create_string("worker:scoped:hash");

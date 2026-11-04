@@ -322,7 +322,7 @@ impl AofRewriter {
 /// # }
 /// static A_TYPE: RedisType<A> = RedisType::new("a-type-01", 0);
 /// fn read(key: &RedisKey) -> Result<(), RedisError> {
-///     let _: Option<&B> = key.get_value(&A_TYPE)?;
+///     let _: Option<&B> = unsafe { key.get_value(&A_TYPE) }?;
 ///     Ok(())
 /// }
 /// ```

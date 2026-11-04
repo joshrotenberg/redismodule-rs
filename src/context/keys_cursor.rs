@@ -47,6 +47,8 @@ impl KeysCursor {
         ctx: &RuntimeContext,
         callback: &mut F,
     ) -> bool {
+        // A scan can expire keys, the lent one included.
+        crate::key::panic_while_lent();
         let res = unsafe {
             crate::__required_api!(RedisModule_Scan)(
                 ctx.ctx,
