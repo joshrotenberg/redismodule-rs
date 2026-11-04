@@ -48,6 +48,10 @@ impl KeysCursor {
         crate::key::panic_while_lent();
         // Expiring keys frees their values, so close the open ones first.
         crate::key::keyspace_will_change(None).unwrap_or_else(|error| panic!("{error}"));
+        // Redis closes each key it lends the callback after the callback
+        // returns, which reads the key's value, so a callback may not change
+        // the keyspace.
+        let frozen = crate::key::Frozen::begin();
         let res = unsafe {
             crate::__required_api!(RedisModule_Scan)(
                 ctx.ctx,
@@ -56,6 +60,7 @@ impl KeysCursor {
                 callback as *mut F as *mut c_void,
             )
         };
+        drop(frozen);
         crate::panic::resume_deferred_panic();
         res != 0
     }

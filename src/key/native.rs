@@ -35,13 +35,19 @@ thread_local! {
     static OPEN_KEYS: Cell<*const Entry> = const { Cell::new(ptr::null()) };
     /// Counts keyspace changes on this thread, for raw handles.
     static CHANGES: Cell<u64> = const { Cell::new(0) };
-    /// How many key scan callbacks are running on this thread.
+    /// How many key and keyspace scan callbacks are running on this thread.
     static FROZEN: Cell<u32> = const { Cell::new(0) };
+    /// How many native key writes are in progress on this thread.
+    static MID_WRITE: Cell<u32> = const { Cell::new(0) };
 }
 
-/// The error for a keyspace change inside a key scan callback.
+/// The error for a keyspace change inside a key or keyspace scan callback.
 pub(crate) const FROZEN_ERROR: &str =
     "ERR a key scan callback is running; the keyspace cannot change until it returns";
+
+/// The error for a keyspace change from a callback a key write raised.
+pub(crate) const MID_WRITE_ERROR: &str =
+    "ERR a key write is in progress; the keyspace cannot change from a callback it raised";
 
 const STALE_RAW: &str =
     "a key handle built from raw parts was used after the keyspace changed; open the key again";
@@ -56,19 +62,23 @@ const UNSEEN: u64 = u64::MAX;
 /// thread's other keys with the same name and database close, since that is
 /// the only value the operation can free; without, every key closes.
 ///
-/// A key in the middle of its own native call stays open: Redis is still
-/// using it, and closing it would free the native key under that call. Only a
-/// callback Redis raises during the call can reach it, such as the `new`
-/// keyspace event of a write that creates the key. Redis warns notification
-/// subscribers not to write, without refusing it; a subscriber that changes
-/// the key a call is creating leaves Redis itself on a freed value.
+/// Changes are refused while a native key write is in progress: Redis raises
+/// callbacks during it, such as the `new` keyspace event of a write that
+/// creates the key, before it stores the new value, and a change from one
+/// would leave Redis itself on a freed value. Redis warns notification
+/// subscribers not to write, without refusing it. A key Redis is using in a
+/// native call (a write in progress, or a key scan) also stays open.
 ///
 /// # Errors
 ///
-/// Refuses while a key scan callback runs on this thread.
+/// Refuses while a key or keyspace scan callback runs on this thread, and
+/// while a native key write is in progress on it.
 pub(crate) fn keyspace_will_change(acting: Option<&NativeKey>) -> Result<(), RedisError> {
     if FROZEN.get() != 0 {
         return Err(RedisError::Str(FROZEN_ERROR));
+    }
+    if MID_WRITE.get() != 0 {
+        return Err(RedisError::Str(MID_WRITE_ERROR));
     }
     CHANGES.set(CHANGES.get().wrapping_add(1));
     let acting = acting.and_then(NativeKey::entry);
@@ -114,6 +124,36 @@ fn close_expired_access(except: Option<&Entry>) {
             entry.close();
         }
     });
+}
+
+/// `NOEXPIRE` while this thread holds an `ACCESS_EXPIRED` key Redis is using,
+/// such as one a key scan is scanning: a plain open of that key would delete
+/// its expired value under the scan. Otherwise no flags.
+fn expiry_guard() -> c_int {
+    let access_expired = super::KeyFlags::ACCESS_EXPIRED.bits();
+    let mut held = false;
+    each_entry(|entry| held |= entry.busy.get() != 0 && entry.flags & access_expired != 0);
+    if held {
+        super::KeyFlags::NOEXPIRE.bits()
+    } else {
+        0
+    }
+}
+
+/// Marks a native key write as in progress until dropped.
+struct MidWrite;
+
+impl MidWrite {
+    fn begin() -> Self {
+        MID_WRITE.set(MID_WRITE.get() + 1);
+        MidWrite
+    }
+}
+
+impl Drop for MidWrite {
+    fn drop(&mut self) {
+        MID_WRITE.set(MID_WRITE.get() - 1);
+    }
 }
 
 /// FNV-1a over a key name: registered keys compare it, with the database, to
@@ -233,7 +273,8 @@ impl Entry {
             unsafe { select(self.ctx, self.db) };
         }
         let mode = raw::KeyMode::from_bits_truncate(self.mode);
-        let inner = raw::open_key_with_flags(self.ctx, name.as_ptr(), mode, self.flags);
+        let flags = self.flags | expiry_guard();
+        let inner = raw::open_key_with_flags(self.ctx, name.as_ptr(), mode, flags);
         if selected != self.db {
             unsafe { select(self.ctx, selected) };
         }
@@ -291,7 +332,8 @@ impl NativeKey {
         let mode_bits = mode.bits();
         close_expired_access(None);
         let key_hash = key_hash(name);
-        let inner = raw::open_key_with_flags(ctx, name, mode, flags);
+        // The entry keeps the requested flags; the guard covers this open only.
+        let inner = raw::open_key_with_flags(ctx, name, mode, flags | expiry_guard());
         let db = unsafe { crate::__required_api!(RedisModule_GetSelectedDb)(ctx) };
         // A missing key opened for reading has no native key to ask its name.
         let kept_name = if inner.is_null() {
@@ -398,6 +440,7 @@ impl NativeKey {
             // The change is this key's own, so it stays current.
             seen.set(CHANGES.get());
         }
+        let _write = MidWrite::begin();
         let _busy = self.entry().map(Busy::begin);
         Ok(f(inner))
     }

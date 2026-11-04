@@ -4138,11 +4138,12 @@ fn test_key_handles_reopen_for_raw_parts_and_after_yield() -> Result<()> {
 }
 
 /// A `new` keyspace subscriber that calls while a handle's write is still
-/// creating the key closes the thread's other keys, but not the one Redis is
-/// writing through.
+/// creating the key is refused: a change then would leave Redis writing a
+/// freed value.
 #[test]
 fn test_subscriber_call_leaves_the_key_mid_write_open() -> Result<()> {
     let mut con = TestConnection::new("stale_keys");
+    // The subscriber's call is refused while the write is in progress.
     let reply: (i64, String, String) = redis::cmd("stale.create_with_subscriber")
         .arg(&["created:k", "value"])
         .query(&mut con)?;
@@ -4182,27 +4183,27 @@ fn test_key_scan_of_an_expired_key_survives_opens_in_the_callback() -> Result<()
         .arg(&["h", "other"])
         .query(&mut con)?;
     assert_eq!(fields, 2);
+    // The plain open of h inside the callback did not delete it under the scan.
+    assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut con)?, 1);
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
 
-/// The handle a keyspace scan lends its callback panics when used after a
-/// change, since the SDK cannot close and re-open a key Redis owns.
+/// Redis closes each key a keyspace scan lends its callback after the callback,
+/// reading the key's value, so the SDK refuses keyspace changes from it.
 #[test]
-fn test_keyspace_scan_handle_panics_after_a_change() -> Result<()> {
+fn test_keyspace_scan_callback_refuses_keyspace_changes() -> Result<()> {
     let mut con = TestConnection::new("stale_keys");
-    redis::cmd("SET").arg(&["a", "1"]).query::<()>(&mut con)?;
-    let error = redis::cmd("stale.keys_scan_call")
-        .arg("other")
-        .query::<Value>(&mut con)
-        .expect_err("a lent key handle was used after a keyspace change");
-    assert!(
-        error.to_string().contains(
-            "command panicked: a key handle built from raw parts was used after the keyspace changed"
-        ),
-        "{error}"
+    for key in ["a", "b"] {
+        redis::cmd("SET").arg(&[key, "1"]).query::<()>(&mut con)?;
+    }
+    let (keys, refusal): (i64, String) = redis::cmd("stale.keys_scan_del").query(&mut con)?;
+    assert_eq!(keys, 2);
+    assert_eq!(
+        refusal,
+        "ERR a key scan callback is running; the keyspace cannot change until it returns"
     );
-    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut con)?, 2);
     Ok(())
 }
 
