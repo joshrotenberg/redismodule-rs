@@ -458,14 +458,56 @@ mod tests {
     }
     #[test]
     fn full_output_pipe_with_retained_readers_cannot_trap_launcher_cleanup() {
+        trailer_fixture(None);
+        #[cfg(target_os = "linux")]
+        trailer_fixture(Some(8192));
+    }
+
+    fn trailer_fixture(capacity_limit: Option<i32>) {
+        use std::io::{Seek, SeekFrom};
         use std::os::fd::FromRawFd;
-        let mut initial = Owned::spawn(2 << 30);
-        let (_, response) = compile(&mut initial, b"\0asm\x0d\0\x01\0").unwrap();
+        let invalid = b"invalid wasm";
+        let engine = compiler_engine::engine().unwrap();
+        let fingerprint = compiler_engine::fingerprint(&engine);
+        let request = protocol::request([17; 32], fingerprint, invalid.len()).unwrap();
+        // Measure the ACTUAL failed frame in an ordinary owned C/L exchange.
+        // L emits the same final trailer after reaping a refused compiler,
+        // before checking its nonzero status. No failed code is deserialized.
+        let mut captured = tempfile::tempfile().unwrap();
+        let mut initial = Owned(Some(
+            Process::spawn_with_output(
+                &helper(),
+                2 << 30,
+                5,
+                Duration::from_secs(10),
+                [17; 32],
+                Stdio::from(captured.try_clone().unwrap()),
+            )
+            .unwrap(),
+        ));
+        initial.handshake(&|| false).unwrap();
+        let mut input = initial.child.stdin.take().unwrap();
+        input.write_all(&request).unwrap();
+        input.write_all(invalid).unwrap();
+        drop(input);
+        let exited = initial
+            .next_frame(Instant::now() + Duration::from_secs(5), &|| false)
+            .unwrap();
+        assert_eq!(exited.0, protocol::EXIT);
+        assert_eq!(u32::from_le_bytes(exited.2[..4].try_into().unwrap()), 1);
         assert!(
             initial
                 .cleanup(Instant::now() + Duration::from_secs(2))
                 .unwrap()
         );
+        captured.seek(SeekFrom::Start(0)).unwrap();
+        let mut header = [0; protocol::RESPONSE_SIZE];
+        captured.read_exact(&mut header).unwrap();
+        let response = Response::parse(&header, [17; 32], fingerprint).unwrap();
+        assert!(response.failed);
+        let mut body = vec![0; response.len];
+        captured.read_exact(&mut body).unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("invalid component"));
         let frame_size = protocol::RESPONSE_SIZE + response.len;
         let mut fds = [0; 2];
         assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
@@ -475,8 +517,23 @@ mod tests {
                 0
             );
         }
+        #[cfg(target_os = "linux")]
+        if let Some(limit) = capacity_limit {
+            let current = unsafe { libc::fcntl(fds[1], libc::F_GETPIPE_SZ) };
+            assert!(current > 0);
+            // Only shrink an empty owned pipe. This needs no privileged raise.
+            if current > limit {
+                assert!(unsafe { libc::fcntl(fds[1], libc::F_SETPIPE_SZ, limit) } > 0);
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        assert!(capacity_limit.is_none());
         let mut reader = unsafe { File::from_raw_fd(fds[0]) };
         let mut writer = unsafe { File::from_raw_fd(fds[1]) };
+        let atomic = unsafe { libc::fpathconf(fds[1], libc::_PC_PIPE_BUF) };
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        assert!(atomic > 0 && page > 0);
+        assert!(frame_size > 0 && frame_size < atomic.min(page) as usize);
         let flags = unsafe { libc::fcntl(fds[1], libc::F_GETFL) };
         assert_eq!(
             unsafe { libc::fcntl(fds[1], libc::F_SETFL, flags | libc::O_NONBLOCK) },
@@ -490,18 +547,16 @@ mod tests {
                 Err(error) => panic!("fill output pipe: {error}"),
             }
         }
-        assert!(capacity > 0);
-        // The total prefix + frame is an exact capacity multiple. Drain all
-        // but its last capacity while C writes, leaving a full pipe for L's
-        // trailer even when the component frame is larger than this pipe.
-        // Linux page slots are freed in whole-capacity/page multiples, and
-        // the partial initial tail stays mergeable. No privileged resize.
-        let prefix = (capacity - frame_size % capacity) % capacity;
-        let drain = prefix + frame_size - capacity;
+        assert!(frame_size < capacity);
+        // Linux pipe slots are page based and Stdout is a LineWriter. A tiny
+        // failed frame, smaller than PIPE_BUF and one page, fits the mergeable
+        // final tail even if embedded newlines split it into several writes.
         reader.read_exact(&mut vec![0; capacity]).unwrap();
-        writer.write_all(&vec![0; prefix]).unwrap();
-        // Restore a blocking writer, just as normal Stdio::piped creates.
+        writer.write_all(&vec![0; capacity - frame_size]).unwrap();
         assert_eq!(unsafe { libc::fcntl(fds[1], libc::F_SETFL, flags) }, 0);
+        eprintln!(
+            "trailer fixture: capacity={capacity}, failed_frame={frame_size}, PIPE_BUF={atomic}, page={page}"
+        );
         let inherited_reader = reader.try_clone().unwrap();
         let mut owned = Owned(Some(
             Process::spawn_with_output(
@@ -515,42 +570,17 @@ mod tests {
             .unwrap(),
         ));
         owned.handshake(&|| false).unwrap();
-        let engine = compiler_engine::engine().unwrap();
-        let request =
-            protocol::request([17; 32], compiler_engine::fingerprint(&engine), 8).unwrap();
         let mut input = owned.child.stdin.take().unwrap();
         input.write_all(&request).unwrap();
-        input.write_all(b"\0asm\x0d\0\x01\0").unwrap();
+        input.write_all(invalid).unwrap();
         drop(input);
-        let read_flags = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
-        assert_eq!(
-            unsafe { libc::fcntl(fds[0], libc::F_SETFL, read_flags | libc::O_NONBLOCK) },
-            0
-        );
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut remaining = drain;
-        let mut chunk = [0; 8192];
-        while remaining > 0 {
-            assert!(Instant::now() < deadline, "compiler frame drain timed out");
-            let limit = remaining.min(chunk.len());
-            match reader.read(&mut chunk[..limit]) {
-                Ok(0) => panic!("compiler closed before its complete frame"),
-                Ok(n) => remaining -= n,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(2))
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(error) => panic!("compiler frame drain: {error}"),
-            }
-        }
         let exited = owned
             .next_frame(Instant::now() + Duration::from_secs(5), &|| false)
             .unwrap();
         assert_eq!(exited.0, protocol::EXIT);
-        assert_eq!(exited.2[..4], [0; 4]);
-        // C has successfully written exactly the remaining pipe capacity. L
-        // must observe X while trying to append its trailer, although these
-        // otherwise-unused readers keep the full pipe alive.
+        assert_eq!(u32::from_le_bytes(exited.2[..4].try_into().unwrap()), 1);
+        // C actually exited after filling the pipe. Retained readers keep it
+        // alive: only L's deadline/control-aware trailer permits bounded reap.
         let bounded = owned.cleanup(Instant::now() + Duration::from_millis(300));
         drop(inherited_reader);
         drop(reader);
@@ -560,10 +590,9 @@ mod tests {
             "full trailer pipe prevented bounded cancellation"
         );
         assert!(reaped.unwrap() && owned.exit_proof && owned.reaped);
-        // Feed that actual compiler/launcher exit proof into admission recovery.
-        let process = owned.into_inner();
-        crate::compiler::tests::assert_recovery_after_exit(process);
+        crate::compiler::tests::assert_recovery_after_exit(owned.into_inner());
     }
+
     #[test]
     fn terminal_control_reset_neither_discards_valid_exit_nor_invents_proof() {
         for proof in [false, true] {
