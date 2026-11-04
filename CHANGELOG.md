@@ -16,6 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `None` when the native nonblocking lock API is unavailable; they do not
   acquire a blocking lock instead.
 
+- **Breaking:** native data types are typed Rust values with SDK-generated
+  callbacks (#154, #155). A type implements `native_types::NativeType`
+  (`rdb_load` and `rdb_save`; `free` is `Drop`) and is declared as a
+  `static` `RedisType<T>`; `RedisType::new` takes only the name and encoding
+  version. Optional callbacks are traits enabled with `with_` methods
+  (`MemUsage`, `CopyValue`, `FreeEffort`, `Unlink`, `DigestValue`,
+  `AofRewrite`, `AuxData`, `Defrag`). Every callback runs inside a panic guard;
+  a panic in `rdb_save`, `aux_save` or `aof_rewrite` ends the process after
+  logging rather than write an incomplete value (a background save's child is
+  killed, failing only that save). `get_value` and `set_value` are typed
+  by the `RedisType<T>`, require `T: Send + 'static` because Redis frees
+  values on background threads, refuse a type that was never registered, and
+  drop a value Redis refuses. Load callbacks get a read-only
+  `io::RdbReader` and save callbacks a write-only `io::RdbWriter`, since a
+  write while loading a `RESTORE` payload corrupts the command's argument.
+  `unsafe RedisType::from_raw_methods` keeps native callbacks, and
+  `RedisModuleIO` adds binary-safe `read_redis_string` and
+  `write_redis_string`.
+
 - The `module_config_get` and `module_config_set` commands that
   `redis_module!` registers require the same permissions as `CONFIG` (#160).
   They are registered with `CONFIG`'s flags (`admin deny-script allow-loading

@@ -1,9 +1,10 @@
 //! Logs a command argument through each logging entry point, so tests can
 //! check the exact text that reaches the server log.
+use redis_module::error::Error;
+use redis_module::io::{RdbReader, RdbWriter};
 use redis_module::logging::{self, RedisLogLevel};
-use redis_module::native_types::RedisType;
+use redis_module::native_types::{NativeType, RedisType};
 use redis_module::{Context, RedisError, RedisResult, RedisString, Status, raw, redis_module};
-use std::os::raw::c_void;
 
 fn init(_ctx: &redis_module::RegistrationContext<'_>, _args: &[RedisString]) -> Status {
     // The load callback's context is temporary. The persistent log facade uses
@@ -28,53 +29,42 @@ fn log_message(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok("Logged".into())
 }
 
-// This type is never stored in a key. SaveDataTypeToString supplies a real IO
-// handle and calls this callback synchronously while the command owns its String.
-unsafe extern "C" fn save_message(io: *mut raw::RedisModuleIO, value: *mut c_void) {
-    unsafe {
-        let message = &*value.cast::<String>();
-        logging::log_io_error(io, RedisLogLevel::Warning, &format!("log-io: {message}"));
-        raw::RedisModule_SaveStringBuffer.unwrap()(io, message.as_ptr().cast(), message.len());
+/// A message logged through a real IO handle. It is never stored in a key:
+/// `log.io` passes one to SaveDataTypeToString, which calls `rdb_save`
+/// synchronously while the command owns the message.
+struct LogMessage(String);
+
+impl NativeType for LogMessage {
+    fn rdb_load(_io: &mut RdbReader, _encver: i32) -> Result<Self, Error> {
+        Err(Error::generic("log messages are never loaded"))
+    }
+
+    fn rdb_save(&self, io: &mut RdbWriter) {
+        // SAFETY: io is the IO Redis passed to this rdb_save.
+        unsafe {
+            logging::log_io_error(
+                io.as_ptr(),
+                RedisLogLevel::Warning,
+                &format!("log-io: {}", self.0),
+            );
+        }
+        io.write_slice(self.0.as_bytes());
     }
 }
 
-static LOG_TYPE: RedisType = RedisType::new(
-    "logmsg001",
-    0,
-    raw::RedisModuleTypeMethods {
-        version: raw::REDISMODULE_TYPE_METHOD_VERSION as u64,
-        rdb_save: Some(save_message),
-        rdb_load: None,
-        aof_rewrite: None,
-        free: None,
-        mem_usage: None,
-        digest: None,
-        aux_load: None,
-        aux_save: None,
-        aux_save2: None,
-        aux_save_triggers: 0,
-        free_effort: None,
-        unlink: None,
-        copy: None,
-        defrag: None,
-        copy2: None,
-        free_effort2: None,
-        mem_usage2: None,
-        unlink2: None,
-    },
-);
+static LOG_TYPE: RedisType<LogMessage> = RedisType::new("logmsg001", 0);
 
 fn log_io(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     if args.len() != 2 {
         return Err(RedisError::WrongArity);
     }
-    let mut message = args[1].try_as_str()?.to_owned();
+    let mut message = LogMessage(args[1].try_as_str()?.to_owned());
     // SAFETY: the registered type invokes save_message synchronously; message
     // remains alive and is only borrowed by that callback. Redis owns the IO.
     let encoded = unsafe {
         raw::RedisModule_SaveDataTypeToString.unwrap()(
             ctx.get_raw(),
-            (&mut message as *mut String).cast(),
+            (&mut message as *mut LogMessage).cast(),
             LOG_TYPE.raw_type(),
         )
     };

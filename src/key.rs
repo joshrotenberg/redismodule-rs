@@ -145,10 +145,18 @@ impl<'ctx> RedisKey<'ctx> {
         (key.ctx, key.key_inner)
     }
 
+    /// The value of the key, read as the type `redis_type` stores; `None` for
+    /// an empty key.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the running Redis does not provide `RedisModule_ModuleTypeGetValue`.
-    pub fn get_value<T>(&self, redis_type: &RedisType) -> Result<Option<&T>, RedisError> {
+    /// Returns [`RedisError::WrongType`] if the key holds another type, and an
+    /// error if `redis_type` is not registered or the running Redis does not
+    /// provide `RedisModule_ModuleTypeGetValue`.
+    pub fn get_value<T: Send + 'static>(
+        &self,
+        redis_type: &RedisType<T>,
+    ) -> Result<Option<&T>, RedisError> {
         verify_type(self.key_inner, redis_type)?;
 
         let value = unsafe {
@@ -631,26 +639,39 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// so do not use the reference after either.
     ///
     /// ```compile_fail,E0499
-    /// # use redis_module::{native_types::RedisType, Context, RedisError, RedisString};
-    /// # fn two(ctx: &Context, name: &RedisString, kind: &RedisType) -> Result<(), RedisError> {
+    /// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, native_types::{NativeType, RedisType}, Context, RedisError, RedisString};
+    /// # struct Count(u64);
+    /// # impl NativeType for Count {
+    /// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(Count(0)) }
+    /// #     fn rdb_save(&self, _: &mut RdbWriter) {}
+    /// # }
+    /// # fn two(ctx: &Context, name: &RedisString, kind: &RedisType<Count>) -> Result<(), RedisError> {
     /// let mut key = ctx.open_key_writable(name);
-    /// let first = key.get_value::<u64>(kind)?;
-    /// let second = key.get_value::<u64>(kind)?;
-    /// first.map(|value| *value += 1);
+    /// let first = key.get_value(kind)?;
+    /// let second = key.get_value(kind)?;
+    /// first.map(|value| value.0 += 1);
     /// # Ok(()) }
     /// ```
     ///
     /// ```compile_fail,E0597
-    /// # use redis_module::{native_types::RedisType, Context, RedisError, RedisString};
-    /// # fn closed(ctx: &Context, name: &RedisString, kind: &RedisType) -> Result<(), RedisError> {
+    /// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, native_types::{NativeType, RedisType}, Context, RedisError, RedisString};
+    /// # struct Count(u64);
+    /// # impl NativeType for Count {
+    /// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(Count(0)) }
+    /// #     fn rdb_save(&self, _: &mut RdbWriter) {}
+    /// # }
+    /// # fn closed(ctx: &Context, name: &RedisString, kind: &RedisType<Count>) -> Result<(), RedisError> {
     /// let value = {
     ///     let mut key = ctx.open_key_writable(name);
-    ///     key.get_value::<u64>(kind)?
+    ///     key.get_value(kind)?
     /// };
-    /// value.map(|value| *value += 1);
+    /// value.map(|value| value.0 += 1);
     /// # Ok(()) }
     /// ```
-    pub fn get_value<T>(&mut self, redis_type: &RedisType) -> Result<Option<&mut T>, RedisError> {
+    pub fn get_value<T: Send + 'static>(
+        &mut self,
+        redis_type: &RedisType<T>,
+    ) -> Result<Option<&mut T>, RedisError> {
         verify_type(self.key_inner, redis_type)?;
         let value = unsafe {
             crate::__available_api!(RedisModule_ModuleTypeGetValue)(self.key_inner).cast::<T>()
@@ -664,18 +685,33 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         Ok(Some(value))
     }
 
+    /// Stores `value` as the key's value, replacing any existing value of
+    /// this type.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the running Redis does not provide `RedisModule_ModuleTypeSetValue`.
-    pub fn set_value<T>(&self, redis_type: &RedisType, value: T) -> Result<(), RedisError> {
+    /// Returns [`RedisError::WrongType`] if the key holds another type, and an
+    /// error if `redis_type` is not registered, Redis refuses the value (the
+    /// key is not open for writing, or an iterator is open on it), or the
+    /// running Redis does not provide `RedisModule_ModuleTypeSetValue`. A
+    /// refused value is dropped.
+    pub fn set_value<T: Send + 'static>(
+        &self,
+        redis_type: &RedisType<T>,
+        value: T,
+    ) -> Result<(), RedisError> {
         verify_type(self.key_inner, redis_type)?;
         // Look up the API before boxing, so a missing one cannot leak the value.
         let set_value = unsafe { crate::__available_api!(RedisModule_ModuleTypeSetValue) };
         let value = Box::into_raw(Box::new(value)).cast::<c_void>();
         let status: raw::Status =
             unsafe { set_value(self.key_inner, redis_type.raw_type(), value) }.into();
-
-        status.into()
+        if status == raw::Status::Err {
+            // SAFETY: Redis did not take the value, so this is still its only owner.
+            drop(unsafe { Box::from_raw(value.cast::<T>()) });
+            return Err(RedisError::Str("ERR Redis did not store the value"));
+        }
+        Ok(())
     }
 
     /// Removes stream entries with IDs less than `id`, returning the count.
@@ -935,12 +971,20 @@ fn to_raw_mode(mode: KeyMode) -> raw::KeyMode {
 /// # Errors
 ///
 /// Returns [`RedisError::WrongType`] if the key exists and holds a value of
-/// another type, and an error if the running Redis does not provide
-/// `RedisModule_KeyType` or `RedisModule_ModuleTypeGetType`.
-pub(crate) fn verify_type(
+/// another type, and an error if `redis_type` is not registered or the running
+/// Redis does not provide `RedisModule_KeyType` or
+/// `RedisModule_ModuleTypeGetType`.
+pub(crate) fn verify_type<T: Send + 'static>(
     key_inner: *mut raw::RedisModuleKey,
-    redis_type: &RedisType,
+    redis_type: &RedisType<T>,
 ) -> RedisResult {
+    // An unregistered type has no native type: stored, its value would carry a
+    // null type, and Redis would crash on the next DEL, TYPE or save.
+    if redis_type.raw_type().is_null() {
+        return Err(RedisError::Str(
+            "ERR the native type is not registered; list it in data_types",
+        ));
+    }
     let key_type: KeyType =
         unsafe { crate::__available_api!(RedisModule_KeyType)(key_inner) }.into();
 
