@@ -5,8 +5,9 @@
 //! `normal`; the other modes exercise callback and destructor refusal paths.
 
 use redis_module::{
-    Context, KeyBlockingResult, KeyBlockingTimeout, NextArg, RedisError, RedisResult, RedisString,
-    RedisValue, redis_module,
+    CommandFlags, Context, EventContext, KeyBlockingResult, KeyBlockingTimeout, KeyRange, NextArg,
+    RedisError, RedisResult, RedisString, RedisValue, RegistrationContext, Status, YieldMode, raw,
+    redis_command, redis_module,
 };
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
@@ -15,6 +16,8 @@ static DROPS: AtomicI64 = AtomicI64::new(0);
 static READY: AtomicI64 = AtomicI64::new(0);
 static TIMEOUTS: AtomicI64 = AtomicI64::new(0);
 static DELETE_FLAG: AtomicBool = AtomicBool::new(false);
+static LOAD_TEST: AtomicBool = AtomicBool::new(false);
+static LOAD_ATTEMPT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy)]
 enum Mode {
@@ -121,7 +124,11 @@ fn wait(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         return Ok(reply);
     }
     let keys: Vec<_> = keys.iter().collect();
-    match ctx.block_client_on_keys(&keys, timeout, true, waiter, on_ready, on_timeout)? {
+    let outcome = ctx.block_client_on_keys(&keys, timeout, true, waiter, on_ready, on_timeout);
+    if LOAD_TEST.load(Ordering::SeqCst) {
+        LOAD_ATTEMPT.store(true, Ordering::SeqCst);
+    }
+    match outcome? {
         KeyBlockingResult::Blocked { unblock_on_delete } => {
             DELETE_FLAG.store(unblock_on_delete, Ordering::SeqCst);
             Ok(RedisValue::NoReply)
@@ -149,6 +156,115 @@ fn call_wait(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ctx.call("keyblock.wait", &args)
 }
 
+// Use the native K call deliberately: the SDK's call_blocking correctly
+// refuses OnLoad before invoking the command, which would miss this regression.
+// On a broken implementation abort a promise and keep the module mapped.
+enum KCall {
+    Unsupported,
+    Denied,
+    Unexpected,
+}
+
+fn native_call_wait_k(ctx: &EventContext, key: &RedisString) -> KCall {
+    unsafe {
+        let (Some(call), Some(kind), Some(free), Some(abort)) = (
+            raw::RedisModule_Call,
+            raw::RedisModule_CallReplyType,
+            raw::RedisModule_FreeCallReply,
+            raw::RedisModule_CallReplyPromiseAbort,
+        ) else {
+            return KCall::Unsupported;
+        };
+        let args = [
+            ctx.create_string("0"),
+            ctx.create_string("1"),
+            ctx.create_string("normal"),
+        ];
+        let mut argv = [
+            args[0].as_ptr(),
+            args[1].as_ptr(),
+            args[2].as_ptr(),
+            key.as_ptr(),
+        ];
+        let reply = call(
+            ctx.get_raw(),
+            c"keyblock.wait".as_ptr(),
+            c"Kv".as_ptr(),
+            argv.as_mut_ptr(),
+            argv.len(),
+        );
+        if reply.is_null() {
+            return KCall::Unexpected;
+        }
+        let reply_type = kind(reply);
+        if reply_type == raw::REDISMODULE_REPLY_PROMISE as i32 {
+            abort(reply, std::ptr::null_mut());
+        }
+        free(reply);
+        if reply_type == raw::REDISMODULE_REPLY_NULL as i32 {
+            KCall::Denied
+        } else {
+            KCall::Unexpected
+        }
+    }
+}
+
+fn call_wait_k(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let key = args.next_arg()?;
+    args.done()?;
+    match native_call_wait_k(ctx, &key) {
+        KCall::Unsupported => Ok(RedisValue::SimpleStringStatic("unsupported")),
+        KCall::Denied => Ok(RedisValue::NullArray),
+        KCall::Unexpected => Err(RedisError::Str("ERR module call unexpectedly blocked")),
+    }
+}
+
+fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
+    if args.iter().any(|arg| arg.as_slice() == b"fail-load-k") {
+        match native_call_wait_k(ctx, &ctx.create_string("keyblock:load-k")) {
+            KCall::Denied => ctx.log_notice("keyblock: load K call denied without a waiter"),
+            KCall::Unsupported => ctx.log_notice("keyblock: load K call unsupported"),
+            // Retain the image if the regression ever creates a native waiter.
+            KCall::Unexpected => return Status::Ok,
+        }
+        return Status::Err;
+    }
+    if args.iter().any(|arg| arg.as_slice() == b"fail-load-yield") {
+        LOAD_TEST.store(true, Ordering::SeqCst);
+        ctx.log_notice("keyblock: waiting for a real client during load");
+        let started = std::time::Instant::now();
+        while !LOAD_ATTEMPT.load(Ordering::SeqCst)
+            && started.elapsed() < std::time::Duration::from_secs(3)
+        {
+            if ctx.yield_now(YieldMode::Clients, None).is_err() {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        LOAD_TEST.store(false, Ordering::SeqCst);
+        if LIVE.load(Ordering::SeqCst) != 0 {
+            return Status::Ok;
+        }
+        if LOAD_ATTEMPT.load(Ordering::SeqCst) {
+            ctx.log_notice(&format!(
+                "keyblock: real client refused while loading; live={} drops={}",
+                LIVE.load(Ordering::SeqCst),
+                DROPS.load(Ordering::SeqCst)
+            ));
+        }
+        return Status::Err;
+    }
+    Status::Ok
+}
+
+// Minimal native control for yielded failed-load command-cache diagnostics.
+// This does not construct a waiter or call any key-blocking API.
+fn load_control(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    LOAD_ATTEMPT.store(true, Ordering::SeqCst);
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
 fn ready_outside(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Bool(ctx.blocked_client_ready_key()?.is_some()))
 }
@@ -169,10 +285,24 @@ redis_module! {
     version: 1,
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
+    init: init,
     commands: [
-        ["keyblock.wait", wait, "readonly", 4, -1, 1, ""],
+        redis_command!("keyblock.wait", wait)
+            .flags(if unsafe { raw::RedisModule_Yield }.is_some() {
+                CommandFlags::READ_ONLY | CommandFlags::ALLOW_BUSY
+            } else {
+                CommandFlags::READ_ONLY
+            })
+            .keys(KeyRange::new(4).last(-1)),
+        redis_command!("keyblock.load_control", load_control)
+            .flags(if unsafe { raw::RedisModule_Yield }.is_some() {
+                CommandFlags::READ_ONLY | CommandFlags::ALLOW_BUSY
+            } else {
+                CommandFlags::READ_ONLY
+            }),
         ["keyblock.signal", signal, "readonly", 1, 1, 1, ""],
         ["keyblock.call_wait", call_wait, "readonly", 1, 1, 1, ""],
+        ["keyblock.call_wait_k", call_wait_k, "readonly", 1, 1, 1, ""],
         ["keyblock.ready_outside", ready_outside, "readonly", 0, 0, 0, ""],
         ["keyblock.stats", stats, "readonly", 0, 0, 0, ""],
     ],

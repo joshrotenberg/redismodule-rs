@@ -450,8 +450,8 @@ pub enum KeyBlockingResult<T> {
         /// Older servers fall back to ordinary readiness notifications.
         unblock_on_delete: bool,
     },
-    /// This invocation cannot block (a script, transaction or call without
-    /// blocking permission). No native block was attempted; use the returned
+    /// This invocation cannot block (a script, transaction or module call,
+    /// including a module call with `K`). No native block was attempted; use the returned
     /// data to compute the command's non-blocking fallback.
     Denied(T),
 }
@@ -468,6 +468,11 @@ impl Context {
     /// `NoReply` from either callback becomes an error so the client cannot be
     /// unblocked without a reply. Callbacks should return their reply rather
     /// than writing one themselves.
+    ///
+    /// Only indexed network clients may wait. Module calls, including calls
+    /// using the `K` flag, return [`KeyBlockingResult::Denied`] and must use the
+    /// non-blocking fallback. Requires a module loaded with `redis_module!`;
+    /// load/unload callbacks and unbound custom loaders cannot register waiters.
     ///
     /// Redis protects the module from unload while the waiter exists. Its
     /// free callback drops the data once even when the client disconnects
@@ -503,6 +508,15 @@ impl Context {
         if !self.blocking_context_allowed()? {
             return Ok(KeyBlockingResult::Denied(data.take()));
         }
+        // A module-call client may carry K but it is not a real network client.
+        // Exclude all of them, including nested calls during module loading.
+        let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
+        let client_info = unsafe { crate::__available_api!(RedisModule_GetClientInfoById) };
+        if unsafe { client_info(ptr::null_mut(), client_id(self.ctx)) }
+            != raw::REDISMODULE_OK as c_int
+        {
+            return Ok(KeyBlockingResult::Denied(data.take()));
+        }
         // An auth/load context can be rejected by native blocking only after
         // it has allocated a handle. Only tracked command invocations are
         // eligible here; native reply/timeout phases were rejected above.
@@ -511,6 +525,14 @@ impl Context {
                 "ERR key blocking requires an SDK command callback",
             ));
         }
+        if !super::timer::sdk_module_is_active(self) {
+            return Err(RedisError::Str(
+                "ERR key blocking requires an active SDK module",
+            ));
+        }
+        let lifecycle = super::post_notification::Job::new(()).ok_or(RedisError::Str(
+            "ERR key blocking requires an active SDK module",
+        ))?;
         let block = unsafe { crate::__available_api!(RedisModule_BlockClientOnKeys) };
         let with_flags = unsafe { raw::RedisModule_BlockClientOnKeysWithFlags };
         unsafe { crate::__available_api!(RedisModule_GetBlockedClientPrivateData) };
@@ -522,6 +544,7 @@ impl Context {
             state: ManuallyDrop::new(Arc::new(KeysState {
                 data: Mutex::new(data.take()),
                 completed: AtomicBool::new(false),
+                _lifecycle: lifecycle,
             })),
             on_ready,
             on_timeout,
@@ -610,6 +633,9 @@ fn key_count(count: usize) -> Result<c_int, RedisError> {
 struct KeysState<T> {
     data: Mutex<T>,
     completed: AtomicBool,
+    // Last so user data and callback snapshots retain the unload lease through
+    // all captured destructors, including a reentrant MODULE UNLOAD attempt.
+    _lifecycle: super::post_notification::Job<()>,
 }
 
 struct KeysInput<T>(Option<T>);
@@ -842,6 +868,8 @@ mod key_blocking_tests {
                     panic,
                 }),
                 completed: AtomicBool::new(false),
+                _lifecycle: crate::context::post_notification::Job::new(())
+                    .expect("unit-test lifecycle"),
             })),
             on_ready: no_reply,
             on_timeout: timeout,

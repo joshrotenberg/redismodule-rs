@@ -22,8 +22,12 @@ callback snapshots and a nonblocking mutex also protect reentrant cleanup.
 
 `KeyBlockingTimeout` rejects negative and excessively large timeouts before
 native registration, leaving conservative clock headroom. Scripts,
-transactions and calls without blocking permission receive `Denied(data)` for
-an immediate fallback. The flag-aware API requests deletion wakeups where
+transactions and all module calls, including calls using `K`, receive
+`Denied(data)` for an immediate fallback. Only indexed network clients can
+wait, and an active SDK lifecycle binding is required: loading, unloading and
+unbound custom-loader invocations are refused before native registration.
+An existing lifecycle lease remains held through callbacks and captured data
+destructors. The flag-aware API requests deletion wakeups where
 available and otherwise reports ordinary readiness behavior. Signaling and
 an independent owned copy of the callback's ready-key name are available as
 context methods. Redis's blocked-client count prevents unload while a key

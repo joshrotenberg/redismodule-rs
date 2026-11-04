@@ -156,9 +156,12 @@ an error because a completed wait must send one reply.
 
 Return `RedisValue::NoReply` only for `KeyBlockingResult::Blocked`.
 `KeyBlockingResult::Denied(data)` preserves the data for a non-blocking reply
-inside a transaction, script or call without blocking permission. The new API
-requires a tracked SDK command callback; a raw command callback can invoke
-its handler through the unsafe SDK `panic::run_command` trampoline.
+inside a transaction, script or any module call, including one using `K`.
+Only indexed network clients can wait. The new API requires an active module
+loaded by `redis_module!` and a tracked SDK command callback; load/unload
+callbacks and custom loaders without that lifecycle binding are refused.
+Within an SDK-bound module, a raw command callback may invoke its handler
+through the unsafe SDK `panic::run_command` trampoline.
 
 `KeyBlockingTimeout::try_from(0_i64)` and `INFINITE` have no deadline; duration
 conversions round zero and submillisecond values up to one millisecond.

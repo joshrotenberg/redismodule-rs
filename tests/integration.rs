@@ -7482,7 +7482,7 @@ fn key_blocking_live(con: &mut TestConnection, live: i64, drops: i64) -> Result<
 fn test_key_blocking_readiness_rechecks_and_copies_binary_ready_keys() -> Result<()> {
     let mut con = TestConnection::new("key_blocking");
     assert!(!redis::cmd("keyblock.ready_outside").query::<bool>(&mut con)?);
-    let key = b"keyblock:binary\0\xff";
+    let key: &[u8] = b"keyblock:binary\0\xff";
     let mut client = KeyBlockingWire::connect(&con)?;
     client.send(
         redis::cmd("keyblock.wait")
@@ -7509,6 +7509,11 @@ fn test_key_blocking_readiness_rechecks_and_copies_binary_ready_keys() -> Result
         .arg(key)
         .arg("two")
         .query::<usize>(&mut con)?;
+    // Redis automatically signals a list when it becomes nonempty. Further
+    // list pushes need the module producer to signal its own readiness rule.
+    redis::cmd("keyblock.signal")
+        .arg(key)
+        .query::<String>(&mut con)?;
     assert_eq!(
         client.read()?,
         Value::Array(vec![
@@ -7554,6 +7559,14 @@ fn test_key_blocking_denied_contexts_keep_the_nonblocking_fallback() -> Result<(
         Value::Nil
     );
     key_blocking_live(&mut con, 0, 3)?;
+    let k_reply = redis::cmd("keyblock.call_wait_k")
+        .arg(key)
+        .query::<Value>(&mut con)?;
+    if k_reply == Value::Nil {
+        key_blocking_live(&mut con, 0, 4)?;
+    } else {
+        assert_eq!(k_reply, Value::SimpleString("unsupported".to_owned()));
+    }
     let stats = key_blocking_stats(&mut con)?;
     assert_eq!(&stats[2..4], &[0, 0]);
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
@@ -7667,6 +7680,95 @@ fn test_key_blocking_deletion_disconnect_and_unload_release_waiters() -> Result<
     redis::cmd("MODULE")
         .arg(("UNLOAD", "key_blocking"))
         .query::<String>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_failed_load_k_call_leaves_no_waiter() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    let loaded = redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("key_blocking")?)
+        .arg("fail-load-k")
+        .query::<Value>(&mut con);
+    assert!(loaded.is_err(), "the fixture must refuse the load");
+    let log = con.server_log()?;
+    assert!(
+        log.contains("keyblock: load K call denied without a waiter")
+            || log.contains("keyblock: load K call unsupported"),
+        "{log}"
+    );
+    redis::cmd("RPUSH")
+        .arg(("keyblock:load-k", "after failed load"))
+        .query::<usize>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    // Successful reloading and unloading also prove no old waiter pins the image.
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("key_blocking")?)
+        .query::<String>(&mut con)?;
+    assert_eq!(key_blocking_stats(&mut con)?[0], 0);
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "key_blocking"))
+        .query::<String>(&mut con)?;
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_real_client_during_yielded_load_is_refused() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    if redis::cmd("CONFIG")
+        .arg(("SET", "busy-reply-threshold", 1))
+        .query::<String>(&mut con)
+        .is_err()
+    {
+        eprintln!(
+            "Redis lacks Yield client processing; old-server K refusal is covered separately"
+        );
+        return Ok(());
+    }
+    let path = utils::module_path("key_blocking")?;
+    let mut loader = con.connection()?;
+    let mut during_load = con.connection()?;
+    let load = std::thread::spawn(move || {
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(path)
+            .arg("fail-load-yield")
+            .query::<Value>(&mut loader)
+    });
+    utils::wait_until(
+        Duration::from_secs(5),
+        "keyblock yielding load entered",
+        || {
+            Ok(con
+                .server_log()?
+                .contains("keyblock: waiting for a real client during load"))
+        },
+    )?;
+    // A failed native load removes its command metadata. Use a dedicated
+    // invocation client and retire it: Redis caches that metadata on a client
+    // which executes a command admitted by a yielded, later-failed OnLoad.
+    let reply = redis::cmd("keyblock.wait")
+        .arg((0, 1, "normal", "keyblock:load-yield"))
+        .query::<Value>(&mut during_load);
+    drop(during_load);
+    assert!(
+        reply
+            .unwrap_err()
+            .to_string()
+            .contains("key blocking requires an active SDK module")
+    );
+    assert!(load.join().expect("load thread").is_err());
+    assert!(
+        con.server_log()?
+            .contains("keyblock: real client refused while loading; live=0 drops=1")
+    );
+    redis::cmd("RPUSH")
+        .arg(("keyblock:load-yield", "after failed load"))
+        .query::<usize>(&mut con)
+        .with_context(|| format!("after yielded failed load: {:?}", con.server_log()))?;
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
