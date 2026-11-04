@@ -23,6 +23,21 @@ and `.summary` and `.arity` set the command info `COMMAND DOCS` and
 it for a call its arity accepts without a subcommand, so registration refuses a
 container arity of 1 or -1, and refuses containers before Redis 7.0.
 
+## Redis 6.0 capability fallbacks
+
+Keyspace subscriptions no longer require native flag enumeration (#167).
+When `RedisModule_GetKeyspaceNotificationFlagsAll` is unavailable on older
+Redis 6.0 servers, runtime subscriptions and `redis_module!` event handlers
+pass the requested mask unchanged. `NotifyEvent::all()` includes all flags
+known to the SDK; the server emits only events it implements. Native
+subscription support remains required before module initialization.
+
+`ThreadSafeContext::try_lock` and `DetachedContext::try_lock` return `None`
+when `RedisModule_ThreadSafeContextTryLock` is unavailable, preserving their
+nonblocking contract. Neither method falls back to a blocking acquisition.
+Later Redis 6.0 patch releases backport both APIs, so missing-binding probes
+cover the older-server paths as well as native version checks.
+
 ## Clients blocked on keys
 
 `Context::block_client_on_keys` wraps key-based blocking with typed owned

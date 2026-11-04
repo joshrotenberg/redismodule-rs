@@ -261,6 +261,73 @@ fn test_api_availability_missing_job_releases_captures_without_panicking() -> Re
     Ok(())
 }
 
+#[test]
+fn test_api_availability_missing_try_lock_is_nonblocking() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    for _ in 0..2 {
+        let refused: Vec<i64> = redis::cmd("api.missing_try_lock").query(&mut con)?;
+        assert_eq!(refused, [1, 1], "both owners return None without waiting");
+    }
+    assert!(!con.server_log()?.contains("panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "api_availability"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_api_availability_missing_keyspace_flags_preserves_requested_mask() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    redis::cmd("api.missing_keyspace_flags").query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("api.keyspace_events").query::<i64>(&mut con)?, 0);
+    redis::cmd("SET")
+        .arg(&["api:subscribed", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("api.keyspace_events").query::<i64>(&mut con)?,
+        1,
+        "the requested STRING subscription survives missing flag enumeration"
+    );
+    assert!(!con.server_log()?.contains("panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "api_availability"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["api:unloaded", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_api_availability_missing_subscription_is_refused_and_recovers() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    let refused: Vec<i64> = redis::cmd("api.missing_keyspace_subscription").query(&mut con)?;
+    assert_eq!(
+        refused,
+        [1, 1, 1],
+        "required API fails preflight and both masks"
+    );
+    redis::cmd("SET")
+        .arg(&["api:refused", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("api.keyspace_events").query::<i64>(&mut con)?, 0);
+    // The diagnostic restored the binding, so a real subscription works now.
+    redis::cmd("api.missing_keyspace_flags").query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["api:recovered", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("api.keyspace_events").query::<i64>(&mut con)?, 1);
+    assert!(!con.server_log()?.contains("panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "api_availability"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
 #[cfg(feature = "redis-7-2-examples")]
 #[test]
 fn test_notification_job_rejection_releases_captures() -> Result<()> {

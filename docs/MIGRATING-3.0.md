@@ -986,6 +986,21 @@ take `&Context` instead of a raw pointer.
 
 ## Changes that compile unchanged
 
+### Missing optional APIs on older Redis 6.0 servers
+
+`ThreadSafeContext::try_lock` and `MODULE_CONTEXT.try_lock()` return `None`
+when the native nonblocking lock API is missing, as well as when the lock is
+contended (#167). They never wait for a blocking acquisition. A module that
+requires nonblocking locking can check
+`ctx.api_available("ThreadSafeContextTryLock")` before starting its worker.
+
+Keyspace `event_handlers` and runtime subscriptions can load without native
+flag enumeration. They pass the requested mask unchanged in that case:
+`NotifyEvent::all()` means all flags known to this SDK, while the running
+server only emits events it implements. Servers that provide flag enumeration
+keep filtering unsupported bits. Native subscription support is still
+required before `init` runs.
+
 These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.

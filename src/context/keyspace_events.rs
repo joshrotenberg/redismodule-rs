@@ -50,8 +50,11 @@ impl EventContext {
     /// mask. Redis removes subscriptions when the module unloads. Notifications
     /// do not depend on the server's `notify-keyspace-events` configuration.
     ///
-    /// Unsupported flags are logged and filtered, just as with `redis_module!`
-    /// event handlers. An empty resulting mask succeeds without subscribing.
+    /// When Redis can report its supported flags, unsupported flags are logged
+    /// and filtered, just as with `redis_module!` event handlers. Older Redis
+    /// 6.0 servers receive the requested mask unchanged: "all" means all flags
+    /// known to this SDK, and that server only emits the events it implements.
+    /// An empty resulting mask succeeds without subscribing.
     /// Event names are decoded lossily; keys are borrowed only during the
     /// callback. A handler must copy any data it needs to keep. Panics are caught
     /// and logged. Use [`Self::add_post_notification_job`] for writes in response
@@ -62,10 +65,10 @@ impl EventContext {
         handler: KeyspaceEventHandler,
     ) -> Result<(), RedisError> {
         keyspace_subscription_available()?;
-        let flags_all = unsafe { raw::RedisModule_GetKeyspaceNotificationFlagsAll }.ok_or(
-            RedisError::Str("ERR keyspace notification flags API is unavailable"),
-        )?;
-        let supported = NotifyEvent::from_bits_truncate(unsafe { flags_all() });
+        let supported = unsafe { raw::RedisModule_GetKeyspaceNotificationFlagsAll }
+            .map_or(mask, |flags_all| {
+                NotifyEvent::from_bits_truncate(unsafe { flags_all() })
+            });
         let available = mask.intersection(supported);
         if !supported.contains(mask) {
             let unsupported = mask.difference(supported);
@@ -95,9 +98,6 @@ impl EventContext {
 /// load before `init` instead.
 #[doc(hidden)]
 pub fn keyspace_subscription_available() -> Result<(), RedisError> {
-    unsafe { raw::RedisModule_GetKeyspaceNotificationFlagsAll }.ok_or(RedisError::Str(
-        "ERR keyspace notification flags API is unavailable",
-    ))?;
     unsafe { raw::RedisModule_SubscribeToKeyspaceEvents }.ok_or(RedisError::Str(
         "ERR keyspace subscription API is unavailable",
     ))?;

@@ -295,9 +295,11 @@ impl<B: Send> ThreadSafeContext<B> {
 
     /// Attempts to acquire the Redis lock without waiting.
     ///
-    /// Returns `None` if the lock cannot be acquired immediately. A successful
-    /// guard borrows this owner and releases the lock when dropped, just like
-    /// [`Self::lock`]. Use this from a worker that must check a stop flag instead
+    /// Returns `None` if the lock cannot be acquired immediately or the server
+    /// has no nonblocking-lock API (older Redis 6.0 servers). It never falls
+    /// back to waiting. A successful guard borrows this owner and releases the
+    /// lock when dropped, just like [`Self::lock`]. Use this from a worker that
+    /// must check a stop flag instead
     /// of waiting for a lock held by `MODULE UNLOAD`; stop and join workers
     /// before the module unloads. See `examples/try_lock.rs`.
     ///
@@ -318,8 +320,8 @@ impl<B: Send> ThreadSafeContext<B> {
     /// }
     /// ```
     pub fn try_lock(&self) -> Option<ContextGuard<'_>> {
-        let status =
-            unsafe { crate::__required_api!(RedisModule_ThreadSafeContextTryLock)(self.ctx) };
+        let try_lock = unsafe { raw::RedisModule_ThreadSafeContextTryLock }?;
+        let status = unsafe { try_lock(self.ctx) };
         if raw::Status::from(status) != raw::Status::Ok {
             return None;
         }

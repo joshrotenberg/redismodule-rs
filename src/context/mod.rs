@@ -430,9 +430,11 @@ impl DetachedContext {
 
     /// Attempts to acquire the Redis lock without waiting.
     ///
-    /// Returns `None` if the lock cannot be acquired immediately. On success,
-    /// returns the same borrowed worker guard as [`Self::lock`]; dropping it
-    /// releases the lock. Workers can check a stop flag between attempts so
+    /// Returns `None` if the lock cannot be acquired immediately or the server
+    /// has no nonblocking-lock API (older Redis 6.0 servers). It never falls
+    /// back to waiting. On success, returns the same borrowed worker guard as
+    /// [`Self::lock`]; dropping it releases the lock. Workers can check a stop
+    /// flag between attempts so
     /// `MODULE UNLOAD` can join them while holding the Redis lock. Stop workers
     /// before unloading the module, as with [`Self::lock`].
     ///
@@ -457,7 +459,8 @@ impl DetachedContext {
         let c = self.ctx.load(Ordering::Acquire);
         assert!(!c.is_null(), "Detached context has not been initialized");
         // Like Lock, TryLock does not read the context in supported servers.
-        let status = unsafe { crate::__required_api!(RedisModule_ThreadSafeContextTryLock)(c) };
+        let try_lock = unsafe { raw::RedisModule_ThreadSafeContextTryLock }?;
+        let status = unsafe { try_lock(c) };
         if raw::Status::from(status) != raw::Status::Ok {
             return None;
         }

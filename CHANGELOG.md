@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keyspace subscriptions and nonblocking context locks tolerate missing Redis
+  6.2 capability APIs on older Redis 6.0 servers (#167). Without flag
+  enumeration, keyspace handlers request their mask unchanged, including all
+  SDK-known bits for `NotifyEvent::all()`. Both `try_lock` methods return
+  `None` when the native nonblocking lock API is unavailable; they do not
+  acquire a blocking lock instead.
+
 - **Breaking:** `Context::key_at_pos` returns `Result<(), RedisError>` and
   refuses a position that is not an argument position of the running command
   (#161). Redis checks only that the position is positive and later reads the

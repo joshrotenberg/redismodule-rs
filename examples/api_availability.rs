@@ -2,8 +2,8 @@
 //! The diagnostic commands temporarily hide one binding under the Redis lock
 //! to exercise graceful missing-API behavior on a normal server.
 use redis_module::{
-    Context, NextArg, RedisError, RedisResult, RedisString, RegistrationContext, Status, raw,
-    redis_module,
+    Context, EventContext, NextArg, NotifyEvent, RedisError, RedisResult, RedisString,
+    RegistrationContext, Status, ThreadSafeContext, raw, redis_event_handler, redis_module,
 };
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -92,6 +92,77 @@ fn missing_job(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     .into())
 }
 
+fn missing_try_lock(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    let owner = ThreadSafeContext::new();
+    let _restore = Restore {
+        slot: std::ptr::addr_of_mut!(raw::RedisModule_ThreadSafeContextTryLock),
+        value: unsafe { raw::RedisModule_ThreadSafeContextTryLock },
+    };
+    unsafe { raw::RedisModule_ThreadSafeContextTryLock = None };
+    Ok(vec![
+        i64::from(owner.try_lock().is_none()),
+        i64::from(redis_module::MODULE_CONTEXT.try_lock().is_none()),
+    ]
+    .into())
+}
+
+static KEYSPACE_EVENTS: AtomicI64 = AtomicI64::new(0);
+
+fn on_keyspace_event(_: &EventContext, _: NotifyEvent, _: &str, _: &[u8]) {
+    KEYSPACE_EVENTS.fetch_add(1, Ordering::Relaxed);
+}
+
+fn keyspace_events(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(KEYSPACE_EVENTS.load(Ordering::Relaxed).into())
+}
+
+fn missing_keyspace_flags(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let _restore = Restore {
+        slot: std::ptr::addr_of_mut!(raw::RedisModule_GetKeyspaceNotificationFlagsAll),
+        value: unsafe { raw::RedisModule_GetKeyspaceNotificationFlagsAll },
+    };
+    unsafe { raw::RedisModule_GetKeyspaceNotificationFlagsAll = None };
+    // redis_module! runs this same preflight before init. Flag enumeration
+    // must be optional there as well as in the subscription itself.
+    redis_module::__private::keyspace_subscription_available()?;
+    ctx.subscribe_to_keyspace_events(
+        NotifyEvent::empty(),
+        redis_event_handler!(on_keyspace_event),
+    )?;
+    ctx.subscribe_to_keyspace_events(NotifyEvent::STRING, redis_event_handler!(on_keyspace_event))?;
+    Ok("OK".into())
+}
+
+fn missing_keyspace_subscription(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let _restore = Restore {
+        slot: std::ptr::addr_of_mut!(raw::RedisModule_SubscribeToKeyspaceEvents),
+        value: unsafe { raw::RedisModule_SubscribeToKeyspaceEvents },
+    };
+    unsafe { raw::RedisModule_SubscribeToKeyspaceEvents = None };
+    let refused = |result| {
+        matches!(
+            result,
+            Err(RedisError::Str(
+                "ERR keyspace subscription API is unavailable"
+            ))
+        )
+    };
+    Ok(vec![
+        i64::from(refused(
+            redis_module::__private::keyspace_subscription_available(),
+        )),
+        i64::from(refused(ctx.subscribe_to_keyspace_events(
+            NotifyEvent::STRING,
+            redis_event_handler!(on_keyspace_event),
+        ))),
+        i64::from(refused(ctx.subscribe_to_keyspace_events(
+            NotifyEvent::empty(),
+            redis_event_handler!(on_keyspace_event),
+        ))),
+    ]
+    .into())
+}
+
 redis_module! {
     name: "api_availability",
     version: 1,
@@ -102,5 +173,9 @@ redis_module! {
         ["api.available", available, "readonly", 0, 0, 0, ""],
         ["api.missing_lookup", missing_lookup, "readonly", 0, 0, 0, ""],
         ["api.missing_job", missing_job, "readonly", 0, 0, 0, ""],
+        ["api.missing_try_lock", missing_try_lock, "readonly", 0, 0, 0, ""],
+        ["api.missing_keyspace_flags", missing_keyspace_flags, "readonly", 0, 0, 0, ""],
+        ["api.missing_keyspace_subscription", missing_keyspace_subscription, "readonly", 0, 0, 0, ""],
+        ["api.keyspace_events", keyspace_events, "readonly", 0, 0, 0, ""],
     ],
 }
