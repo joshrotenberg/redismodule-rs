@@ -76,9 +76,13 @@ const UNSEEN: u64 = u64::MAX;
 /// Refuses while a key or keyspace scan callback runs on this thread, and
 /// while a native key write is in progress on it.
 pub(crate) fn keyspace_will_change(acting: Option<&NativeKey>) -> Result<(), RedisError> {
-    // The key Redis lends a scan callback may read through string DMA: Redis
-    // keeps that key current, and the change replaces only its own value.
-    let lent = acting.is_some_and(NativeKey::is_lent);
+    // The key Redis lends a keyspace scan callback may read through string
+    // DMA: Redis keeps that key current, and the change replaces only its own
+    // value. Only in a single scan: a nested scan lends the same key again,
+    // and a read through the inner handle would free the value the outer
+    // handle still holds.
+    let lent =
+        acting.is_some_and(NativeKey::is_lent) && FROZEN.get() == 1 && KEYSPACE_SCANS.get() == 1;
     if FROZEN.get() != 0 && !lent {
         return Err(RedisError::Str(FROZEN_ERROR));
     }

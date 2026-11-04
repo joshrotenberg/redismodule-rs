@@ -236,6 +236,34 @@ fn keys_scan_del(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ]))
 }
 
+/// `stale.keys_scan_nested`: scans the keyspace, and from each callback scans
+/// it again and reads each key through the handle the inner scan lends, which
+/// the SDK refuses: the outer scan lent the same key too, and the read would
+/// replace the value the outer handle holds. The outer callback can then read
+/// its own lent key. Replies with the first inner refusal and the outer reads.
+fn keys_scan_nested(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    args.done()?;
+    let outer = KeysCursor::new();
+    let mut refusal = None;
+    let mut read: i64 = 0;
+    while outer.scan(ctx, &mut |ctx, _, key| {
+        let inner = KeysCursor::new();
+        while inner.scan(ctx, &mut |_, _, key| {
+            if let Some(Err(error)) = key.map(|key| key.read()) {
+                refusal.get_or_insert(error.to_string());
+            }
+        }) {}
+        if key.is_some_and(|key| matches!(key.read(), Ok(Some(_)))) {
+            read += 1;
+        }
+    }) {}
+    Ok(RedisValue::Array(vec![
+        refusal.map_or(RedisValue::Null, RedisValue::BulkString),
+        read.into(),
+    ]))
+}
+
 /// `stale.keys_scan_open`: scans the keyspace and opens each key by name from
 /// the callback. Redis lends keys that expired but are not yet deleted, and
 /// the callback's opens use `NOEXPIRE` (Redis 7.2+), so they do not delete
@@ -368,6 +396,7 @@ redis_module! {
         ["stale.scan_del", scan_del, "write", 1, 1, 1, ""],
         ["stale.keys_scan_del", keys_scan_del, "write", 0, 0, 0, ""],
         ["stale.keys_scan_open", keys_scan_open, "readonly", 0, 0, 0, ""],
+        ["stale.keys_scan_nested", keys_scan_nested, "readonly", 0, 0, 0, ""],
         ["stale.keys_scan_keep", keys_scan_keep, "write", 1, 1, 1, ""],
         ["stale.new_calls", new_calls, "readonly", 0, 0, 0, ""],
         ["stale.raw_parts_after_call", raw_parts_after_call, "write", 1, 1, 1, ""],

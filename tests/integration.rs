@@ -4218,6 +4218,32 @@ fn test_keyspace_scan_callback_refuses_keyspace_changes() -> Result<()> {
     Ok(())
 }
 
+/// A keyspace scan nested in another's callback lends the same keys again, so
+/// a string read through the inner lent key is refused: it would replace the
+/// value the outer lent key still holds. The outer callback can still read
+/// its own lent key. The values are embstr strings, which a read through
+/// string DMA replaces.
+#[test]
+fn test_nested_keyspace_scan_refuses_reads_through_its_lent_keys() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    for key in ["a", "b"] {
+        redis::cmd("SET")
+            .arg(&[key, "hello"])
+            .query::<()>(&mut con)?;
+    }
+    let (refusal, read): (String, i64) = redis::cmd("stale.keys_scan_nested").query(&mut con)?;
+    assert_eq!(
+        refusal,
+        "ERR a key scan callback is running; the keyspace cannot change until it returns"
+    );
+    assert_eq!(read, 2);
+    assert_eq!(
+        redis::cmd("GET").arg("a").query::<String>(&mut con)?,
+        "hello"
+    );
+    Ok(())
+}
+
 /// A keyspace scan lends keys that expired but are not yet deleted. Opening
 /// one from the callback does not delete it under the scan, and a writable
 /// handle opened there and kept past the scan re-opens normally for its
