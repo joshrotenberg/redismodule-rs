@@ -7871,6 +7871,26 @@ fn test_native_type_callbacks_and_panic_guards() -> Result<()> {
     Ok(())
 }
 
+/// A closure that holds key data cannot change that key, even through a
+/// context it reaches from a thread local instead of a capture: the SDK
+/// refuses the call while the data is lent, and the write completes.
+#[test]
+fn test_lent_key_data_refuses_commands_from_the_closure() -> Result<()> {
+    let mut con = TestConnection::new("string");
+    redis::cmd("SET")
+        .arg(&["lent", "original value"])
+        .query::<()>(&mut con)?;
+    let refused: bool = redis::cmd("string.lend_probe")
+        .arg("lent")
+        .query(&mut con)?;
+    assert!(refused, "the call inside the closure ran");
+    assert_eq!(
+        redis::cmd("GET").arg("lent").query::<String>(&mut con)?,
+        "kept"
+    );
+    Ok(())
+}
+
 #[test]
 fn test_key_type_names_each_built_in_type() -> Result<()> {
     let mut con = TestConnection::new("key_type");
