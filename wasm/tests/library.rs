@@ -1308,6 +1308,49 @@ fn call_pcall_acl_check_and_set_resp_work_as_in_lua() {
     );
 }
 
+/// Each call runs with its own caller's context: the instance a library keeps
+/// between calls serves two users in turn, and after a call that failed or
+/// trapped the next call, by the other user, still answers for its caller.
+#[test]
+fn each_call_runs_with_its_own_callers_context() {
+    let server = Server::start(6613, &[]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    let _: () = redis::cmd("SET").arg(&["s", "x"]).query(&mut con).unwrap();
+    let _: () = redis::cmd("ACL")
+        .arg(&["SETUSER", "limited", "on", "nopass", "~a*", "+@all", "-set"])
+        .query(&mut con)
+        .unwrap();
+    let mut limited = server.connection();
+    let _: () = redis::cmd("AUTH")
+        .arg(&["limited", "any"])
+        .query(&mut limited)
+        .unwrap();
+    // Whether the caller may run SET a1: the default user may, limited not.
+    let may_set = |con: &mut Connection| call(con, &["acl_check", "0", "SET", "a1", "v"]).unwrap();
+
+    // The kept instance serves both users in turn.
+    assert_eq!(counter(&mut con), 1);
+    assert_eq!(may_set(&mut limited), Value::Int(0));
+    assert_eq!(counter(&mut limited), 2);
+    assert_eq!(may_set(&mut con), Value::Int(1));
+    assert_eq!(counter(&mut con), 3);
+
+    // limited's call fails (its INCR is refused), which drops the instance;
+    // the next call is the default user's.
+    let refused = error_text(call(&mut limited, &["run", "0", "INCR", "s"]));
+    assert!(refused.starts_with("NOPERM"), "{refused}");
+    assert_eq!(may_set(&mut con), Value::Int(1));
+    assert_eq!(counter(&mut con), 1);
+
+    // The default user's call traps; the next call is limited's.
+    let trapped = error_text(call(&mut con, &["oob", "0"]));
+    assert!(trapped.contains("out of bounds memory access"), "{trapped}");
+    assert_eq!(may_set(&mut limited), Value::Int(0));
+    assert_eq!(counter(&mut limited), 1);
+    assert_eq!(may_set(&mut con), Value::Int(1));
+}
+
 #[test]
 fn the_module_unloads_when_persistence_is_off() {
     let server = Server::start(
