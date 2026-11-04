@@ -1,4 +1,4 @@
-use std::{ffi::c_void, mem::ManuallyDrop, ptr::NonNull};
+use std::{ffi::c_void, ptr::NonNull};
 
 use crate::{RedisString, key::RedisKey, raw};
 
@@ -109,7 +109,7 @@ impl<'ctx> ScanKeyCursor<'ctx> {
             // SAFETY: scan passes an exclusive local CallbackData during this
             // synchronous invocation; ctx is the key's actual opening context.
             let data = unsafe { &mut *data.cast::<CallbackData<F>>() };
-            let key = ManuallyDrop::new(unsafe { RedisKey::from_raw_parts(data.ctx, key) });
+            let key = unsafe { RedisKey::borrowed(data.ctx, key) };
             let field =
                 unsafe { RedisString::retain_from_ptr(NonNull::new(field).expect("scan field")) };
             let value = NonNull::new(value).map(|p| unsafe { RedisString::retain_from_ptr(p) });
@@ -126,14 +126,22 @@ impl<'ctx> ScanKeyCursor<'ctx> {
             ctx: self.key.ctx,
             callback: &mut f,
         };
+        let native = self.key.native.current();
+        // Redis keeps scanning the key after each callback, so a callback may
+        // not change the keyspace, and opening a key in it must not close the
+        // one being scanned (an open closes ACCESS_EXPIRED keys).
+        let held = self.key.native.hold();
+        let frozen = crate::key::Frozen::begin();
         let res = unsafe {
             scan_key(
-                self.key.key_inner,
+                native,
                 self.inner_cursor,
                 Some(scan_callback::<&mut F>),
                 &mut data as *mut CallbackData<&mut F> as *mut c_void,
             )
         };
+        drop(frozen);
+        drop(held);
         crate::panic::resume_deferred_panic();
 
         res != 0

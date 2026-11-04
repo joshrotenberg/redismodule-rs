@@ -26,13 +26,18 @@ pub struct StreamRecord {
 
 /// Iterates the entries of a stream key. Dropping it stops the iterator, after
 /// which the key can start another one. The key borrow also keeps its opening
-/// runtime context alive and locked. This does not prevent a call or another
-/// key handle from deleting or replacing the stream: do not mutate it while
-/// iterating, including through native aliases. The inherited key-aliasing
-/// restriction also applies to the incremental entry API.
+/// runtime context alive and locked.
+///
+/// A keyspace change while it iterates, such as a call in the loop body,
+/// closes the key under it (see [`RedisKey`]), and its next step, or the next
+/// field of an entry from [`next_entry`](Self::next_entry), panics: start a
+/// new iterator after the change. For a key opened with
+/// `KeyFlags::ACCESS_EXPIRED`, opening any other key closes it too.
 #[derive(Debug)]
 pub struct StreamIterator<'key> {
     key: &'key RedisKey<'key>,
+    /// The key's token when the iterator started.
+    token: u64,
     stop: StopFn,
     next_id: NextIdFn,
     next_field: NextFieldFn,
@@ -67,9 +72,10 @@ impl<'key> StreamIterator<'key> {
             0
         };
 
+        let native = key.native.current();
         let res = unsafe {
             start(
-                key.key_inner,
+                native,
                 flags,
                 from.as_mut().map_or(ptr::null_mut(), |v| v),
                 to.as_mut().map_or(ptr::null_mut(), |v| v),
@@ -78,6 +84,7 @@ impl<'key> StreamIterator<'key> {
         if Status::Ok == res.into() {
             Ok(StreamIterator {
                 key,
+                token: key.native.token(),
                 stop,
                 next_id,
                 next_field,
@@ -91,6 +98,18 @@ impl<'key> StreamIterator<'key> {
 }
 
 impl<'key> StreamIterator<'key> {
+    /// The native key the iterator started on.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a keyspace change closed the key since: the native iterator
+    /// ended with it.
+    fn native(&self) -> *mut raw::RedisModuleKey {
+        self.key.native.unchanged_since(self.token).expect(
+            "the stream's key was closed by a keyspace change while iterating it; start a new iterator",
+        )
+    }
+
     /// Advances to an entry without allocating its field/value strings.
     ///
     /// The entry exclusively borrows this iterator until it is dropped. Its
@@ -118,14 +137,16 @@ impl<'key> StreamIterator<'key> {
         if self.finished {
             return None;
         }
+        // Panics after a keyspace change, before draining skips quietly.
+        self.native();
         self.drain_fields();
         if self.finished {
             return None;
         }
         let mut id = raw::RedisModuleStreamID { ms: 0, seq: 0 };
         let mut fields: c_long = 0;
-        if Status::Ok != unsafe { (self.next_id)(self.key.key_inner, &mut id, &mut fields) }.into()
-        {
+        let native = self.native();
+        if Status::Ok != unsafe { (self.next_id)(native, &mut id, &mut fields) }.into() {
             self.finished = true;
             return None;
         }
@@ -139,9 +160,8 @@ impl<'key> StreamIterator<'key> {
         }
         let mut field = ptr::null_mut();
         let mut value = ptr::null_mut();
-        if Status::Ok
-            != unsafe { (self.next_field)(self.key.key_inner, &mut field, &mut value) }.into()
-        {
+        let native = self.native();
+        if Status::Ok != unsafe { (self.next_field)(native, &mut field, &mut value) }.into() {
             self.remaining = 0;
             self.finished = true;
             return None;
@@ -158,10 +178,17 @@ impl<'key> StreamIterator<'key> {
     }
 
     fn drain_fields(&mut self) -> usize {
+        // A keyspace change ended the native iterator: nothing to skip, and
+        // this runs from Drop, which must not panic.
+        // Leave `finished` unset, so the next entry panics rather than end
+        // the iteration as if the stream were exhausted.
+        let Some(native) = self.key.native.unchanged_since(self.token) else {
+            self.remaining = 0;
+            return 0;
+        };
         let mut skipped = 0;
         while self.remaining != 0 {
-            let status =
-                unsafe { (self.next_field)(self.key.key_inner, ptr::null_mut(), ptr::null_mut()) };
+            let status = unsafe { (self.next_field)(native, ptr::null_mut(), ptr::null_mut()) };
             if Status::Ok != status.into() {
                 self.remaining = 0;
                 self.finished = true;
@@ -241,8 +268,11 @@ impl Iterator for StreamIterator<'_> {
 
 impl<'key> Drop for StreamIterator<'key> {
     fn drop(&mut self) {
-        // Stop, not Delete: StreamIteratorDelete removes the current entry.
-        unsafe { (self.stop)(self.key.key_inner) };
+        // Closing the key ended the native iterator with it.
+        if let Some(native) = self.key.native.unchanged_since(self.token) {
+            // Stop, not Delete: StreamIteratorDelete removes the current entry.
+            unsafe { (self.stop)(native) };
+        }
     }
 }
 
@@ -300,6 +330,7 @@ mod tests {
     fn iterator<'a>(key: &'a RedisKey<'a>) -> StreamIterator<'a> {
         StreamIterator {
             key,
+            token: key.native.token(),
             stop,
             next_id,
             next_field: field_failure,

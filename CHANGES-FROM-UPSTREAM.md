@@ -26,8 +26,8 @@ fields. An unexpected field failure stops further cursor advancement.
 Key pointer access no longer needs an ownership round trip through
 `to_raw_parts` and `from_raw_parts`: borrowing `as_ptr` accessors preserve the
 key owner. They do not grant native access, transfer ownership or permit
-mutation while iterating or while scoped key data is lent. This does not
-change the inherited multiple-key-handle mutation restriction tracked in #197.
+mutation while iterating or while scoped key data is lent. The pointer is valid
+until the next keyspace change, after which the SDK re-opens the key (#197).
 `RedisString::parse_stream_id` uses native `StringToStreamID` where available,
 without imposing a Rust text/grammar parser. Numeric IDs and range endpoints
 follow Redis, while command-specific markers are separate. No AutoMemory
@@ -85,8 +85,24 @@ a thread local, so while the closure runs the SDK also refuses calls, key
 opening and scans, other key operations, `yield_now` and keyspace
 notifications on that thread. The borrowing forms are `unsafe` with their
 rules stated. A handle opened before another handle or a call deleted or
-replaced the same key's value still points at the freed value (#197).
+replaced the same key's value re-opens its key since #197.
 Upstream has no issue or pull request for this.
+
+## Key handles across keyspace changes
+
+An open native key caches the value Redis looked up when it opened. Upstream's
+`RedisKey` and `RedisKeyWritable` keep that pointer for their whole life, so a
+call that deletes or rewrites the key, string DMA through a second handle
+(which replaces an int- or embstr-encoded value), a pop that empties a list,
+or `yield_now` left a handle pointing at freed memory, and dropping it closed
+the native key, which from Redis 6.2 reads `key->value->type` (#197). The fork
+registers the keys it opens on each thread and closes them before any such
+operation, while their values are still valid (all of them for a call, the
+same key's other handles for a change through one handle), and re-opens a
+closed key on its next use. A
+stream iterator panics after a change instead of continuing on a freed
+iterator, a key scan callback cannot change the keyspace, and handles built
+from raw parts panic when used after a change.
 
 ## The lists example
 

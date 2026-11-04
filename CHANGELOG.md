@@ -61,6 +61,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Key handles stay valid when something else changes their key (#197). An
+  open native key caches the value Redis looked up, and a call, `yield_now`,
+  a keyspace notification or scan, or string DMA, a write, delete, pop or trim
+  through another handle could free that value: the handle then read and wrote
+  freed memory, and from Redis 6.2 closing it did too. The SDK now registers
+  every key it opens on its thread and closes them before such an operation,
+  while the values are still valid: all of them for a call, `yield_now`, a
+  notification or a scan, and the other handles to the same key for a change
+  through one handle. A closed handle re-opens on its next use, with the same
+  name, mode, flags and database, sees the key as a fresh open would, and has
+  an open's effects, such as `keymiss` notifications. Each open costs one
+  small allocation for its registry entry. `as_ptr` returns the current native
+  key, valid until the next keyspace change.
+  **Breaking:**
+  - A `StreamIterator` panics on its next step, or its entry's next field,
+    after a keyspace change, since it cannot re-open; start a new one.
+  - A `ScanKeyCursor` callback cannot change the keyspace, because Redis keeps
+    scanning the key after it: calls, `yield_now` and notifications return
+    `ERR a key scan callback is running`, key writes return that error or
+    `Status::Err`, and pops and keyspace scans panic.
+  - Handles built with `RedisKey::from_raw_parts`, and the handles scan
+    callbacks receive, panic when used after a keyspace change; one on a
+    missing key does not.
+  - `RedisKey` and `RedisKeyWritable` are no longer `UnwindSafe` or
+    `RefUnwindSafe`.
+
 - SDK-generated error replies consistently start with `ERR` or a specific
   Redis error code (#166), including argument parsing, key operations,
   configuration, registration and API-availability errors. Forwarded server
@@ -89,8 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thread, so a context reached another way, such as from a thread local,
   cannot change the key either. The borrowing forms, `read_borrowed`,
   `get_value` and `as_string_dma`, are `unsafe`. A handle opened before the
-  same key was deleted or replaced through another handle or a call can still
-  point at a freed value; #197 tracks that.
+  same key was deleted or replaced through another handle or a call re-opens
+  its key since #197.
 
 - Unusual input no longer panics or silently changes stored data (#165).
   Calls and replication reject NUL command names before creating native

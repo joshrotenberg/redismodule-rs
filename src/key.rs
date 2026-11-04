@@ -5,7 +5,6 @@ use std::mem::ManuallyDrop;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::os::raw::c_void;
-use std::ptr;
 use std::ptr::NonNull;
 use std::time::Duration;
 
@@ -23,6 +22,10 @@ use crate::redismodule::REDIS_OK;
 pub use crate::redisraw::bindings::*;
 use crate::stream::StreamIterator;
 use bitflags::bitflags;
+
+mod native;
+
+pub(crate) use native::{Frozen, NativeKey, keyspace_will_change};
 
 /// Access requested when opening a native Redis key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,16 +128,31 @@ pub(crate) fn with_test_key_loan<R>(f: impl FnOnce() -> R) -> R {
 ///
 /// Dropping the handle closes the native key. It must close before its opening
 /// callback ends or its worker lock guard is released, even with AutoMemory off.
+///
+/// The handle stays valid across keyspace changes: a call, `yield_now`, a
+/// keyspace notification or scan, and string DMA, writes, deletes, pops and
+/// trims through another handle can delete, replace or move the key's value,
+/// so before each the SDK closes the native key, and the handle re-opens it on
+/// its next use. It then sees the key as a fresh open would: deleted, created
+/// or changed since. A [`StreamIterator`] cannot re-open, and panics on its
+/// next step after a change. A handle built with
+/// [`from_raw_parts`](Self::from_raw_parts) panics on use after a change.
 #[derive(Debug)]
 pub struct RedisKey<'ctx> {
     pub(crate) ctx: *mut raw::RedisModuleCtx,
-    pub(crate) key_inner: *mut raw::RedisModuleKey,
+    pub(crate) native: NativeKey,
     _context: PhantomData<&'ctx ()>,
 }
 
 impl<'ctx> RedisKey<'ctx> {
     /// Borrows the native open-key pointer without transferring ownership.
     /// The pointer can be null for a read-only open of a missing key.
+    ///
+    /// The pointer is valid until the next keyspace change: the SDK closes
+    /// the native key before one and re-opens it, at a new address, on the
+    /// handle's next use. Call `as_ptr` again after any call, `yield_now` or
+    /// change through another handle, and, for a key opened with
+    /// `KeyFlags::ACCESS_EXPIRED`, after opening any other key.
     ///
     /// Native access remains unsafe: keep this owner, its opening context and
     /// Redis lock alive; respect the open mode and all native aliasing rules.
@@ -148,7 +166,7 @@ impl<'ctx> RedisKey<'ctx> {
     #[must_use]
     pub fn as_ptr(&self) -> *mut raw::RedisModuleKey {
         panic_while_lent();
-        self.key_inner
+        self.native.current()
     }
 
     /// Opens `key` for reading.
@@ -162,10 +180,9 @@ impl<'ctx> RedisKey<'ctx> {
     /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     pub unsafe fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
         panic_while_lent();
-        let key_inner = raw::open_key(ctx, key.as_ptr(), to_raw_mode(KeyMode::Read));
         Self {
             ctx,
-            key_inner,
+            native: unsafe { NativeKey::open(ctx, key.as_ptr(), to_raw_mode(KeyMode::Read), 0) },
             _context: PhantomData,
         }
     }
@@ -185,11 +202,11 @@ impl<'ctx> RedisKey<'ctx> {
         flags: KeyFlags,
     ) -> Self {
         panic_while_lent();
-        let key_inner =
-            raw::open_key_with_flags(ctx, key.as_ptr(), to_raw_mode(KeyMode::Read), flags.bits());
         Self {
             ctx,
-            key_inner,
+            native: unsafe {
+                NativeKey::open(ctx, key.as_ptr(), to_raw_mode(KeyMode::Read), flags.bits())
+            },
             _context: PhantomData,
         }
     }
@@ -211,15 +228,39 @@ impl<'ctx> RedisKey<'ctx> {
     /// 4. The Redis lock remains held until the key is dropped. The chosen
     ///    `'ctx` lifetime must stay within that context and lock scope; these raw
     ///    pointers cannot establish a borrow.
+    /// 5. The key's value is not deleted, replaced or moved before the key is
+    ///    first used. The SDK does not own such a key, so it cannot close it
+    ///    ahead of a keyspace change and re-open it after, as it does for the
+    ///    keys it opens. Using the handle after a change panics instead, and
+    ///    the key must be closed before anything changes its value: closing a
+    ///    key whose value was freed reads that memory.
     pub const unsafe fn from_raw_parts(
         ctx: *mut raw::RedisModuleCtx,
         key_inner: *mut raw::RedisModuleKey,
     ) -> Self {
         Self {
             ctx,
-            key_inner,
+            native: NativeKey::raw(key_inner),
             _context: PhantomData,
         }
+    }
+
+    /// A key Redis lends to a callback: current as of now, never closed by
+    /// the handle (wrap it in `ManuallyDrop`), and panicking if used after a
+    /// keyspace change.
+    ///
+    /// # Safety
+    ///
+    /// As for [`from_raw_parts`](Self::from_raw_parts), for the callback.
+    pub(crate) unsafe fn borrowed(
+        ctx: *mut raw::RedisModuleCtx,
+        key_inner: *mut raw::RedisModuleKey,
+    ) -> ManuallyDrop<Self> {
+        ManuallyDrop::new(Self {
+            ctx,
+            native: NativeKey::borrowed(key_inner),
+            _context: PhantomData,
+        })
     }
 
     /// Decomposes a `RedisKey` into its raw components: `(redismodule context pointer, key pointer)`.
@@ -232,9 +273,7 @@ impl<'ctx> RedisKey<'ctx> {
     /// AutoMemory, or leaks if AutoMemory is off.
     #[must_use = "the key stays open; close it or rebuild a RedisKey with from_raw_parts"]
     pub fn to_raw_parts(self) -> (*mut raw::RedisModuleCtx, *mut raw::RedisModuleKey) {
-        // Skip Drop, which would close the key being handed over.
-        let key = ManuallyDrop::new(self);
-        (key.ctx, key.key_inner)
+        (self.ctx, self.native.into_raw())
     }
 
     /// Calls `f` with the key's value, read as the type `redis_type` stores,
@@ -305,11 +344,11 @@ impl<'ctx> RedisKey<'ctx> {
         redis_type: &RedisType<T>,
     ) -> Result<Option<&T>, RedisError> {
         refuse_while_lent()?;
-        verify_type(self.key_inner, redis_type)?;
+        let key = self.native.current();
+        verify_type(key, redis_type)?;
 
-        let value = unsafe {
-            crate::__available_api!(RedisModule_ModuleTypeGetValue)(self.key_inner).cast::<T>()
-        };
+        let value =
+            unsafe { crate::__available_api!(RedisModule_ModuleTypeGetValue)(key).cast::<T>() };
 
         if value.is_null() {
             return Ok(None);
@@ -325,14 +364,14 @@ impl<'ctx> RedisKey<'ctx> {
     /// Will panic if `RedisModule_KeyType` is missing in redismodule.h
     #[must_use]
     pub fn key_type(&self) -> raw::KeyType {
-        unsafe { crate::__required_api!(RedisModule_KeyType)(self.key_inner) }.into()
+        unsafe { crate::__required_api!(RedisModule_KeyType)(self.native.current()) }.into()
     }
 
-    /// Detects whether the key pointer given to us by Redis is null.
+    /// Detects whether the key pointer given to us by Redis is null: whether
+    /// the key was missing when the handle opened, or last re-opened.
     #[must_use]
     pub fn is_null(&self) -> bool {
-        let null_key: *mut raw::RedisModuleKey = ptr::null_mut();
-        self.key_inner == null_key
+        self.native.current().is_null()
     }
 
     /// Copies the key's string bytes into an owned buffer.
@@ -383,7 +422,10 @@ impl<'ctx> RedisKey<'ctx> {
             Ok(None)
         } else {
             let mut length: size_t = 0;
-            let dma = raw::string_dma(self.key_inner, &mut length, raw::KeyMode::READ);
+            // Reading through DMA replaces an int- or embstr-encoded value.
+            let dma = self
+                .native
+                .changing(|key| raw::string_dma(key, &mut length, raw::KeyMode::READ))?;
             if dma.is_null() {
                 Err(RedisError::Str("ERR Could not read key"))
             } else {
@@ -411,7 +453,7 @@ impl<'ctx> RedisKey<'ctx> {
         let val = if self.is_null() {
             None
         } else {
-            hash_mget_key(self.ctx, self.key_inner, &[field.as_ref()])?
+            hash_mget_key(self.ctx, self.native.current(), &[field.as_ref()])?
                 .pop()
                 .expect("hash_mget_key should return vector of same length as input")
         };
@@ -431,7 +473,7 @@ impl<'ctx> RedisKey<'ctx> {
         if self.is_null() {
             return Ok(None);
         }
-        let value = raw::hash_get_by_string(self.key_inner, field.as_ptr())?;
+        let value = raw::hash_get_by_string(self.native.current(), field.as_ptr())?;
         Ok((!value.is_null()).then(|| unsafe {
             RedisString::from_owned_ptr(
                 NonNull::new(self.ctx),
@@ -456,7 +498,7 @@ impl<'ctx> RedisKey<'ctx> {
         } else {
             Some(HMGetResult {
                 fields,
-                values: hash_mget_key(self.ctx, self.key_inner, fields)?,
+                values: hash_mget_key(self.ctx, self.native.current(), fields)?,
                 phantom: std::marker::PhantomData,
             })
         };
@@ -492,23 +534,18 @@ impl<'ctx> RedisKey<'ctx> {
     }
 }
 
-impl Drop for RedisKey<'_> {
-    // Frees resources appropriately as a RedisKey goes out of scope.
-    fn drop(&mut self) {
-        if !self.key_inner.is_null() {
-            raw::close_key(self.key_inner);
-        }
-    }
-}
-
 /// `RedisKeyWritable` is an abstraction over a Redis key that allows read and
 /// write operations, borrowing the runtime context that opened it.
 ///
 /// Dropping the handle closes the native key while that context and its lock
 /// are still live. Copy results into Rust-owned data before leaving that scope.
+///
+/// Like [`RedisKey`], the handle closes before a keyspace change and re-opens
+/// on its next use, so a write after a call that deleted the key creates it
+/// again, as a fresh open would.
 pub struct RedisKeyWritable<'ctx> {
     ctx: *mut raw::RedisModuleCtx,
-    key_inner: *mut raw::RedisModuleKey,
+    native: NativeKey,
     _context: PhantomData<&'ctx ()>,
 }
 
@@ -522,7 +559,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     #[must_use]
     pub fn as_ptr(&self) -> *mut raw::RedisModuleKey {
         panic_while_lent();
-        self.key_inner
+        self.native.current()
     }
 
     /// Opens `key` for reading and writing.
@@ -536,10 +573,11 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// [`RuntimeContext::open_key`](crate::RuntimeContext::open_key) and its siblings.
     pub unsafe fn open(ctx: *mut raw::RedisModuleCtx, key: &RedisString) -> Self {
         panic_while_lent();
-        let key_inner = raw::open_key(ctx, key.as_ptr(), to_raw_mode(KeyMode::ReadWrite));
         Self {
             ctx,
-            key_inner,
+            native: unsafe {
+                NativeKey::open(ctx, key.as_ptr(), to_raw_mode(KeyMode::ReadWrite), 0)
+            },
             _context: PhantomData,
         }
     }
@@ -559,15 +597,16 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         flags: KeyFlags,
     ) -> Self {
         panic_while_lent();
-        let key_inner = raw::open_key_with_flags(
-            ctx,
-            key.as_ptr(),
-            to_raw_mode(KeyMode::ReadWrite),
-            flags.bits(),
-        );
         Self {
             ctx,
-            key_inner,
+            native: unsafe {
+                NativeKey::open(
+                    ctx,
+                    key.as_ptr(),
+                    to_raw_mode(KeyMode::ReadWrite),
+                    flags.bits(),
+                )
+            },
             _context: PhantomData,
         }
     }
@@ -685,7 +724,8 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// for such fields.
     pub fn hash_set(&self, field: &str, value: RedisString) -> Result<usize, RedisError> {
         refuse_while_lent()?;
-        raw::hash_set(self.key_inner, field, value.as_ptr())
+        self.native
+            .changing(|key| raw::hash_set(key, field, value.as_ptr()))?
     }
 
     /// Like [`Self::hash_set`], with the field and value borrowed as Redis
@@ -700,7 +740,8 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         value: &RedisString,
     ) -> Result<usize, RedisError> {
         refuse_while_lent()?;
-        raw::hash_set_by_string(self.key_inner, field.as_ptr(), value.as_ptr())
+        self.native
+            .changing(|key| raw::hash_set_by_string(key, field.as_ptr(), value.as_ptr()))?
     }
 
     /// Deletes `field`. Returns the number of fields deleted: 0 or 1.
@@ -712,7 +753,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// for such fields.
     pub fn hash_del(&self, field: &str) -> Result<usize, RedisError> {
         refuse_while_lent()?;
-        raw::hash_del(self.key_inner, field)
+        self.native.changing(|key| raw::hash_del(key, field))?
     }
 
     /// Like [`Self::hash_del`], with the field as a Redis string, so it can hold
@@ -723,7 +764,8 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// Returns [`RedisError::WrongType`] if the key holds another type.
     pub fn hash_del_by_string(&self, field: &RedisString) -> Result<usize, RedisError> {
         refuse_while_lent()?;
-        raw::hash_del_by_string(self.key_inner, field.as_ptr())
+        self.native
+            .changing(|key| raw::hash_del_by_string(key, field.as_ptr()))?
     }
 
     /// Reads one hash field through this writable handle.
@@ -738,7 +780,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// [`Self::hash_get_by_string`] for a field containing NUL bytes.
     pub fn hash_get(&self, field: &str) -> Result<Option<RedisString>, RedisError> {
         refuse_while_lent()?;
-        Ok(hash_mget_key(self.ctx, self.key_inner, &[field])?
+        Ok(hash_mget_key(self.ctx, self.native.current(), &[field])?
             .pop()
             .expect("hash_mget_key should return vector of same length as input"))
     }
@@ -753,7 +795,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         field: &RedisString,
     ) -> Result<Option<RedisString>, RedisError> {
         refuse_while_lent()?;
-        let value = raw::hash_get_by_string(self.key_inner, field.as_ptr())?;
+        let value = raw::hash_get_by_string(self.native.current(), field.as_ptr())?;
         Ok((!value.is_null()).then(|| unsafe {
             RedisString::from_owned_ptr(
                 NonNull::new(self.ctx),
@@ -774,7 +816,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         refuse_while_lent()?;
         Ok(HMGetResult {
             fields,
-            values: hash_mget_key(self.ctx, self.key_inner, fields)?,
+            values: hash_mget_key(self.ctx, self.native.current(), fields)?,
             phantom: std::marker::PhantomData,
         })
     }
@@ -789,7 +831,9 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         if key_data_lent() {
             return raw::Status::Err;
         }
-        raw::list_push(self.key_inner, raw::Where::ListHead, element.as_ptr())
+        self.native
+            .changing(|key| raw::list_push(key, raw::Where::ListHead, element.as_ptr()))
+            .unwrap_or(raw::Status::Err)
     }
 
     /// Inserts `element` at the tail of the list, creating it if missing.
@@ -802,7 +846,9 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         if key_data_lent() {
             return raw::Status::Err;
         }
-        raw::list_push(self.key_inner, raw::Where::ListTail, element.as_ptr())
+        self.native
+            .changing(|key| raw::list_push(key, raw::Where::ListTail, element.as_ptr()))
+            .unwrap_or(raw::Status::Err)
     }
 
     /// Removes and returns the first element as an owned [`RedisString`].
@@ -817,7 +863,10 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     #[allow(clippy::must_use_candidate)]
     pub fn list_pop_head(&self) -> Option<RedisString> {
         panic_while_lent();
-        let ptr = raw::list_pop(self.key_inner, raw::Where::ListHead);
+        let ptr = self
+            .native
+            .changing(|key| raw::list_pop(key, raw::Where::ListHead))
+            .unwrap_or_else(|error| panic!("{error}"));
 
         if ptr.is_null() {
             return None;
@@ -843,7 +892,10 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     #[must_use]
     pub fn list_pop_tail(&self) -> Option<RedisString> {
         panic_while_lent();
-        let ptr = raw::list_pop(self.key_inner, raw::Where::ListTail);
+        let ptr = self
+            .native
+            .changing(|key| raw::list_pop(key, raw::Where::ListTail))
+            .unwrap_or_else(|error| panic!("{error}"));
 
         if ptr.is_null() {
             return None;
@@ -887,10 +939,12 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     pub fn set_expire(&self, expire: Duration) -> RedisResult {
         refuse_while_lent()?;
         let (relative, absolute) = checked_expiration(expire, crate::milliseconds())?;
-        let status = match unsafe { raw::RedisModule_SetAbsExpire } {
-            Some(set) => unsafe { set(self.key_inner, absolute) }.into(),
-            None => raw::set_expire(self.key_inner, relative),
-        };
+        let status =
+            self.native
+                .changing(|key| match unsafe { raw::RedisModule_SetAbsExpire } {
+                    Some(set) => unsafe { set(key, absolute) }.into(),
+                    None => raw::set_expire(key, relative),
+                })?;
         match status {
             raw::Status::Ok => REDIS_OK,
             // The key can be empty or not open for writing.
@@ -901,7 +955,10 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// Remove expiration from a key if it exists.
     pub fn remove_expire(&self) -> RedisResult {
         refuse_while_lent()?;
-        match raw::set_expire(self.key_inner, REDISMODULE_NO_EXPIRE.into()) {
+        match self
+            .native
+            .changing(|key| raw::set_expire(key, REDISMODULE_NO_EXPIRE.into()))?
+        {
             raw::Status::Ok => REDIS_OK,
 
             // Error may occur if the key wasn't open for writing or is an
@@ -913,7 +970,10 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     pub fn write(&self, val: &str) -> RedisResult {
         refuse_while_lent()?;
         let val_str = RedisString::create(NonNull::new(self.ctx), val);
-        match raw::string_set(self.key_inner, val_str.as_ptr()) {
+        match self
+            .native
+            .changing(|key| raw::string_set(key, val_str.as_ptr()))?
+        {
             raw::Status::Ok => REDIS_OK,
             raw::Status::Err => Err(RedisError::Str("ERR Error while setting key")),
         }
@@ -929,7 +989,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         refuse_while_lent()?;
         let delete = unsafe { crate::__available_api!(RedisModule_DeleteKey) };
         let held_value = self.key_type() != KeyType::Empty;
-        if unsafe { delete(self.key_inner) } != raw::REDISMODULE_OK as c_int {
+        if self.native.changing(|key| unsafe { delete(key) })? != raw::REDISMODULE_OK as c_int {
             return Err(RedisError::Str("ERR Redis did not delete the key"));
         }
         Ok(held_value)
@@ -946,7 +1006,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         refuse_while_lent()?;
         let unlink = unsafe { crate::__available_api!(RedisModule_UnlinkKey) };
         let held_value = self.key_type() != KeyType::Empty;
-        if unsafe { unlink(self.key_inner) } != raw::REDISMODULE_OK as c_int {
+        if self.native.changing(|key| unsafe { unlink(key) })? != raw::REDISMODULE_OK as c_int {
             return Err(RedisError::Str("ERR Redis did not unlink the key"));
         }
         Ok(held_value)
@@ -957,7 +1017,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// Will panic if `RedisModule_KeyType` is missing in redismodule.h
     #[must_use]
     pub fn key_type(&self) -> raw::KeyType {
-        unsafe { crate::__required_api!(RedisModule_KeyType)(self.key_inner) }.into()
+        unsafe { crate::__required_api!(RedisModule_KeyType)(self.native.current()) }.into()
     }
 
     /// Opens the key named by a raw Redis string for reading and writing.
@@ -975,10 +1035,9 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         key: *mut raw::RedisModuleString,
     ) -> Self {
         panic_while_lent();
-        let key_inner = raw::open_key(ctx, key, to_raw_mode(KeyMode::ReadWrite));
         Self {
             ctx,
-            key_inner,
+            native: unsafe { NativeKey::open(ctx, key, to_raw_mode(KeyMode::ReadWrite), 0) },
             _context: PhantomData,
         }
     }
@@ -1064,10 +1123,10 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         redis_type: &RedisType<T>,
     ) -> Result<Option<&mut T>, RedisError> {
         refuse_while_lent()?;
-        verify_type(self.key_inner, redis_type)?;
-        let value = unsafe {
-            crate::__available_api!(RedisModule_ModuleTypeGetValue)(self.key_inner).cast::<T>()
-        };
+        let key = self.native.current();
+        verify_type(key, redis_type)?;
+        let value =
+            unsafe { crate::__available_api!(RedisModule_ModuleTypeGetValue)(key).cast::<T>() };
 
         if value.is_null() {
             return Ok(None);
@@ -1093,12 +1152,21 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         value: T,
     ) -> Result<(), RedisError> {
         refuse_while_lent()?;
-        verify_type(self.key_inner, redis_type)?;
+        verify_type(self.native.current(), redis_type)?;
         // Look up the API before boxing, so a missing one cannot leak the value.
         let set_value = unsafe { crate::__available_api!(RedisModule_ModuleTypeSetValue) };
         let value = Box::into_raw(Box::new(value)).cast::<c_void>();
-        let status: raw::Status =
-            unsafe { set_value(self.key_inner, redis_type.raw_type(), value) }.into();
+        let status: raw::Status = match self
+            .native
+            .changing(|key| unsafe { set_value(key, redis_type.raw_type(), value) })
+        {
+            Ok(status) => status.into(),
+            Err(error) => {
+                // SAFETY: Redis did not see the value, so this is its only owner.
+                drop(unsafe { Box::from_raw(value.cast::<T>()) });
+                return Err(error);
+            }
+        };
         if status == raw::Status::Err {
             // SAFETY: Redis did not take the value, so this is still its only owner.
             drop(unsafe { Box::from_raw(value.cast::<T>()) });
@@ -1128,13 +1196,10 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         } else {
             0
         };
-        let res = unsafe {
-            crate::__available_api!(RedisModule_StreamTrimByID)(
-                self.key_inner,
-                flags as i32,
-                &mut id,
-            )
-        };
+        let trim = unsafe { crate::__available_api!(RedisModule_StreamTrimByID) };
+        let res = self
+            .native
+            .changing(|key| unsafe { trim(key, flags as i32, &mut id) })?;
         if res < 0 {
             Err(RedisError::Str("ERR Failed trimming the stream"))
         } else {
@@ -1275,7 +1340,10 @@ impl<'a> DerefMut for StringDMA<'a> {
 impl<'a> StringDMA<'a> {
     fn new(key: &'a RedisKeyWritable<'a>) -> Result<StringDMA<'a>, RedisError> {
         let mut length: size_t = 0;
-        let dma = raw::string_dma(key.key_inner, &mut length, raw::KeyMode::WRITE);
+        // Write-mode DMA replaces a shared or int- or embstr-encoded value.
+        let dma = key
+            .native
+            .changing(|native| raw::string_dma(native, &mut length, raw::KeyMode::WRITE))?;
         if dma.is_null() {
             Err(RedisError::Str("ERR Could not read key"))
         } else {
@@ -1286,9 +1354,12 @@ impl<'a> StringDMA<'a> {
 
     pub fn write(&mut self, data: &[u8]) -> Result<&mut Self, RedisError> {
         if self.buffer.len() != data.len() {
-            if raw::Status::Ok == raw::string_truncate(self.key.key_inner, data.len()) {
-                let mut length: size_t = 0;
-                let dma = raw::string_dma(self.key.key_inner, &mut length, raw::KeyMode::WRITE);
+            let mut length: size_t = 0;
+            let dma = self.key.native.changing(|key| {
+                (raw::Status::Ok == raw::string_truncate(key, data.len()))
+                    .then(|| raw::string_dma(key, &mut length, raw::KeyMode::WRITE))
+            })?;
+            if let Some(dma) = dma {
                 self.buffer = unsafe { std::slice::from_raw_parts_mut(dma.cast::<u8>(), length) };
             } else {
                 return Err(RedisError::Str("ERR Failed to truncate string"));
@@ -1301,22 +1372,18 @@ impl<'a> StringDMA<'a> {
     pub fn append(&mut self, data: &[u8]) -> Result<&mut Self, RedisError> {
         let current_len = self.buffer.len();
         let new_len = current_len + data.len();
-        if raw::Status::Ok == raw::string_truncate(self.key.key_inner, new_len) {
-            let mut length: size_t = 0;
-            let dma = raw::string_dma(self.key.key_inner, &mut length, raw::KeyMode::WRITE);
+        let mut length: size_t = 0;
+        let dma = self.key.native.changing(|key| {
+            (raw::Status::Ok == raw::string_truncate(key, new_len))
+                .then(|| raw::string_dma(key, &mut length, raw::KeyMode::WRITE))
+        })?;
+        if let Some(dma) = dma {
             self.buffer = unsafe { std::slice::from_raw_parts_mut(dma.cast::<u8>(), length) };
         } else {
             return Err(RedisError::Str("ERR Failed to truncate string"));
         }
         self.buffer[current_len..new_len].copy_from_slice(data);
         Ok(self)
-    }
-}
-
-impl Drop for RedisKeyWritable<'_> {
-    // Frees resources appropriately as a RedisKey goes out of scope.
-    fn drop(&mut self) {
-        raw::close_key(self.key_inner);
     }
 }
 
@@ -1397,6 +1464,7 @@ pub(crate) fn verify_type<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ptr;
 
     // Outside a Redis server every module API pointer is None, so a RedisKey that
     // closes its key panics with the name of RedisModule_CloseKey.
@@ -1408,7 +1476,7 @@ mod tests {
     #[test]
     fn to_raw_parts_leaves_the_key_open() {
         let key = unsafe { RedisKey::from_raw_parts(ptr::null_mut(), open_key_pointer()) };
-        let parts = std::panic::catch_unwind(|| key.to_raw_parts())
+        let parts = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| key.to_raw_parts()))
             .expect("to_raw_parts must not close the key");
         assert_eq!(parts, (ptr::null_mut(), open_key_pointer()));
     }
@@ -1459,6 +1527,7 @@ mod expiration_tests {
 mod pointer_loan_tests {
     use super::*;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::ptr;
 
     #[test]
     fn borrowed_pointers_obey_the_scoped_key_loan_guard() {
@@ -1466,12 +1535,12 @@ mod pointer_loan_tests {
         // pointer borrowing and the guard before it, without native Drop.
         let read = ManuallyDrop::new(RedisKey {
             ctx: ptr::null_mut(),
-            key_inner: ptr::null_mut(),
+            native: NativeKey::raw(ptr::null_mut()),
             _context: PhantomData,
         });
         let write = ManuallyDrop::new(RedisKeyWritable {
             ctx: ptr::null_mut(),
-            key_inner: ptr::null_mut(),
+            native: NativeKey::raw(ptr::null_mut()),
             _context: PhantomData,
         });
         assert!(read.as_ptr().is_null());

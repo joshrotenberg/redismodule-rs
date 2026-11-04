@@ -3954,6 +3954,258 @@ fn test_shared_api_is_called_across_modules() -> Result<()> {
     Ok(())
 }
 
+/// Key handles across keyspace changes (#197): string DMA through one handle
+/// replaces the int- or embstr-encoded value another handle opened, and both
+/// read the value.
+#[test]
+fn test_key_handles_survive_a_second_handle_reading_through_dma() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    for value in ["12345", "short"] {
+        redis::cmd("SET").arg(&["k", value]).query::<()>(&mut con)?;
+        let reads: Vec<Option<String>> = redis::cmd("stale.two_reads").arg("k").query(&mut con)?;
+        assert_eq!(
+            reads,
+            [Some(value.to_owned()), Some(value.to_owned())],
+            "{value}"
+        );
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// A handle sees what a call did to its key: changed, deleted, renamed away,
+/// flushed, or created.
+#[test]
+fn test_key_handles_see_changes_made_through_calls() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let run = |con: &mut TestConnection, setup: &[&[&str]], args: &[&str]| -> Result<Value> {
+        for command in setup {
+            redis::cmd(command[0]).arg(&command[1..]).query::<()>(con)?;
+        }
+        Ok(redis::cmd("stale.call_then_read").arg(args).query(con)?)
+    };
+    let reply = |before: &str, after: &str, value: Option<&str>| {
+        Value::Array(vec![
+            Value::BulkString(before.into()),
+            Value::BulkString(after.into()),
+            value.map_or(Value::Nil, |value| Value::BulkString(value.into())),
+        ])
+    };
+    let set: &[&str] = &["SET", "k", "12345"];
+    assert_eq!(
+        run(&mut con, &[set], &["k", "APPEND", "k", "x"])?,
+        reply("string", "string", Some("12345x"))
+    );
+    assert_eq!(
+        run(&mut con, &[set], &["k", "DEL", "k"])?,
+        reply("string", "none", None)
+    );
+    assert_eq!(
+        run(&mut con, &[set], &["k", "RENAME", "k", "k2"])?,
+        reply("string", "none", None)
+    );
+    assert_eq!(
+        redis::cmd("GET").arg("k2").query::<String>(&mut con)?,
+        "12345"
+    );
+    assert_eq!(
+        run(&mut con, &[set], &["k", "FLUSHDB"])?,
+        reply("string", "none", None)
+    );
+    assert_eq!(
+        run(&mut con, &[&["DEL", "k"]], &["k", "SET", "k", "created"])?,
+        reply("none", "string", Some("created"))
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// A writable handle whose key a call deleted writes it again, as a fresh
+/// open would.
+#[test]
+fn test_writable_handle_writes_after_its_key_is_deleted() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("SET").arg(&["k", "old"]).query::<()>(&mut con)?;
+    let types: Vec<String> = redis::cmd("stale.del_then_write")
+        .arg(&["k", "new"])
+        .query(&mut con)?;
+    assert_eq!(types, ["none", "string"]);
+    assert_eq!(redis::cmd("GET").arg("k").query::<String>(&mut con)?, "new");
+    Ok(())
+}
+
+/// Popping a list's last element through one handle deletes the key, and
+/// another handle to it sees the key gone.
+#[test]
+fn test_key_handle_sees_a_pop_that_deleted_its_key() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("RPUSH")
+        .arg(&["l", "only"])
+        .query::<()>(&mut con)?;
+    let reply: (String, String, String) = redis::cmd("stale.pop_other").arg("l").query(&mut con)?;
+    assert_eq!(reply, ("list".into(), "only".into(), "none".into()));
+    assert_eq!(redis::cmd("EXISTS").arg("l").query::<i64>(&mut con)?, 0);
+    Ok(())
+}
+
+/// A re-opened handle opens its key in the database it was opened in, and
+/// leaves the module's selected database as it found it.
+#[test]
+fn test_reopened_key_handle_keeps_its_database() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("SET").arg(&["k", "db0"]).query::<()>(&mut con)?;
+    let reply: (String, i64) = redis::cmd("stale.other_db")
+        .arg(&["k", "db1"])
+        .query(&mut con)?;
+    assert_eq!(reply, ("db0".into(), 1));
+    redis::cmd("SELECT").arg(1).query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("GET").arg("k").query::<String>(&mut con)?, "db1");
+    redis::cmd("SELECT").arg(0).query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("GET").arg("k").query::<String>(&mut con)?, "db0");
+    Ok(())
+}
+
+/// A stream iterator cannot re-open its key, so a call in the loop body makes
+/// its next step panic, which the command's guard reports.
+#[test]
+fn test_stream_iterator_stops_after_a_keyspace_change() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    for value in ["1", "2"] {
+        redis::cmd("XADD")
+            .arg(&["s", "*", "f", value])
+            .query::<String>(&mut con)?;
+    }
+    let error = redis::cmd("stale.stream_call")
+        .arg("s")
+        .query::<Value>(&mut con)
+        .expect_err("a stream iterator continued after a keyspace change");
+    assert!(
+        error.to_string().contains(
+            "command panicked: the stream's key was closed by a keyspace change while iterating it"
+        ),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("XLEN").arg("s").query::<i64>(&mut con)?, 2);
+
+    // The field-at-a-time form panics on the next entry too, instead of
+    // ending the iteration as if the stream were exhausted.
+    let error = redis::cmd("stale.entry_call")
+        .arg("s")
+        .query::<Value>(&mut con)
+        .expect_err("next_entry continued after a keyspace change");
+    assert!(
+        error.to_string().contains(
+            "command panicked: the stream's key was closed by a keyspace change while iterating it"
+        ),
+        "{error}"
+    );
+    Ok(())
+}
+
+/// Redis keeps scanning a key after each callback, so the SDK refuses
+/// keyspace changes from a key scan callback.
+#[test]
+fn test_key_scan_callback_refuses_keyspace_changes() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("HSET")
+        .arg(&["h", "a", "1", "b", "2", "c", "3"])
+        .query::<()>(&mut con)?;
+    let (fields, refusal): (i64, String) = redis::cmd("stale.scan_del").arg("h").query(&mut con)?;
+    assert_eq!(fields, 3);
+    assert_eq!(
+        refusal,
+        "ERR a key scan callback is running; the keyspace cannot change until it returns"
+    );
+    assert_eq!(redis::cmd("HLEN").arg("h").query::<i64>(&mut con)?, 3);
+    Ok(())
+}
+
+/// `to_raw_parts` re-opens a closed handle before handing the key over, and a
+/// handle re-opens after `yield_now`.
+#[test]
+fn test_key_handles_reopen_for_raw_parts_and_after_yield() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("SET").arg(&["k", "old"]).query::<()>(&mut con)?;
+    let read: String = redis::cmd("stale.raw_parts_after_call")
+        .arg(&["k", "new"])
+        .query(&mut con)?;
+    assert_eq!(read, "new");
+    let read: String = redis::cmd("stale.yield_then_read")
+        .arg("k")
+        .query(&mut con)?;
+    assert_eq!(read, "new");
+    Ok(())
+}
+
+/// A `new` keyspace subscriber that calls while a handle's write is still
+/// creating the key closes the thread's other keys, but not the one Redis is
+/// writing through.
+#[test]
+fn test_subscriber_call_leaves_the_key_mid_write_open() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let reply: (i64, String, String) = redis::cmd("stale.create_with_subscriber")
+        .arg(&["created:k", "value"])
+        .query(&mut con)?;
+    assert_eq!(reply, (1, "string".into(), "string".into()));
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("created:k")
+            .query::<String>(&mut con)?,
+        "value"
+    );
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+/// Opening a key closes keys opened with `ACCESS_EXPIRED`, which may hold an
+/// expired value the open deletes, but not one Redis is scanning: a scan
+/// callback that opens another key leaves the scanned key open. Redis 8.0+.
+#[test]
+fn test_key_scan_of_an_expired_key_survives_opens_in_the_callback() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version = redis_module::Context::version_from_info(RedisValue::BulkString(info))?;
+    if version.major < 8 {
+        return Ok(());
+    }
+    redis::cmd("DEBUG")
+        .arg(&["SET-ACTIVE-EXPIRE", "0"])
+        .query::<()>(&mut con)?;
+    redis::cmd("HSET")
+        .arg(&["h", "a", "1", "b", "2"])
+        .query::<()>(&mut con)?;
+    redis::cmd("PEXPIRE")
+        .arg(&["h", "1"])
+        .query::<()>(&mut con)?;
+    thread::sleep(Duration::from_millis(20));
+    let fields: i64 = redis::cmd("stale.scan_expired_open")
+        .arg(&["h", "other"])
+        .query(&mut con)?;
+    assert_eq!(fields, 2);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// The handle a keyspace scan lends its callback panics when used after a
+/// change, since the SDK cannot close and re-open a key Redis owns.
+#[test]
+fn test_keyspace_scan_handle_panics_after_a_change() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("SET").arg(&["a", "1"]).query::<()>(&mut con)?;
+    let error = redis::cmd("stale.keys_scan_call")
+        .arg("other")
+        .query::<Value>(&mut con)
+        .expect_err("a lent key handle was used after a keyspace change");
+    assert!(
+        error.to_string().contains(
+            "command panicked: a key handle built from raw parts was used after the keyspace changed"
+        ),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
 #[test]
 fn test_dbsize() -> Result<()> {
     let mut con = TestConnection::new("test_helper");
