@@ -522,32 +522,6 @@ extern "C" fn config_change_event_callback(
     );
 }
 
-#[cfg(test)]
-mod config_change_tests {
-    use super::config_change_names;
-    use crate::raw;
-
-    #[test]
-    fn configuration_event_names_keep_valid_text_and_replace_invalid_utf8() {
-        let mut pointers = [c"plain".as_ptr(), c"a\xffb".as_ptr()];
-        let data = raw::RedisModuleConfigChange {
-            version: 1,
-            num_changes: pointers.len() as u32,
-            config_names: pointers.as_mut_ptr(),
-        };
-        // SAFETY: both names are live C string literals through this call.
-        let names = unsafe { config_change_names(&data) };
-        assert_eq!(names, ["plain", "a\u{fffd}b"]);
-        let empty = raw::RedisModuleConfigChange {
-            version: 1,
-            num_changes: 0,
-            config_names: std::ptr::null_mut(),
-        };
-        // SAFETY: an empty event has no name pointers to read.
-        assert!(unsafe { config_change_names(&empty) }.is_empty());
-    }
-}
-
 /// The server events this module subscribed to natively during its current
 /// load, one bit per event id. A failed load releases exactly these: Redis
 /// before 7.2.4 keeps a failed load's subscriptions, and passing a null
@@ -677,4 +651,30 @@ pub fn register_server_events(ctx: &EventContext) -> Result<(), RedisError> {
         Some(shutdown_event_callback),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod config_change_tests {
+    use super::config_change_names;
+    use crate::raw;
+
+    #[test]
+    fn configuration_event_names_keep_valid_text_and_replace_invalid_utf8() {
+        let mut pointers = [c"plain".as_ptr(), c"a\xffb".as_ptr()];
+        let data = raw::RedisModuleConfigChange {
+            version: 1,
+            num_changes: pointers.len() as u32,
+            config_names: pointers.as_mut_ptr(),
+        };
+        // SAFETY: both names are live C string literals through this call.
+        let names = unsafe { config_change_names(&data) };
+        assert_eq!(names, ["plain", "a\u{fffd}b"]);
+        let empty = raw::RedisModuleConfigChange {
+            version: 1,
+            num_changes: 0,
+            config_names: std::ptr::null_mut(),
+        };
+        // SAFETY: an empty event has no name pointers to read.
+        assert!(unsafe { config_change_names(&empty) }.is_empty());
+    }
 }
