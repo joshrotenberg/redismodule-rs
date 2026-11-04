@@ -1917,8 +1917,9 @@ impl EventContext {
     /// At a 7.2+ floor, a missing API returns `Status::Err` instead of
     /// panicking. Captures are released on either missing-API path.
     /// Scheduling successfully does not promise the later write succeeds.
-    /// See the [notification write guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/KEYSPACE-NOTIFICATIONS.md)
-    /// for replication, role/loading gates, database scopes and teardown.
+    /// See `docs/KEYSPACE-NOTIFICATIONS.md` in the dependency source revision
+    /// pinned by `Cargo.lock` for replication, role/loading gates, database
+    /// scopes and teardown; the source README links the matching guide.
     pub fn add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
         &self,
         callback: F,
@@ -1940,7 +1941,8 @@ impl EventContext {
     /// Generated module load/unload refuses new jobs; unload refuses until all
     /// accepted jobs have been cleaned up, including empty/cancelled work.
     /// Scheduling successfully does not promise the later write succeeds.
-    /// See the [notification write guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/KEYSPACE-NOTIFICATIONS.md).
+    /// See `docs/KEYSPACE-NOTIFICATIONS.md` in the dependency source revision
+    /// pinned by `Cargo.lock`; the source README links the matching guide.
     #[cfg(any(
         feature = "min-redis-compatibility-version-6-0",
         feature = "min-redis-compatibility-version-6-2",

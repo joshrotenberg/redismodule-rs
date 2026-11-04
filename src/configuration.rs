@@ -24,8 +24,9 @@
 //! Shared guards require `Send` values; native [`RedisString`] owners are not
 //! `Send` or `Sync`.
 //!
-//! See the [configuration notes](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/CONFIGURATION.md)
-//! for argument syntax, precedence examples, storage choices and reload behavior.
+//! See `docs/CONFIGURATION.md` in the dependency source revision pinned by
+//! `Cargo.lock` for argument syntax, precedence examples, storage choices and
+//! reload behavior. The source tree's README links to the matching guides.
 
 use crate::context::thread_safe::{RedisGILGuard, RedisLockIndicator};
 use crate::{CallOptionResp, CallOptionsBuilder, CallResult, RedisValue, raw};

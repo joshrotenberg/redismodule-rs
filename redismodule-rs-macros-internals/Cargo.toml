@@ -1,6 +1,6 @@
 [package]
 name = "redis-module-macros-internals"
-authors = ["Meir Shpilraien <meir@redis.com>"]
+authors = ["Josh Rotenberg", "Meir Shpilraien <meir@redis.com>"]
 description = "A macros crate for redismodule-rs"
 version.workspace = true
 edition.workspace = true
