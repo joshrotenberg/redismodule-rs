@@ -246,6 +246,8 @@ impl TestConnection {
                 let Some(mut probe) = probe_connection(port, server.child.child.id())? else {
                     return Ok(false);
                 };
+                // Keep each check short so the outer deadline bounds the wait.
+                probe.set_read_timeout(Some(PROBE_TIMEOUT))?;
                 match redis::cmd("INFO")
                     .arg("replication")
                     .query::<String>(&mut probe)

@@ -990,8 +990,9 @@ fn queued_drain_refuses_unload_even_after_unwatch() -> Result<()> {
     Ok(())
 }
 
-/// Test connections wait for commands slower than the startup probe's
-/// timeout, as SAVE, MODULE LOAD and DEBUG RELOAD can be on a busy runner.
+/// Test connections wait for a command slower than the startup probe's
+/// timeout: DEBUG SLEEP stands in for SAVE, MODULE LOAD or DEBUG RELOAD on a
+/// busy runner.
 #[test]
 fn test_connections_wait_for_slow_commands() -> Result<()> {
     let mut con = server()?;
