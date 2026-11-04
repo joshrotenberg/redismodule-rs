@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Integration tests load the `lists` and `load_unload` examples and run
+  `export_shared_api`, `replicate_verbatim`, `reply_with_key` and
+  `list_push_head`, which nothing ran before (#168). New `shared_api` and
+  `shared_api_user` examples show one module calling a function another
+  exports. The `lists` example now replicates its writes, which the key API
+  does not propagate on its own, and rotates a list given to `LPOPRPUSH` twice
+  through one key handle instead of two.
+
 - Command containers and native subcommands (#178).
   `CommandBuilder::container(name)` declares a command without a handler, and
   `.subcommand(redis_command!("child", handler))` registers each child as

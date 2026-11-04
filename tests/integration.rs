@@ -3733,6 +3733,208 @@ fn test_subcommands_acl_categories() -> Result<()> {
     Ok(())
 }
 
+fn list_range(con: &mut TestConnection, key: &str) -> redis::RedisResult<Vec<String>> {
+    redis::cmd("LRANGE").arg(&[key, "0", "-1"]).query(con)
+}
+
+/// The lists example's commands, through the key API: LISTS.PUSHHEAD pushes
+/// to the head as LPUSH does, and LPOPRPUSH moves the head of one list to the
+/// tail of another, or rotates a list given twice.
+#[test]
+fn test_lists_example_moves_and_pushes_elements() -> Result<()> {
+    let mut con = TestConnection::new("lists");
+    let pushed: i64 = redis::cmd("LISTS.PUSHHEAD")
+        .arg(&["src", "c", "b", "a"])
+        .query(&mut con)?;
+    assert_eq!(pushed, 3);
+    assert_eq!(list_range(&mut con, "src")?, ["a", "b", "c"]);
+    let moved: Option<String> = redis::cmd("LPOPRPUSH")
+        .arg(&["src", "dst"])
+        .query(&mut con)?;
+    assert_eq!(moved.as_deref(), Some("a"));
+    assert_eq!(list_range(&mut con, "src")?, ["b", "c"]);
+    assert_eq!(list_range(&mut con, "dst")?, ["a"]);
+
+    // A list given twice rotates through one key handle, including a list of
+    // one element, whose pop deletes the key before the push recreates it.
+    let moved: Option<String> = redis::cmd("LPOPRPUSH")
+        .arg(&["src", "src"])
+        .query(&mut con)?;
+    assert_eq!(moved.as_deref(), Some("b"));
+    assert_eq!(list_range(&mut con, "src")?, ["c", "b"]);
+    let moved: Option<String> = redis::cmd("LPOPRPUSH")
+        .arg(&["dst", "dst"])
+        .query(&mut con)?;
+    assert_eq!(moved.as_deref(), Some("a"));
+    assert_eq!(list_range(&mut con, "dst")?, ["a"]);
+
+    // An empty source replies nil and writes nothing.
+    let moved: Option<String> = redis::cmd("LPOPRPUSH")
+        .arg(&["missing", "other"])
+        .query(&mut con)?;
+    assert_eq!(moved, None);
+    assert_eq!(redis::cmd("EXISTS").arg("other").query::<i64>(&mut con)?, 0);
+
+    // Binary elements move unchanged.
+    let binary: &[u8] = b"\0\xff\r\n";
+    redis::cmd("LISTS.PUSHHEAD")
+        .arg("bytes")
+        .arg(binary)
+        .query::<i64>(&mut con)?;
+    let moved: Vec<u8> = redis::cmd("LPOPRPUSH")
+        .arg(&["bytes", "bytes_to"])
+        .query(&mut con)?;
+    assert_eq!(moved, binary);
+
+    // A key of another type is refused before anything moves.
+    redis::cmd("SET")
+        .arg(&["string", "v"])
+        .query::<()>(&mut con)?;
+    for args in [
+        &["LPOPRPUSH", "string", "dst"][..],
+        &["LPOPRPUSH", "src", "string"],
+        &["LISTS.PUSHHEAD", "string", "x"],
+    ] {
+        let error = redis::cmd(args[0])
+            .arg(&args[1..])
+            .query::<Value>(&mut con)
+            .expect_err("a command wrote to a string key");
+        assert_eq!(error.code(), Some("WRONGTYPE"), "{args:?}: {error}");
+    }
+    assert_eq!(list_range(&mut con, "src")?, ["c", "b"]);
+    let error = redis::cmd("LISTS.PUSHHEAD")
+        .arg("src")
+        .query::<Value>(&mut con)
+        .expect_err("LISTS.PUSHHEAD without elements ran");
+    assert!(
+        error.to_string().contains("wrong number of arguments"),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// Writes through the key API are not propagated on their own. The lists
+/// example's commands replicate themselves verbatim, so a replica, which has
+/// the module too, ends with the same lists.
+#[test]
+fn test_lists_example_replicates_its_writes() -> Result<()> {
+    let mut primary = TestConnection::new("lists");
+    let mut replica = primary.replica()?;
+    redis::cmd("LISTS.PUSHHEAD")
+        .arg(&["src", "c", "b", "a"])
+        .query::<i64>(&mut primary)?;
+    redis::cmd("LPOPRPUSH")
+        .arg(&["src", "dst"])
+        .query::<Value>(&mut primary)?;
+    redis::cmd("LPOPRPUSH")
+        .arg(&["src", "src"])
+        .query::<Value>(&mut primary)?;
+    redis::cmd("LPOPRPUSH")
+        .arg(&["missing", "other"])
+        .query::<Value>(&mut primary)?;
+    let acknowledged: usize = redis::cmd("WAIT").arg(&[1, 5000]).query(&mut primary)?;
+    assert_eq!(acknowledged, 1, "replica log: {}", replica.server_log()?);
+    assert_eq!(list_range(&mut replica, "src")?, ["c", "b"]);
+    assert_eq!(list_range(&mut replica, "dst")?, ["a"]);
+    assert_eq!(
+        redis::cmd("EXISTS")
+            .arg("other")
+            .query::<i64>(&mut replica)?,
+        0
+    );
+    Ok(())
+}
+
+/// The load_unload example sets its state from its arguments in `init` and
+/// clears it in `deinit`, so a reload starts from nothing.
+#[test]
+fn test_load_unload_example_sets_and_clears_its_state() -> Result<()> {
+    let mut con = TestConnection::with_args("load_unload", &["first", "second"]);
+    let loaded =
+        r#"Update global state on LOAD. BEFORE: None, AFTER: Some("Args passed: first, second")"#;
+    assert!(con.server_log()?.contains(loaded), "{}", con.server_log()?);
+
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "load_unload"])
+        .query::<()>(&mut con)?;
+    let unloaded =
+        r#"Update global state on UNLOAD. BEFORE: Some("Args passed: first, second"), AFTER: None"#;
+    assert!(
+        con.server_log()?.contains(unloaded),
+        "{}",
+        con.server_log()?
+    );
+
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("load_unload")?)
+        .arg("third")
+        .query::<()>(&mut con)?;
+    let reloaded =
+        r#"Update global state on LOAD. BEFORE: None, AFTER: Some("Args passed: third")"#;
+    assert!(
+        con.server_log()?.contains(reloaded),
+        "{}",
+        con.server_log()?
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// One module calls a function another exports: shared_api exports
+/// `shared_api.add` in `init`, and shared_api_user looks it up and calls it.
+/// Redis refuses a second export of the name, and keeps the exporter loaded
+/// while the user module holds its API.
+#[test]
+fn test_shared_api_is_called_across_modules() -> Result<()> {
+    let mut con = TestConnection::new("shared_api");
+    let again: i64 = redis::cmd("shared_api.export_again").query(&mut con)?;
+    assert_eq!(again, 0, "a taken name was exported again");
+
+    let user = utils::module_path("shared_api_user")?;
+    redis::cmd("MODULE")
+        .arg(&["LOAD", user.as_str()])
+        .query::<()>(&mut con)?;
+    let add = |con: &mut TestConnection, a: i64, b: i64| -> redis::RedisResult<i64> {
+        redis::cmd("shared_api_user.add").arg(a).arg(b).query(con)
+    };
+    assert_eq!(add(&mut con, 40, 2)?, 42);
+    assert_eq!(add(&mut con, -5, 7)?, 2);
+    assert_eq!(add(&mut con, i64::MAX, 1)?, i64::MIN);
+
+    let refused = redis::cmd("MODULE")
+        .arg(&["UNLOAD", "shared_api"])
+        .query::<()>(&mut con)
+        .expect_err("Redis unloaded a module whose API another module uses");
+    assert!(
+        refused
+            .to_string()
+            .contains("the module exports APIs used by other modules"),
+        "{refused}"
+    );
+    assert_eq!(add(&mut con, 1, 1)?, 2);
+
+    for module in ["shared_api_user", "shared_api"] {
+        redis::cmd("MODULE")
+            .arg(&["UNLOAD", module])
+            .query::<()>(&mut con)?;
+    }
+    // Without the exporter, the lookup finds nothing.
+    redis::cmd("MODULE")
+        .arg(&["LOAD", user.as_str()])
+        .query::<()>(&mut con)?;
+    let missing = add(&mut con, 1, 1).expect_err("the API outlived its module");
+    assert!(
+        missing
+            .to_string()
+            .contains("shared_api.add is not exported"),
+        "{missing}"
+    );
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
 #[test]
 fn test_dbsize() -> Result<()> {
     let mut con = TestConnection::new("test_helper");
@@ -7378,6 +7580,57 @@ fn assert_null_reply_wire(
             .read_exact(&mut reply)
             .with_context(|| format!("RESP{protocol} {kind} reply and following PING"))?;
         assert_eq!(reply, expected.as_bytes(), "RESP{protocol} {kind}");
+    }
+    Ok(())
+}
+
+/// Sends `args` in RESP2, RESP3 and RESP2 again, and checks each reply's
+/// bytes and that a PING after it still lines up.
+fn assert_reply_wire(
+    con: &TestConnection,
+    args: &[&str],
+    resp2: &[u8],
+    resp3: &[u8],
+) -> Result<()> {
+    use std::io::{Read, Write};
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], con.port()));
+    let timeout = Duration::from_secs(5);
+    let mut stream = std::net::TcpStream::connect_timeout(&address, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    let mut parser = redis::Parser::new();
+    for protocol in [2, 3, 2] {
+        stream.write_all(&redis::cmd("HELLO").arg(protocol).get_packed_command())?;
+        parser.parse_value(&mut stream)?.extract_error()?;
+        let mut request = redis::cmd(args[0]).arg(&args[1..]).get_packed_command();
+        request.extend(redis::cmd("PING").get_packed_command());
+        stream.write_all(&request)?;
+        let mut expected = if protocol == 2 { resp2 } else { resp3 }.to_vec();
+        expected.extend_from_slice(b"+PONG\r\n");
+        let mut reply = vec![0; expected.len()];
+        stream
+            .read_exact(&mut reply)
+            .with_context(|| format!("RESP{protocol} {args:?} reply and following PING"))?;
+        assert_eq!(reply, expected, "RESP{protocol} {args:?}");
+    }
+    Ok(())
+}
+
+/// `Context::reply_with_key` sends each `RedisValueKey` kind as its type:
+/// integers as integers, strings and bytes as bulk strings, a simple string
+/// as one, and a bool as a RESP3 boolean, or an integer in RESP2.
+#[test]
+fn test_reply_with_key_wire_types() -> Result<()> {
+    let con = TestConnection::new("reply_types");
+    for (kind, resp2, resp3) in [
+        ("integer", &b":42\r\n"[..], &b":42\r\n"[..]),
+        ("string", b"$4\r\ntext\r\n", b"$4\r\ntext\r\n"),
+        ("redis_string", b"$5\r\nowned\r\n", b"$5\r\nowned\r\n"),
+        ("bytes", b"$3\r\n\0\xff!\r\n", b"$3\r\n\0\xff!\r\n"),
+        ("bool", b":1\r\n", b"#t\r\n"),
+        ("simple", b"+ok\r\n", b"+ok\r\n"),
+    ] {
+        assert_reply_wire(&con, &["reply.key", kind], resp2, resp3)?;
     }
     Ok(())
 }
