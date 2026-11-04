@@ -56,6 +56,78 @@ change because `serde_syn` is no longer involved.
 
 ## Changes the compiler reports
 
+### Native data types implement `NativeType`
+
+A native data type is a Rust type that implements
+`native_types::NativeType`, declared as a `static` `RedisType<T>` (#154,
+#155). The SDK generates the `extern "C"` callbacks Redis calls, runs each
+inside a panic guard, and frees values with `Drop`. `RedisType::new` takes the
+name and encoding version only.
+
+```rust,ignore
+// 2.x
+static MY_TYPE: RedisType = RedisType::new(
+    "mytype123",
+    0,
+    raw::RedisModuleTypeMethods {
+        version: raw::REDISMODULE_TYPE_METHOD_VERSION as u64,
+        rdb_load: Some(rdb_load),
+        rdb_save: Some(rdb_save),
+        free: Some(free),
+        // ...
+    },
+);
+
+// 3.0
+impl NativeType for MyType {
+    fn rdb_load(io: &mut RedisModuleIO, _encver: i32) -> Result<Self, Error> {
+        Ok(MyType { data: io.read_string()? })
+    }
+    fn rdb_save(&self, io: &mut RedisModuleIO) {
+        io.write_string(&self.data);
+    }
+}
+static MY_TYPE: RedisType<MyType> =
+    RedisType::new("mytype123", 0).with_mem_usage();
+```
+
+- `rdb_load` and `rdb_save` are required. Redis calls them without checking,
+  so a type that left them out crashed the server on its first save. `free`
+  is the value's `Drop`.
+- Each optional callback is a trait with a `with_` method on `RedisType`:
+  `MemUsage`, `CopyValue`, `FreeEffort`, `Unlink`, `DigestValue` (through
+  `native_types::Digest`), `AofRewrite` (through `AofRewriter::emit`),
+  `AuxData` and `Defrag`. A callback is registered only when the type asks for
+  it, since Redis treats a missing callback differently from one that does
+  nothing: without `CopyValue`, `COPY` replies that the type does not support
+  it, and without `AofRewrite`, an AOF rewrite with `aof-use-rdb-preamble no`
+  fails on Redis 8.10 and later and crashes its child process before that.
+- A panic in `rdb_load` fails that value's load, so `RESTORE` fails and an RDB
+  file does not load; in `copy` it fails the `COPY`, in `Drop` it leaks the
+  rest of the value, and in the others it falls back to a neutral result. A
+  panic in `rdb_save`, `aux_save` or `aof_rewrite` is logged and aborts the
+  process, because the partly written value cannot be reported to Redis; a
+  background save or rewrite runs in a child process, so only that save fails.
+- `get_value` and `set_value` take `&RedisType<T>` and return or take `T`, so
+  the turbofish is no longer needed and reading a value as another type does
+  not compile. `T` must be `Send + 'static`: Redis can free values on a
+  background thread, as `UNLINK`, `FLUSHALL ASYNC` and, since Redis 7.4, a
+  plain `FLUSHALL` do. A value that holds a `RedisString` or an `Rc` needs a
+  wrapper whose `unsafe impl Send` states why that is sound, as
+  [string_ownership.rs](../examples/string_ownership.rs) shows.
+- Both return an error for a `RedisType` that was never registered (not
+  listed in `data_types`) instead of storing a value with a null type, which
+  crashed Redis on the next `DEL`, `TYPE` or save. A value Redis refuses is
+  dropped instead of leaked.
+- `unsafe RedisType::from_raw_methods(name, version, methods)` keeps native
+  callbacks for what the traits do not cover; they must treat each value as a
+  `Box<T>`.
+- `RedisModuleIO` adds `read_redis_string` and `write_redis_string`, which are
+  binary safe.
+
+See [data_type.rs](../examples/data_type.rs) and
+[native_type.rs](../examples/native_type.rs).
+
 ### Timers use typed handles
 
 `EventContext::create_timer` now returns
@@ -725,7 +797,7 @@ args.done()?;
 ```rust
 // 3.0
 let mut key = ctx.open_key_writable(&name);
-if let Some(value) = key.get_value::<MyType>(&MY_TYPE)? {
+if let Some(value) = key.get_value(&MY_TYPE)? {
     value.count += 1;
 }
 ```
@@ -779,6 +851,8 @@ let value = parse(text).map_err(RedisError::from_error)?;
 
 ### Data types
 
+- Native data types implement `NativeType`; see
+  [Native data types implement `NativeType`](#native-data-types-implement-nativetype).
 - `RedisType::raw_type` is a method returning `*mut RedisModuleType` instead of
   a public `RefCell` field.
 - `RedisType::create_data_type` takes `&RegistrationContext<'_>`.
@@ -908,8 +982,10 @@ text.
   instead of aborting the server. A panic in a callback with no client (events,
   timers, INFO, configuration getters, defrag) is logged at warning level.
   A panic in a configuration setter fails the `CONFIG SET`; one in OnLoad
-  fails the load. This needs the default `panic = "unwind"`; callbacks a module
-  registers itself, such as native type methods, can use `panic::catch_panic`.
+  fails the load. Native data type callbacks are guarded as
+  [their section](#native-data-types-implement-nativetype) describes. This
+  needs the default `panic = "unwind"`; callbacks a module registers itself
+  through the raw API can use `panic::catch_panic`.
 - **`RedisGILGuard`.** Locking a guard that is already locked panics instead of
   returning a second mutable reference.
 - **Missing module APIs.** Calling an API the running Redis lacks returns or

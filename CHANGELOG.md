@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Breaking:** native data types are typed Rust values with SDK-generated
+  callbacks (#154, #155). A type implements `native_types::NativeType`
+  (`rdb_load` and `rdb_save`; `free` is `Drop`) and is declared as a
+  `static` `RedisType<T>`; `RedisType::new` takes only the name and encoding
+  version. Optional callbacks are traits enabled with `with_` methods
+  (`MemUsage`, `CopyValue`, `FreeEffort`, `Unlink`, `DigestValue`,
+  `AofRewrite`, `AuxData`, `Defrag`). Every callback runs inside a panic guard;
+  a panic in `rdb_save`, `aux_save` or `aof_rewrite` aborts after logging
+  rather than write an incomplete value. `get_value` and `set_value` are typed
+  by the `RedisType<T>`, require `T: Send + 'static` because Redis frees
+  values on background threads, refuse a type that was never registered, and
+  drop a value Redis refuses. `unsafe RedisType::from_raw_methods` keeps
+  native callbacks, and `RedisModuleIO` adds binary-safe `read_redis_string`
+  and `write_redis_string`.
+
 - Event loop callbacks no longer outlive their module or loop forever after a
   panic (#159). With `redis_module!`, a successful unload stops watching every
   descriptor still watched after `deinit` and a failed load those it added,
