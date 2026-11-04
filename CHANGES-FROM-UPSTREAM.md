@@ -34,6 +34,20 @@ and optional callbacks are traits registered only when the type asks for them.
 `data_type` example's swapped defrag start and end attributes are fixed. Upstream
 has no issue or pull request for these.
 
+## Configuration wrapper permissions
+
+The `module_config_get` and `module_config_set` commands `redis_module!`
+registers forward to `CONFIG GET` and `CONFIG SET`, but upstream registers them
+with no command flags and calls `CONFIG` without ACL verification, so Redis ran
+`CONFIG` for any user allowed the wrapper, including users denied `@admin`, and
+for Lua scripts, which `CONFIG` refuses (#160). The wrappers now take
+`CONFIG`'s flags (`admin deny-script allow-loading allow-stale`), so scripts
+cannot call them, and its ACL categories `@admin` and `@dangerous` as optional
+categories, set on Redis 7.2 and later; Redis derives no categories from a
+module command's flags. They call `CONFIG` with the `C` flag, so a user
+allowed a wrapper by name, or through `+@all`, still needs `CONFIG`
+permission. Upstream has no issue or pull request for this.
+
 ## Event loop lifecycle
 
 Redis keeps watched descriptors and pending one-shots across `MODULE UNLOAD`
