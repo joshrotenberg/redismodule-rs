@@ -1,3 +1,76 @@
+//! Build native Redis modules in Rust.
+//!
+//! This is the 3.0 SDK fork of `RedisLabsModules/redismodule-rs`. It is consumed
+//! from Git; the published docs.rs 2.x crate describes the upstream API. Generate
+//! this reference with `cargo doc --open` from the same revision as your module's
+//! dependency.
+//!
+//! # Module entry point and commands
+//!
+//! Build a `cdylib` and use [`redis_module!`] to register its name, version,
+//! allocator, commands and optional lifecycle hooks. Command handlers receive a
+//! [`Context`] and owned [`RedisString`] arguments, and return [`RedisResult`]:
+//!
+//! ```
+//! use redis_module::{Context, RedisResult, RedisString};
+//! fn ping(_: &Context, _: Vec<RedisString>) -> RedisResult {
+//!     Ok("PONG".into())
+//! }
+//! ```
+//!
+//! The macro wraps command dispatch in the SDK's panic and reply handling.
+//! [`commands::CommandBuilder`] adds flags, key specifications and ACL metadata
+//! when a legacy command tuple is insufficient.
+//!
+//! # Context views
+//!
+//! [`RegistrationContext`] is for load-time registration. [`Context`] is a
+//! command view, [`EventContext`] is for server/keyspace events, and
+//! [`WorkerContext`] is obtained while a worker holds Redis's lock. Shared
+//! operations live on [`RuntimeContext`]. [`ThreadSafeContext`] and
+//! [`DetachedContext`] provide worker lock guards; retaining a native pointer
+//! alone does not establish a valid context, thread or lock scope.
+//!
+//! # Keys, arguments and replies
+//!
+//! Open keys through [`RuntimeContext::open_key`] or
+//! [`RuntimeContext::open_key_writable`]. Handles borrow the opening context.
+//! Read the individual methods' access and aliasing requirements before keeping
+//! native views across another Redis call. [`ArgCursor`] provides checked
+//! argument parsing; [`RedisString::try_as_str`] validates text, while
+//! [`RedisString::as_slice`] keeps arbitrary bytes intact.
+//!
+//! Return a [`RedisValue`] for a normal command reply. Arrays and maps may nest
+//! other values. [`RedisValue::Null`] is a RESP2 null bulk string;
+//! [`RedisValue::NullArray`] is a RESP2 null array; both are null in RESP3.
+//! [`RedisValue::NoReply`] is for commands whose reply is supplied another way.
+//! Root [`CallResult`]/[`CallReply`] values own the native result and are
+//! scoped to the calling context. Nested replies and views borrow their parent.
+//! Copy data before the relevant owner or legal Redis-access scope ends.
+//!
+//! # API floors and build requirements
+//!
+//! Rust 1.87 is the MSRV; this repository pins Rust 1.94.0. A C compiler builds
+//! the native API stub. Select exactly one
+//! `min-redis-compatibility-version-*` feature, disabling defaults for a floor
+//! other than the default 6.0. The floor selects compile-time API assumptions,
+//! not the Redis server process. Test your module on its actual oldest server.
+//! Use [`RuntimeContext::api_available`] when an optional operation needs a
+//! runtime availability check.
+//!
+//! # Module-author guides
+//!
+//! The matching source checkout includes `README.md` and the `docs/` guides:
+//! `MIGRATING-3.0.md`, `COMPATIBILITY-FLOORS.md`, `CONFIGURATION.md`,
+//! `KEYSPACE-NOTIFICATIONS.md`, `TESTING-MODULES.md`, `SHIPPING-MODULES.md` and
+//! `UPGRADING-MODULES.md`. Open these from the dependency revision pinned by
+//! `Cargo.lock`; the README links the guides relative to that source tree.
+//! This avoids substituting current master documentation for a pinned SDK.
+//!
+//! For unwrapped APIs, [`raw`] contains the native bindings. A raw context/key
+//! pointer does not transfer ownership or authorize calls outside Redis's native
+//! callback, thread and lifetime rules.
+
 pub use crate::context::InfoContext;
 
 // Paths used by registration macros. Consumers do not need to declare the

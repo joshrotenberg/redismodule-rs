@@ -43,6 +43,15 @@ types without a `From` conversion.
   edition 2021 and on edition 2024 both build with `redis_module!` and the
   proc macros.
 
+## Native SDK dependency identity
+
+The package declares `links = "redismodule"` (#169), so Cargo refuses a graph
+with another package declaring the same native library identity. Use one SDK
+revision throughout the module's dependency graph and update its Git dependency
+packages together. An older SDK with no `links` key is not detected by this
+check; inspect `cargo tree -d` before mixing dependencies inherited from 2.x.
+The native API globals must not be linked from two SDK copies in one module.
+
 ## Macro metadata syntax
 
 Both macro crates now use Syn 2 internally. The public macro crate parses its
@@ -676,6 +685,35 @@ lists, strings, info fields, replication) are no longer public. The methods on
 `Context`, `RedisKey`, `RedisKeyWritable`, the call reply types and
 `InfoContext` cover them, and the bindings in `raw` remain for anything else.
 `key::verify_type` is no longer public either.
+
+Two patterns still need native bindings rather than a method equivalent:
+
+- Piece-by-piece aggregate replies use `RedisModule_ReplyWithArray`,
+  `RedisModule_ReplyWithMap`, `RedisModule_ReplyWithStringBuffer` or
+  `RedisModule_ReplyWithString` with `ctx.get_raw()`. The module must emit
+  exactly the announced element count and obey the native reply protocol.
+  Prefer a complete `RedisValue` tree where practical; `InsertionOrderedMap`,
+  `BulkRedisString` and `NullArray` cover repeated binary keys, native string
+  replies and stream-style absent arrays without these raw calls.
+- For an unwrapped read-only key API, open with `ctx.open_key(&name)`, then consume the
+  handle with `to_raw_parts()`. Rebuild exactly one `RedisKey` using
+  `unsafe { RedisKey::from_raw_parts(opening_ctx, key_ptr) }` in your wrapper's
+  cleanup so the SDK closes it, or call the native close once yourself. Keep
+  the opening context and its Redis lock valid until then; do not retain the
+  raw key beyond that scope. A null read-only key needs no native close.
+  Native write operations require a key opened with write access: use
+  `RedisModule_OpenKey` with `REDISMODULE_READ | REDISMODULE_WRITE` and close
+  the returned handle exactly once with `RedisModule_CloseKey` while the
+  opening context and Redis lock remain valid. `RedisKeyWritable` has no
+  ownership-extraction method; a native wrapper must own this cleanup itself.
+
+When adopting an owned string returned by a native API, a null producer context
+is correct only when the string has no AutoMemory registration, such as a
+producer context that never enabled AutoMemory. Pass the real producer context
+otherwise: `RedisString::from_owned_ptr` detaches its registration with a native
+`RetainString` plus `FreeString` pair, preserving one independent owner. Do not
+use a null producer merely to save those calls. The compatibility constructor
+`from_redis_module_string` follows the same rule.
 
 The native context pointer is private on every context view and on
 `InfoContext`. For `Context`, `EventContext`, `RegistrationContext` and

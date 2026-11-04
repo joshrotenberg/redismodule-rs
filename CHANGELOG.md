@@ -111,6 +111,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The SDK package declares `links = "redismodule"`, allowing Cargo to reject
+  another package declaring the same native library identity (#169).
+  Legacy SDKs without a `links` declaration still require a dependency audit.
+  The generated crate reference now introduces contexts, commands, keys,
+  replies and floors; module guides cover master/local dependency overrides,
+  post-notification unload guards and raw ownership transitions.
+
 - **Breaking:** `RedisValue::NullArray` replies as a null array in RESP2
   (`*-1`) and null in RESP3 (`_`), including inside aggregates (#180).
   `Null` still sends a RESP2 null bulk string; `None` and `()` conversions
