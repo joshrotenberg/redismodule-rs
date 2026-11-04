@@ -43,6 +43,15 @@ types without a `From` conversion.
   edition 2021 and on edition 2024 both build with `redis_module!` and the
   proc macros.
 
+## Native SDK dependency identity
+
+The package declares `links = "redismodule"` (#169), so Cargo refuses a graph
+with another package declaring the same native library identity. Use one SDK
+revision throughout the module's dependency graph and update its Git dependency
+packages together. An older SDK with no `links` key is not detected by this
+check; inspect `cargo tree -d` before mixing dependencies inherited from 2.x.
+The native API globals must not be linked from two SDK copies in one module.
+
 ## Macro metadata syntax
 
 Both macro crates now use Syn 2 internally. The public macro crate parses its
@@ -55,6 +64,88 @@ Generated helper names remain stable. Invalid-input diagnostic wording may
 change because `serde_syn` is no longer involved.
 
 ## Changes the compiler reports
+
+### Native data types implement `NativeType`
+
+A native data type is a Rust type that implements
+`native_types::NativeType`, declared as a `static` `RedisType<T>` (#154,
+#155). The SDK generates the `extern "C"` callbacks Redis calls, runs each
+inside a panic guard, and frees values with `Drop`. `RedisType::new` takes the
+name and encoding version only.
+
+```rust,ignore
+// 2.x
+static MY_TYPE: RedisType = RedisType::new(
+    "mytype123",
+    0,
+    raw::RedisModuleTypeMethods {
+        version: raw::REDISMODULE_TYPE_METHOD_VERSION as u64,
+        rdb_load: Some(rdb_load),
+        rdb_save: Some(rdb_save),
+        free: Some(free),
+        // ...
+    },
+);
+
+// 3.0
+impl NativeType for MyType {
+    fn rdb_load(io: &mut RdbReader, _encver: i32) -> Result<Self, Error> {
+        Ok(MyType { data: io.read_string()? })
+    }
+    fn rdb_save(&self, io: &mut RdbWriter) {
+        io.write_string(&self.data);
+    }
+}
+static MY_TYPE: RedisType<MyType> =
+    RedisType::new("mytype123", 0).with_mem_usage();
+```
+
+- `rdb_load` and `rdb_save` are required. Redis calls them without checking,
+  so a type that left them out crashed the server on its first save. `free`
+  is the value's `Drop`.
+- Load callbacks get an `io::RdbReader`, which only reads, and save callbacks
+  an `io::RdbWriter`, which only writes: during a `RESTORE` the IO writes into
+  the command's own argument, so a write from a load callback would corrupt
+  it.
+- Each optional callback is a trait with a `with_` method on `RedisType`:
+  `MemUsage`, `CopyValue`, `FreeEffort`, `Unlink`, `DigestValue` (through
+  `native_types::Digest`), `AofRewrite` (through `AofRewriter::emit`),
+  `AuxData` and `Defrag`. A callback is registered only when the type asks for
+  it, since Redis treats a missing callback differently from one that does
+  nothing: without `CopyValue`, `COPY` replies that the type does not support
+  it, and without `AofRewrite`, an AOF rewrite with `aof-use-rdb-preamble no`
+  fails on Redis 8.10 and later and crashes its child process before that.
+- A panic in `rdb_load` fails that value's load: `RESTORE` fails, and Redis
+  exits when an RDB file or a replica's full sync does not load. In `copy` it
+  fails the `COPY`, in `Drop` it is contained after the unwind drops the rest
+  of the value, and in the others it falls back to a neutral result. A panic
+  in `rdb_save`, `aux_save` or `aof_rewrite` is logged and ends the process,
+  because the partly written value cannot be reported to Redis: a background
+  save or rewrite's child process is killed, which fails only that save and
+  lets the server remove its partial file, and the server itself aborts, as
+  for `SAVE` or `DUMP`.
+- `get_value` and `set_value` take `&RedisType<T>` and return or take `T`, so
+  the turbofish is no longer needed and reading a value as another type does
+  not compile. `T` must be `Send + 'static`: Redis can free values on a
+  background thread, as `UNLINK`, `FLUSHALL ASYNC` and, since Redis 7.4, a
+  plain `FLUSHALL` do. Hold shared data in an `Arc` rather than an `Rc`. A
+  value that holds a `RedisString` needs a wrapper whose `unsafe impl Send`
+  states why that is sound, as
+  [string_ownership.rs](../examples/string_ownership.rs) shows.
+- Both return an error for a `RedisType` that was never registered (not
+  listed in `data_types`) instead of storing a value with a null type, which
+  crashed Redis on the next `DEL`, `TYPE` or save. A value Redis refuses is
+  dropped instead of leaked.
+- `unsafe RedisType::from_raw_methods(name, version, methods)` keeps native
+  callbacks for what the traits do not cover; they must treat each value as a
+  `Box<T>`, and `T` need not implement `NativeType`.
+- Redis 6.0 ignores `free_effort`, `unlink`, `copy` and `defrag`, which Redis
+  6.2 added.
+- `RedisModuleIO` adds `read_redis_string` and `write_redis_string`, which are
+  binary safe.
+
+See [data_type.rs](../examples/data_type.rs) and
+[native_type.rs](../examples/native_type.rs).
 
 ### Timers use typed handles
 
@@ -654,6 +745,35 @@ lists, strings, info fields, replication) are no longer public. The methods on
 `InfoContext` cover them, and the bindings in `raw` remain for anything else.
 `key::verify_type` is no longer public either.
 
+Two patterns still need native bindings rather than a method equivalent:
+
+- Piece-by-piece aggregate replies use `RedisModule_ReplyWithArray`,
+  `RedisModule_ReplyWithMap`, `RedisModule_ReplyWithStringBuffer` or
+  `RedisModule_ReplyWithString` with `ctx.get_raw()`. The module must emit
+  exactly the announced element count and obey the native reply protocol.
+  Prefer a complete `RedisValue` tree where practical; `InsertionOrderedMap`,
+  `BulkRedisString` and `NullArray` cover repeated binary keys, native string
+  replies and stream-style absent arrays without these raw calls.
+- For an unwrapped read-only key API, open with `ctx.open_key(&name)`, then consume the
+  handle with `to_raw_parts()`. Rebuild exactly one `RedisKey` using
+  `unsafe { RedisKey::from_raw_parts(opening_ctx, key_ptr) }` in your wrapper's
+  cleanup so the SDK closes it, or call the native close once yourself. Keep
+  the opening context and its Redis lock valid until then; do not retain the
+  raw key beyond that scope. A null read-only key needs no native close.
+  Native write operations require a key opened with write access: use
+  `RedisModule_OpenKey` with `REDISMODULE_READ | REDISMODULE_WRITE` and close
+  the returned handle exactly once with `RedisModule_CloseKey` while the
+  opening context and Redis lock remain valid. `RedisKeyWritable` has no
+  ownership-extraction method; a native wrapper must own this cleanup itself.
+
+When adopting an owned string returned by a native API, a null producer context
+is correct only when the string has no AutoMemory registration, such as a
+producer context that never enabled AutoMemory. Pass the real producer context
+otherwise: `RedisString::from_owned_ptr` detaches its registration with a native
+`RetainString` plus `FreeString` pair, preserving one independent owner. Do not
+use a null producer merely to save those calls. The compatibility constructor
+`from_redis_module_string` follows the same rule.
+
 The native context pointer is private on every context view and on
 `InfoContext`. For `Context`, `EventContext`, `RegistrationContext` and
 `WorkerContext` the compiler names the field on `RuntimeContext`, which they
@@ -725,7 +845,7 @@ args.done()?;
 ```rust
 // 3.0
 let mut key = ctx.open_key_writable(&name);
-if let Some(value) = key.get_value::<MyType>(&MY_TYPE)? {
+if let Some(value) = key.get_value(&MY_TYPE)? {
     value.count += 1;
 }
 ```
@@ -779,6 +899,8 @@ let value = parse(text).map_err(RedisError::from_error)?;
 
 ### Data types
 
+- Native data types implement `NativeType`; see
+  [Native data types implement `NativeType`](#native-data-types-implement-nativetype).
 - `RedisType::raw_type` is a method returning `*mut RedisModuleType` instead of
   a public `RefCell` field.
 - `RedisType::create_data_type` takes `&RegistrationContext<'_>`.
@@ -812,6 +934,20 @@ take `&Context` instead of a raw pointer.
 These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.
+
+- **Configuration wrapper commands need `CONFIG` permissions.** The commands
+  named by `module_config_get` and `module_config_set` are now admin commands
+  that scripts cannot call, in the `@admin` and `@dangerous` categories on
+  Redis 7.2 and later, and they check the caller's permission for
+  `CONFIG GET` or `CONFIG SET`. Users who could run them without `CONFIG`
+  permission now get `NOPERM` (on Redis 7.0, `ERR acl verification failed`);
+  grant `@admin`, or the wrapper and `+config|get` and `+config|set`, to users
+  who should read or change the module's configurations. On Redis 7.0, where
+  ACL categories do not cover module commands, allow the wrapper by name and
+  `+config|get` and `+config|set`. A module calling its own wrapper through
+  `ctx.call`, or calling `module_config_get` or `module_config_set` from a
+  timer or thread-safe context, now gets an error, since there is no user to
+  check; call `CONFIG` directly there.
 
 - **Event loop callbacks and the module lifecycle.** With `redis_module!`,
   `event_loop::add_one_shot` returns an error while the module loads or
@@ -908,8 +1044,10 @@ text.
   instead of aborting the server. A panic in a callback with no client (events,
   timers, INFO, configuration getters, defrag) is logged at warning level.
   A panic in a configuration setter fails the `CONFIG SET`; one in OnLoad
-  fails the load. This needs the default `panic = "unwind"`; callbacks a module
-  registers itself, such as native type methods, can use `panic::catch_panic`.
+  fails the load. Native data type callbacks are guarded as
+  [their section](#native-data-types-implement-nativetype) describes. This
+  needs the default `panic = "unwind"`; callbacks a module registers itself
+  through the raw API can use `panic::catch_panic`.
 - **`RedisGILGuard`.** Locking a guard that is already locked panics instead of
   returning a second mutable reference.
 - **Missing module APIs.** Calling an API the running Redis lacks returns or

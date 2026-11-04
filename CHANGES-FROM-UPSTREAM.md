@@ -11,6 +11,56 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Typed native data types
+
+Upstream's `RedisType` takes a raw `RedisModuleTypeMethods`, and
+`get_value::<T>` and `set_value::<T>` accept any `T`, checking only that the key
+holds the native type. Safe code could store a `u8` and read it back as a
+`String`, and the type's `free` then dropped a box of the wrong type. A type
+used before registration had a null native type, which the check compared
+equal to a string key's, so storing through it left Redis a value with a null
+type that crashed the next `DEL`, `TYPE` or save. Values could hold
+non-`Send` data although Redis frees them on lazyfree threads. The callbacks
+were the module's own `extern "C"` functions, unguarded against panics, and
+nothing required `rdb_load`, `rdb_save` and `free`, which Redis calls without
+checking; the canonical `data_type` example left the RDB callbacks out
+(#154, #155).
+
+A type now implements `NativeType` and is declared as `RedisType<T>`; the SDK
+generates every callback for `T`, inside a panic guard with a safe fallback,
+and optional callbacks are traits registered only when the type asks for them.
+`get_value` and `set_value` are typed by the `RedisType<T>`, `T` must be
+`Send`, an unregistered type is refused, and a refused value is dropped. The
+`data_type` example's swapped defrag start and end attributes are fixed. Upstream
+has no issue or pull request for these.
+
+## SDK crate orientation and native package identity
+
+The crate overview introduces the module entry point, context views, keys,
+replies and compatibility floors (#169 part 1). The README documents matching
+Git pins and local workspace overrides, and the guides describe post-notification
+unload guards and explicit raw ownership transitions. The root package adds the
+fork maintainer while retaining its upstream authors.
+
+`links = "redismodule"` identifies the SDK's native API stub to Cargo. Two
+packages declaring that identity are rejected before linking; an upstream 2.x
+package with no `links` declaration is not covered by that resolver check.
+This does not change Redis's module loading or native API ABI.
+
+## Configuration wrapper permissions
+
+The `module_config_get` and `module_config_set` commands `redis_module!`
+registers forward to `CONFIG GET` and `CONFIG SET`, but upstream registers them
+with no command flags and calls `CONFIG` without ACL verification, so Redis ran
+`CONFIG` for any user allowed the wrapper, including users denied `@admin`, and
+for Lua scripts, which `CONFIG` refuses (#160). The wrappers now take
+`CONFIG`'s flags (`admin deny-script allow-loading allow-stale`), so scripts
+cannot call them, and its ACL categories `@admin` and `@dangerous` as optional
+categories, set on Redis 7.2 and later; Redis derives no categories from a
+module command's flags. They call `CONFIG` with the `C` flag, so a user
+allowed a wrapper by name, or through `+@all`, still needs `CONFIG`
+permission. Upstream has no issue or pull request for this.
+
 ## Event loop lifecycle
 
 Redis keeps watched descriptors and pending one-shots across `MODULE UNLOAD`

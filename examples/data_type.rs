@@ -1,17 +1,40 @@
+//! A native data type, `alloc`'s `mytype123`, storing a string per key. The
+//! SDK generates its callbacks from the `NativeType` and `Defrag`
+//! implementations: the value round-trips through RDB files, and active
+//! defragmentation counts the values it visits.
 use lazy_static::lazy_static;
-use libc::c_int;
 use redis_module::defrag::DefragContext;
-use redis_module::native_types::RedisType;
+use redis_module::error::Error;
+use redis_module::io::{RdbReader, RdbWriter};
+use redis_module::native_types::{Defrag, DefragStatus, NativeType, RedisType};
 use redis_module::redisvalue::RedisValueKey;
 use redis_module::{
-    Context, NextArg, RedisGILGuard, RedisResult, RedisString, RedisValue, raw, redis_module,
+    Context, NextArg, RedisGILGuard, RedisResult, RedisString, RedisValue, redis_module,
 };
 use redis_module_macros::{defrag_end_function, defrag_function, defrag_start_function};
-use std::os::raw::c_void;
 
 #[derive(Debug)]
 struct MyType {
     data: String,
+}
+
+impl NativeType for MyType {
+    fn rdb_load(io: &mut RdbReader, _encver: i32) -> Result<Self, Error> {
+        Ok(MyType {
+            data: io.read_string()?,
+        })
+    }
+
+    fn rdb_save(&self, io: &mut RdbWriter) {
+        io.write_string(&self.data);
+    }
+}
+
+impl Defrag for MyType {
+    fn defrag(&mut self, ctx: &DefragContext, _key: &[u8]) -> DefragStatus {
+        *NUM_KEYS_DEFRAG.lock(ctx) += 1;
+        DefragStatus::Done
+    }
 }
 
 lazy_static! {
@@ -21,67 +44,18 @@ lazy_static! {
     static ref NUM_DEFRAG_GLOBALS: RedisGILGuard<usize> = RedisGILGuard::default();
 }
 
-static MY_REDIS_TYPE: RedisType = RedisType::new(
-    "mytype123",
-    0,
-    raw::RedisModuleTypeMethods {
-        version: raw::REDISMODULE_TYPE_METHOD_VERSION as u64,
-        rdb_load: None,
-        rdb_save: None,
-        aof_rewrite: None,
-        free: Some(free),
-
-        // Currently unused by Redis
-        mem_usage: None,
-        digest: None,
-
-        // Aux data
-        aux_load: None,
-        aux_save: None,
-        aux_save2: None,
-        aux_save_triggers: 0,
-
-        free_effort: None,
-        unlink: None,
-        copy: None,
-        defrag: Some(defrag),
-
-        copy2: None,
-        free_effort2: None,
-        mem_usage2: None,
-        unlink2: None,
-    },
-);
-
-unsafe extern "C" fn free(value: *mut c_void) {
-    unsafe {
-        drop(Box::from_raw(value.cast::<MyType>()));
-    }
-}
-
-unsafe extern "C" fn defrag(
-    ctx: *mut raw::RedisModuleDefragCtx,
-    _key: *mut raw::RedisModuleString,
-    _value: *mut *mut c_void,
-) -> c_int {
-    unsafe {
-        let defrag_ctx = DefragContext::new(ctx);
-        let mut num_keys_defrag = NUM_KEYS_DEFRAG.lock(&defrag_ctx);
-        *num_keys_defrag += 1;
-        0
-    }
-}
+static MY_REDIS_TYPE: RedisType<MyType> = RedisType::new("mytype123", 0).with_defrag();
 
 #[defrag_start_function]
-fn defrag_end(defrag_ctx: &DefragContext) {
-    let mut num_defrag_end = NUM_DEFRAG_END.lock(defrag_ctx);
-    *num_defrag_end += 1;
-}
-
-#[defrag_end_function]
 fn defrag_start(defrag_ctx: &DefragContext) {
     let mut num_defrag_start = NUM_DEFRAG_START.lock(defrag_ctx);
     *num_defrag_start += 1;
+}
+
+#[defrag_end_function]
+fn defrag_end(defrag_ctx: &DefragContext) {
+    let mut num_defrag_end = NUM_DEFRAG_END.lock(defrag_ctx);
+    *num_defrag_end += 1;
 }
 
 #[defrag_function]
@@ -99,7 +73,7 @@ fn alloc_set(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let mut key = ctx.open_key_writable(&key);
 
-    if let Some(value) = key.get_value::<MyType>(&MY_REDIS_TYPE)? {
+    if let Some(value) = key.get_value(&MY_REDIS_TYPE)? {
         value.data = "B".repeat(size as usize);
     } else {
         let value = MyType {
@@ -117,7 +91,7 @@ fn alloc_get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let key = ctx.open_key(&key);
 
-    let value = match key.get_value::<MyType>(&MY_REDIS_TYPE)? {
+    let value = match key.get_value(&MY_REDIS_TYPE)? {
         Some(value) => value.data.as_str().into(),
         None => ().into(),
     };

@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Breaking:** native data types are typed Rust values with SDK-generated
+  callbacks (#154, #155). A type implements `native_types::NativeType`
+  (`rdb_load` and `rdb_save`; `free` is `Drop`) and is declared as a
+  `static` `RedisType<T>`; `RedisType::new` takes only the name and encoding
+  version. Optional callbacks are traits enabled with `with_` methods
+  (`MemUsage`, `CopyValue`, `FreeEffort`, `Unlink`, `DigestValue`,
+  `AofRewrite`, `AuxData`, `Defrag`). Every callback runs inside a panic guard;
+  a panic in `rdb_save`, `aux_save` or `aof_rewrite` ends the process after
+  logging rather than write an incomplete value (a background save's child is
+  killed, failing only that save). `get_value` and `set_value` are typed
+  by the `RedisType<T>`, require `T: Send + 'static` because Redis frees
+  values on background threads, refuse a type that was never registered, and
+  drop a value Redis refuses. Load callbacks get a read-only
+  `io::RdbReader` and save callbacks a write-only `io::RdbWriter`, since a
+  write while loading a `RESTORE` payload corrupts the command's argument.
+  `unsafe RedisType::from_raw_methods` keeps native callbacks, and
+  `RedisModuleIO` adds binary-safe `read_redis_string` and
+  `write_redis_string`.
+
+- The `module_config_get` and `module_config_set` commands that
+  `redis_module!` registers require the same permissions as `CONFIG` (#160).
+  They are registered with `CONFIG`'s flags (`admin deny-script allow-loading
+  allow-stale`), so scripts cannot call them, and in the `@admin` and
+  `@dangerous` ACL categories on Redis 7.2 and later, and they call `CONFIG`
+  with ACL verification for the calling user. Before, any user allowed the
+  wrapper, including one denied `@admin`, or a script could read and change
+  the module's configurations through them. Callers with no user, such as a
+  module's own `ctx.call` of a wrapper, now get an error.
+
 - Event loop callbacks no longer outlive their module or loop forever after a
   panic (#159). With `redis_module!`, a successful unload stops watching every
   descriptor still watched after `deinit` and a failed load those it added,
@@ -91,6 +120,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   captures immediately, preventing callbacks from surviving a failed load.
 
 ### Added
+
+- The SDK package declares `links = "redismodule"`, allowing Cargo to reject
+  another package declaring the same native library identity (#169).
+  Legacy SDKs without a `links` declaration still require a dependency audit.
+  The generated crate reference now introduces contexts, commands, keys,
+  replies and floors; module guides cover master/local dependency overrides,
+  post-notification unload guards and raw ownership transitions.
 
 - **Breaking:** `RedisValue::NullArray` replies as a null array in RESP2
   (`*-1`) and null in RESP3 (`_`), including inside aggregates (#180).
