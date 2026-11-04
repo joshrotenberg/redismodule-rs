@@ -127,6 +127,20 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-04: merged SDK master `6f459d7` into the branch as `345cdb0`, on top
+  of the branch's PRs 199 (#189: the context pointer scoped to each
+  invocation) and 198 (#132: aggregate guest and image memory budgets). It
+  brings SDK PR 200 (#168: tests for the `lists`, `load_unload`, shared-API
+  and `reply_with_key` paths, and the `lists` example's replication and
+  same-key fixes), which touches no API the host uses. The full
+  `wasm/ci/check.sh` ran on Rust 1.94.0 and Redis 8.10.2. Its first run failed
+  one test, `a_slow_load_does_not_block_other_clients` (slowest PING 524 ms
+  against a 500 ms limit, at a load average of about 50), which passed in two
+  runs alone. A second run from the tests stage on passed every stage: 538
+  tests and none failed (the host's 33 unit, 5 compiler and 35 library tests,
+  the SDK's 85 unit, 217 integration and 142 doc tests, and 21 others), and
+  the four lockfiles were unchanged.
+
 - 2026-11-04: merged SDK master `3d75b9d` into the branch as `df6a985`, then
   `cf04774` as `dbfd99f`, on top of the branch's PR 192 (`eb3b46d`, #131:
   wasm compilation in bounded helper processes). They bring SDK PRs 186
