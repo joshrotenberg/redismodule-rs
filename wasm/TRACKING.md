@@ -115,6 +115,19 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-03: merged SDK master `70420ce` into the branch as `265ddf4`. It
+  brings SDK PRs 181 (#180: `RedisValue::NullArray`) and 182 (#159: event
+  loop watches and one-shots bound to the module lifecycle); the host uses
+  neither API, so no adaptation was needed. `cj run wasm-sync` fetched with
+  `--locked` and ran the full `wasm/ci/check.sh` on Rust 1.94.0 and Redis
+  8.10.2: 445 tests passed and one failed, `a_slow_load_does_not_block_other_clients`
+  (its slowest PING took 5.3 s against a 500 ms limit), and three reruns of
+  that test alone failed the same way at 1.4 to 1.8 s. The machine's load
+  average was about 245 from other builds and test suites, and the host's
+  load path does not use either change, so the experiment push CI on a clean
+  runner decides this sync. All four installed lockfiles remained
+  byte-identical to their snapshots.
+
 - 2026-11-03: merged SDK master `57b5cf1` into the branch as `afa0911`. It
   brings SDK PRs 174 (#163: `RedisAlloc` uses `TryAlloc` where the server has
   it), 175 (#164: `RedisString` borrows as `[u8]` instead of `str`), 173
