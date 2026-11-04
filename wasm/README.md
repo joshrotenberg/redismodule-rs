@@ -7,6 +7,33 @@ A Redis module that runs WebAssembly components as functions, the way
 This is an early prototype. It needs Redis 7.2 or later, and has been run on
 7.2, 7.4, 8.0, 8.2 and 8.10.
 
+[MODULE-VS-CORE.md](MODULE-VS-CORE.md) sets out what running wasm as a module
+can and cannot do, against building it into Redis as Lua is.
+
+## Demo
+
+[`demo/demo.sh`](demo/demo.sh) builds the module and the example guests and
+walks through the commands on throwaway servers: loading a library, calls
+with keys and into Redis, a read-only refusal, a guest trap the server
+survives, `WASM.KILL` of a busy function, `WASM.STATS` and `INFO wasm`,
+libraries kept through `DEBUG RELOAD` and a restart, a replica that gets
+them, the JavaScript library when Node.js is installed, and a function that
+cannot be killed once it has written. From the repository root:
+
+```bash
+wasm/demo/demo.sh
+```
+
+It needs `redis-server` and `redis-cli` on the `PATH` (or `REDIS_SERVER` and
+`REDIS_CLI`), Rust with the `wasm32-unknown-unknown` target, and Node.js for
+the JavaScript part. It seeds a missing `Cargo.lock` from
+[`ci/locks`](ci/locks), takes free ports from 7400 up, works in
+`target/wasm-demo` and stops its servers when it exits, so it can run again
+at once. `DEMO_STEP=1` waits for Enter before each section, for presenting,
+and `DEMO_PROFILE=release` builds the module with `--release`, which compiles
+the JavaScript library faster. The first build compiles wasmtime and takes a
+few minutes.
+
 ## Commands
 
 ```text
@@ -117,7 +144,10 @@ is running. You can only call WASM.KILL or SHUTDOWN NOSAVE.`, as it does for a
 long Lua script. `WASM.KILL` stops the function, which fails with `ERR function
 '<name>' failed: killed by WASM.KILL`, unless it has already called a write
 command: then `WASM.KILL` replies `UNKILLABLE`, so the function's writes are not
-left half done, and `SHUTDOWN NOSAVE` is the way out. With no function running,
+left half done, and `SHUTDOWN NOSAVE` is the way out. On a primary with
+replicas use `SHUTDOWN NOSAVE NOW`: without `NOW`, Redis waits for lagging
+replicas and checks that wait's timeout only between commands, so it can wait
+for good while a function or a Lua script yields. With no function running,
 `WASM.KILL` replies `NOTBUSY`. `WASM.STATS`, like `FUNCTION STATS`, also
 answers while a function runs: it names the running function and how long it
 has run.
