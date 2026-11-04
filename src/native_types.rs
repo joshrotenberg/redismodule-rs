@@ -617,10 +617,11 @@ fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
 
 /// Runs a callback that writes persisted data. A panic leaves the data
 /// incomplete, which Redis cannot be told, so it is logged and the process
-/// ends. A fork child, such as a background save, exits with a failure
-/// status, so only that save fails; it skips the abort, whose crash handler
-/// would print a bug report and could remove the server's pid file. The
-/// server itself aborts.
+/// ends. A fork child, such as a background save, kills itself with
+/// `SIGKILL`: the server then removes the child's partial temporary file and
+/// records the save as failed, which an exit status alone does not clean up,
+/// and no crash handler runs, which an abort would (printing a bug report and
+/// possibly removing the server's pid file). The server itself aborts.
 fn run_writer(io: *mut raw::RedisModuleIO, callback: &str, f: impl FnOnce()) {
     if let Err(payload) = catch_unwind(AssertUnwindSafe(f)) {
         let message = panic_text(payload.as_ref());
@@ -628,7 +629,7 @@ fn run_writer(io: *mut raw::RedisModuleIO, callback: &str, f: impl FnOnce()) {
         std::mem::forget(payload);
         let in_child = LOAD_PROCESS.load(Ordering::Relaxed) != std::process::id();
         let ending = if in_child {
-            "exiting the child process"
+            "killing the child process"
         } else {
             "aborting the server"
         };
@@ -643,9 +644,9 @@ fn run_writer(io: *mut raw::RedisModuleIO, callback: &str, f: impl FnOnce()) {
             );
         }
         if in_child {
-            // SAFETY: _exit ends the process without running Redis's or Rust's
-            // exit handlers, as a fork child must.
-            unsafe { libc::_exit(1) };
+            // SAFETY: SIGKILL ends this fork child at once; it cannot be caught,
+            // so neither Redis's crash handler nor any exit handler runs.
+            unsafe { libc::raise(libc::SIGKILL) };
         }
         std::process::abort();
     }

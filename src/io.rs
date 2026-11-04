@@ -17,7 +17,9 @@ impl RedisModuleIO {
     ///
     /// `io` must be the `RedisModuleIO` pointer Redis passed to the running
     /// `rdb_save`, `rdb_load` or aux callback, and the wrapper must not be used
-    /// after that callback returns.
+    /// after that callback returns. A load callback must only read: while
+    /// Redis loads a `RESTORE` payload, a write goes into the command's own
+    /// argument and corrupts it.
     pub unsafe fn new(io: *mut raw::RedisModuleIO) -> Self {
         Self { io }
     }

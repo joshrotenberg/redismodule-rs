@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`MemUsage`, `CopyValue`, `FreeEffort`, `Unlink`, `DigestValue`,
   `AofRewrite`, `AuxData`, `Defrag`). Every callback runs inside a panic guard;
   a panic in `rdb_save`, `aux_save` or `aof_rewrite` ends the process after
-  logging rather than write an incomplete value (a background save's child
-  exits, failing only that save). `get_value` and `set_value` are typed
+  logging rather than write an incomplete value (a background save's child is
+  killed, failing only that save). `get_value` and `set_value` are typed
   by the `RedisType<T>`, require `T: Send + 'static` because Redis frees
   values on background threads, refuse a type that was never registered, and
   drop a value Redis refuses. Load callbacks get a read-only

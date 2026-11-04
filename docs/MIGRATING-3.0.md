@@ -112,8 +112,9 @@ static MY_TYPE: RedisType<MyType> =
   of the value, and in the others it falls back to a neutral result. A panic
   in `rdb_save`, `aux_save` or `aof_rewrite` is logged and ends the process,
   because the partly written value cannot be reported to Redis: a background
-  save or rewrite's child process exits, which fails only that save, and the
-  server itself aborts, as for `SAVE` or `DUMP`.
+  save or rewrite's child process is killed, which fails only that save and
+  lets the server remove its partial file, and the server itself aborts, as
+  for `SAVE` or `DUMP`.
 - `get_value` and `set_value` take `&RedisType<T>` and return or take `T`, so
   the turbofish is no longer needed and reading a value as another type does
   not compile. `T` must be `Send + 'static`: Redis can free values on a

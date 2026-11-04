@@ -7395,8 +7395,17 @@ fn test_native_type_callbacks_and_panic_guards() -> Result<()> {
     })?;
     assert!(persistence(&mut con)?.contains("rdb_last_bgsave_status:err"));
     assert!(con.server_log()?.contains(
-        "native type rdb_save panicked: rdb_save refused the marker value; exiting the child process"
+        "native type rdb_save panicked: rdb_save refused the marker value; killing the child process"
     ));
+    let dir: Vec<String> = redis::cmd("CONFIG").arg(&["GET", "dir"]).query(&mut con)?;
+    let leftovers: Vec<_> = std::fs::read_dir(&dir[1])?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("temp-"))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "partial save files left: {leftovers:?}"
+    );
     redis::cmd("DEL").arg("panic-save").query::<()>(&mut con)?;
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
