@@ -122,6 +122,36 @@ left half done, and `SHUTDOWN NOSAVE` is the way out. With no function running,
 answers while a function runs: it names the running function and how long it
 has run.
 
+## The command's context
+
+A guest's imports (`call`, `pcall`, `acl-check`, `log` and the rest) and the
+yield every 10 ms all need the context of the `WASM.CALL` command running the
+guest. The SDK hands a command its context only as a borrow for the length of
+its callback, while wasmtime needs a store's data to be `'static`, so the store
+holds a raw pointer to the context, and only while a guest runs:
+
+- Each guest run, a call or an instantiation (when a library loads, and when a
+  call has no kept instance to reuse), is an invocation that puts the
+  command's context in the store and takes it out again when the run ends,
+  however it ends: the function returns, it fails, the guest traps, or a host
+  import panics. Between runs the store holds no context, including the
+  instance a library keeps for its next call, which may come from another
+  client and user.
+- An import that ran outside an invocation would stop with a panic rather than
+  use an old context; none can, since the guest runs synchronously inside one.
+- A call that comes back into the host while a guest runs, through a command
+  that runs `WASM.CALL` again, runs on another store (a new instance of the
+  same library, whose kept instance is taken, or the other library's
+  instance), leaving the outer run's context in place. A guest cannot run
+  `WASM.*` commands itself, as a Lua script cannot run `FUNCTION` or `FCALL`.
+- While a function yields, Redis runs only commands that allow it.
+  `WASM.CALL` does not; another module's command that does and runs
+  `WASM.CALL` is a call coming back into the host, as above.
+
+The pointer and its safety argument are in `src/host.rs` ("The context
+pointer"), next to the `invoke` function that sets it and the `Invocation`
+that clears it.
+
 ## Memory
 
 `wasm.max-memory` (64 MiB by default; `CONFIG SET wasm.max-memory 128mb`)
