@@ -1884,6 +1884,160 @@ fn test_unusual_input_context_call_rejects_nul_names_without_panicking() -> Resu
 }
 
 #[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_unusual_input_replication_reports_refused_command_names() -> Result<()> {
+    let mut con = TestConnection::new("call");
+    for command in ["\0SET", "SET\0", "SET\0GET"] {
+        assert_eq!(
+            redis::cmd("call.replicate")
+                .arg(command)
+                .arg("replication:refused")
+                .arg("value")
+                .query::<i64>(&mut con)?,
+            0,
+            "{command:?}"
+        );
+    }
+    assert_eq!(
+        redis::cmd("call.replicate")
+            .arg("NOSUCHCOMMAND")
+            .query::<i64>(&mut con)?,
+        0
+    );
+    assert_eq!(
+        redis::cmd("call.replicate")
+            .arg("SET")
+            .arg(b"replication:\0key".as_slice())
+            .arg(b"\0\xffvalue".as_slice())
+            .query::<i64>(&mut con)?,
+        1
+    );
+    // Replicate appends to propagation only; it does not execute locally.
+    assert_eq!(
+        redis::cmd("EXISTS")
+            .arg(b"replication:\0key".as_slice())
+            .query::<i64>(&mut con)?,
+        0
+    );
+    assert!(!con.server_log()?.contains("panicked"));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_unusual_input_resp3_aggregate_keys_return_errors_and_preserve_framing() -> Result<()> {
+    let mut con = TestConnection::new("call");
+    for (shape, message) in [
+        ("map", "ERR call reply map contains an unsupported key"),
+        ("set", "ERR call reply set contains an unsupported element"),
+    ] {
+        for key in [
+            "{double=1.5}",
+            "false",
+            "{1,2}",
+            "redis.error_reply('ERR key')",
+        ] {
+            let value = if shape == "map" { "'value'" } else { "true" };
+            let aggregate = format!("{{{shape} = {{[{key}] = {value}}}}}");
+            let script = format!("return {aggregate}");
+            let error = redis::cmd("call.convert3")
+                .arg(&["EVAL", &script, "0"])
+                .query::<Value>(&mut con)
+                .expect_err("an unsupported RESP3 key or member was accepted");
+            assert_eq!(error.code(), Some("ERR"), "{shape} {key}: {error}");
+            assert!(
+                error
+                    .to_string()
+                    .contains(message.trim_start_matches("ERR ")),
+                "{shape} {key}: {error}"
+            );
+            assert!(!error.to_string().contains("panicked"));
+
+            let nested = format!("return {{1, {aggregate}, 3}}");
+            let expected = format!("*3\r\n:1\r\n-{message}\r\n:3\r\n");
+            assert_eq!(
+                raw_reply(&con, &["call.convert3", "EVAL", &nested, "0"], &expected)?,
+                expected,
+                "{shape} {key}"
+            );
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        }
+    }
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_unusual_input_resp3_conversion_keeps_supported_scalar_keys() -> Result<()> {
+    let mut con = TestConnection::new("call");
+    for shape in ["map", "set"] {
+        for (key, expected_key) in [
+            ("7", Value::Int(7)),
+            ("true", Value::Int(1)),
+            ("false", Value::Int(0)),
+            ("'key'", Value::BulkString(b"key".to_vec())),
+            ("redis.status_reply('OK')", Value::Okay),
+        ] {
+            let value = if shape == "map" { "9" } else { "true" };
+            let script = format!("redis.setresp(3); return {{{shape} = {{[{key}] = {value}}}}}");
+            let reply: Value = redis::cmd("call.convert3")
+                .arg(&["EVAL", &script, "0"])
+                .query(&mut con)?;
+            let mut expected = vec![expected_key];
+            if shape == "map" {
+                expected.push(Value::Int(9));
+            }
+            assert_eq!(reply, Value::Array(expected), "{shape} {key}");
+        }
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_unusual_input_poisoned_configuration_getters_keep_stored_values() -> Result<()> {
+    let mut con = TestConnection::new("configuration");
+    for (kind, name, value) in [
+        ("string", "configuration.mutex_string", "preserved text"),
+        ("enum", "configuration.enum_mutex", "Val2"),
+    ] {
+        redis::cmd("CONFIG")
+            .arg(&["SET", name, value])
+            .query::<()>(&mut con)?;
+        let error = redis::cmd("configuration.poison")
+            .arg(kind)
+            .query::<Value>(&mut con)
+            .expect_err("poison diagnostic did not panic under the command guard");
+        assert!(error.to_string().contains("poison probe"), "{error}");
+        for _ in 0..2 {
+            let values: Vec<String> = redis::cmd("CONFIG").arg(&["GET", name]).query(&mut con)?;
+            assert_eq!(values, [name, value]);
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        }
+    }
+    assert!(!con.server_log()?.contains("configuration getter panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "configuration"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_call_error_codes_do_not_require_utf8_messages() -> Result<()> {
     let mut con = TestConnection::new("call_reply");
     for (script, expected) in [

@@ -947,6 +947,6 @@ mod poisoned_getter_tests {
         stored_value_survives_poison(true);
         stored_value_survives_poison(Choice::Second);
         stored_value_survives_poison(String::from("unchanged"));
-        stored_value_survives_poison(vec![0, 0xff, 0xfe]);
+        stored_value_survives_poison(vec![0_u8, 0xff, 0xfe]);
     }
 }

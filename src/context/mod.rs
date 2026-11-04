@@ -1231,9 +1231,12 @@ impl RuntimeContext {
         unsafe { RedisKeyWritable::open_with_flags(self.ctx, key, flags) }
     }
 
-    /// Replicate command to the replica and AOF.
-    pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) {
-        raw::replicate(self.ctx, command, args);
+    /// Replicate a command to the replica and AOF.
+    ///
+    /// Returns [`Status::Err`](raw::Status::Err) if the command name contains
+    /// NUL or Redis refuses the replication. Arguments remain binary-safe.
+    pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> raw::Status {
+        raw::replicate(self.ctx, command, args)
     }
 
     /// How much memory Redis uses relative to its `maxmemory` setting, through

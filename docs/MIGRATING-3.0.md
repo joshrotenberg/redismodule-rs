@@ -65,6 +65,14 @@ change because `serde_syn` is no longer involved.
 
 ## Changes the compiler reports
 
+### Replication returns a status
+
+`RuntimeContext::replicate` now returns `Status`: check `Status::Err` for a
+refused command name or native replication failure. Calls used as statements
+with a semicolon still compile. Code that required a `()` return, such as a
+function pointer or a unit-returning tail expression, must check or explicitly
+discard the status.
+
 ### Timers use typed handles
 
 `EventContext::create_timer` now returns

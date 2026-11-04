@@ -15,7 +15,8 @@ For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
 Command names containing NUL are refused before call or replication arguments
 are converted, rather than panicking through `CString::new(...).unwrap()`
-(#165). Converting a native RESP3 map whose key is not a supported
+(#165). `RuntimeContext::replicate` returns the native `Status` so a caller can
+observe refusal; it previously discarded that result. Converting a native RESP3 map whose key is not a supported
 `RedisValueKey`, or a set with an unsupported member, returns an error value
 for that entire aggregate. Nested arrays and map values retain that error in
 the aggregate's slot. Native reply forwarding remains available for callers

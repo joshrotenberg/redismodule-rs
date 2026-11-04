@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of replacing bytes (#165). Read binary data with
   `read_string_buffer`.
 
+- **Breaking:** `RuntimeContext::replicate` now returns Redis's `Status`, including
+  `Status::Err` for a command name containing NUL or a native refusal, instead
+  of discarding it (#165). Existing calls that ignore the result as a statement
+  remain valid.
+
 - The `module_config_get` and `module_config_set` commands that
   `redis_module!` registers require the same permissions as `CONFIG` (#160).
   They are registered with `CONFIG`'s flags (`admin deny-script allow-loading
