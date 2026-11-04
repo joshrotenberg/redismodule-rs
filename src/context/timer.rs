@@ -104,6 +104,13 @@ static TIMERS: RedisGILGuard<Registry> = RedisGILGuard::new(Registry {
     entries: BTreeMap::new(),
 });
 
+// A read-only check for callbacks which must not outlive an SDK-bound module.
+// Callers hold the Redis lock, so lifecycle transitions cannot race this check.
+pub(crate) fn sdk_module_is_active(ctx: &EventContext) -> bool {
+    let registry = TIMERS.lock(ctx);
+    registry.phase == Phase::Active && registry.owner.is_some()
+}
+
 /// Internal binding for `redis_module!`; not a custom-loader lifecycle API.
 #[doc(hidden)]
 pub struct TimerLoadGuard<'a> {

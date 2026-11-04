@@ -26,6 +26,45 @@ nonblocking contract. Neither method falls back to a blocking acquisition.
 Later Redis 6.0 patch releases backport both APIs, so missing-binding probes
 cover the older-server paths as well as native version checks.
 
+## Clients blocked on keys
+
+`Context::block_client_on_keys` wraps key-based blocking with typed owned
+private data (#177). A ready callback returns no value to keep waiting, or a
+value/error to reply and unblock. Timeout, disconnect and null-handle paths
+release the waiter once. Callbacks and data destructors cannot unwind into
+Redis, including when a panic payload has a panicking destructor; owned
+callback snapshots and a nonblocking mutex also protect reentrant cleanup.
+
+`KeyBlockingTimeout` rejects negative and excessively large timeouts before
+native registration, leaving conservative clock headroom. Scripts,
+transactions and all module calls, including calls using `K`, receive
+`Denied(data)` for an immediate fallback. Only indexed network clients can
+wait, and an active SDK lifecycle binding is required: loading, unloading and
+unbound custom-loader invocations are refused before native registration.
+An existing lifecycle lease remains held through callbacks and captured data
+destructors. The SDK blocking APIs refuse a second registration on the same
+network client before it can overwrite the first native handle. The flag-aware
+API requests deletion wakeups where available and otherwise reports ordinary
+readiness behavior. Signaling and an independent owned copy of the callback's ready-key name are available as
+context methods. Redis's blocked-client count prevents unload while a key
+waiter remains. Upstream has no equivalent safe wrapper.
+
+## Checked key positions
+
+`Context::key_at_pos` was a safe function, but `RedisModule_KeyAtPos` checks
+only that the position is positive, and Redis then reads the argument at each
+reported position: `COMMAND GETKEYS` replies with `argv[pos + 2]`, and cluster
+routing hashes `argv[pos]`. An off-by-one in a getkeys-api handler read past
+the argument vector (#161); upstream marks it with a TODO. The SDK's command
+callbacks now record the running command's context and argument count, and
+**Breaking:** `key_at_pos` returns `Result<(), RedisError>`. In a
+keys-position request it refuses a position outside 1 to the count minus one,
+or any position when its context is not the running SDK command callback's,
+so a hand-written callback nested inside an SDK command does not borrow the
+outer count; outside one it does nothing, as Redis does.
+`unsafe fn key_at_pos_unchecked` keeps the old behavior for callbacks
+registered another way.
+
 ## Typed native data types
 
 Upstream's `RedisType` takes a raw `RedisModuleTypeMethods`, and

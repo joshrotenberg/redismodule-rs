@@ -167,6 +167,10 @@ name = "block"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "key_blocking"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "data_type"
 crate-type = ["cdylib"]
 

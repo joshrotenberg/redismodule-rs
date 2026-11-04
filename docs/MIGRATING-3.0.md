@@ -208,6 +208,29 @@ macro's hidden lifecycle hooks are not a stable custom-loader API. See the
 [upgrade guide](UPGRADING-MODULES.md#sdk-timers-and-unload) for shutdown order.
 Cancellation-on-drop and payload-inspection helpers are not part of this API.
 
+### Key positions are checked
+
+`Context::key_at_pos` returns `Result<(), RedisError>` instead of `()`. It
+refuses a position that is not an argument position of the running command (1
+to the argument count minus one), which Redis would accept and then read past
+the arguments for. Propagate the result in a getkeys-api handler:
+
+```rust,ignore
+if ctx.is_keys_position_request() {
+    for pos in (1..args.len()).step_by(2) {
+        ctx.key_at_pos(pos as i32)?;
+    }
+    return Ok(RedisValue::NoReply);
+}
+```
+
+The SDK checks positions in the command callbacks it generates
+(`redis_module!`, `redis_command!` and `#[command]`); in a keys-position
+request reached through another callback, `key_at_pos` returns an error. A
+command callback registered another way can call
+`unsafe fn key_at_pos_unchecked`, which keeps the old unchecked behavior.
+Outside a keys-position request `key_at_pos` does nothing and returns `Ok`.
+
 ### Direct client blocking returns a result
 
 `Context::block_client()` now returns `Result<BlockedClient, RedisError>`.
@@ -233,6 +256,38 @@ sends `ERR the blocked client was released without a reply`; see "Blocked
 clients get one reply" under
 [Changes that compile unchanged](#changes-that-compile-unchanged), and
 [block.rs](../examples/block.rs).
+
+### Clients blocked on keys
+
+Use `Context::block_client_on_keys` for main-thread readiness callbacks rather
+than putting a key-blocked native handle in a `BlockedClient`. Redis owns this
+waiter and frees it after readiness, timeout or disconnect; no worker unblock
+handle is returned. Supply owned `Send + 'static` data, a `KeyBlockingTimeout`,
+a ready callback returning `Result<Option<RedisValue>, RedisError>` and a
+timeout callback returning `RedisResult`. `Ok(None)` means keep waiting;
+`Ok(Some(value))` or an error replies and unblocks. Callback `NoReply` becomes
+an error because a completed wait must send one reply.
+
+Return `RedisValue::NoReply` only for `KeyBlockingResult::Blocked`.
+`KeyBlockingResult::Denied(data)` preserves the data for a non-blocking reply
+inside a transaction, script or any module call, including one using `K`.
+Only indexed network clients can wait. The new API requires an active module
+loaded by `redis_module!` and a tracked SDK command callback; load/unload
+callbacks and custom loaders without that lifecycle binding are refused.
+Do not register another blocked handle for the same network client: all SDK
+blocking entry points refuse that attempt and retain the first waiter.
+Within an SDK-bound module, a raw command callback may invoke its handler
+through the unsafe SDK `panic::run_command` trampoline.
+
+`KeyBlockingTimeout::try_from(0_i64)` and `INFINITE` have no deadline; duration
+conversions round zero and submillisecond values up to one millisecond.
+Negative or excessive millisecond counts fail before native allocation.
+Requested deletion wakeups are enabled on Redis 7.2+ and fall back to ordinary
+readiness on older servers; the `Blocked` result reports the actual flag.
+The ready callback must recheck key state. `blocked_client_ready_key` copies
+Redis's borrowed name into a separate native owner, and `signal_key_as_ready`
+signals the calling client's selected database. See
+[key_blocking.rs](../examples/key_blocking.rs) for a complete example.
 
 ### Blocked-client contexts are not `Sync`
 
