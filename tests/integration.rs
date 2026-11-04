@@ -3273,6 +3273,25 @@ fn test_keys_pos() -> Result<()> {
     Ok(())
 }
 
+/// `key_at_pos` refuses a position past the command's arguments: Redis would
+/// accept it and then read past them in COMMAND GETKEYS and cluster routing.
+#[test]
+fn test_key_at_pos_refuses_positions_past_the_arguments() -> Result<()> {
+    let mut con = TestConnection::new("keys_pos");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let keys: Vec<String> = redis::cmd("COMMAND")
+        .arg(&["GETKEYS", "keys_pos.overreach", "first", "second"])
+        .query(&mut con)?;
+    assert_eq!(keys, ["first"]);
+    let result: String = redis::cmd("keys_pos.overreach_result").query(&mut con)?;
+    assert_eq!(
+        result,
+        "ERR key position 3 is not an argument position of the command (1 to 2)"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
 #[test]
 fn test_dbsize() -> Result<()> {
     let mut con = TestConnection::new("test_helper");
