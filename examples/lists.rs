@@ -35,7 +35,8 @@ fn lpoprpush(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     // One key: rotate it through a single handle. With a second handle on the
     // same key, popping the last element deletes the key and leaves that
-    // handle pointing at the freed list.
+    // handle pointing at the freed list. Rotating a one-element list this way
+    // deletes and recreates the key, so unlike LMOVE it drops the key's TTL.
     if src.as_slice() == dst.as_slice() {
         let key = ctx.open_key_writable(&src);
         check_list(&key)?;

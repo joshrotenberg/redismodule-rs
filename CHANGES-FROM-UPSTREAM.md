@@ -37,7 +37,8 @@ Upstream's `lists` example writes through the key API, which Redis does not
 propagate, and never replicates, so a replica or the AOF missed its writes. It
 also opened `LPOPRPUSH`'s source and destination as two handles when both name
 the same key: popping a one-element list deletes the key, and the push then
-went through the other handle to the freed list, losing the element (#168).
+went through the other handle to the freed list, a use after free that loses
+the element or corrupts the heap (#168).
 The example replicates each write verbatim and rotates a list given twice
 through one handle, and tests cover both, with a replica. The handle hazard
 itself is #197.

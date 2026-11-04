@@ -31,8 +31,8 @@ fn reply_nulls(_: &Context, args: Vec<RedisString>) -> RedisResult {
     }
 }
 
-/// `reply.key integer|string|redis_string|bytes|bool|simple`: one reply of
-/// that `RedisValueKey` kind, sent with `Context::reply_with_key`.
+/// `reply.key integer|string|redis_string|bytes|true|false|simple`: one
+/// reply of that `RedisValueKey` kind, sent with `Context::reply_with_key`.
 fn reply_key(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);
     let kind = args.next_string()?;
@@ -42,11 +42,12 @@ fn reply_key(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         "string" => RedisValueKey::String("text".to_owned()),
         "redis_string" => RedisValueKey::BulkRedisString(ctx.create_string("owned")),
         "bytes" => RedisValueKey::BulkString(b"\0\xff!".to_vec()),
-        "bool" => RedisValueKey::Bool(true),
+        "true" => RedisValueKey::Bool(true),
+        "false" => RedisValueKey::Bool(false),
         "simple" => RedisValueKey::SimpleString("ok".to_owned()),
         _ => {
             return Err(RedisError::Str(
-                "ERR expected integer, string, redis_string, bytes, bool or simple",
+                "ERR expected integer, string, redis_string, bytes, true, false or simple",
             ));
         }
     };

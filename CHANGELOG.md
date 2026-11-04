@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `shared_api_user` examples show one module calling a function another
   exports. The `lists` example now replicates its writes, which the key API
   does not propagate on its own, and rotates a list given to `LPOPRPUSH` twice
-  through one key handle instead of two.
+  through one key handle instead of two. `LPOPRPUSH` also replies with the
+  element's bytes unchanged, where it replaced invalid UTF-8, and refuses
+  extra arguments.
 
 - Command containers and native subcommands (#178).
   `CommandBuilder::container(name)` declares a command without a handler, and

@@ -3793,6 +3793,7 @@ fn test_lists_example_moves_and_pushes_elements() -> Result<()> {
     for args in [
         &["LPOPRPUSH", "string", "dst"][..],
         &["LPOPRPUSH", "src", "string"],
+        &["LPOPRPUSH", "string", "string"],
         &["LISTS.PUSHHEAD", "string", "x"],
     ] {
         let error = redis::cmd(args[0])
@@ -3830,9 +3831,25 @@ fn test_lists_example_replicates_its_writes() -> Result<()> {
     redis::cmd("LPOPRPUSH")
         .arg(&["src", "src"])
         .query::<Value>(&mut primary)?;
+    // A command that wrote nothing replicates nothing.
+    let offset = |con: &mut TestConnection| -> Result<i64> {
+        let info: String = redis::cmd("INFO").arg("replication").query(con)?;
+        info.lines()
+            .find_map(|line| line.strip_prefix("master_repl_offset:"))
+            .context("INFO replication reports master_repl_offset")?
+            .trim()
+            .parse()
+            .context("master_repl_offset is an integer")
+    };
+    let before = offset(&mut primary)?;
     redis::cmd("LPOPRPUSH")
         .arg(&["missing", "other"])
         .query::<Value>(&mut primary)?;
+    assert_eq!(
+        offset(&mut primary)?,
+        before,
+        "an empty LPOPRPUSH replicated"
+    );
     let acknowledged: usize = redis::cmd("WAIT").arg(&[1, 5000]).query(&mut primary)?;
     assert_eq!(acknowledged, 1, "replica log: {}", replica.server_log()?);
     assert_eq!(list_range(&mut replica, "src")?, ["c", "b"]);
@@ -7561,27 +7578,12 @@ fn assert_null_reply_wire(
     resp2: &str,
     resp3: &str,
 ) -> Result<()> {
-    use std::io::{Read, Write};
-    let address = std::net::SocketAddr::from(([127, 0, 0, 1], con.port()));
-    let timeout = Duration::from_secs(5);
-    let mut stream = std::net::TcpStream::connect_timeout(&address, timeout)?;
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
-    let mut parser = redis::Parser::new();
-    for protocol in [2, 3, 2] {
-        stream.write_all(&redis::cmd("HELLO").arg(protocol).get_packed_command())?;
-        parser.parse_value(&mut stream)?.extract_error()?;
-        let mut request = redis::cmd("reply.nulls").arg(kind).get_packed_command();
-        request.extend(redis::cmd("PING").get_packed_command());
-        stream.write_all(&request)?;
-        let expected = format!("{}+PONG\r\n", if protocol == 2 { resp2 } else { resp3 });
-        let mut reply = vec![0; expected.len()];
-        stream
-            .read_exact(&mut reply)
-            .with_context(|| format!("RESP{protocol} {kind} reply and following PING"))?;
-        assert_eq!(reply, expected.as_bytes(), "RESP{protocol} {kind}");
-    }
-    Ok(())
+    assert_reply_wire(
+        con,
+        &["reply.nulls", kind],
+        resp2.as_bytes(),
+        resp3.as_bytes(),
+    )
 }
 
 /// Sends `args` in RESP2, RESP3 and RESP2 again, and checks each reply's
@@ -7618,7 +7620,7 @@ fn assert_reply_wire(
 
 /// `Context::reply_with_key` sends each `RedisValueKey` kind as its type:
 /// integers as integers, strings and bytes as bulk strings, a simple string
-/// as one, and a bool as a RESP3 boolean, or an integer in RESP2.
+/// as one, and a bool as a RESP3 boolean, or an integer (1 or 0) in RESP2.
 #[test]
 fn test_reply_with_key_wire_types() -> Result<()> {
     let con = TestConnection::new("reply_types");
@@ -7627,7 +7629,8 @@ fn test_reply_with_key_wire_types() -> Result<()> {
         ("string", b"$4\r\ntext\r\n", b"$4\r\ntext\r\n"),
         ("redis_string", b"$5\r\nowned\r\n", b"$5\r\nowned\r\n"),
         ("bytes", b"$3\r\n\0\xff!\r\n", b"$3\r\n\0\xff!\r\n"),
-        ("bool", b":1\r\n", b"#t\r\n"),
+        ("true", b":1\r\n", b"#t\r\n"),
+        ("false", b":0\r\n", b"#f\r\n"),
         ("simple", b"+ok\r\n", b"+ok\r\n"),
     ] {
         assert_reply_wire(&con, &["reply.key", kind], resp2, resp3)?;
