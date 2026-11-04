@@ -1127,7 +1127,7 @@ impl RuntimeContext {
     /// let bytes = {
     ///     let guard = owner.lock();
     ///     let key = guard.open_key(name);
-    ///     key.read()?.map(<[u8]>::to_vec)
+    ///     key.read()?
     /// };
     /// # Ok(bytes) }
     /// ```

@@ -124,9 +124,11 @@ static MY_TYPE: RedisType<MyType> =
   save or rewrite's child process is killed, which fails only that save and
   lets the server remove its partial file, and the server itself aborts, as
   for `SAVE` or `DUMP`.
-- `get_value` and `set_value` take `&RedisType<T>` and return or take `T`, so
-  the turbofish is no longer needed and reading a value as another type does
-  not compile. `T` must be `Send + 'static`: Redis can free values on a
+- `set_value` and the value accessors (`with_value` and `with_value_mut`, or
+  the `unsafe` `get_value`; see
+  [Key data borrows are scoped](#key-data-borrows-are-scoped)) take
+  `&RedisType<T>` and take or lend `T`, so the turbofish is no longer needed
+  and reading a value as another type does not compile. `T` must be `Send + 'static`: Redis can free values on a
   background thread, as `UNLINK`, `FLUSHALL ASYNC` and, since Redis 7.4, a
   plain `FLUSHALL` do. Hold shared data in an `Arc` rather than an `Rc`. A
   value that holds a `RedisString` needs a wrapper whose `unsafe impl Send`
@@ -146,6 +148,42 @@ static MY_TYPE: RedisType<MyType> =
 
 See [data_type.rs](../examples/data_type.rs) and
 [native_type.rs](../examples/native_type.rs).
+
+### Key data borrows are scoped
+
+Data borrowed from a key could be freed while still borrowed: the borrow tied
+it to the key handle only, and `Context::call`, opening the key again or
+another handle's string DMA could delete, replace or move the value (#162).
+The safe APIs now copy, or lend the data to a closure that must be `Send`, so
+it cannot hold the context, a key handle or a `RedisString` and change the key
+meanwhile. The borrowing forms remain as `unsafe` functions whose safety
+sections state the rules.
+
+| 2.x and earlier 3.0 | 3.0 |
+|---|---|
+| `RedisKey::read() -> Option<&[u8]>` | `read() -> Option<Vec<u8>>`, or `unsafe read_borrowed()` |
+| `RedisKey::get_value(&TYPE) -> Option<&T>` | `with_value(&TYPE, \|value\| ...)`, or `unsafe get_value` |
+| `RedisKeyWritable::get_value(&TYPE) -> Option<&mut T>` | `with_value_mut(&TYPE, \|value\| ...)`, or `unsafe get_value` |
+| `RedisKeyWritable::as_string_dma() -> StringDMA` | `with_string_dma(\|data\| ...)`, or `unsafe as_string_dma` |
+
+```rust,ignore
+// earlier
+let mut key = ctx.open_key_writable(&name);
+if let Some(value) = key.get_value(&MY_TYPE)? {
+    value.count += 1;
+}
+key.as_string_dma()?.write(bytes)?;
+
+// 3.0
+let mut key = ctx.open_key_writable(&name);
+key.with_value_mut(&MY_TYPE, |value| value.count += 1)?;
+key.with_string_dma(|data| data.write(bytes).map(|_| ()))??;
+```
+
+The closures return a value (`Option<R>` for the value forms, since the key
+may be empty) but cannot return a reference into the key. A closure that needs
+a `RedisString`'s bytes borrows `as_slice()` before the call, since a
+`&[u8]` is `Send` and the `RedisString` is not.
 
 ### Timers use typed handles
 
@@ -838,17 +876,8 @@ args.done()?;
   existing fields replaced or deleted, instead of a `Status` that read a
   replaced field as an error. `hash_set_by_string` and `hash_del_by_string`
   take the field as a `RedisString`, so it can hold any bytes.
-- `RedisKeyWritable::get_value` and `as_string_dma` take `&mut self`, so the
-  reference they return cannot outlive the key or alias another one. Bind the
-  key with `let mut`.
-
-```rust
-// 3.0
-let mut key = ctx.open_key_writable(&name);
-if let Some(value) = key.get_value(&MY_TYPE)? {
-    value.count += 1;
-}
-```
+- Data borrowed from a key is scoped; see
+  [Key data borrows are scoped](#key-data-borrows-are-scoped).
 
 ### Replies
 

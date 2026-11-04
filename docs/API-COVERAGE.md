@@ -658,7 +658,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
 | `StringSet` | 6.0 | 6.0 | required | safe | `RedisKeyWritable::write` |  |  |
-| `StringDMA` | 6.0 | 6.0 | required | safe | `RedisKey::read`, `StringDMA::append` and 1 more |  |  |
+| `StringDMA` | 6.0 | 6.0 | required | safe | `StringDMA::append`, `StringDMA::write` |  |  |
 | `StringTruncate` | 6.0 | 6.0 | required | safe | `StringDMA::append`, `StringDMA::write` |  |  |
 
 #### Lists
@@ -731,8 +731,8 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `CreateDataType` | 6.0 | 6.0 | required | safe | `RedisType::create_data_type` |  |  |
 | `ModuleTypeSetValue` | 6.0 | 6.0 | available | safe | `RedisKeyWritable::set_value` |  |  |
 | `ModuleTypeReplaceValue` | 6.0 | 6.0 |  | none |  | key |  |
-| `ModuleTypeGetType` | 6.0 | 6.0 | available | safe | `RedisKey::get_value`, `RedisKeyWritable::get_value` and 1 more |  |  |
-| `ModuleTypeGetValue` | 6.0 | 6.0 | available | safe | `RedisKey::get_value`, `RedisKeyWritable::get_value` |  |  |
+| `ModuleTypeGetType` | 6.0 | 6.0 | available | safe | `RedisKeyWritable::set_value` |  |  |
+| `ModuleTypeGetValue` | 6.0 | 6.0 | available | safe | `RedisKey::with_value`, `RedisKeyWritable::with_value_mut` |  |  |
 | `IsIOError` | 6.0 | 6.0 | required | safe | `RedisModuleIO::read_double`, `RedisModuleIO::read_float` and 5 more |  |  |
 | `SaveUnsigned` | 6.0 | 6.0 | required | safe | `RedisModuleIO::write_unsigned` |  |  |
 | `LoadUnsigned` | 6.0 | 6.0 | available | safe | `RedisModuleIO::read_unsigned` |  |  |

@@ -65,9 +65,13 @@ fn string_set(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let value = args.next_arg()?;
 
     let mut key = ctx.open_key_writable(&key_name);
-    let mut dma = key.as_string_dma()?;
-    dma.write(value.as_slice())
-        .map(|_| RedisValue::SimpleStringStatic("OK"))
+    // The closure borrows the argument's bytes, not the RedisString, which
+    // is not Send.
+    let bytes = value.as_slice();
+    key.with_string_dma(|data| {
+        data.write(bytes)
+            .map(|_| RedisValue::SimpleStringStatic("OK"))
+    })?
 }
 
 fn string_get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -81,7 +85,7 @@ fn string_get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let key = ctx.open_key(&key_name);
     let res = key
         .read()?
-        .map_or(RedisValue::Null, |v| RedisValue::StringBuffer(Vec::from(v)));
+        .map_or(RedisValue::Null, RedisValue::StringBuffer);
     Ok(res)
 }
 

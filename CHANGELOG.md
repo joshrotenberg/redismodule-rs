@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Breaking:** data borrowed from a key can no longer outlive a change to the
+  key through `Context::call` or another handle (#162). `RedisKey::read`
+  returns an owned `Vec<u8>`; `RedisKey::with_value`,
+  `RedisKeyWritable::with_value_mut` and `RedisKeyWritable::with_string_dma`
+  lend the value or the string buffer to a closure that must be `Send`, so it
+  cannot hold the context, a key handle or a `RedisString`. The borrowing
+  forms, `read_borrowed`, `get_value` and `as_string_dma`, are `unsafe`.
+
 - **Breaking:** native data types are typed Rust values with SDK-generated
   callbacks (#154, #155). A type implements `native_types::NativeType`
   (`rdb_load` and `rdb_save`; `free` is `Drop`) and is declared as a

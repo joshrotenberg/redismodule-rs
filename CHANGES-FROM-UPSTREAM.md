@@ -11,6 +11,21 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Scoped key data borrows
+
+Upstream's `RedisKey::read` returns a slice into the string value,
+`as_string_dma` a mutable view of it, and `get_value` a reference to a native
+type's value, each borrowing only the key handle. `Context::call`, opening the
+same key again, and string DMA through another handle (which can replace a
+shared value) all take `&self`, so safe code could delete, replace or move the
+value while still holding the borrow, a use after free (#162).
+
+`read` now copies, and `with_value`, `with_value_mut` and `with_string_dma`
+lend the data to a closure that must be `Send`. The context, key handles and
+`RedisString` are not `Sync`, so such a closure cannot hold them and change
+the key while it borrows the data. The borrowing forms are `unsafe` with their
+rules stated. Upstream has no issue or pull request for this.
+
 ## Typed native data types
 
 Upstream's `RedisType` takes a raw `RedisModuleTypeMethods`, and

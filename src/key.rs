@@ -145,15 +145,61 @@ impl<'ctx> RedisKey<'ctx> {
         (key.ctx, key.key_inner)
     }
 
-    /// The value of the key, read as the type `redis_type` stores; `None` for
-    /// an empty key.
+    /// Calls `f` with the key's value, read as the type `redis_type` stores,
+    /// and returns what it returns; `None` for an empty key. `f` must be
+    /// `Send`, so it cannot hold the context, a key handle or a `RedisString`
+    /// and change the key while it borrows the value:
+    ///
+    /// ```compile_fail,E0277
+    /// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, native_types::{NativeType, RedisType}, Context, RedisError, RedisString};
+    /// # struct Count(u64);
+    /// # impl NativeType for Count {
+    /// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(Count(0)) }
+    /// #     fn rdb_save(&self, _: &mut RdbWriter) {}
+    /// # }
+    /// # fn deleted(ctx: &Context, name: &RedisString, kind: &RedisType<Count>) -> Result<(), RedisError> {
+    /// let key = ctx.open_key(name);
+    /// key.with_value(kind, |count| {
+    ///     // Capturing the context would let the closure run DEL here.
+    ///     ctx.log_notice("reading the count");
+    ///     count.0
+    /// })?;
+    /// # Ok(()) }
+    /// ```
     ///
     /// # Errors
     ///
     /// Returns [`RedisError::WrongType`] if the key holds another type, and an
     /// error if `redis_type` is not registered or the running Redis does not
     /// provide `RedisModule_ModuleTypeGetValue`.
-    pub fn get_value<T: Send + 'static>(
+    pub fn with_value<T: Send + 'static, R>(
+        &self,
+        redis_type: &RedisType<T>,
+        f: impl FnOnce(&T) -> R + Send,
+    ) -> Result<Option<R>, RedisError> {
+        // SAFETY: f is Send, so it holds nothing that can reach this key while
+        // it borrows the value.
+        Ok(unsafe { self.get_value(redis_type) }?.map(f))
+    }
+
+    /// The value of the key, read as the type `redis_type` stores; `None` for
+    /// an empty key. [`with_value`](Self::with_value) is the safe form.
+    ///
+    /// # Safety
+    ///
+    /// While the borrow is live, nothing may delete, replace, resize or move
+    /// the key's value: no [`RuntimeContext::call`](crate::RuntimeContext::call)
+    /// or other command that writes the key, no other handle to the same key
+    /// (string DMA through a read-only handle can replace a shared value), and
+    /// no module callback that Redis runs in between, such as during
+    /// `yield_now`. The safe scoped forms rule these out.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RedisError::WrongType`] if the key holds another type, and an
+    /// error if `redis_type` is not registered or the running Redis does not
+    /// provide `RedisModule_ModuleTypeGetValue`.
+    pub unsafe fn get_value<T: Send + 'static>(
         &self,
         redis_type: &RedisType<T>,
     ) -> Result<Option<&T>, RedisError> {
@@ -187,7 +233,32 @@ impl<'ctx> RedisKey<'ctx> {
         self.key_inner == null_key
     }
 
-    pub fn read(&self) -> Result<Option<&[u8]>, RedisError> {
+    /// A copy of the key's string value; `None` for an empty key.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key does not hold a string.
+    pub fn read(&self) -> Result<Option<Vec<u8>>, RedisError> {
+        // SAFETY: the bytes are copied before anything else can run.
+        Ok(unsafe { self.read_borrowed() }?.map(<[u8]>::to_vec))
+    }
+
+    /// The key's string value, borrowed from Redis; `None` for an empty key.
+    /// [`read`](Self::read) is the safe, copying form.
+    ///
+    /// # Safety
+    ///
+    /// While the borrow is live, nothing may delete, replace, resize or move
+    /// the key's value: no [`RuntimeContext::call`](crate::RuntimeContext::call)
+    /// or other command that writes the key, no other handle to the same key
+    /// (string DMA through a read-only handle can replace a shared value), and
+    /// no module callback that Redis runs in between, such as during
+    /// `yield_now`. The safe scoped forms rule these out.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key does not hold a string.
+    pub unsafe fn read_borrowed(&self) -> Result<Option<&[u8]>, RedisError> {
         if self.is_null() {
             Ok(None)
         } else {
@@ -365,14 +436,43 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// use redis_module::RedisError;
     ///
     /// fn is_empty_old(key: &mut RedisKeyWritable) -> Result<bool, RedisError> {
-    ///     let mut s = key.as_string_dma()?;
-    ///     let is_empty = s.write(b"new value")?.is_empty();
-    ///     Ok(is_empty)
+    ///     key.with_string_dma(|s| Ok(s.write(b"new value")?.is_empty()))?
     /// }
     /// ```
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.key_type() == KeyType::Empty
+    }
+
+    /// Calls `f` with direct access to the string value's buffer and returns
+    /// what it returns. `f` must be `Send`, so it cannot hold the context, a
+    /// key handle or a `RedisString` and change the key while it holds the
+    /// buffer:
+    ///
+    /// ```compile_fail,E0277
+    /// # use redis_module::{Context, RedisError, RedisString};
+    /// # fn deleted(ctx: &Context, name: &RedisString) -> Result<(), RedisError> {
+    /// let mut key = ctx.open_key_writable(name);
+    /// key.with_string_dma(|data| {
+    ///     // Capturing the context would let the closure run DEL here.
+    ///     ctx.log_notice("writing the value");
+    ///     data.write(b"value").map(|_| ())
+    /// })??;
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key does not hold a string or is not open for
+    /// writing.
+    pub fn with_string_dma<R>(
+        &mut self,
+        f: impl FnOnce(&mut StringDMA<'_>) -> R + Send,
+    ) -> Result<R, RedisError> {
+        // SAFETY: f is Send, so it holds nothing that can reach this key while
+        // it holds the buffer.
+        let mut dma = unsafe { self.as_string_dma() }?;
+        Ok(f(&mut dma))
     }
 
     /// Direct access to the string value's buffer. The view borrows the key
@@ -384,12 +484,28 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// # fn bad(owner: &ThreadSafeContext<DetachedFromClient>, name: &RedisString) {
     /// let guard = owner.lock();
     /// let mut key = guard.open_key_writable(name);
-    /// let mut data = key.as_string_dma().unwrap();
+    /// let mut data = unsafe { key.as_string_dma() }.unwrap();
     /// drop(guard);
     /// data.write(b"value").unwrap();
     /// # }
     /// ```
-    pub fn as_string_dma(&mut self) -> Result<StringDMA<'_>, RedisError> {
+    ///
+    /// [`with_string_dma`](Self::with_string_dma) is the safe form.
+    ///
+    /// # Safety
+    ///
+    /// While the borrow is live, nothing may delete, replace, resize or move
+    /// the key's value: no [`RuntimeContext::call`](crate::RuntimeContext::call)
+    /// or other command that writes the key, no other handle to the same key
+    /// (string DMA through a read-only handle can replace a shared value), and
+    /// no module callback that Redis runs in between, such as during
+    /// `yield_now`. The safe scoped forms rule these out.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key does not hold a string or is not open for
+    /// writing.
+    pub unsafe fn as_string_dma(&mut self) -> Result<StringDMA<'_>, RedisError> {
         StringDMA::new(self)
     }
 
@@ -628,15 +744,31 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         }
     }
 
+    /// Calls `f` with the key's value, read as the type `redis_type` stores,
+    /// for changing it in place, and returns what it returns; `None` for an
+    /// empty key. Like [`RedisKey::with_value`], `f` must be `Send`.
+    ///
     /// # Errors
     ///
-    /// Returns an error if the running Redis does not provide `RedisModule_ModuleTypeGetValue`.
+    /// Returns [`RedisError::WrongType`] if the key holds another type, and an
+    /// error if `redis_type` is not registered or the running Redis does not
+    /// provide `RedisModule_ModuleTypeGetValue`.
+    pub fn with_value_mut<T: Send + 'static, R>(
+        &mut self,
+        redis_type: &RedisType<T>,
+        f: impl FnOnce(&mut T) -> R + Send,
+    ) -> Result<Option<R>, RedisError> {
+        // SAFETY: f is Send, so it holds nothing that can reach this key while
+        // it borrows the value.
+        Ok(unsafe { self.get_value(redis_type) }?.map(f))
+    }
+
+    /// The key's value for changing in place.
+    /// [`with_value_mut`](Self::with_value_mut) is the safe form.
     ///
     /// The reference borrows the key mutably, so only one can be live at a time,
-    /// and only while this handle is open. The borrow covers this handle only:
-    /// another handle to the same key, or a command run through
-    /// [`RuntimeContext::call`](crate::RuntimeContext::call), can delete or replace the value,
-    /// so do not use the reference after either.
+    /// and only while this handle is open. The borrow covers this handle only,
+    /// which is why the function is unsafe:
     ///
     /// ```compile_fail,E0499
     /// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, native_types::{NativeType, RedisType}, Context, RedisError, RedisString};
@@ -647,8 +779,8 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// # }
     /// # fn two(ctx: &Context, name: &RedisString, kind: &RedisType<Count>) -> Result<(), RedisError> {
     /// let mut key = ctx.open_key_writable(name);
-    /// let first = key.get_value(kind)?;
-    /// let second = key.get_value(kind)?;
+    /// let first = unsafe { key.get_value(kind) }?;
+    /// let second = unsafe { key.get_value(kind) }?;
     /// first.map(|value| value.0 += 1);
     /// # Ok(()) }
     /// ```
@@ -663,12 +795,27 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// # fn closed(ctx: &Context, name: &RedisString, kind: &RedisType<Count>) -> Result<(), RedisError> {
     /// let value = {
     ///     let mut key = ctx.open_key_writable(name);
-    ///     key.get_value(kind)?
+    ///     unsafe { key.get_value(kind) }?
     /// };
     /// value.map(|value| value.0 += 1);
     /// # Ok(()) }
     /// ```
-    pub fn get_value<T: Send + 'static>(
+    ///
+    /// # Safety
+    ///
+    /// While the borrow is live, nothing may delete, replace, resize or move
+    /// the key's value: no [`RuntimeContext::call`](crate::RuntimeContext::call)
+    /// or other command that writes the key, no other handle to the same key
+    /// (string DMA through a read-only handle can replace a shared value), and
+    /// no module callback that Redis runs in between, such as during
+    /// `yield_now`. The safe scoped forms rule these out.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RedisError::WrongType`] if the key holds another type, and an
+    /// error if `redis_type` is not registered or the running Redis does not
+    /// provide `RedisModule_ModuleTypeGetValue`.
+    pub unsafe fn get_value<T: Send + 'static>(
         &mut self,
         redis_type: &RedisType<T>,
     ) -> Result<Option<&mut T>, RedisError> {
