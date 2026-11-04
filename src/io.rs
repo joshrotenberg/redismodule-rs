@@ -171,7 +171,8 @@ impl RdbReader {
     /// See [`RedisModuleIO::read_string`].
     ///
     /// # Errors
-    /// Returns an error if the operation fails or if an IO error occurred.
+    /// Returns an error if the operation fails, an IO error occurred, or the
+    /// stored bytes are not valid UTF-8.
     pub fn read_string(&mut self) -> Result<String, Error> {
         self.io.read_string()
     }
