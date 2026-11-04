@@ -34,6 +34,17 @@ follow Redis, while command-specific markers are separate. No AutoMemory
 optimization is included; the producer-aware string-adoption path is retained,
 and part 3 of #179 remains open.
 
+## Module-author reference and macro packages
+
+The remaining readiness documentation work (#169) adds rustdoc for key reads,
+hash fields, list operations, expiry, typed call replies and server events.
+Cursor examples compile with a `RedisString` key name, and the internal API
+macro documents its input syntax with the current event callback contract.
+Rustdoc points readers to guides in their pinned dependency source instead of
+master. Both macro packages preserve the upstream author and add the fork
+maintainer, include the unchanged BSD license, and the pre-release checklist
+covers the shipping recipe's fixed source checkout.
+
 ## SDK error codes, expirations and callback diagnostics
 
 SDK-generated failures now carry `ERR` or an existing specific Redis code

@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   numeric/range-ID grammar; command markers such as XREADGROUP's `>` remain
   separate. AutoMemory adoption is unchanged; part 3 of #179 remains open.
 
+- Complete the module-author rustdoc for key reads, hash fields, list writes,
+  expiry, native call replies and server events (#169). Cursor examples now
+  compile against the current API, macro input syntax uses the current callback
+  contract, and guide references follow the pinned dependency source. Both macro
+  packages include the BSD license and fork maintainer metadata; the pre-release
+  checklist also updates the shipping recipe's source pin.
+
 - Integration tests load the `lists` and `load_unload` examples and run
   `export_shared_api`, `replicate_verbatim`, `reply_with_key` and
   `list_push_head`, which nothing ran before (#168). New `shared_api` and

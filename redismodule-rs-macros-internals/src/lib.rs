@@ -32,37 +32,42 @@ impl Parse for Args {
     }
 }
 
-/// This proc macro allows specifying which RedisModuleAPI is required by some redismodue-rs
-/// function. The macro finds, for a given set of RedisModuleAPI, what the minimal Redis version is
-/// that contains all those APIs and decides whether or not the function might raise an `APIError`.
+/// Declares the native APIs required by an SDK-internal wrapper.
 ///
-/// In addition, for each RedisModuleAPI, the proc macro injects a code that extracts the actual
-/// API function pointer and raises an error or panics if the API is invalid.
+/// When the selected SDK compatibility floor includes every listed API, the
+/// wrapper keeps its return type and extracts required API pointers. At an
+/// older floor its return type becomes `crate::apierror::APIResult<T>`; missing
+/// pointers return an error before the wrapper body runs.
+///
+/// This macro expands against the SDK's `crate::raw`, `crate::apierror`,
+/// `crate::__required_api!` and compatibility features. It is not a standalone
+/// module registration interface.
 ///
 /// # Panics
 ///
-/// Panics when an API is not available and if the function doesn't return [`Result`]. If it does
-/// return a [`Result`], the panics are replaced with returning a [`Result::Err`].
+/// At a floor that requires an API, the SDK's required-API check panics if the
+/// server has no binding for it. At an older floor, a missing binding returns
+/// an error instead.
 ///
-/// # Examples
+/// # Input syntax
 ///
-/// Creating a wrapper for `RedisModule_AddPostNotificationJob`:
-/// ```rust,no_run,ignore
-///    redismodule_api!(
-///         [RedisModule_AddPostNotificationJob],
-///         pub fn add_post_notification_job<F: Fn(&Context)>(&self, callback: F) -> Status {
-///             let callback = Box::into_raw(Box::new(callback));
-///             unsafe {
-///                 RedisModule_AddPostNotificationJob(
-///                     self.ctx,
-///                     Some(post_notification_job::<F>),
-///                     callback as *mut c_void,
-///                     Some(post_notification_job_free_callback::<F>),
-///                 )
-///             }
-///             .into()
-///         }
-///     );
+/// This compiling example constructs the macro's input tokens, not a native
+/// registration or a standalone expansion. Callback wrappers use the current
+/// `FnOnce(&EventContext) + 'static` contract. The SDK's
+/// `EventContext::add_post_notification_job` rustdoc checks use of the actual
+/// public method; the wrapper body below is only a placeholder.
+///
+/// ```
+/// use quote::quote;
+/// let wrapper: syn::ItemFn = syn::parse_quote! {
+///     pub fn add_post_notification_job<F: FnOnce(&EventContext) + 'static>(
+///         &self, callback: F,
+///     ) -> Status {
+///         install_job(self, callback)
+///     }
+/// };
+/// let input = quote! { [RedisModule_AddPostNotificationJob], #wrapper };
+/// assert!(input.to_string().contains("RedisModule_AddPostNotificationJob"));
 /// ```
 #[proc_macro]
 pub fn api(item: TokenStream) -> TokenStream {
