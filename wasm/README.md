@@ -32,8 +32,9 @@ from [`ci/locks`](ci/locks) when they are missing, takes free ports from 7400
 up (`DEMO_PORT` sets the first), works in `target/wasm-demo` and stops its
 servers when it exits, so it can run again at once. `DEMO_STEP=1` waits for
 Enter before each section, for presenting, and `DEMO_PROFILE=release` builds
-the module with `--release`, which compiles the JavaScript library several
-times faster. The first build compiles wasmtime and takes a few minutes.
+the module with `--release`, which compiles the JavaScript library faster
+(see [MODULE-VS-CORE.md](MODULE-VS-CORE.md#performance)). The first build
+compiles wasmtime and takes a few minutes.
 
 ## Commands
 

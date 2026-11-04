@@ -45,18 +45,16 @@ see wasm libraries; two checks Lua makes before a script starts have no direct
 module API; and a rewritten AOF without its RDB preamble loses the libraries.
 A `FUNCTION` engine in core gets these from the existing framework, with
 `FUNCTION KILL`; `EVAL` and `SCRIPT KILL` accept only Lua today, so they would
-need more core work (inferred). Two more things are
-out of a module's reach and not in the framework either: a function that is a
-command of its own, and memory outside the Redis allocator counted in
-`used_memory`. Core could add them in tree (inferred); a module would need new
-module APIs.
+need more core work (inferred). Two more things are out of a module's reach
+and not in the framework either: a function that is a command of its own, and
+memory outside the Redis allocator counted in `used_memory`. Core could add
+them in tree (inferred); a module would need new module APIs.
 
 Core pays with coupling: every Redis build would carry the runtime and its
 toolchain, and the runtime's version would move with Redis releases (inferred).
 The module loads into a stock Redis 7.2 or later as it is (the current build
-is checked on 8.10.2), on its own release cycle, at
-the cost of a second deployable binary and of being absent wherever it was
-not loaded.
+is checked on 8.10.2), on its own release cycle, at the cost of a second
+deployable binary and of being absent wherever it was not loaded.
 
 ## What the module API made possible
 
@@ -93,13 +91,13 @@ Two of Lua's write checks have no direct counterpart in the module API:
   script that may write before it starts when writes would fail for a disk
   error (`MISCONF`) or for too few replicas (`NOREPLICAS`), at lines 230 to
   255. No direct module API reports either state, so a wasm function that may
-       write starts, and its first write fails in `S` mode with the same error
-       code (for `MISCONF` the message differs). A dry run would come close:
-       `RM_Call` with `D` and `S` (`src/module.c` lines 6798 to 6801) runs the
-       script-mode write checks (lines 7032 to 7066) and returns before the
-       command runs (line 7144), so the host could check both states before a
-       function starts with a synthetic write command, whose own ACL, memory
-       and cluster checks would apply too. The host does not do this.
+  write starts, and its first write fails in `S` mode with the same error
+  code (for `MISCONF` the message differs). A dry run would come close:
+  `RM_Call` with `D` and `S` (`src/module.c` lines 6798 to 6801) runs the
+  script-mode write checks (lines 7032 to 7066) and returns before the
+  command runs (line 7144), so the host could check both states before a
+  function starts with a synthetic write command, whose own ACL, memory and
+  cluster checks would apply too. The host does not do this.
 - **G6.** A read-only Lua script also refuses commands flagged
   `may_replicate`. That flag is hidden from `COMMAND INFO` ("Hidden on
   purpose", `src/server.c` line 5369) and no module API returns a command's
@@ -440,9 +438,11 @@ What the numbers say about module against core:
   the sieve as it was then written (H11); that one is a module cost, since
   core could keep signal handlers (inferred).
 
-The demo's JavaScript load is not a benchmark: through the debug build's
-helper, on an Apple M3 busy with other work (load average 23 to 35), it took
-29.2 s, and the server answered 351 `PING`s meanwhile, the slowest in 174 ms.
+The demo's JavaScript load is not a benchmark. On an Apple M3 busy with other
+work, it took 17.7 s through the debug build's helper at a load average of 8
+to 20, with 291 `PING`s answered meanwhile and the slowest in 112 ms; 29.2 s
+in an earlier debug run at 23 to 35; and 8.2 s with `DEMO_PROFILE=release` at
+24 to 30.
 
 ## Operability
 
