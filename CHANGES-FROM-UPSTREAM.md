@@ -20,8 +20,11 @@ bindings and a hand-written dispatcher without the SDK's panic guard (#178).
 children with the same metadata and callback handling as top-level commands,
 and `.summary` and `.arity` set the command info `COMMAND DOCS` and
 `COMMAND INFO` report. Redis keeps a container's handler NULL and would call
-it for a call its arity accepts without a subcommand, so registration refuses a
-container arity of 1 or -1, and refuses containers before Redis 7.0.
+it for any call to a container without subcommands, and for a call its arity
+accepts without a subcommand, so registration refuses an empty container and a
+container arity of 1 or -1, and refuses containers before Redis 7.0. Redis
+grants a container's ACL categories to every subcommand, so a container cannot
+have categories; each subcommand sets its own.
 
 ## Redis 6.0 capability fallbacks
 

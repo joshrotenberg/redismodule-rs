@@ -1811,11 +1811,15 @@ fn test_command_builder_invalid_definitions_fail_the_load() {
         ("nested-subcommand", "subcommand cannot have subcommands"),
         ("subcommand-pipe", "contain no '|'"),
         ("subcommand-empty", "must be non-empty"),
-        (
-            "subcommand-duplicate",
-            "failed to register subcommand builder.container|CHILD",
-        ),
+        ("subcommand-duplicate", "duplicate subcommand CHILD"),
         ("subcommand-key-range", "invalid command key range"),
+        ("subcommand-arity-one", "cannot be 1"),
+        ("container-empty", "needs at least one subcommand"),
+        ("container-acl", "container cannot have ACL categories"),
+        (
+            "container-optional-acl",
+            "container cannot have ACL categories",
+        ),
     ] {
         let error = match TestConnection::try_with_args("command_builder", &[mode]) {
             Ok(_) => panic!("invalid definition {mode} loaded"),

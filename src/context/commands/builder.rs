@@ -177,8 +177,13 @@ impl CommandBuilder {
     /// A container named `name`: a command without a handler that only groups
     /// the definitions added with [`subcommand`](Self::subcommand). Calling the
     /// container without a subcommand gets Redis's wrong-arity error, and an
-    /// unknown subcommand gets Redis's unknown-subcommand error. Registering it
-    /// fails before Redis 7.0, which has no subcommands.
+    /// unknown subcommand gets Redis's unknown-subcommand error.
+    ///
+    /// Registration refuses a container without subcommands, which Redis would
+    /// dispatch to its missing handler, and a container with keys or ACL
+    /// categories: Redis grants a container's categories to every subcommand,
+    /// so each subcommand sets its own. It also fails before Redis 7.0, which
+    /// has no subcommands.
     pub fn container(name: impl Into<Vec<u8>>) -> Self {
         Self::with_callback(name, None)
     }
@@ -186,13 +191,15 @@ impl CommandBuilder {
     /// Adds a subcommand to this container. `child` is named by its short
     /// name, such as `"create"`, and registers as `<container>|<child>`. It
     /// keeps its own flags, key range, ACL categories, summary and arity, and
-    /// cannot have subcommands of its own.
+    /// cannot have subcommands of its own. Names are unique ignoring ASCII
+    /// case, as Redis looks them up.
     pub fn subcommand(mut self, child: CommandBuilder) -> Self {
         self.subcommands.push(child);
         self
     }
 
-    /// Sets the summary that `COMMAND DOCS` reports (Redis 7.0 and later).
+    /// Sets the summary that `COMMAND DOCS` reports. Registration fails before
+    /// Redis 7.0, which has no command info.
     pub fn summary(mut self, summary: impl Into<String>) -> Self {
         self.summary = Some(summary.into());
         self
@@ -201,9 +208,10 @@ impl CommandBuilder {
     /// Sets the arity that `COMMAND INFO` reports and Redis enforces: the
     /// exact number of arguments including the command name, or, if negative,
     /// the minimum. For a subcommand it counts the container and subcommand
-    /// names. A container's arity must require a subcommand (2 or more, or -2
-    /// or less; the default is -2), since Redis would otherwise run its
-    /// missing handler. Needs Redis 7.0 or later.
+    /// names, so it cannot be 1. A container's arity must require a
+    /// subcommand (2 or more, or -2 or less; the default is -2), since Redis
+    /// would otherwise run its missing handler. Registration fails before
+    /// Redis 7.0, which has no command info.
     pub fn arity(mut self, arity: i32) -> Self {
         self.arity = Some(arity);
         self
@@ -270,93 +278,150 @@ impl CommandBuilder {
     /// Registers during module initialization. `redis_module!` calls this
     /// automatically for builder expressions in its command list. A runtime
     /// [`Context`](crate::Context) cannot supply the required load-time capability.
+    ///
+    /// A container and its subcommands are checked before anything is
+    /// registered, but Redis can still refuse a step after the container
+    /// exists, and Redis has no way to remove a command during the load. An
+    /// `init` that registers a definition itself should fail the load when
+    /// this returns an error, as `redis_module!` does.
     pub fn register(self, ctx: &RegistrationContext<'_>) -> Result<(), RedisError> {
-        if self.callback.is_some() && !self.subcommands.is_empty() {
-            return Err(RedisError::Str(
-                "ERR only a container, from CommandBuilder::container, can have subcommands",
-            ));
-        }
-        if self.callback.is_none() {
-            if self.keys.is_some() {
-                return Err(RedisError::Str("ERR a command container cannot have keys"));
-            }
-            // Redis runs a container's handler, which it does not have, for
-            // a call its arity accepts without a subcommand.
-            if matches!(self.arity, Some(1 | -1)) {
+        if self.callback.is_some() {
+            if !self.subcommands.is_empty() {
                 return Err(RedisError::Str(
-                    "ERR a command container's arity must require a subcommand (2 or more, or -2 or less)",
+                    "ERR only a container, from CommandBuilder::container, can have subcommands",
                 ));
             }
-            // Before Redis 7.0 the container would register without a handler
-            // and with nothing to dispatch to.
-            if unsafe { raw::RedisModule_CreateSubcommand }.is_none() {
-                return Err(RedisError::Str(SUBCOMMANDS_NEED_7_0));
-            }
+            let prepared = self.prepare(ctx)?;
+            let name =
+                register_base_command(ctx, &self.name, &prepared.flags, self.callback, self.keys)?;
+            set_acl_categories(ctx, &name, &prepared.required, prepared.optional.as_deref())?;
+            return set_command_info(ctx, &name, self.summary.as_deref(), self.arity);
         }
-        let prepared = self.prepare(ctx)?;
-        let name =
-            register_base_command(ctx, &self.name, &prepared.flags, self.callback, self.keys)?;
-        set_acl_categories(ctx, &name, &prepared.required, prepared.optional.as_deref())?;
-        set_command_info(ctx, &name, self.summary.as_deref(), self.arity)?;
-        for child in self.subcommands {
-            child.register_subcommand(ctx, &name)?;
-        }
-        Ok(())
+        self.register_container(ctx)
     }
 
-    /// Registers this definition as a subcommand of the container `parent`.
-    fn register_subcommand(
-        self,
+    fn register_container(self, ctx: &RegistrationContext<'_>) -> Result<(), RedisError> {
+        if self.keys.is_some() {
+            return Err(RedisError::Str("ERR a command container cannot have keys"));
+        }
+        // Redis grants a container's categories to every subcommand.
+        if !matches!(self.required_acl, AclCategory::None) || self.optional_acl.is_some() {
+            return Err(RedisError::Str(
+                "ERR a command container cannot have ACL categories: Redis grants them to every subcommand",
+            ));
+        }
+        // Redis runs a container's handler, which it does not have, for a
+        // call its arity accepts without a subcommand, and for any call to a
+        // container without subcommands.
+        if matches!(self.arity, Some(1 | -1)) {
+            return Err(RedisError::Str(
+                "ERR a command container's arity must require a subcommand (2 or more, or -2 or less)",
+            ));
+        }
+        if self.subcommands.is_empty() {
+            return Err(RedisError::Str(
+                "ERR a command container needs at least one subcommand",
+            ));
+        }
+        let create = unsafe { raw::RedisModule_CreateSubcommand }
+            .ok_or(RedisError::Str(SUBCOMMANDS_NEED_7_0))?;
+        let prepared = self.prepare(ctx)?;
+        let mut children: Vec<(CommandBuilder, CString, Prepared)> =
+            Vec::with_capacity(self.subcommands.len());
+        for child in self.subcommands {
+            let checked = child.check_subcommand(ctx)?;
+            // Redis looks subcommands up case-insensitively.
+            if children
+                .iter()
+                .any(|(_, other, _)| checked.0.as_bytes().eq_ignore_ascii_case(other.as_bytes()))
+            {
+                return Err(RedisError::String(format!(
+                    "ERR duplicate subcommand {}",
+                    checked.0.to_string_lossy()
+                )));
+            }
+            children.push((child, checked.0, checked.1));
+        }
+
+        let name = register_base_command(ctx, &self.name, &prepared.flags, None, None)?;
+        let get = unsafe { crate::__available_api!(RedisModule_GetCommand) };
+        let container = unsafe { get(ctx.get_raw(), name.as_ptr()) };
+        if container.is_null() {
+            return Err(RedisError::Str("ERR registered command was not found"));
+        }
+        // Create every subcommand before setting anything else, so a failed
+        // step leaves the container with the subcommands it has.
+        let mut registered: Vec<(CommandBuilder, CString, Prepared)> =
+            Vec::with_capacity(children.len());
+        for (child, short_name, prepared) in children {
+            let flags = CString::new(prepared.flags.as_str())?;
+            let callback: raw::RedisModuleCmdFunc = match child.callback {
+                Some(callback) => Some(callback),
+                None => None,
+            };
+            let (first, last, step) = child
+                .keys
+                .map_or((0, 0, 0), |keys| (keys.first, keys.last, keys.step));
+            // SAFETY: container is this module's registered container, and
+            // the strings outlive the call, which copies them.
+            if unsafe {
+                create(
+                    container,
+                    short_name.as_ptr(),
+                    callback,
+                    flags.as_ptr(),
+                    first,
+                    last,
+                    step,
+                )
+            } != Status::Ok as i32
+            {
+                return Err(RedisError::String(format!(
+                    "ERR failed to register subcommand {}|{}",
+                    name.to_string_lossy(),
+                    short_name.to_string_lossy()
+                )));
+            }
+            let full_name = CString::new([name.as_bytes(), b"|", short_name.as_bytes()].concat())?;
+            registered.push((child, full_name, prepared));
+        }
+        for (child, full_name, prepared) in registered {
+            set_acl_categories(
+                ctx,
+                &full_name,
+                &prepared.required,
+                prepared.optional.as_deref(),
+            )?;
+            set_command_info(ctx, &full_name, child.summary.as_deref(), child.arity)?;
+        }
+        set_command_info(ctx, &name, self.summary.as_deref(), self.arity)
+    }
+
+    /// Checks a container's child and returns its name and prepared metadata.
+    fn check_subcommand(
+        &self,
         ctx: &RegistrationContext<'_>,
-        parent: &CStr,
-    ) -> Result<(), RedisError> {
-        let Some(callback) = self.callback else {
+    ) -> Result<(CString, Prepared), RedisError> {
+        if self.callback.is_none() {
             return Err(RedisError::Str("ERR a subcommand cannot be a container"));
-        };
+        }
         if !self.subcommands.is_empty() {
             return Err(RedisError::Str("ERR a subcommand cannot have subcommands"));
         }
-        let prepared = self.prepare(ctx)?;
         let child = CString::new(self.name.as_slice())?;
         if child.as_bytes().is_empty() || child.as_bytes().contains(&b'|') {
             return Err(RedisError::Str(
                 "ERR a subcommand name must be non-empty and contain no '|'",
             ));
         }
-        let create = unsafe { raw::RedisModule_CreateSubcommand }
-            .ok_or(RedisError::Str(SUBCOMMANDS_NEED_7_0))?;
-        let get = unsafe { crate::__available_api!(RedisModule_GetCommand) };
-        let container = unsafe { get(ctx.get_raw(), parent.as_ptr()) };
-        if container.is_null() {
-            return Err(RedisError::Str("ERR registered command was not found"));
+        // A subcommand's arguments always include the container's name and
+        // its own, so an arity of exactly 1 could never be met.
+        if self.arity == Some(1) {
+            return Err(RedisError::Str(
+                "ERR a subcommand's arity counts the container and subcommand names and cannot be 1",
+            ));
         }
-        let flags = CString::new(prepared.flags)?;
-        let (first, last, step) = self
-            .keys
-            .map_or((0, 0, 0), |keys| (keys.first, keys.last, keys.step));
-        // SAFETY: container is this module's registered command, and the
-        // strings outlive the call, which copies them.
-        if unsafe {
-            create(
-                container,
-                child.as_ptr(),
-                Some(callback),
-                flags.as_ptr(),
-                first,
-                last,
-                step,
-            )
-        } != Status::Ok as i32
-        {
-            return Err(RedisError::String(format!(
-                "ERR failed to register subcommand {}|{}",
-                parent.to_string_lossy(),
-                child.to_string_lossy()
-            )));
-        }
-        let name = CString::new([parent.to_bytes(), b"|", child.to_bytes()].concat())?;
-        set_acl_categories(ctx, &name, &prepared.required, prepared.optional.as_deref())?;
-        set_command_info(ctx, &name, self.summary.as_deref(), self.arity)
+        Ok((child, self.prepare(ctx)?))
     }
 
     /// Validates the key range and flags and resolves the ACL categories.

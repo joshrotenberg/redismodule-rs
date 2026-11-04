@@ -93,6 +93,15 @@ fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> St
             .subcommand(redis_command!("CHILD", ping)),
         "subcommand-key-range" => CommandBuilder::container("builder.container")
             .subcommand(redis_command!("child", ping).key(0)),
+        "subcommand-arity-one" => CommandBuilder::container("builder.container")
+            .subcommand(redis_command!("child", ping).arity(1)),
+        "container-empty" => CommandBuilder::container("builder.container"),
+        "container-acl" => CommandBuilder::container("builder.container")
+            .acl_categories("read")
+            .subcommand(redis_command!("child", ping)),
+        "container-optional-acl" => CommandBuilder::container("builder.container")
+            .optional_acl_categories("read")
+            .subcommand(redis_command!("child", ping)),
         _ => return Status::Err,
     };
     match command.register(ctx) {

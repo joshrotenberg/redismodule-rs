@@ -1,7 +1,8 @@
 //! A command container with native subcommands, as `XGROUP` has:
 //! `subcmd.kv set key value`, `subcmd.kv get key` and `subcmd.kv panic`.
 //! Redis passes the container and subcommand names as the first two
-//! arguments. Containers need Redis 7.0 or later.
+//! arguments. Containers need Redis 7.0 or later; this example's ACL
+//! categories need 7.2.
 use redis_module::{
     CommandBuilder, Context, KeyRange, NextArg, RedisResult, RedisString, redis_command,
     redis_module,
@@ -39,7 +40,6 @@ redis_module! {
     commands: [
         CommandBuilder::container("subcmd.kv")
             .summary("Reads and writes string keys")
-            .arity(-2)
             .subcommand(
                 redis_command!("set", set)
                     .write()

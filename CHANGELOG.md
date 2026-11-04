@@ -17,10 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   handling of a top-level command, and its handler receives the container and
   child names as its first two arguments. `.summary(text)` and `.arity(n)` set
   what `COMMAND DOCS` and `COMMAND INFO` report on any builder definition.
-  Containers need Redis 7.0 or later; registration refuses a container before
-  7.0, with keys, or with an arity that accepts a call without a subcommand,
-  and refuses a child that is a container, has children, or has an empty name
-  or one containing `|`. See `examples/subcommands.rs`.
+  Containers, summaries and arities need Redis 7.0 or later. Registration
+  checks a container and all its children before creating anything, and
+  refuses a container before 7.0, without subcommands, with keys, with ACL
+  categories (Redis grants them to every subcommand), or with an arity that
+  accepts a call without a subcommand. It refuses a child that is a container,
+  has children, repeats another child's name ignoring case, has an empty name
+  or one containing `|`, or has an arity of 1. See `examples/subcommands.rs`.
 
 ### Fixed
 
