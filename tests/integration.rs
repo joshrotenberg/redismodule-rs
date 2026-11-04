@@ -5330,6 +5330,99 @@ fn test_configuration() -> Result<()> {
     Ok(())
 }
 
+/// The `module_config_get` and `module_config_set` wrappers need the same
+/// permissions as CONFIG: they are in `@admin` and `@dangerous`, scripts
+/// cannot call them, and the call checks the user's CONFIG access. Runs on
+/// Redis 7.2 and later, which set module command categories.
+#[test]
+fn test_module_config_wrappers_require_config_permissions() -> Result<()> {
+    let mut con = TestConnection::new("configuration");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version = redis_module::Context::version_from_info(RedisValue::BulkString(info))?;
+    if (version.major, version.minor) < (7, 2) {
+        return Ok(());
+    }
+
+    // A user granted only @admin, or only @dangerous, can use the wrappers:
+    // both categories include CONFIG, and the wrappers are in both. (ACL CAT
+    // lists module commands only from Redis 8.0.)
+    for category in ["+@admin", "+@dangerous"] {
+        let user = format!("only{category}");
+        redis::cmd("ACL")
+            .arg(&[
+                "SETUSER",
+                user.as_str(),
+                "on",
+                "nopass",
+                "~*",
+                "-@all",
+                category,
+            ])
+            .query::<()>(&mut con)?;
+        let mut user_con = con.connection()?;
+        redis::cmd("AUTH")
+            .arg(&[user.as_str(), "unused"])
+            .query::<()>(&mut user_con)?;
+        let value: Vec<String> = redis::cmd("configuration.config_get")
+            .arg("i64")
+            .query(&mut user_con)?;
+        assert_eq!(value, ["configuration.i64", "10"], "{user}");
+    }
+
+    let value: Vec<String> = redis::cmd("configuration.config_get")
+        .arg("i64")
+        .query(&mut con)?;
+    assert_eq!(value, ["configuration.i64", "10"]);
+    redis::cmd("configuration.config_set")
+        .arg(&["i64", "20"])
+        .query::<()>(&mut con)?;
+    let value: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.i64"])
+        .query(&mut con)?;
+    assert_eq!(value[1], "20");
+
+    for (user, rules) in [
+        ("no-admin", &["+@all", "-@admin", "-@dangerous"][..]),
+        // Allowed the wrappers by name but not CONFIG.
+        (
+            "wrappers-only",
+            &["+configuration.config_get", "+configuration.config_set"],
+        ),
+    ] {
+        redis::cmd("ACL")
+            .arg(&["SETUSER", user, "on", "nopass", "~*"])
+            .arg(rules)
+            .query::<()>(&mut con)?;
+        let mut user_con = con.connection()?;
+        redis::cmd("AUTH")
+            .arg(&[user, "unused"])
+            .query::<()>(&mut user_con)?;
+        for (command, args) in [
+            ("configuration.config_get", &["i64"][..]),
+            ("configuration.config_set", &["i64", "30"]),
+        ] {
+            let error = redis::cmd(command)
+                .arg(args)
+                .query::<Value>(&mut user_con)
+                .expect_err("a user without CONFIG permission used a wrapper");
+            assert_eq!(error.code(), Some("NOPERM"), "{user} {command}: {error}");
+        }
+    }
+
+    let error = redis::cmd("EVAL")
+        .arg("return redis.call('configuration.config_set', 'i64', '40')")
+        .arg(0)
+        .query::<Value>(&mut con)
+        .expect_err("a script called the wrapper");
+    assert!(error.to_string().contains("script"), "{error}");
+
+    let value: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.i64"])
+        .query(&mut con)?;
+    assert_eq!(value[1], "20", "no refused call changed the value");
+    Ok(())
+}
+
 #[test]
 fn test_string_configuration_getter_releases_replies() -> Result<()> {
     let mut con = TestConnection::new("configuration_getter");
@@ -7291,14 +7384,30 @@ fn test_defrag() -> Result<()> {
         .query::<()>(&mut con)
         .with_context(|| "failed to run 'config set active-defrag-cycle-min 99'")?;
 
-    // enable active defrag
-    if redis::cmd("config")
+    // The designated jemalloc CI job must exercise defrag rather than skip.
+    let required = std::env::var_os("TEST_REDIS_REQUIRE_DEFRAG").is_some();
+    if let Err(error) = redis::cmd("config")
         .arg(&["set", "activedefrag", "yes"])
         .query::<String>(&mut con)
-        .is_err()
     {
-        // Server the does not support active defrag, avoid failing the test.
+        if required {
+            return Err(error.into());
+        }
+        eprintln!("Skipping active defrag on a server without support: {error}");
         return Ok(());
+    }
+
+    // Leave holes in jemalloc and retain native values for the per-key hook.
+    for index in 0..256 {
+        redis::cmd("alloc.set")
+            .arg(format!("defrag:{index}"))
+            .arg(4096)
+            .query::<i64>(&mut con)?;
+    }
+    for index in (0..256).step_by(2) {
+        redis::cmd("DEL")
+            .arg(format!("defrag:{index}"))
+            .query::<i64>(&mut con)?;
     }
 
     let start = SystemTime::now();
@@ -7309,16 +7418,21 @@ fn test_defrag() -> Result<()> {
         let num_defrag_globals = res.get("num_defrag_globals").ok_or_else(|| {
             anyhow::Error::msg("Failed getting 'num_defrag_globals' value from result")
         })?;
-        // Wait till we will get at least 2 defrag cycles.
-        // We are looking at num_defrag_globals because this is supported by all Redis versions
-        // that supports defrag.
-        if *num_defrag_globals > 2 {
+        let keys = res.get("num_keys_defrag").copied().unwrap_or(0);
+        let began = res.get("num_defrag_start").copied().unwrap_or(0);
+        let ended = res.get("num_defrag_end").copied().unwrap_or(0);
+        // Redis 6.2+ has the global hook; start/end hooks need Redis 8.0+.
+        // The required CI server supplies all four callbacks.
+        if *num_defrag_globals > 2 && keys > 0 && (!required || (began > 0 && ended > 0)) {
+            println!("Observed native defrag callbacks: {res:?}");
             break;
         }
-        let duration = SystemTime::now().duration_since(start)?;
-        if duration > Duration::from_secs(30) {
-            return Err(anyhow::Error::msg("Failed waiting for defrag cycle"));
+        if start.elapsed()? > Duration::from_secs(30) {
+            return Err(anyhow::anyhow!(
+                "Timed out waiting for native defrag callbacks: {res:?}"
+            ));
         }
+        std::thread::sleep(Duration::from_millis(10));
     }
 
     Ok(())
