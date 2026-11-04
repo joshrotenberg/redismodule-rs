@@ -4107,6 +4107,43 @@ fn test_key_scan_callback_refuses_keyspace_changes() -> Result<()> {
     Ok(())
 }
 
+/// `to_raw_parts` re-opens a closed handle before handing the key over, and a
+/// handle re-opens after `yield_now`.
+#[test]
+fn test_key_handles_reopen_for_raw_parts_and_after_yield() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("SET").arg(&["k", "old"]).query::<()>(&mut con)?;
+    let read: String = redis::cmd("stale.raw_parts_after_call")
+        .arg(&["k", "new"])
+        .query(&mut con)?;
+    assert_eq!(read, "new");
+    let read: String = redis::cmd("stale.yield_then_read")
+        .arg("k")
+        .query(&mut con)?;
+    assert_eq!(read, "new");
+    Ok(())
+}
+
+/// A `new` keyspace subscriber that calls while a handle's write is still
+/// creating the key closes the thread's other keys, but not the one Redis is
+/// writing through.
+#[test]
+fn test_subscriber_call_leaves_the_key_mid_write_open() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let reply: (i64, String, String) = redis::cmd("stale.create_with_subscriber")
+        .arg(&["created:k", "value"])
+        .query(&mut con)?;
+    assert_eq!(reply, (1, "string".into(), "string".into()));
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("created:k")
+            .query::<String>(&mut con)?,
+        "value"
+    );
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
 /// The handle a keyspace scan lends its callback panics when used after a
 /// change, since the SDK cannot close and re-open a key Redis owns.
 #[test]

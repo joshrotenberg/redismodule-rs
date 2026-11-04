@@ -1525,8 +1525,8 @@ mod expiration_tests {
 #[cfg(test)]
 mod pointer_loan_tests {
     use super::*;
-    use std::ptr;
     use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::ptr;
 
     #[test]
     fn borrowed_pointers_obey_the_scoped_key_loan_guard() {

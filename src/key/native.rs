@@ -5,10 +5,13 @@
 //! An open native key caches the value Redis looked up when it opened.
 //! Anything that deletes, replaces or moves that value while the key stays
 //! open leaves the key pointing at freed memory, and closing it then reads that
-//! memory too: `moduleCloseKey` reads `key->value->type`. So before such an
+//! memory too: from Redis 6.2, `moduleCloseKey` reads `key->value->type`. So
+//! before such an
 //! operation the SDK closes every key it opened on the thread, while each value
 //! is still valid, and a closed key re-opens, with the same name, mode, flags
-//! and database, the next time its handle is used. The operations are
+//! and database, the next time its handle is used. Re-opening has an open's
+//! effects: it can raise `keymiss` and `expired` notifications and touch the
+//! key's statistics, LRU and LFU, as the flags allow. The operations are
 //! [`keyspace_will_change`]'s callers: calls, `yield_now`, keyspace
 //! notifications, keyspace scans, and string DMA, writes, deletes, pops and
 //! trims through a handle.
@@ -48,12 +51,17 @@ const STALE_RAW: &str =
 const UNSEEN: u64 = u64::MAX;
 
 /// Prepares this thread for an operation that can delete, replace or move key
-/// values: closes every key the SDK opened here and has not closed, while each
-/// value is still valid, except `acting`, the key performing the operation,
-/// whose own native key Redis keeps current, and keys in the middle of their
-/// own native call. A key mid-call can only be reached from a callback Redis
-/// raises during that call, such as the `new` keyspace event of a write that
-/// creates the key, and Redis refuses writes from such callbacks.
+/// values: closes the keys the SDK opened here and has not closed, while each
+/// value is still valid. With `acting`, a key changing its own value, only the
+/// thread's other keys with the same name and database close, since that is
+/// the only value the operation can free; without, every key closes.
+///
+/// A key in the middle of its own native call stays open: Redis is still
+/// using it, and closing it would free the native key under that call. Only a
+/// callback Redis raises during the call can reach it, such as the `new`
+/// keyspace event of a write that creates the key. Redis warns notification
+/// subscribers not to write, without refusing it; a subscriber that changes
+/// the key a call is creating leaves Redis itself on a freed value.
 ///
 /// # Errors
 ///
@@ -63,20 +71,64 @@ pub(crate) fn keyspace_will_change(acting: Option<&NativeKey>) -> Result<(), Red
         return Err(RedisError::Str(FROZEN_ERROR));
     }
     CHANGES.set(CHANGES.get().wrapping_add(1));
-    let acting = acting
-        .and_then(NativeKey::entry)
-        .map_or(ptr::null(), ptr::from_ref);
-    let mut next = OPEN_KEYS.get();
-    while !next.is_null() {
-        // SAFETY: an entry unlinks itself before it is freed, and entries are
-        // only reached on their own thread.
-        let entry = unsafe { &*next };
-        next = entry.next.get();
-        if !ptr::eq(entry, acting) && entry.busy.get() == 0 {
+    let acting = acting.and_then(NativeKey::entry);
+    each_entry(|entry| {
+        let affected = match acting {
+            Some(acting) => {
+                !ptr::eq(entry, acting)
+                    && entry.db == acting.db
+                    && entry.key_hash == acting.key_hash
+            }
+            None => true,
+        };
+        if affected && entry.busy.get() == 0 {
             entry.close();
         }
-    }
+    });
     Ok(())
+}
+
+/// Calls `f` with each of this thread's registered keys.
+fn each_entry(mut f: impl FnMut(&Entry)) {
+    let mut next = OPEN_KEYS.get();
+    while !next.is_null() {
+        // SAFETY: an entry unlinks itself before it is freed, closing one
+        // raises no callback that could unlink another, and entries are only
+        // reached on their own thread.
+        let entry = unsafe { &*next };
+        next = entry.next.get();
+        f(entry);
+    }
+}
+
+/// Closes, before a key opens or re-opens, the registered keys opened with
+/// `ACCESS_EXPIRED` (Redis 8.0+): they may hold an expired value that a plain
+/// open of the same key deletes.
+fn close_expired_access(except: Option<&Entry>) {
+    let flag = super::KeyFlags::ACCESS_EXPIRED.bits();
+    each_entry(|entry| {
+        if entry.flags & flag != 0
+            && !except.is_some_and(|except| ptr::eq(entry, except))
+            && entry.busy.get() == 0
+        {
+            entry.close();
+        }
+    });
+}
+
+/// FNV-1a over a key name: registered keys compare it, with the database, to
+/// tell which keys a change to one key can affect. A collision only closes an
+/// extra key.
+fn key_hash(name: *mut raw::RedisModuleString) -> u64 {
+    let mut length = 0;
+    // SAFETY: name is a live Redis string; the bytes are read immediately.
+    let bytes = unsafe {
+        let data = crate::__required_api!(RedisModule_StringPtrLen)(name, &mut length);
+        std::slice::from_raw_parts(data.cast::<u8>(), length)
+    };
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+    })
 }
 
 /// Refuses keyspace changes on this thread until dropped, even when the code
@@ -115,6 +167,7 @@ struct Entry {
     mode: c_int,
     flags: c_int,
     db: c_int,
+    key_hash: u64,
     prev: Cell<*const Entry>,
     next: Cell<*const Entry>,
 }
@@ -171,6 +224,7 @@ impl Entry {
 
     /// Re-opens a closed key in the database it was opened in.
     fn reopen(&self) {
+        close_expired_access(Some(self));
         let name = self.name.take().expect("a closed key keeps its name");
         let selected = unsafe { crate::__required_api!(RedisModule_GetSelectedDb)(self.ctx) };
         let select = unsafe { crate::__required_api!(RedisModule_SelectDb) };
@@ -235,6 +289,8 @@ impl NativeKey {
         flags: c_int,
     ) -> Self {
         let mode_bits = mode.bits();
+        close_expired_access(None);
+        let key_hash = key_hash(name);
         let inner = raw::open_key_with_flags(ctx, name, mode, flags);
         let db = unsafe { crate::__required_api!(RedisModule_GetSelectedDb)(ctx) };
         // A missing key opened for reading has no native key to ask its name.
@@ -253,6 +309,7 @@ impl NativeKey {
             mode: mode_bits,
             flags,
             db,
+            key_hash,
             prev: Cell::new(ptr::null()),
             next: Cell::new(ptr::null()),
         })));
@@ -302,6 +359,8 @@ impl NativeKey {
         }
         match &self.0 {
             State::Opened(_) => unreachable!(),
+            // A missing key has nothing that can be stale.
+            State::Raw { inner, .. } if inner.is_null() => ptr::null_mut(),
             State::Raw { inner, seen } => {
                 let changes = CHANGES.get();
                 if seen.get() == UNSEEN {

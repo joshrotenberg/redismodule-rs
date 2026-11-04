@@ -3,10 +3,17 @@
 //! uses the first handle again. The SDK closes open keys before each change
 //! and re-opens them on their next use, so every handle sees the key as a
 //! fresh open would, instead of the value Redis freed.
+use std::sync::atomic::{AtomicI64, Ordering};
+
+use redis_module::key::RedisKey;
 use redis_module::raw::KeyType;
 use redis_module::{
-    Context, KeysCursor, NextArg, RedisResult, RedisString, RedisValue, ScanKeyCursor, redis_module,
+    Context, KeysCursor, NextArg, NotifyEvent, RedisResult, RedisString, RedisValue, ScanKeyCursor,
+    YieldMode, redis_module,
 };
+
+/// Calls the `new` subscriber made for keys named `created:*`.
+static NEW_CALLS: AtomicI64 = AtomicI64::new(0);
 
 fn key_type_name(key_type: KeyType) -> &'static str {
     match key_type {
@@ -166,6 +173,63 @@ fn keys_scan_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok("done".into())
 }
 
+/// `stale.raw_parts_after_call key value`: opens `key`, sets it through a
+/// call, and hands the handle over with `to_raw_parts`, which re-opens it
+/// first, so the rebuilt handle reads the new value.
+fn raw_parts_after_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let name = args.next_arg()?;
+    let value = args.next_arg()?;
+    args.done()?;
+    let key = ctx.open_key(&name);
+    ctx.call("SET", &[&name, &value])?;
+    let (raw_ctx, raw_key) = key.to_raw_parts();
+    // SAFETY: the parts come from to_raw_parts on this command's context, and
+    // nothing changes the key before the rebuilt handle closes it.
+    let key = unsafe { RedisKey::from_raw_parts(raw_ctx, raw_key) };
+    Ok(read_reply(key.read()?))
+}
+
+/// `stale.yield_then_read key`: opens `key`, yields to Redis, and reads it.
+fn yield_then_read(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let name = args.next_arg()?;
+    args.done()?;
+    let key = ctx.open_key(&name);
+    ctx.yield_now(YieldMode::Events, None)?;
+    Ok(read_reply(key.read()?))
+}
+
+/// `stale.create_with_subscriber key value`: writes a missing key through a
+/// handle, which raises the `new` event while Redis is still creating it; the
+/// subscriber makes a call, which closes the thread's other open keys but not
+/// the one mid-write. Replies with the subscriber's calls and both handles'
+/// types.
+fn create_with_subscriber(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let name = args.next_arg()?;
+    let value = args.next_string()?;
+    args.done()?;
+    let before = NEW_CALLS.load(Ordering::SeqCst);
+    let other = ctx.open_key(&name);
+    let key = ctx.open_key_writable(&name);
+    key.write(&value)?;
+    Ok(RedisValue::Array(vec![
+        (NEW_CALLS.load(Ordering::SeqCst) - before).into(),
+        key_type_name(key.key_type()).into(),
+        key_type_name(other.key_type()).into(),
+    ]))
+}
+
+fn on_new(ctx: &redis_module::EventContext, _: NotifyEvent, _: &str, key: &[u8]) {
+    let Ok(name) = std::str::from_utf8(key) else {
+        return;
+    };
+    if name.starts_with("created:") && ctx.call("EXISTS", &[name]).is_ok() {
+        NEW_CALLS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 //////////////////////////////////////////////////////
 
 redis_module! {
@@ -182,5 +246,11 @@ redis_module! {
         ["stale.stream_call", stream_call, "readonly", 1, 1, 1, ""],
         ["stale.scan_del", scan_del, "write", 1, 1, 1, ""],
         ["stale.keys_scan_call", keys_scan_call, "write", 1, 1, 1, ""],
+        ["stale.raw_parts_after_call", raw_parts_after_call, "write", 1, 1, 1, ""],
+        ["stale.yield_then_read", yield_then_read, "readonly", 1, 1, 1, ""],
+        ["stale.create_with_subscriber", create_with_subscriber, "write", 1, 1, 1, ""],
+    ],
+    event_handlers: [
+        [@NEW: on_new],
     ],
 }
