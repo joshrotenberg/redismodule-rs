@@ -7733,6 +7733,13 @@ fn test_key_blocking_panics_no_reply_and_timeouts_finish_once() -> Result<()> {
     client.ping()?;
     drops += 1;
     key_blocking_live(&mut con, 0, drops)?;
+    // The client-identity probe's owned username is released through its
+    // producer context, removing its automatic-memory entry before return.
+    client.send(redis::cmd("keyblock.wait").arg((10, 1, "auto-memory", "keyblock:auto-memory")))?;
+    assert_eq!(client.read()?, Value::Nil);
+    client.ping()?;
+    drops += 1;
+    key_blocking_live(&mut con, 0, drops)?;
     for timeout in [-1, i64::MAX, i64::MAX - i64::MAX / 1000 + 1] {
         let error = redis::cmd("keyblock.wait")
             .arg((timeout, 1, "normal", "keyblock:bad"))
@@ -7883,6 +7890,57 @@ fn test_key_blocking_real_client_during_yielded_load_is_refused() -> Result<()> 
         .arg(("keyblock:load-yield", "after failed load"))
         .query::<usize>(&mut con)
         .with_context(|| format!("after yielded failed load: {:?}", con.server_log()))?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_real_client_during_yielded_unload_is_refused() -> Result<()> {
+    let mut con = TestConnection::with_args("key_blocking", &["yield-unload"]);
+    if redis::cmd("CONFIG")
+        .arg(("SET", "busy-reply-threshold", 1))
+        .query::<String>(&mut con)
+        .is_err()
+    {
+        eprintln!(
+            "Redis lacks Yield client processing; ordinary unload refusal is covered separately"
+        );
+        return Ok(());
+    }
+    let mut unloader = con.connection()?;
+    let mut during_unload = con.connection()?;
+    let unload = std::thread::spawn(move || {
+        redis::cmd("MODULE")
+            .arg(("UNLOAD", "key_blocking"))
+            .query::<String>(&mut unloader)
+    });
+    utils::wait_until(
+        Duration::from_secs(5),
+        "keyblock yielding unload entered",
+        || {
+            Ok(con
+                .server_log()?
+                .contains("keyblock: waiting for a real client during unload"))
+        },
+    )?;
+    let reply = redis::cmd("keyblock.wait")
+        .arg((0, 1, "normal", "keyblock:unload-yield"))
+        .query::<Value>(&mut during_unload);
+    drop(during_unload);
+    assert!(
+        reply
+            .unwrap_err()
+            .to_string()
+            .contains("key blocking requires an active SDK module")
+    );
+    assert_eq!(unload.join().expect("unload thread")?, "OK");
+    assert!(
+        con.server_log()?
+            .contains("keyblock: real client refused while unloading; live=0 drops=1")
+    );
+    redis::cmd("RPUSH")
+        .arg(("keyblock:unload-yield", "after unload"))
+        .query::<usize>(&mut con)?;
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }

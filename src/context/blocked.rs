@@ -512,10 +512,23 @@ impl Context {
         // Exclude all of them, including nested calls during module loading.
         let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
         let client_info = unsafe { crate::__available_api!(RedisModule_GetClientInfoById) };
-        if unsafe { client_info(ptr::null_mut(), client_id(self.ctx)) }
-            != raw::REDISMODULE_OK as c_int
-        {
+        let id = unsafe { client_id(self.ctx) };
+        if unsafe { client_info(ptr::null_mut(), id) } != raw::REDISMODULE_OK as c_int {
             return Ok(KeyBlockingResult::Denied(data.take()));
+        }
+        // Valkey 9.1's info lookup also finds its executing temporary client.
+        // Its username lookup still requires the actual client index. Do not
+        // ask for full info: that path dereferences a fake client's null conn.
+        // Redis 6.0 lacks the username API and its info lookup is index-only.
+        if let Some(user_name) = unsafe { raw::RedisModule_GetClientUserNameById } {
+            let free = unsafe { crate::__available_api!(RedisModule_FreeString) };
+            // This API requires a live producer context for auto-memory.
+            // Free through the same context to remove any auto-memory entry.
+            let user = unsafe { user_name(self.ctx, id) };
+            if user.is_null() {
+                return Ok(KeyBlockingResult::Denied(data.take()));
+            }
+            unsafe { free(self.ctx, user) };
         }
         // An auth/load context can be rejected by native blocking only after
         // it has allocated a handle. Only tracked command invocations are

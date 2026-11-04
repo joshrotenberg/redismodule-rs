@@ -17,11 +17,13 @@ static READY: AtomicI64 = AtomicI64::new(0);
 static TIMEOUTS: AtomicI64 = AtomicI64::new(0);
 static DELETE_FLAG: AtomicBool = AtomicBool::new(false);
 static LOAD_TEST: AtomicBool = AtomicBool::new(false);
+static UNLOAD_TEST: AtomicBool = AtomicBool::new(false);
 static LOAD_ATTEMPT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy)]
 enum Mode {
     Normal,
+    AutoMemory,
     PanicReady,
     PanicTimeout,
     PanicDrop,
@@ -106,6 +108,7 @@ fn wait(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         .ok_or(RedisError::Str("ERR minimum list length must be positive"))?;
     let mode = match args.next_string()?.as_str() {
         "normal" => Mode::Normal,
+        "auto-memory" => Mode::AutoMemory,
         "panic-ready" => Mode::PanicReady,
         "panic-timeout" => Mode::PanicTimeout,
         "panic-drop" => Mode::PanicDrop,
@@ -114,6 +117,11 @@ fn wait(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         _ => return Err(RedisError::Str("ERR unknown waiter mode")),
     };
     let keys: Vec<_> = args.collect();
+    if matches!(mode, Mode::AutoMemory) {
+        // No call replies or raw native owners escape this command context;
+        // the blocked waiter contains only copied Rust bytes.
+        unsafe { ctx.auto_memory() };
+    }
     let waiter = Waiter {
         keys: keys.iter().map(|key| key.as_slice().to_vec()).collect(),
         minimum,
@@ -230,32 +238,51 @@ fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
         }
         return Status::Err;
     }
+    if args.iter().any(|arg| arg.as_slice() == b"yield-unload") {
+        UNLOAD_TEST.store(true, Ordering::SeqCst);
+    }
     if args.iter().any(|arg| arg.as_slice() == b"fail-load-yield") {
-        LOAD_TEST.store(true, Ordering::SeqCst);
-        ctx.log_notice("keyblock: waiting for a real client during load");
-        let started = std::time::Instant::now();
-        while !LOAD_ATTEMPT.load(Ordering::SeqCst)
-            && started.elapsed() < std::time::Duration::from_secs(3)
-        {
-            if ctx.yield_now(YieldMode::Clients, None).is_err() {
-                break;
-            }
-            std::thread::yield_now();
-        }
-        LOAD_TEST.store(false, Ordering::SeqCst);
-        if LIVE.load(Ordering::SeqCst) != 0 {
-            return Status::Ok;
-        }
-        if LOAD_ATTEMPT.load(Ordering::SeqCst) {
-            ctx.log_notice(&format!(
-                "keyblock: real client refused while loading; live={} drops={}",
-                LIVE.load(Ordering::SeqCst),
-                DROPS.load(Ordering::SeqCst)
-            ));
-        }
-        return Status::Err;
+        return if lifecycle_probe(ctx, "load") {
+            Status::Err
+        } else {
+            Status::Ok
+        };
     }
     Status::Ok
+}
+
+fn lifecycle_probe(ctx: &EventContext, phase: &str) -> bool {
+    LOAD_ATTEMPT.store(false, Ordering::SeqCst);
+    LOAD_TEST.store(true, Ordering::SeqCst);
+    ctx.log_notice(&format!(
+        "keyblock: waiting for a real client during {phase}"
+    ));
+    let started = std::time::Instant::now();
+    while !LOAD_ATTEMPT.load(Ordering::SeqCst)
+        && started.elapsed() < std::time::Duration::from_secs(3)
+    {
+        if ctx.yield_now(YieldMode::Clients, None).is_err() {
+            break;
+        }
+        std::thread::yield_now();
+    }
+    LOAD_TEST.store(false, Ordering::SeqCst);
+    if LOAD_ATTEMPT.load(Ordering::SeqCst) {
+        ctx.log_notice(&format!(
+            "keyblock: real client refused while {phase}ing; live={} drops={}",
+            LIVE.load(Ordering::SeqCst),
+            DROPS.load(Ordering::SeqCst)
+        ));
+    }
+    LIVE.load(Ordering::SeqCst) == 0
+}
+
+fn deinit(ctx: &EventContext) -> Status {
+    if !UNLOAD_TEST.load(Ordering::SeqCst) || lifecycle_probe(ctx, "unload") {
+        Status::Ok
+    } else {
+        Status::Err
+    }
 }
 
 // Minimal native control for yielded failed-load command-cache diagnostics.
@@ -286,6 +313,7 @@ redis_module! {
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
     init: init,
+    deinit: deinit,
     commands: [
         redis_command!("keyblock.wait", wait)
             .flags(if unsafe { raw::RedisModule_Yield }.is_some() {
