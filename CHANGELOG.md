@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Breaking:** `Context::key_at_pos` returns `Result<(), RedisError>` and
+  refuses a position that is not an argument position of the running command
+  (#161). Redis checks only that the position is positive and later reads the
+  argument at it, so an off-by-one in a getkeys-api handler read past the
+  arguments in `COMMAND GETKEYS` and cluster routing. The SDK's command
+  callbacks record their context and argument count; from a callback
+  registered without them, use the new `unsafe fn key_at_pos_unchecked`.
+  Outside a keys-position request `key_at_pos` still does nothing.
+
 - **Breaking:** native data types are typed Rust values with SDK-generated
   callbacks (#154, #155). A type implements `native_types::NativeType`
   (`rdb_load` and `rdb_save`; `free` is `Drop`) and is declared as a

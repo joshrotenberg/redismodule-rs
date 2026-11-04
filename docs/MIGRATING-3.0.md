@@ -208,6 +208,29 @@ macro's hidden lifecycle hooks are not a stable custom-loader API. See the
 [upgrade guide](UPGRADING-MODULES.md#sdk-timers-and-unload) for shutdown order.
 Cancellation-on-drop and payload-inspection helpers are not part of this API.
 
+### Key positions are checked
+
+`Context::key_at_pos` returns `Result<(), RedisError>` instead of `()`. It
+refuses a position that is not an argument position of the running command (1
+to the argument count minus one), which Redis would accept and then read past
+the arguments for. Propagate the result in a getkeys-api handler:
+
+```rust,ignore
+if ctx.is_keys_position_request() {
+    for pos in (1..args.len()).step_by(2) {
+        ctx.key_at_pos(pos as i32)?;
+    }
+    return Ok(RedisValue::NoReply);
+}
+```
+
+The SDK checks positions in the command callbacks it generates
+(`redis_module!`, `redis_command!` and `#[command]`); in a keys-position
+request reached through another callback, `key_at_pos` returns an error. A
+command callback registered another way can call
+`unsafe fn key_at_pos_unchecked`, which keeps the old unchecked behavior.
+Outside a keys-position request `key_at_pos` does nothing and returns `Ok`.
+
 ### Direct client blocking returns a result
 
 `Context::block_client()` now returns `Result<BlockedClient, RedisError>`.
