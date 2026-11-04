@@ -567,7 +567,7 @@ api! {[
                 flags = format!("{flags} {}", command_info.enterprise_flags.as_deref().unwrap_or("")).trim().to_owned();
             }
             let name = builder::register_base_command(
-                ctx, command_info.name.as_bytes(), &flags, command_info.callback, None,
+                ctx, command_info.name.as_bytes(), &flags, Some(command_info.callback), None,
             )?;
 
             // Register the extra data of the command

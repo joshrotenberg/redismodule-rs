@@ -430,9 +430,11 @@ impl DetachedContext {
 
     /// Attempts to acquire the Redis lock without waiting.
     ///
-    /// Returns `None` if the lock cannot be acquired immediately. On success,
-    /// returns the same borrowed worker guard as [`Self::lock`]; dropping it
-    /// releases the lock. Workers can check a stop flag between attempts so
+    /// Returns `None` if the lock cannot be acquired immediately or the server
+    /// has no nonblocking-lock API (older Redis 6.0 servers). It never falls
+    /// back to waiting. On success, returns the same borrowed worker guard as
+    /// [`Self::lock`]; dropping it releases the lock. Workers can check a stop
+    /// flag between attempts so
     /// `MODULE UNLOAD` can join them while holding the Redis lock. Stop workers
     /// before unloading the module, as with [`Self::lock`].
     ///
@@ -457,7 +459,8 @@ impl DetachedContext {
         let c = self.ctx.load(Ordering::Acquire);
         assert!(!c.is_null(), "Detached context has not been initialized");
         // Like Lock, TryLock does not read the context in supported servers.
-        let status = unsafe { crate::__required_api!(RedisModule_ThreadSafeContextTryLock)(c) };
+        let try_lock = unsafe { raw::RedisModule_ThreadSafeContextTryLock }?;
+        let status = unsafe { try_lock(c) };
         if raw::Status::from(status) != raw::Status::Ok {
             return None;
         }
@@ -1092,10 +1095,17 @@ impl RuntimeContext {
         fmt: *const c_char,
         args: T,
     ) -> R {
+        let cmd = match CString::new(command) {
+            Ok(command) => command,
+            Err(_) => {
+                return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                    "ERR command name contains a NUL byte".into(),
+                ))));
+            }
+        };
         let mut call_args: StrCallArgs = args.into();
         let final_args = call_args.args_mut();
 
-        let cmd = CString::new(command).unwrap();
         // RedisModule_Call returns null both for a dry run that would succeed
         // and, without the E flag, for a call that failed; errno tells them
         // apart, so clear it first.
@@ -1313,9 +1323,12 @@ impl RuntimeContext {
         unsafe { RedisKeyWritable::open_with_flags(self.ctx, key, flags) }
     }
 
-    /// Replicate command to the replica and AOF.
-    pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) {
-        raw::replicate(self.ctx, command, args);
+    /// Replicate a command to the replica and AOF.
+    ///
+    /// Returns [`Status::Err`](raw::Status::Err) if the command name contains
+    /// NUL or Redis refuses the replication. Arguments remain binary-safe.
+    pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> raw::Status {
+        raw::replicate(self.ctx, command, args)
     }
 
     /// How much memory Redis uses relative to its `maxmemory` setting, through
