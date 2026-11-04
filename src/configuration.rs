@@ -830,10 +830,12 @@ pub fn module_config_get(
         .map(|e| format!("{}.{}", name, e.to_string_lossy()))
         .collect();
     args.insert(0, "get".into());
+    // verify_acl checks the calling user's permission for CONFIG itself.
     let res: CallResult = ctx.call_ext(
         "config",
         &CallOptionsBuilder::new()
             .errors_as_replies()
+            .verify_acl()
             .resp(CallOptionResp::Auto)
             .build(),
         args.iter()
@@ -868,10 +870,12 @@ pub fn module_config_set(
         })
         .collect();
     args.insert(0, "set".into());
+    // verify_acl checks the calling user's permission for CONFIG itself.
     let res: CallResult = ctx.call_ext(
         "config",
         &CallOptionsBuilder::new()
             .errors_as_replies()
+            .verify_acl()
             .resp(CallOptionResp::Auto)
             .build(),
         args.iter()
