@@ -159,6 +159,14 @@ name = "lists"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "shared_api"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "shared_api_user"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "timer"
 crate-type = ["cdylib"]
 
