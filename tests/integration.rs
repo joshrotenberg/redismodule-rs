@@ -10,6 +10,7 @@ use redis::{RedisError, RedisResult, Value, VerbatimFormat};
 use redis_module::RedisValue;
 
 mod configuration_ownership;
+mod correctness_gaps;
 mod utils;
 
 #[test]
@@ -5157,7 +5158,8 @@ fn test_stream_trim_by_id_accepts_zero_and_matches_native_counts() -> Result<()>
                 .arg(&[key, "10-0", mode])
                 .query::<i64>(&mut con)
                 .unwrap_err();
-            assert_eq!(error.detail(), Some("trimming the stream"));
+            assert_eq!(error.code(), Some("ERR"));
+            assert_eq!(error.detail(), Some("Failed trimming the stream"));
         }
         assert_eq!(
             redis::cmd("EXISTS").arg("missing").query::<i64>(&mut con)?,

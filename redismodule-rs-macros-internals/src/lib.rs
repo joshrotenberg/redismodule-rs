@@ -113,7 +113,7 @@ pub fn api(item: TokenStream) -> TokenStream {
         #original_func_vis #new_func_sig {
             #(
                 #[allow(non_snake_case)]
-                let #requested_apis = unsafe{crate::raw::#requested_apis.ok_or(concat!(#requested_apis_str, " does not exists"))?};
+                let #requested_apis = unsafe{crate::raw::#requested_apis.ok_or(concat!("ERR ", #requested_apis_str, " does not exists"))?};
             )*
             let __callback__ = move || -> #inner_return_return_type {
                 #original_func_code

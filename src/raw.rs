@@ -32,7 +32,7 @@ pub fn api_unavailable_error(name: &str) -> RedisError {
     RedisError::String(format!("ERR {name} is not available in this Redis server"))
 }
 
-const GENERIC_ERROR_MESSAGE: &str = "Generic error.";
+const GENERIC_ERROR_MESSAGE: &str = "ERR Generic error.";
 
 bitflags! {
     pub struct KeyMode: c_int {

@@ -183,22 +183,6 @@ pub static MODULE_CONTEXT: DetachedContext = DetachedContext::new();
 )]
 pub type LogLevel = logging::RedisLogLevel;
 
-fn add_trace_info(ctx: &InfoContext) -> RedisResult<()> {
-    const SECTION_NAME: &str = "trace";
-    const FIELD_NAME: &str = "backtrace";
-
-    let current_backtrace = std::backtrace::Backtrace::force_capture();
-    let trace = format!("{current_backtrace:?}");
-
-    ctx.builder()
-        .add_section(SECTION_NAME)
-        .field(FIELD_NAME, trace)?
-        .build_section()?
-        .build_info()?;
-
-    Ok(())
-}
-
 /// A custom INFO handler. Add fields through [`InfoContext::builder`] and
 /// return success, or return an error for the dispatcher to log.
 ///
@@ -211,15 +195,11 @@ pub type InfoHandlerFunctionType = fn(&InfoContext, bool) -> RedisResult<()>;
 /// Default "INFO" command handler for the module.
 ///
 /// This function can be invoked, for example, by sending `INFO modules`
-/// through the RESP protocol.
+/// through the RESP protocol. The dispatcher preserves module callbacks and
+/// their crash-report flag, but does not capture or symbolize a backtrace in
+/// Redis's crash path. Module callbacks remain responsible for that path's
+/// shared-state restrictions; this is not an async-signal-safety guarantee.
 pub fn basic_info_command_handler(ctx: &InfoContext, for_crash_report: bool) {
-    if for_crash_report {
-        if let Err(e) = add_trace_info(ctx) {
-            log::error!("Couldn't send info for the module: {e}");
-            return;
-        }
-    }
-
     INFO_COMMAND_HANDLER_LIST
         .iter()
         .filter_map(|callback| callback(ctx, for_crash_report).err())
@@ -264,5 +244,68 @@ mod clock_tests {
         // No Redis server initializes module API pointers in this test binary.
         // Do not change the shared native pointer to simulate initialization.
         let _ = crate::milliseconds();
+    }
+}
+
+#[cfg(test)]
+mod crash_info_tests {
+    use super::*;
+    use std::ffi::{CStr, c_char, c_int};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static TRACE_REQUESTS: AtomicUsize = AtomicUsize::new(0);
+    static CALLBACK_FLAGS: AtomicUsize = AtomicUsize::new(0);
+
+    #[linkme::distributed_slice(INFO_COMMAND_HANDLER_LIST)]
+    static PROBE: InfoHandlerFunctionType = module_info;
+
+    fn module_info(_: &InfoContext, crash: bool) -> RedisResult<()> {
+        CALLBACK_FLAGS.fetch_or(if crash { 1 } else { 2 }, Ordering::SeqCst);
+        Ok(())
+    }
+
+    unsafe extern "C" fn section(_: *mut raw::RedisModuleInfoCtx, name: *const c_char) -> c_int {
+        if !name.is_null() && unsafe { CStr::from_ptr(name) }.to_bytes() == b"trace" {
+            TRACE_REQUESTS.fetch_add(1, Ordering::SeqCst);
+        }
+        // No fields requested: the dispatcher can avoid every other native API.
+        raw::REDISMODULE_ERR as c_int
+    }
+
+    #[test]
+    fn correctness_crash_info_skips_trace_and_preserves_module_callbacks() {
+        struct Restore(
+            Option<unsafe extern "C" fn(*mut raw::RedisModuleInfoCtx, *const c_char) -> c_int>,
+        );
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                unsafe {
+                    raw::RedisModule_InfoAddSection = self.0;
+                }
+            }
+        }
+        // This unit binary has no Redis INFO calls outside this test. The
+        // opaque output token is understood only by the installed test stub.
+        let _restore = Restore(unsafe { raw::RedisModule_InfoAddSection });
+        unsafe {
+            raw::RedisModule_InfoAddSection = Some(section);
+        }
+        let ctx = InfoContext {
+            ctx: std::ptr::NonNull::<u8>::dangling().as_ptr().cast(),
+        };
+        TRACE_REQUESTS.store(0, Ordering::SeqCst);
+        CALLBACK_FLAGS.store(0, Ordering::SeqCst);
+        basic_info_command_handler(&ctx, true);
+        basic_info_command_handler(&ctx, false);
+        assert_eq!(
+            CALLBACK_FLAGS.load(Ordering::SeqCst),
+            3,
+            "both callback flags forwarded"
+        );
+        assert_eq!(
+            TRACE_REQUESTS.load(Ordering::SeqCst),
+            0,
+            "SDK attempted crash backtrace output"
+        );
     }
 }
