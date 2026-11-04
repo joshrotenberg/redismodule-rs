@@ -100,6 +100,9 @@ fn nested_scopes(ctx: &RuntimeContext, reader: &RedisString) -> Result<Vec<i64>,
     flags.push(permissions(ctx) == baseline);
 
     // Scan callbacks create a fresh runtime wrapper for the native context.
+    // Calls are refused while a keyspace scan lends the callback a key, since
+    // Redis reads the key's value after the callback, so both calls fail
+    // there; the scope still ends with the callback.
     let outer = ctx.scoped_call_user(reader)?;
     let cursor = redis_module::KeysCursor::new();
     let mut visited = false;
@@ -107,10 +110,10 @@ fn nested_scopes(ctx: &RuntimeContext, reader: &RedisString) -> Result<Vec<i64>,
         visited = true;
         callback
             .with_call_user(&other, |callback| {
-                flags.push(permissions(callback) == other_permissions);
+                flags.push(permissions(callback) == [false, false]);
             })
             .unwrap();
-        flags.push(permissions(ctx) == reader_permissions);
+        flags.push(permissions(ctx) == [false, false]);
     }) {}
     flags.push(visited);
     flags.push(permissions(ctx) == reader_permissions);

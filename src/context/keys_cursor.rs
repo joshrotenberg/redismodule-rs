@@ -39,6 +39,14 @@ impl KeysCursor {
         Self { inner_cursor }
     }
 
+    /// Scans the next batch of keys, calling `callback` with each one's name
+    /// and the read-only key Redis lends it. Returns whether keys remain.
+    ///
+    /// The callback cannot change the keyspace: Redis closes the key it lent
+    /// after the callback returns, reading the key's value, so calls,
+    /// `yield_now`, notifications and key writes are refused there, and pops
+    /// and nested keyspace scans panic. Collect what to change and change it
+    /// after `scan` returns.
     pub fn scan<F: FnMut(&RuntimeContext, &RedisString, Option<&RedisKey>)>(
         &self,
         ctx: &RuntimeContext,
