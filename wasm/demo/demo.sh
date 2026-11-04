@@ -41,7 +41,7 @@ if [ -t 1 ]; then
   dim=$(printf '\033[2m')
   plain=$(printf '\033[0m')
 else
-  bold= dim= plain=
+  bold='' dim='' plain=''
 fi
 
 section() {
