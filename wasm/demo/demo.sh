@@ -29,7 +29,12 @@ DEMO_PORT=${DEMO_PORT:-7400}
 DEMO_STEP=${DEMO_STEP:-0}
 DEMO_PROFILE=${DEMO_PROFILE:-debug}
 target=${CARGO_TARGET_DIR:-$root/target}
+case $target in
+  /*) ;;
+  *) target=$root/$target ;;
+esac
 demo=$target/wasm-demo
+server_name=$(basename "$REDIS_SERVER")
 case $DEMO_PROFILE in
   debug) profile_flag= ;;
   release) profile_flag=--release ;;
@@ -72,7 +77,8 @@ die() {
 # Milliseconds since the epoch, for timing the JavaScript load.
 now_ms() {
   if [ -n "${EPOCHREALTIME:-}" ]; then
-    local t=${EPOCHREALTIME/./}
+    # Digits only: the separator follows the locale.
+    local t=${EPOCHREALTIME//[!0-9]/}
     echo $((10#$t / 1000))
   elif command -v perl >/dev/null; then
     perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'
@@ -135,7 +141,8 @@ stop_pid() {
   local pid=$1
   local command
   command=$(ps -p "$pid" -o command= 2>/dev/null) || return 0
-  if case $command in *redis-server*) true ;; *) false ;; esac; then
+  # Only a server, in case the pid now belongs to something else.
+  if case $command in *redis-server* | *"$server_name"*) true ;; *) false ;; esac; then
     kill "$pid" 2>/dev/null || true
     for _ in 1 2 3 4 5 6 7 8 9 10; do
       kill -0 "$pid" 2>/dev/null || return 0
@@ -167,12 +174,18 @@ start_server() {
   "$REDIS_SERVER" --port "$port" --bind 127.0.0.1 --dir "$dir" \
     --logfile "$dir/redis.log" --save '' --appendonly no \
     --enable-debug-command local --busy-reply-threshold 100 \
-    --loadmodule "$module" "$@" >/dev/null 2>&1 &
+    --repl-diskless-sync-delay 0 \
+    --loadmodule "$module" "$@" >>"$dir/stdout.log" 2>&1 &
   pid=$!
   echo "$pid" >"$dir/pid"
+  # The script stops its servers itself; disowned, bash does not report them.
+  disown "$pid" 2>/dev/null || true
   # Redis answers INFO while it still loads an RDB, so wait for loading:0.
   for _ in $(seq 1 200); do
-    kill -0 "$pid" 2>/dev/null || { tail -n 20 "$dir/redis.log" >&2; die "$name did not start"; }
+    if ! kill -0 "$pid" 2>/dev/null; then
+      tail -n 20 "$dir/stdout.log" "$dir/redis.log" >&2 || true
+      die "$name did not start"
+    fi
     # The newline keeps async_loading:0 from matching.
     if reply_has "$name" $'\nloading:0' INFO persistence; then
       note "$name: redis-server on port $port, pid $pid, log $(rel "$dir/redis.log")"
@@ -180,7 +193,7 @@ start_server() {
     fi
     sleep 0.05
   done
-  tail -n 20 "$dir/redis.log" >&2
+  tail -n 20 "$dir/redis.log" >&2 || true
   die "$name did not finish loading"
 }
 
@@ -192,6 +205,16 @@ wait_exit() {
     sleep 0.1
   done
   die "$name did not exit"
+}
+
+# wait_job <pid> <what>: waits up to ten seconds for a background redis-cli.
+wait_job() {
+  for _ in $(seq 1 100); do
+    kill -0 "$1" 2>/dev/null || break
+    sleep 0.1
+  done
+  kill -0 "$1" 2>/dev/null && die "$2 did not return"
+  wait "$1" || true
 }
 
 # Waits until PING on <name> gets -BUSY, for up to ten seconds.
@@ -237,7 +260,7 @@ module=$target/$DEMO_PROFILE/libredis_module_wasm.$ext
 
 note "cargo build $profile_flag -p redis-module-wasm (the first build compiles wasmtime and takes minutes)"
 cargo build --quiet $profile_flag -p redis-module-wasm
-cargo build --quiet -p redis-module-wasm --example componentize
+cargo build --quiet $profile_flag -p redis-module-wasm --example componentize
 [ -x "$target/$DEMO_PROFILE/redis-wasm-compiler" ] || die "the compiler helper was not built next to the module"
 
 if command -v rustup >/dev/null; then
@@ -250,18 +273,21 @@ note "cargo build --release --target wasm32-unknown-unknown (wasm/guests/hello)"
 CARGO_TARGET_DIR=$target/wasm-guests cargo build --quiet --release \
   --target wasm32-unknown-unknown --manifest-path wasm/guests/hello/Cargo.toml
 hello=$demo/hello.wasm
-"$target/debug/examples/componentize" \
+"$target/$DEMO_PROFILE/examples/componentize" \
   "$target/wasm-guests/wasm32-unknown-unknown/release/hello_guest.wasm" "$hello"
 
 js=
 if [ "${DEMO_JS:-1}" != 0 ] && command -v node >/dev/null && command -v npm >/dev/null; then
+  js=$demo/js.wasm
   if [ ! -d wasm/guests/js/node_modules ]; then
     note "npm ci (wasm/guests/js)"
-    npm ci --prefix wasm/guests/js --no-audit --no-fund --silent
+    npm ci --prefix wasm/guests/js --no-audit --no-fund --silent || js=
   fi
-  note "node build.mjs (wasm/guests/js)"
-  js=$demo/js.wasm
-  (cd wasm/guests/js && NODE_NO_WARNINGS=1 node build.mjs "$js")
+  if [ -n "$js" ]; then
+    note "node build.mjs (wasm/guests/js)"
+    (cd wasm/guests/js && NODE_NO_WARNINGS=1 node build.mjs "$js") || js=
+  fi
+  [ -n "$js" ] || note "the JavaScript guest did not build: skipping it"
 else
   note "Node.js not found (or DEMO_JS=0): skipping the JavaScript guest"
 fi
@@ -340,7 +366,7 @@ show primary GET visits
 note "WASM.STATS and WASM.KILL are allow-busy, so they still run"
 show primary WASM.STATS
 show primary WASM.KILL
-wait "$spin" || true
+wait_job "$spin" "the killed WASM.CALL"
 note "the spinning client's reply:"
 cat "$demo/spin.out"
 show primary PING
@@ -419,11 +445,12 @@ if [ -n "$js" ]; then
   show primary WASM.CALL counter 0
   show primary WASM.CALL counter 0
   note "the replica compiles the replicated WASM.LOAD on a thread too"
-  for _ in $(seq 1 600); do
+  for _ in $(seq 1 1200); do
     # The replica's only library is then js, the first line of the list.
     reply_has replica $'js\n' WASM.LIST && break
     sleep 0.05
   done
+  reply_has replica $'js\n' WASM.LIST || die "the replica did not load js within a minute"
   show replica WASM.CALL hello 0 js-on-the-replica
   show replica GET visits
   note "the helper process counters:"
@@ -449,8 +476,8 @@ note "as with Lua, SHUTDOWN NOSAVE is the way out. NOW skips waiting for lagging
 note "Redis checks that wait's timeout in serverCron, which does not run while a function yields"
 printf '%sprimary>%s SHUTDOWN NOSAVE NOW\n' "$bold" "$plain"
 cli primary SHUTDOWN NOSAVE NOW >/dev/null 2>&1 || true
-wait "$spinner" || true
 wait_exit primary
+wait_job "$spinner" "the unkillable WASM.CALL"
 note "primary stopped; logs are in $(rel "$demo")"
 
 section "Done"

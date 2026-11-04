@@ -24,12 +24,13 @@ cannot be killed once it has written. From the repository root:
 wasm/demo/demo.sh
 ```
 
-It needs `redis-server` and `redis-cli` on the `PATH` (or `REDIS_SERVER` and
-`REDIS_CLI`), Rust with the `wasm32-unknown-unknown` target, and Node.js for
-the JavaScript part. It seeds a missing `Cargo.lock` from
-[`ci/locks`](ci/locks), takes free ports from 7400 up, works in
-`target/wasm-demo` and stops its servers when it exits, so it can run again
-at once. `DEMO_STEP=1` waits for Enter before each section, for presenting,
+It needs Redis 7.2 or later, with `redis-server` and `redis-cli` on the
+`PATH` (or `REDIS_SERVER` and `REDIS_CLI`), Rust with the
+`wasm32-unknown-unknown` target, and Node.js for the JavaScript part, which
+`DEMO_JS=0` skips. It seeds the workspace's and `guests/hello`'s `Cargo.lock`
+from [`ci/locks`](ci/locks) when they are missing, takes free ports from 7400
+up (`DEMO_PORT` sets the first), works in `target/wasm-demo` and stops its
+servers when it exits, so it can run again at once. `DEMO_STEP=1` waits for Enter before each section, for presenting,
 and `DEMO_PROFILE=release` builds the module with `--release`, which compiles
 the JavaScript library faster. The first build compiles wasmtime and takes a
 few minutes.
@@ -146,8 +147,10 @@ long Lua script. `WASM.KILL` stops the function, which fails with `ERR function
 command: then `WASM.KILL` replies `UNKILLABLE`, so the function's writes are not
 left half done, and `SHUTDOWN NOSAVE` is the way out. On a primary with
 replicas use `SHUTDOWN NOSAVE NOW`: without `NOW`, Redis waits for lagging
-replicas and checks that wait's timeout only between commands, so it can wait
-for good while a function or a Lua script yields. With no function running,
+replicas, and it rechecks them and the wait's timeout only in `serverCron`,
+which does not run while a function or a Lua script yields, so it waits until
+the function ends. If a `SHUTDOWN NOSAVE` is already waiting, `SHUTDOWN ABORT`
+and then `SHUTDOWN NOSAVE NOW` stops the server. With no function running,
 `WASM.KILL` replies `NOTBUSY`. `WASM.STATS`, like `FUNCTION STATS`, also
 answers while a function runs: it names the running function and how long it
 has run.
