@@ -575,33 +575,42 @@ impl<'a> StrCallArgs<'a> {
     }
 }
 
+/// The context and argument count of the SDK command callback running on this
+/// thread, or a null context outside one.
+type CommandArgs = (*mut raw::RedisModuleCtx, c_int);
+
 thread_local! {
-    /// The argument count of the SDK command callback running on this thread,
-    /// or -1 outside one, for [`Context::key_at_pos`]. A `Cell<c_int>` has no
-    /// destructor, which would keep glibc from unloading the module.
-    static COMMAND_ARGC: std::cell::Cell<c_int> = const { std::cell::Cell::new(-1) };
+    /// The running SDK command callback's context and argument count, for
+    /// [`Context::key_at_pos`]. A `Cell` of a `Copy` pair has no destructor,
+    /// which would keep glibc from unloading the module.
+    static COMMAND_ARGS: std::cell::Cell<CommandArgs> =
+        const { std::cell::Cell::new((ptr::null_mut(), 0)) };
 }
 
-/// Records the running SDK command callback's argument count until dropped,
-/// restoring the previous one for a command that another command called.
-/// Used by the SDK's command callbacks.
+/// Records the running SDK command callback's context and argument count until
+/// dropped, restoring the previous ones for a command that another command
+/// called. Used by the SDK's command callbacks.
 #[doc(hidden)]
 pub struct CommandArgcScope {
-    previous: c_int,
+    previous: CommandArgs,
 }
 
 impl CommandArgcScope {
+    /// # Safety
+    ///
+    /// `ctx` and `argc` must be the context and argument count Redis passed to
+    /// the running command callback, and the scope must end before it returns.
     #[must_use]
-    pub fn begin(argc: c_int) -> Self {
+    pub unsafe fn begin(ctx: *mut raw::RedisModuleCtx, argc: c_int) -> Self {
         Self {
-            previous: COMMAND_ARGC.replace(argc),
+            previous: COMMAND_ARGS.replace((ctx, argc)),
         }
     }
 }
 
 impl Drop for CommandArgcScope {
     fn drop(&mut self) {
-        COMMAND_ARGC.set(self.previous);
+        COMMAND_ARGS.set(self.previous);
     }
 }
 
@@ -670,33 +679,42 @@ impl Context {
 
     /// Reports the argument at `pos` as one of the command's keys, in a
     /// keys-position request (see [`Self::is_keys_position_request`]).
-    /// Position 0 is the command name, so keys start at 1.
+    /// Position 0 is the command name, so keys start at 1. Outside a
+    /// keys-position request it does nothing, as Redis does.
     ///
     /// # Errors
     ///
-    /// Returns an error, without telling Redis, if `pos` is not an argument
-    /// position of the running command (1 to its argument count minus one),
-    /// or if the running callback was not registered through the SDK, which
-    /// records the argument count of the command callbacks it generates.
-    /// Redis checks only that `pos` is positive and later reads the argument
-    /// at it, so a position past the arguments would read past them; from a
-    /// callback registered another way, use [`Self::key_at_pos_unchecked`].
+    /// In a keys-position request, returns an error, without telling Redis, if
+    /// `pos` is not an argument position of the running command (1 to its
+    /// argument count minus one), or if this context is not the one of an SDK
+    /// command callback, which records the context and argument count of the
+    /// command callbacks it generates. Redis checks only that `pos` is positive
+    /// and later reads the argument at it, so a position past the arguments
+    /// would read past them; from a callback registered another way, use
+    /// [`Self::key_at_pos_unchecked`].
     ///
     /// # Panics
     ///
-    /// Will panic if `RedisModule_KeyAtPos` is missing in redismodule.h
+    /// Will panic if `RedisModule_IsKeysPositionRequest` or
+    /// `RedisModule_KeyAtPos` is missing in redismodule.h
     pub fn key_at_pos(&self, pos: i32) -> Result<(), RedisError> {
-        let argc = COMMAND_ARGC.get();
-        if argc < 0 {
+        if !self.is_keys_position_request() {
+            return Ok(());
+        }
+        let (ctx, argc) = COMMAND_ARGS.get();
+        if ctx != self.ctx {
             return Err(RedisError::Str(
                 "ERR key positions can only be checked in an SDK command callback",
             ));
         }
         if pos < 1 || pos >= argc {
-            return Err(RedisError::String(format!(
-                "ERR key position {pos} is not an argument position of the command (1 to {})",
-                argc - 1
-            )));
+            return Err(RedisError::String(match argc {
+                ..=1 => format!("ERR key position {pos}: the command has no arguments"),
+                _ => format!(
+                    "ERR key position {pos} is not an argument position of the command (1 to {})",
+                    argc - 1
+                ),
+            }));
         }
         // SAFETY: pos is an argument position of the running command.
         unsafe { self.key_at_pos_unchecked(pos) };
@@ -2906,5 +2924,32 @@ mod big_number_tests {
         ] {
             assert!(!is_big_number(text), "{text:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod command_args_tests {
+    use super::{COMMAND_ARGS, CommandArgcScope};
+    use std::ptr;
+
+    #[test]
+    fn scopes_nest_and_restore_after_a_panic() {
+        assert!(!std::mem::needs_drop::<std::cell::Cell<super::CommandArgs>>());
+        let outer_ctx = ptr::dangling_mut();
+        let inner_ctx = ptr::dangling_mut::<u64>().cast();
+        // SAFETY: test only; no Redis call reads these values.
+        let outer = unsafe { CommandArgcScope::begin(outer_ctx, 6) };
+        {
+            let _inner = unsafe { CommandArgcScope::begin(inner_ctx, 2) };
+            assert_eq!(COMMAND_ARGS.get(), (inner_ctx, 2));
+        }
+        assert_eq!(COMMAND_ARGS.get(), (outer_ctx, 6));
+        let _ = std::panic::catch_unwind(|| {
+            let _inner = unsafe { CommandArgcScope::begin(inner_ctx, 2) };
+            panic!("command failed");
+        });
+        assert_eq!(COMMAND_ARGS.get(), (outer_ctx, 6));
+        drop(outer);
+        assert_eq!(COMMAND_ARGS.get(), (ptr::null_mut(), 0));
     }
 }

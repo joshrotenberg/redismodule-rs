@@ -18,11 +18,14 @@ only that the position is positive, and Redis then reads the argument at each
 reported position: `COMMAND GETKEYS` replies with `argv[pos + 2]`, and cluster
 routing hashes `argv[pos]`. An off-by-one in a getkeys-api handler read past
 the argument vector (#161); upstream marks it with a TODO. The SDK's command
-callbacks now record the running command's argument count, and
-**Breaking:** `key_at_pos` returns `Result<(), RedisError>`, refusing a
-position outside 1 to the count minus one, or any position outside an SDK
-command callback. `unsafe fn key_at_pos_unchecked` keeps the old behavior for
-callbacks registered another way.
+callbacks now record the running command's context and argument count, and
+**Breaking:** `key_at_pos` returns `Result<(), RedisError>`. In a
+keys-position request it refuses a position outside 1 to the count minus one,
+or any position when its context is not the running SDK command callback's,
+so a hand-written callback nested inside an SDK command does not borrow the
+outer count; outside one it does nothing, as Redis does.
+`unsafe fn key_at_pos_unchecked` keeps the old behavior for callbacks
+registered another way.
 
 ## Event loop lifecycle
 

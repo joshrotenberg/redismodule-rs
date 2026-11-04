@@ -135,7 +135,9 @@ macro_rules! __redis_command_callback {
                     // SAFETY: Redis supplies live argv/count for this callback.
                     let args = unsafe { $crate::decode_args(ctx, argv, argc) };
                     // Lets key_at_pos check positions against the arguments.
-                    let _argc = $crate::__private::CommandArgcScope::begin(argc);
+                    // SAFETY: Redis passed this ctx and argc to this callback,
+                    // and the scope ends inside it.
+                    let _argc = unsafe { $crate::__private::CommandArgcScope::begin(ctx, argc) };
                     let response = $handler(&context, args);
                     let response = $crate::__private::command_reply_after_release(
                         response.map(|value| value.into()),

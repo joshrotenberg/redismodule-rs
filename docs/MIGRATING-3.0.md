@@ -134,9 +134,11 @@ if ctx.is_keys_position_request() {
 ```
 
 The SDK checks positions in the command callbacks it generates
-(`redis_module!`, `redis_command!` and `#[command]`); elsewhere `key_at_pos`
-returns an error. A command callback registered another way can call
+(`redis_module!`, `redis_command!` and `#[command]`); in a keys-position
+request reached through another callback, `key_at_pos` returns an error. A
+command callback registered another way can call
 `unsafe fn key_at_pos_unchecked`, which keeps the old unchecked behavior.
+Outside a keys-position request `key_at_pos` does nothing and returns `Ok`.
 
 ### Direct client blocking returns a result
 
