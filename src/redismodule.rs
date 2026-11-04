@@ -473,6 +473,26 @@ impl RedisString {
         String::from_utf8_lossy(self.as_slice()).into_owned()
     }
 
+    /// Parses an ID with Redis's native `StringToStreamID` parser (Redis 6.2+).
+    ///
+    /// Numeric IDs, incomplete millisecond IDs and the range endpoints `-`
+    /// and `+` follow the running server's parser. Operation markers such as
+    /// XREADGROUP's `>` are handled by their command, not this parser. Bytes
+    /// are passed unchanged, without a UTF-8 or handwritten grammar check.
+    ///
+    /// # Errors
+    /// Returns an `ERR` if the API is unavailable or the native parser refuses
+    /// the input. There is no fallback parser on older servers.
+    pub fn parse_stream_id(&self) -> Result<raw::RedisModuleStreamID, RedisError> {
+        let parse = unsafe { crate::__available_api!(RedisModule_StringToStreamID) };
+        let mut id = raw::RedisModuleStreamID { ms: 0, seq: 0 };
+        if raw::Status::Ok == unsafe { parse(self.as_ptr(), &mut id) }.into() {
+            Ok(id)
+        } else {
+            Err(RedisError::Str("ERR invalid stream ID"))
+        }
+    }
+
     pub fn parse_unsigned_integer(&self) -> Result<u64, RedisError> {
         let val = self.parse_integer()?;
         u64::try_from(val)
