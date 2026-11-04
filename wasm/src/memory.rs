@@ -113,6 +113,7 @@ fn info(ctx: &InfoContext, _for_crash_report: bool) -> RedisResult<()> {
     // the library sizes are left out rather than waited for.
     let sizes = crate::try_with_host(Host::sizes).unwrap_or_default();
     let count = |n: usize| i64::try_from(n).unwrap_or(i64::MAX);
+    let compiler = crate::compiler::diagnostics();
     ctx.builder()
         .add_section("")
         .field("libraries", count(sizes.libraries))?
@@ -126,6 +127,14 @@ fn info(ctx: &InfoContext, _for_crash_report: bool) -> RedisResult<()> {
             count(INSTANCE_MEMORY.load(Ordering::Relaxed)),
         )?
         .field("max_memory", MAX_MEMORY.load(Ordering::Relaxed))?
+        .field("compiler_active", compiler[0])?
+        .field("compiler_queued", compiler[1])?
+        .field("compiler_completed", compiler[2])?
+        .field("compiler_failed", compiler[3])?
+        .field("compiler_baseline_vm", compiler[4])?
+        .field("compiler_ceiling_vm", compiler[5])?
+        .field("compiler_cpu_ms", compiler[6])?
+        .field("compiler_uncertain", compiler[7])?
         .build_section()?
         .build_info()?;
     Ok(())

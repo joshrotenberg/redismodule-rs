@@ -140,14 +140,61 @@ wasm_instance_memory_bytes            their linear memory
 wasm_max_memory                       the limit
 ```
 
-The opposite holds for the runtime's own heap. Compilation and wasmtime's caches
-allocate through the module's global allocator, which is Redis's, so
-`used_memory` counts them. Loading the 11 MB JavaScript component raised
-`used_memory` by about 650 to 800 MiB while it compiled (Redis 8.10.2 on macOS),
-enough for `maxmemory` to refuse other clients' writes during the load, and
-about 35 to 65 MiB stayed counted afterwards as compiler caches that later loads
-reuse. [TRACKING.md](TRACKING.md) has the measurements and the open policy
-question (issue 68).
+The runtime's lasting heap, including metadata, stores and saved component
+bytes, uses Redis's allocator and remains counted in `used_memory`.
+Compilation runs in a System-allocated compiler process owned by a small
+bounded launcher, with address-space and CPU limits and a wall timeout. Only
+one compiler runs at a time; each operation owns these two processes. The
+launcher waits for its own compiler child, since Redis's global child reaper
+can otherwise consume an unrelated helper's exit status during BGSAVE or an
+AOF rewrite. A private live challenge opens the compiler gate only after the
+host arms a stable process-exit watch. It does not use Redis allocation for compiler
+scratch. Host and helper share the exact Wasmtime build/configuration identity;
+only complete, verified output from the owned helper can be deserialized.
+There is no serialized-code import or compiler artifact cache API.
+
+Install `redis-wasm-compiler` next to the module library. `cargo build -p
+redis-module-wasm` builds both. Alternatively set the immutable
+`wasm.compiler-path` to an absolute path to the trusted helper from the same
+build. This executable is native code with the server's OS permissions; it
+must come from your module deployment, not from a library caller. A missing,
+incompatible, failed or timed-out helper fails the load without replacing an
+existing library.
+
+Compiler settings are immutable module configurations:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `wasm.compiler-memory` | 2 GiB | Additional virtual address space above the fresh helper's trusted startup VM |
+| `wasm.compiler-cpu-seconds` | 60 | Process CPU hard limit |
+| `wasm.compiler-wall-seconds` | 120 | Pipe/compile wall deadline |
+| `wasm.compiler-queue` | 8 | Waiting operations, in addition to the one active operation |
+| `wasm.compiler-path` | empty | Empty selects the sibling executable; an override must be absolute |
+
+Admission occurs before spooling source or starting an operation worker. A full
+queue fails immediately. A restore or RDB batch owns one reservation and
+compiles its components sequentially through the same path. Individual source
+components are limited to 64 MiB and serialized artifacts to 512 MiB. These are
+compiler bounds, not aggregate library/code/instance budgets; those are #132.
+
+On macOS, the startup VM includes a large shared-cache reservation, so the hard
+address-space ceiling is startup VM plus the configured allowance. The helper
+disables NanoZone before startup and sets its limit before reading component
+bytes or constructing the compiler. The reported ceiling is a virtual-memory
+limit, not an RSS claim. `INFO wasm` adds `compiler_active`, `compiler_queued`,
+`compiler_completed`, `compiler_failed`, `compiler_baseline_vm`,
+`compiler_ceiling_vm`, `compiler_cpu_ms` and `compiler_uncertain`; failures also report the configured
+resource limits and helper status in the server log. [TRACKING.md](TRACKING.md)
+retains the earlier in-process measurements and policy assessment.
+
+Cancellation is an explicit private message, rather than relying on pipe EOF:
+Redis fork children can inherit open descriptors. Normal timeouts cancel and
+reap the compiler through its launcher. If an external actor stops the entire
+compiler process and kills its launcher, the stopped watchdog cannot run.
+Unproven cleanup therefore retains the admission, refuses new compiler work
+and refuses module unload. Existing libraries and the epoch ticker remain
+available. A later admission or unload request retries the exit proof and
+clears quarantine only after the processes are known to have exited.
 
 As for a Lua function without flags, a function does not start while Redis is
 over `maxmemory`, and the commands it calls follow `deny-oom`.
@@ -236,9 +283,10 @@ componentize-js 0.18 cannot use. `build.mjs` disables the WASI features the
 library does not use, so the component imports only the host's `redis`
 interface.
 
-The component is 11 MB, and loading it compiles all of it: one to two seconds
-in a release build of the module (11.7 s without parallel compilation). A Rust
-library of the same functions is 23 KB and loads in milliseconds.
+The component is 11 MB, and loading it compiles all of it. Earlier in-process
+load timings in [TRACKING.md](TRACKING.md) predate the bounded helper and do
+not establish its end-to-end cost. A Rust library of the same functions is
+23 KB.
 
 ## Benchmark
 

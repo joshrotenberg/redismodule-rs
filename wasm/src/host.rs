@@ -35,16 +35,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, TryLockError};
 
-use anyhow::{Context as _, bail};
+use anyhow::bail;
 use redis_module::logging::RedisLogLevel;
 use redis_module::{
     CallOptionResp, CallOptions, CallOptionsBuilder, CallResult, Context, RedisString,
 };
-use wasmtime::component::{Component, HasSelf, Linker};
-use wasmtime::{Config, Engine, Store};
+use wasmtime::component::{HasSelf, Linker};
+use wasmtime::{Engine, Store};
 
 use crate::busy::{self, Running, Ticker};
 use crate::code::{Code, Now};
+use crate::compiler::{Reservation, Supervisor};
+use crate::compiler_source::Source;
 use crate::flags::{self, Mode};
 use crate::memory::{LibrarySizes, Live, Memory};
 use crate::reply::{flat_call_result, push_call_result};
@@ -283,7 +285,7 @@ impl redis_module_wasm::host::redis::Host for CallState {
 /// instance its calls reuse.
 struct LoadedLibrary {
     code: Arc<Code>,
-    component: Vec<u8>,
+    component: Arc<Vec<u8>>,
     functions: Vec<Function>,
     kept: KeptInstance,
 }
@@ -345,39 +347,34 @@ pub(crate) struct Host {
     libraries: BTreeMap<String, LoadedLibrary>,
     /// Which library provides each function, and the function's flags.
     functions: BTreeMap<String, (String, FunctionFlags)>,
+    compiler: Arc<Supervisor>,
 }
 
 impl Host {
     pub(crate) fn new() -> anyhow::Result<Self> {
-        let mut config = Config::new();
-        config.wasm_component_model(true);
-        // Redis installs its own SIGSEGV handler to write crash reports, so
-        // keep wasmtime from installing signal handlers: guests get explicit
-        // bounds checks instead.
-        config.signals_based_traps(false);
-        // Long-running guests yield at each epoch; see busy.rs.
-        config.epoch_interruption(true);
-        // Keep trap errors to one line: they become error replies.
-        config.wasm_backtrace(false);
-        let engine = Engine::new(&config)?;
-        let ticker = Ticker::start(engine.clone())?;
+        let engine = crate::compiler_engine::engine()?;
         let mut linker = Linker::new(&engine);
         Library::add_to_linker::<CallState, HasSelf<CallState>>(&mut linker, |state| state)?;
+        let compiler = Supervisor::new()?;
+        // Start the owned thread only after all other fallible setup succeeds.
+        let ticker = Ticker::start(engine.clone())?;
         Ok(Self {
             engine,
             ticker,
             linker,
             libraries: BTreeMap::new(),
             functions: BTreeMap::new(),
+            compiler,
         })
     }
 
     /// What compiling a component needs, to compile it on another thread.
-    pub(crate) fn compiler(&self) -> Compiler {
-        Compiler {
+    pub(crate) fn compiler(&self) -> anyhow::Result<Compiler> {
+        Ok(Compiler {
             engine: self.engine.clone(),
             linker: self.linker.clone(),
-        }
+            reservation: self.compiler.reserve()?,
+        })
     }
 
     /// Fails if library `name` exists and `replace` is not set.
@@ -435,7 +432,7 @@ impl Host {
     /// two of the libraries, nor in a library that stays.
     pub(crate) fn restore_all(
         &mut self,
-        staged: Vec<Staged>,
+        mut staged: Vec<Staged>,
         policy: Policy,
     ) -> anyhow::Result<()> {
         let names: BTreeSet<&str> = staged.iter().map(|s| s.name.as_str()).collect();
@@ -472,6 +469,12 @@ impl Host {
             }
         }
 
+        // Every guest has finished staging. Materialize lasting Redis-owned
+        // source bytes before the atomic mutation, with no subsequent guest,
+        // Redis command or yield until this callback returns and argv is freed.
+        for library in &mut staged {
+            library.compiled.component.materialize()?;
+        }
         if policy == Policy::Flush {
             self.clear();
         }
@@ -491,7 +494,7 @@ impl Host {
     pub(crate) fn restore_compiling(
         &mut self,
         name: &str,
-        component: Vec<u8>,
+        component: Arc<Vec<u8>>,
         functions: Vec<Function>,
     ) -> anyhow::Result<Arc<Code>> {
         let code = Arc::new(Code::compiling());
@@ -503,7 +506,7 @@ impl Host {
         self.insert(
             &staged.name,
             Arc::new(Code::ready(staged.compiled.pre)),
-            staged.compiled.component,
+            staged.compiled.component.into_saved()?,
             staged.functions,
             Some(staged.instance),
         )
@@ -513,7 +516,7 @@ impl Host {
         &mut self,
         name: &str,
         code: Arc<Code>,
-        component: Vec<u8>,
+        component: Arc<Vec<u8>>,
         functions: Vec<Function>,
         instance: Option<Instance>,
     ) -> anyhow::Result<()> {
@@ -546,7 +549,11 @@ impl Host {
         Ok(())
     }
 
-    /// Stops the epoch thread, so the module can be unloaded.
+    pub(crate) fn stop_compiler(&self) -> anyhow::Result<()> {
+        self.compiler.shutdown()
+    }
+
+    /// Only after compiler cleanup succeeds; a refused unload retains Host/ticker.
     pub(crate) fn shutdown(self) {
         self.ticker.stop();
     }
@@ -647,26 +654,33 @@ pub(crate) enum Policy {
 /// A compiled component, linked and ready to instantiate, and its bytes.
 pub(crate) struct Compiled {
     pre: LibraryPre<CallState>,
-    component: Vec<u8>,
+    component: Source,
 }
 
 /// Compiles components. It holds clones of the engine and linker, so it can run
 /// on another thread while the server keeps serving.
-#[derive(Clone)]
 pub(crate) struct Compiler {
     engine: Engine,
     linker: Linker<CallState>,
+    reservation: Reservation,
 }
 
 impl Compiler {
-    pub(crate) fn compile(&self, component: Vec<u8>) -> anyhow::Result<Compiled> {
+    pub(crate) fn supervisor(&self) -> Arc<Supervisor> {
+        self.reservation.supervisor()
+    }
+
+    pub(crate) fn compile(&mut self, component: Source) -> anyhow::Result<Compiled> {
         let pre = self.compile_code(&component)?;
         Ok(Compiled { pre, component })
     }
 
     /// Compiles a component without keeping its bytes.
-    pub(crate) fn compile_code(&self, component: &[u8]) -> anyhow::Result<LibraryPre<CallState>> {
-        let compiled = Component::new(&self.engine, component).context("invalid component")?;
+    pub(crate) fn compile_code(
+        &mut self,
+        component: &Source,
+    ) -> anyhow::Result<LibraryPre<CallState>> {
+        let compiled = self.reservation.compile(&self.engine, component)?;
         LibraryPre::new(self.linker.instantiate_pre(&compiled)?)
     }
 }

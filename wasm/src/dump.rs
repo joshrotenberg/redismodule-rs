@@ -34,7 +34,7 @@ pub(crate) fn dump<'a>(libraries: impl Iterator<Item = (&'a str, &'a [u8])>) -> 
 }
 
 /// The libraries in `payload`, as names and components.
-pub(crate) fn parse(payload: &[u8]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+pub(crate) fn parse(payload: &[u8]) -> anyhow::Result<Vec<(String, &[u8])>> {
     let body_len = payload
         .len()
         .checked_sub(8)
@@ -58,7 +58,7 @@ pub(crate) fn parse(payload: &[u8]) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
         let name = String::from_utf8(reader.take(name_len)?.to_vec())
             .context("a library name is not UTF-8")?;
         let component_len = reader.len()?;
-        libraries.push((name, reader.take(component_len)?.to_vec()));
+        libraries.push((name, reader.take(component_len)?));
     }
     if !reader.0.is_empty() {
         bail!("the payload has bytes after its libraries");
@@ -104,8 +104,8 @@ mod tests {
         assert_eq!(
             parse(&payload).unwrap(),
             [
-                ("a".to_owned(), b"\0asm1".to_vec()),
-                ("bee".to_owned(), Vec::new())
+                ("a".to_owned(), b"\0asm1".as_slice()),
+                ("bee".to_owned(), b"".as_slice())
             ]
         );
         assert!(parse(&payload[..payload.len() - 1]).is_err());

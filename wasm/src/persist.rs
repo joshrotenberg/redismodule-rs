@@ -15,8 +15,8 @@
 //! data type is not registered, so Redis can unload the module, and libraries
 //! live only in memory, untouched by loading.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use anyhow::{Context as _, bail};
@@ -117,10 +117,18 @@ fn load(rdb: &mut RdbReader, encver: i32) -> anyhow::Result<()> {
         bail!("unknown encoding version {encver}");
     }
     let started = Instant::now();
+    // Reserve the entire sequential RDB batch before reading/copying sources.
+    let compiler = crate::with_host(|host| host.compiler())??;
     let mut libraries = Vec::new();
     for _ in 0..rdb.read_unsigned()? {
         let name = rdb.read_string()?;
-        let component = rdb.read_string_buffer()?.as_ref().to_vec();
+        let bytes = rdb.read_string_buffer()?;
+        anyhow::ensure!(
+            bytes.as_ref().len() <= crate::compiler_protocol::MAX_INPUT,
+            "RDB component exceeds compiler input bound"
+        );
+        let component = bytes.as_ref().to_vec();
+        drop(bytes);
         let functions = (0..rdb.read_unsigned()?)
             .map(|_| {
                 let name = rdb.read_string()?;
@@ -144,32 +152,42 @@ fn load(rdb: &mut RdbReader, encver: i32) -> anyhow::Result<()> {
 
     // The libraries are added now, and compile on a thread: the server serves
     // meanwhile, and a call to a library still compiling waits for it.
-    let compiler = crate::with_host(|host| host.compiler())?;
     let mut jobs = Vec::with_capacity(count);
     for (name, component, functions) in libraries {
-        let code =
-            crate::with_host(|host| host.restore_compiling(&name, component.clone(), functions))?
-                .with_context(|| format!("library '{name}'"))?;
+        let component = Arc::new(component);
+        let code = crate::with_host(|host| {
+            host.restore_compiling(&name, Arc::clone(&component), functions)
+        })?
+        .with_context(|| format!("library '{name}'"))?;
         jobs.push((code, component));
     }
     if count > 0 {
-        let jobs = Arc::new(Mutex::new(jobs));
-        let compile = {
-            let jobs = Arc::clone(&jobs);
-            move || {
-                let jobs =
-                    std::mem::take(&mut *jobs.lock().unwrap_or_else(PoisonError::into_inner));
-                for (code, component) in jobs {
-                    code.finish(compiler.compile_code(&component));
+        let supervisor = compiler.supervisor();
+        let codes: Vec<_> = jobs.iter().map(|(code, _)| Arc::clone(code)).collect();
+        if let Err(error) = supervisor.spawn(move || {
+            let mut compiler = Some(compiler);
+            for (index, (code, component)) in jobs.into_iter().enumerate() {
+                let source = crate::compiler_source::Source::Saved(component);
+                let result = redis_module::panic::catch_panic(|| {
+                    compiler.as_mut().unwrap().compile_code(&source)
+                })
+                .unwrap_or_else(|message| {
+                    Err(anyhow::anyhow!("compiler worker panicked: {message}"))
+                });
+                if index + 1 == count {
+                    // Earlier libraries become ready while this batch remains
+                    // active. Release before notifying the final set of waiters.
+                    drop(compiler.take());
                 }
+                code.finish(result);
             }
-        };
-        let spawned = std::thread::Builder::new()
-            .name("wasm-compile".into())
-            .spawn(compile.clone());
-        if spawned.is_err() {
-            // Without a thread, compile here; the load takes longer.
-            compile();
+        }) {
+            for code in codes {
+                code.finish(Err(anyhow::anyhow!(
+                    "compiler worker did not start: {error:#}"
+                )));
+            }
+            return Err(error);
         }
         logging::log_notice(format!(
             "wasm: loaded {count} libraries ({bytes} bytes) from the RDB in {} ms; they compile in the background",
