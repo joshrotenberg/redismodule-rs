@@ -1,5 +1,8 @@
 //! Exercises RedisString ownership across producers (hash, list, stream, scan,
 //! ServerInfo, RDB), command-thread retention, and AutoMemory on and off.
+use redis_module::error::Error;
+use redis_module::io::{RdbReader, RdbWriter};
+use redis_module::native_types::{NativeType, RedisType};
 use redis_module::{
     Context, EventContext, KeysCursor, NextArg, RedisError, RedisResult, RedisString, RedisValue,
     ScanKeyCursor, Status, raw, redis_module,
@@ -382,50 +385,28 @@ fn churn(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Integer(produced))
 }
 // Ordinary save/load of one string reference, exercised through DUMP/RESTORE.
-unsafe extern "C" fn rdb_save(io: *mut raw::RedisModuleIO, value: *mut std::ffi::c_void) {
-    // SAFETY: Redis passes this type's own IO and value.
-    unsafe { raw::save_redis_string(io, &*value.cast::<RedisString>()) };
-}
-unsafe extern "C" fn rdb_load(io: *mut raw::RedisModuleIO, version: i32) -> *mut std::ffi::c_void {
-    unsafe {
-        if version != 0 {
-            return ptr::null_mut();
+/// A string stored in a key. Its `RedisString` is a deep copy, created
+/// without a context, that the value alone references.
+struct OwnedString(RedisString);
+
+// SAFETY: the string is this value's own reference, so Redis may free it on a
+// lazy-free thread: no other owner or context shares the native object.
+unsafe impl Send for OwnedString {}
+
+impl NativeType for OwnedString {
+    fn rdb_load(io: &mut RdbReader, encver: i32) -> Result<Self, Error> {
+        if encver != 0 {
+            return Err(Error::generic("unknown owner0001 encoding version"));
         }
-        match raw::load_string(io) {
-            Ok(s) => Box::into_raw(Box::new(s)).cast(),
-            Err(_) => ptr::null_mut(),
-        }
+        Ok(OwnedString(io.read_redis_string()?))
+    }
+
+    fn rdb_save(&self, io: &mut RdbWriter) {
+        io.write_redis_string(&self.0);
     }
 }
-unsafe extern "C" fn rdb_free(value: *mut std::ffi::c_void) {
-    drop(unsafe { Box::from_raw(value.cast::<RedisString>()) });
-}
-static OWNER_TYPE: redis_module::native_types::RedisType =
-    redis_module::native_types::RedisType::new(
-        "owner0001",
-        0,
-        raw::RedisModuleTypeMethods {
-            version: raw::REDISMODULE_TYPE_METHOD_VERSION as u64,
-            rdb_save: Some(rdb_save),
-            rdb_load: Some(rdb_load),
-            free: Some(rdb_free),
-            aof_rewrite: None,
-            mem_usage: None,
-            digest: None,
-            aux_load: None,
-            aux_save: None,
-            aux_save2: None,
-            aux_save_triggers: 0,
-            free_effort: None,
-            unlink: None,
-            copy: None,
-            defrag: None,
-            copy2: None,
-            free_effort2: None,
-            mem_usage2: None,
-            unlink2: None,
-        },
-    );
+
+static OWNER_TYPE: RedisType<OwnedString> = RedisType::new("owner0001", 0);
 fn rdb_set(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
     let mut args = argv.into_iter().skip(1);
     let key = args.next_arg()?;
@@ -433,7 +414,7 @@ fn rdb_set(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
     args.done()?;
     // Deep copy gives the datatype one manual reference of its own.
     ctx.open_key_writable(&key)
-        .set_value(&OWNER_TYPE, value.clone())?;
+        .set_value(&OWNER_TYPE, OwnedString(value.clone()))?;
     Ok(RedisValue::SimpleStringStatic("OK"))
 }
 fn rdb_get(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
@@ -442,9 +423,9 @@ fn rdb_get(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {
     args.done()?;
     let handle = ctx.open_key(&key);
     Ok(handle
-        .get_value::<RedisString>(&OWNER_TYPE)?
+        .get_value(&OWNER_TYPE)?
         .map_or(RedisValue::Null, |s| {
-            RedisValue::StringBuffer(s.as_slice().to_vec())
+            RedisValue::StringBuffer(s.0.as_slice().to_vec())
         }))
 }
 fn transfer(ctx: &Context, argv: Vec<RedisString>) -> RedisResult {

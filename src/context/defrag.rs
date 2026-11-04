@@ -161,8 +161,7 @@ impl DefragContext {
         unsafe { std::alloc::alloc(layout) }.cast()
     }
 
-    /// Deallocate memory using defrag deallocator if supported by the
-    /// current Redis server, fallback to regular deallocation otherwise.
+    /// Frees a block from [`Self::defrag_alloc`] with the global allocator.
     ///
     /// # Safety
     ///

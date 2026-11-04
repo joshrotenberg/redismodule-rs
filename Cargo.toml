@@ -17,8 +17,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-authors = ["Gavrie Philipson <gavrie@redis.com>", "Guy Korland <guy.korland@redis.com>"]
+authors = ["Josh Rotenberg", "Gavrie Philipson <gavrie@redis.com>", "Guy Korland <guy.korland@redis.com>"]
 build = "build.rs"
+links = "redismodule"
 description = "A toolkit for building Redis modules in Rust"
 readme = "README.md"
 keywords = ["redis", "plugin"]
@@ -167,6 +168,10 @@ crate-type = ["cdylib"]
 
 [[example]]
 name = "data_type"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "native_type"
 crate-type = ["cdylib"]
 
 [[example]]

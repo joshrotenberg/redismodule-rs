@@ -3273,6 +3273,25 @@ fn test_keys_pos() -> Result<()> {
     Ok(())
 }
 
+/// `key_at_pos` refuses a position past the command's arguments: Redis would
+/// accept it and then read past them in COMMAND GETKEYS and cluster routing.
+#[test]
+fn test_key_at_pos_refuses_positions_past_the_arguments() -> Result<()> {
+    let mut con = TestConnection::new("keys_pos");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let keys: Vec<String> = redis::cmd("COMMAND")
+        .arg(&["GETKEYS", "keys_pos.overreach", "first", "second"])
+        .query(&mut con)?;
+    assert_eq!(keys, ["first"]);
+    let result: String = redis::cmd("keys_pos.overreach_result").query(&mut con)?;
+    assert_eq!(
+        result,
+        "ERR key position 3 is not an argument position of the command (1 to 2)"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
 #[test]
 fn test_dbsize() -> Result<()> {
     let mut con = TestConnection::new("test_helper");
@@ -5330,6 +5349,99 @@ fn test_configuration() -> Result<()> {
     Ok(())
 }
 
+/// The `module_config_get` and `module_config_set` wrappers need the same
+/// permissions as CONFIG: they are in `@admin` and `@dangerous`, scripts
+/// cannot call them, and the call checks the user's CONFIG access. Runs on
+/// Redis 7.2 and later, which set module command categories.
+#[test]
+fn test_module_config_wrappers_require_config_permissions() -> Result<()> {
+    let mut con = TestConnection::new("configuration");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version = redis_module::Context::version_from_info(RedisValue::BulkString(info))?;
+    if (version.major, version.minor) < (7, 2) {
+        return Ok(());
+    }
+
+    // A user granted only @admin, or only @dangerous, can use the wrappers:
+    // both categories include CONFIG, and the wrappers are in both. (ACL CAT
+    // lists module commands only from Redis 8.0.)
+    for category in ["+@admin", "+@dangerous"] {
+        let user = format!("only{category}");
+        redis::cmd("ACL")
+            .arg(&[
+                "SETUSER",
+                user.as_str(),
+                "on",
+                "nopass",
+                "~*",
+                "-@all",
+                category,
+            ])
+            .query::<()>(&mut con)?;
+        let mut user_con = con.connection()?;
+        redis::cmd("AUTH")
+            .arg(&[user.as_str(), "unused"])
+            .query::<()>(&mut user_con)?;
+        let value: Vec<String> = redis::cmd("configuration.config_get")
+            .arg("i64")
+            .query(&mut user_con)?;
+        assert_eq!(value, ["configuration.i64", "10"], "{user}");
+    }
+
+    let value: Vec<String> = redis::cmd("configuration.config_get")
+        .arg("i64")
+        .query(&mut con)?;
+    assert_eq!(value, ["configuration.i64", "10"]);
+    redis::cmd("configuration.config_set")
+        .arg(&["i64", "20"])
+        .query::<()>(&mut con)?;
+    let value: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.i64"])
+        .query(&mut con)?;
+    assert_eq!(value[1], "20");
+
+    for (user, rules) in [
+        ("no-admin", &["+@all", "-@admin", "-@dangerous"][..]),
+        // Allowed the wrappers by name but not CONFIG.
+        (
+            "wrappers-only",
+            &["+configuration.config_get", "+configuration.config_set"],
+        ),
+    ] {
+        redis::cmd("ACL")
+            .arg(&["SETUSER", user, "on", "nopass", "~*"])
+            .arg(rules)
+            .query::<()>(&mut con)?;
+        let mut user_con = con.connection()?;
+        redis::cmd("AUTH")
+            .arg(&[user, "unused"])
+            .query::<()>(&mut user_con)?;
+        for (command, args) in [
+            ("configuration.config_get", &["i64"][..]),
+            ("configuration.config_set", &["i64", "30"]),
+        ] {
+            let error = redis::cmd(command)
+                .arg(args)
+                .query::<Value>(&mut user_con)
+                .expect_err("a user without CONFIG permission used a wrapper");
+            assert_eq!(error.code(), Some("NOPERM"), "{user} {command}: {error}");
+        }
+    }
+
+    let error = redis::cmd("EVAL")
+        .arg("return redis.call('configuration.config_set', 'i64', '40')")
+        .arg(0)
+        .query::<Value>(&mut con)
+        .expect_err("a script called the wrapper");
+    assert!(error.to_string().contains("script"), "{error}");
+
+    let value: Vec<String> = redis::cmd("CONFIG")
+        .arg(&["GET", "configuration.i64"])
+        .query(&mut con)?;
+    assert_eq!(value[1], "20", "no refused call changed the value");
+    Ok(())
+}
+
 #[test]
 fn test_string_configuration_getter_releases_replies() -> Result<()> {
     let mut con = TestConnection::new("configuration_getter");
@@ -7138,6 +7250,186 @@ fn test_failed_load_leaves_no_event_subscriptions() -> Result<()> {
     Ok(())
 }
 
+/// The SDK-generated callbacks of a native type: RDB round trips with aux
+/// data, an AOF rewrite without an RDB preamble, MEMORY USAGE, COPY, DEBUG
+/// DIGEST-VALUE and the unlink and free callbacks. Callbacks that panic on a
+/// marker value fail their operation and leave the server running, and a type
+/// that was never registered stores nothing.
+#[test]
+fn test_native_type_callbacks_and_panic_guards() -> Result<()> {
+    let mut con = TestConnection::new("native_type");
+    let counts = |con: &mut TestConnection| -> Result<Vec<i64>> {
+        Ok(redis::cmd("note.counts").query(con)?)
+    };
+    let note = |con: &mut TestConnection, key: &str| -> Result<Option<String>> {
+        Ok(redis::cmd("note.get").arg(key).query(con)?)
+    };
+    let persistence = |con: &mut TestConnection| -> Result<String> {
+        Ok(redis::cmd("INFO").arg("persistence").query(con)?)
+    };
+
+    redis::cmd("note.set")
+        .arg(&["short", "hello"])
+        .query::<()>(&mut con)?;
+    redis::cmd("note.set")
+        .arg(&["long", &"x".repeat(4096)])
+        .query::<()>(&mut con)?;
+    assert_eq!(note(&mut con, "short")?.as_deref(), Some("hello"));
+    let usage = |con: &mut TestConnection, key: &str| -> Result<i64> {
+        Ok(redis::cmd("MEMORY").arg(&["USAGE", key]).query(con)?)
+    };
+    assert!(usage(&mut con, "long")? > usage(&mut con, "short")? + 4000);
+
+    // COPY, then a digest that matches between the copies.
+    assert_eq!(
+        redis::cmd("COPY")
+            .arg(&["short", "copy"])
+            .query::<i64>(&mut con)?,
+        1
+    );
+    assert_eq!(note(&mut con, "copy")?.as_deref(), Some("hello"));
+    let digests: Vec<String> = redis::cmd("DEBUG")
+        .arg(&["DIGEST-VALUE", "short", "copy", "long"])
+        .query(&mut con)?;
+    assert_eq!(digests[0], digests[1]);
+    assert_ne!(digests[0], digests[2]);
+    assert_ne!(digests[0], "0".repeat(40));
+
+    // DUMP and RESTORE, then a reload that saves and loads the aux data.
+    let dump: Vec<u8> = redis::cmd("DUMP").arg("short").query(&mut con)?;
+    redis::cmd("RESTORE")
+        .arg("restored")
+        .arg(0)
+        .arg(dump)
+        .query::<()>(&mut con)?;
+    assert_eq!(note(&mut con, "restored")?.as_deref(), Some("hello"));
+    redis::cmd("note.aux").arg(42).query::<()>(&mut con)?;
+    redis::cmd("DEBUG").arg("RELOAD").query::<()>(&mut con)?;
+    assert_eq!(counts(&mut con)?[2], 42, "aux data loaded");
+    assert_eq!(note(&mut con, "copy")?.as_deref(), Some("hello"));
+
+    // An AOF rewrite without an RDB preamble emits note.set commands, which
+    // DEBUG LOADAOF replays.
+    redis::cmd("CONFIG")
+        .arg(&["SET", "aof-use-rdb-preamble", "no"])
+        .query::<()>(&mut con)?;
+    redis::cmd("CONFIG")
+        .arg(&["SET", "appendonly", "yes"])
+        .query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(10), "the AOF rewrite", || {
+        let info = persistence(&mut con)?;
+        Ok(info.contains("aof_rewrite_in_progress:0")
+            && info.contains("aof_rewrite_scheduled:0")
+            && info.contains("aof_enabled:1"))
+    })?;
+    assert!(persistence(&mut con)?.contains("aof_last_bgrewrite_status:ok"));
+    redis::cmd("DEBUG").arg("LOADAOF").query::<()>(&mut con)?;
+    assert_eq!(note(&mut con, "short")?.as_deref(), Some("hello"));
+    assert_eq!(note(&mut con, "long")?.map(|text| text.len()), Some(4096));
+
+    // Deleting a note runs its unlink callback and drops it; UNLINK also asks
+    // for its free effort, which keeps the free immediate.
+    let before = counts(&mut con)?;
+    redis::cmd("DEL").arg("restored").query::<()>(&mut con)?;
+    let after = counts(&mut con)?;
+    assert_eq!(after[0], before[0] + 1, "dropped once");
+    assert_eq!(after[1], before[1] + 1, "unlinked once");
+    redis::cmd("UNLINK").arg("copy").query::<()>(&mut con)?;
+    let unlinked = counts(&mut con)?;
+    assert_eq!(unlinked[0], after[0] + 1, "dropped at once");
+    assert!(unlinked[3] > after[3], "free effort consulted");
+
+    // Marker values make a callback panic; the operation fails and the server
+    // keeps running.
+    redis::cmd("note.set")
+        .arg(&["no-copy", "no-copy"])
+        .query::<()>(&mut con)?;
+    redis::cmd("note.set")
+        .arg(&["panic-copy", "panic-copy"])
+        .query::<()>(&mut con)?;
+    for key in ["no-copy", "panic-copy"] {
+        let error = redis::cmd("COPY")
+            .arg(&[key, "copied"])
+            .query::<i64>(&mut con)
+            .expect_err("a refused copy succeeded");
+        assert!(error.to_string().contains("failed to copy"), "{error}");
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    redis::cmd("note.set")
+        .arg(&["panic-load", "panic-load"])
+        .query::<()>(&mut con)?;
+    let dump: Vec<u8> = redis::cmd("DUMP").arg("panic-load").query(&mut con)?;
+    redis::cmd("RESTORE")
+        .arg("loaded")
+        .arg(0)
+        .arg(dump)
+        .query::<()>(&mut con)
+        .expect_err("a value whose rdb_load panicked was restored");
+    assert_eq!(
+        redis::cmd("EXISTS").arg("loaded").query::<i64>(&mut con)?,
+        0
+    );
+    redis::cmd("note.set")
+        .arg(&["panic-free", "panic-free"])
+        .query::<()>(&mut con)?;
+    let before = counts(&mut con)?;
+    redis::cmd("DEL").arg("panic-free").query::<()>(&mut con)?;
+    assert_eq!(counts(&mut con)?[0], before[0] + 1);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+
+    let log = con.server_log()?;
+    for callback in ["copy", "rdb_load", "free"] {
+        assert!(
+            log.contains(&format!("native type {callback} panicked")),
+            "{callback} panic not logged"
+        );
+    }
+
+    // A type that was never registered stores and reads nothing.
+    let error = redis::cmd("note.set_unregistered")
+        .arg(&["unregistered", "text"])
+        .query::<()>(&mut con)
+        .expect_err("an unregistered type stored a value");
+    assert!(error.to_string().contains("not registered"), "{error}");
+    assert_eq!(
+        redis::cmd("EXISTS")
+            .arg("unregistered")
+            .query::<i64>(&mut con)?,
+        0
+    );
+    let error = redis::cmd("note.get_unregistered")
+        .arg("short")
+        .query::<Value>(&mut con)
+        .expect_err("an unregistered type read a value");
+    assert!(error.to_string().contains("not registered"), "{error}");
+
+    // A panicking rdb_save ends a background save's child process: the save
+    // fails and the server keeps running.
+    redis::cmd("note.set")
+        .arg(&["panic-save", "panic-save"])
+        .query::<()>(&mut con)?;
+    redis::cmd("BGSAVE").query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(10), "the background save", || {
+        Ok(persistence(&mut con)?.contains("rdb_bgsave_in_progress:0"))
+    })?;
+    assert!(persistence(&mut con)?.contains("rdb_last_bgsave_status:err"));
+    assert!(con.server_log()?.contains(
+        "native type rdb_save panicked: rdb_save refused the marker value; killing the child process"
+    ));
+    let dir: Vec<String> = redis::cmd("CONFIG").arg(&["GET", "dir"]).query(&mut con)?;
+    let leftovers: Vec<_> = std::fs::read_dir(&dir[1])?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("temp-"))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "partial save files left: {leftovers:?}"
+    );
+    redis::cmd("DEL").arg("panic-save").query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
 #[test]
 fn test_key_type_names_each_built_in_type() -> Result<()> {
     let mut con = TestConnection::new("key_type");
@@ -7291,14 +7583,30 @@ fn test_defrag() -> Result<()> {
         .query::<()>(&mut con)
         .with_context(|| "failed to run 'config set active-defrag-cycle-min 99'")?;
 
-    // enable active defrag
-    if redis::cmd("config")
+    // The designated jemalloc CI job must exercise defrag rather than skip.
+    let required = std::env::var_os("TEST_REDIS_REQUIRE_DEFRAG").is_some();
+    if let Err(error) = redis::cmd("config")
         .arg(&["set", "activedefrag", "yes"])
         .query::<String>(&mut con)
-        .is_err()
     {
-        // Server the does not support active defrag, avoid failing the test.
+        if required {
+            return Err(error.into());
+        }
+        eprintln!("Skipping active defrag on a server without support: {error}");
         return Ok(());
+    }
+
+    // Leave holes in jemalloc and retain native values for the per-key hook.
+    for index in 0..256 {
+        redis::cmd("alloc.set")
+            .arg(format!("defrag:{index}"))
+            .arg(4096)
+            .query::<i64>(&mut con)?;
+    }
+    for index in (0..256).step_by(2) {
+        redis::cmd("DEL")
+            .arg(format!("defrag:{index}"))
+            .query::<i64>(&mut con)?;
     }
 
     let start = SystemTime::now();
@@ -7309,16 +7617,21 @@ fn test_defrag() -> Result<()> {
         let num_defrag_globals = res.get("num_defrag_globals").ok_or_else(|| {
             anyhow::Error::msg("Failed getting 'num_defrag_globals' value from result")
         })?;
-        // Wait till we will get at least 2 defrag cycles.
-        // We are looking at num_defrag_globals because this is supported by all Redis versions
-        // that supports defrag.
-        if *num_defrag_globals > 2 {
+        let keys = res.get("num_keys_defrag").copied().unwrap_or(0);
+        let began = res.get("num_defrag_start").copied().unwrap_or(0);
+        let ended = res.get("num_defrag_end").copied().unwrap_or(0);
+        // Redis 6.2+ has the global hook; start/end hooks need Redis 8.0+.
+        // The required CI server supplies all four callbacks.
+        if *num_defrag_globals > 2 && keys > 0 && (!required || (began > 0 && ended > 0)) {
+            println!("Observed native defrag callbacks: {res:?}");
             break;
         }
-        let duration = SystemTime::now().duration_since(start)?;
-        if duration > Duration::from_secs(30) {
-            return Err(anyhow::Error::msg("Failed waiting for defrag cycle"));
+        if start.elapsed()? > Duration::from_secs(30) {
+            return Err(anyhow::anyhow!(
+                "Timed out waiting for native defrag callbacks: {res:?}"
+            ));
         }
+        std::thread::sleep(Duration::from_millis(10));
     }
 
     Ok(())

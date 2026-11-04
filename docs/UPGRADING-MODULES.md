@@ -20,6 +20,10 @@ Other blockers include shared APIs in use by another module and blocked clients.
 Current Redis also checks outstanding timers before the module's unload hook.
 The SDK also refuses unload while a blocking call's unblock handler is pending;
 see [Blocking calls and unload](#blocking-calls-and-unload).
+Outstanding SDK post-notification jobs also refuse unload, through callback
+execution and capture cleanup, even when a job is cancelled or panics. Drain
+that work before requesting unload; see
+[Writing from keyspace notifications](KEYSPACE-NOTIFICATIONS.md).
 Finish or cancel that work through the module's normal controls first.
 An unload hook may also refuse by returning `Status::Err`.
 See [MODULE UNLOAD](https://redis.io/docs/latest/commands/module-unload/) and
@@ -29,6 +33,16 @@ Build and test the replacement against the intended server and SDK compatibility
 floor. Use distinct, versioned artifact paths, and retain the previous file.
 Do not overwrite a library file that a running process may still have mapped.
 On macOS the extension is normally `.dylib`; on Linux it is `.so`.
+
+## SDK post-notification jobs and unload
+
+`EventContext::add_post_notification_job` retains an SDK unload guard until the
+job and its captured values have finished cleanup. The generated lifecycle
+refuses unload before calling the module's `deinit`, so a `deinit` hook cannot
+clear this blocker. Let pending jobs run while the module is active, then retry
+`MODULE UNLOAD`. New jobs are refused during module loading or unloading.
+This applies to the SDK submission path; raw submissions must provide their
+own callback/lifecycle guarantees.
 
 ## SDK timers and unload
 

@@ -86,5 +86,7 @@ redis_module! {
             ["enum_mutex", &*CONFIGURATION_MUTEX_ENUM, EnumConfiguration::Val1, ConfigurationFlags::DEFAULT, Some(Box::new(on_configuration_changed))],
         ],
         module_args_as_configuration: true,
+        module_config_get: "configuration.config_get",
+        module_config_set: "configuration.config_set",
     ]
 }

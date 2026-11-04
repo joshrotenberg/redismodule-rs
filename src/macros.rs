@@ -134,6 +134,10 @@ macro_rules! __redis_command_callback {
                     let context = unsafe { $crate::Context::from_module_context(ctx) };
                     // SAFETY: Redis supplies live argv/count for this callback.
                     let args = unsafe { $crate::decode_args(ctx, argv, argc) };
+                    // Lets key_at_pos check positions against the arguments.
+                    // SAFETY: Redis passed this ctx and argc to this callback,
+                    // and the scope ends inside it.
+                    let _argc = unsafe { $crate::__private::CommandArgcScope::begin(ctx, argc) };
                     let response = $handler(&context, args);
                     let response = $crate::__private::command_reply_after_release(
                         response.map(|value| value.into()),
@@ -652,16 +656,21 @@ macro_rules! redis_module {
                             }
                         }
 
+                        // The wrappers are CONFIG GET and CONFIG SET by another
+                        // name, so they take CONFIG's flags, which keep scripts
+                        // from calling them, and CONFIG's ACL categories. Redis
+                        // derives no categories from a module command's flags;
+                        // they are set where Redis can (7.2 and later).
                         $(
                             $crate::redis_command!(&context, $module_config_get_command, |ctx, args: Vec<RedisString>| {
                                 module_config_get(ctx, args, const { $module_name })
-                            }, "", 0, 0, 0, "");
+                            }, "admin deny-script allow-loading allow-stale", 0, 0, 0, "", "admin dangerous");
                         )?
 
                         $(
                             $crate::redis_command!(&context, $module_config_set_command, |ctx, args: Vec<RedisString>| {
                                 module_config_set(ctx, args, const { $module_name })
-                            }, "", 0, 0, 0, "");
+                            }, "admin deny-script allow-loading allow-stale", 0, 0, 0, "", "admin dangerous");
                         )?
                     )?
 
