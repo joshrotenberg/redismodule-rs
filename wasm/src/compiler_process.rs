@@ -494,7 +494,11 @@ mod tests {
             frame_size < capacity,
             "empty component frame must fit in one pipe"
         );
-        reader.read_exact(&mut vec![0; frame_size]).unwrap();
+        // Linux's pipe uses page slots: draining only part of a head page
+        // does not free that space for a new tail write. Start empty, then
+        // refill so the remaining tail is mergeable by C's complete frame.
+        reader.read_exact(&mut vec![0; capacity]).unwrap();
+        writer.write_all(&vec![0; capacity - frame_size]).unwrap();
         // Restore a blocking writer, just as normal Stdio::piped creates.
         assert_eq!(unsafe { libc::fcntl(fds[1], libc::F_SETFL, flags) }, 0);
         let inherited_reader = reader.try_clone().unwrap();
