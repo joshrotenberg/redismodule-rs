@@ -15,7 +15,7 @@ impl<'root> From<ErrorCallReply<'root>> for RedisError {
     fn from(err: ErrorCallReply<'root>) -> Self {
         RedisError::String(
             err.to_utf8_string()
-                .unwrap_or("can not convert error into String".into()),
+                .unwrap_or("ERR can not convert error into String".into()),
         )
     }
 }
@@ -24,7 +24,7 @@ impl<'root> From<ErrorReply<'root>> for RedisError {
     fn from(err: ErrorReply<'root>) -> Self {
         RedisError::String(
             err.to_utf8_string()
-                .unwrap_or("can not convert error into String".into()),
+                .unwrap_or("ERR can not convert error into String".into()),
         )
     }
 }
@@ -115,7 +115,7 @@ impl<T> From<std::sync::mpsc::SendError<T>> for RedisError {
 impl fmt::Display for RedisError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let d = match self {
-            Self::WrongArity => "Wrong Arity",
+            Self::WrongArity => "ERR wrong number of arguments",
             // remove NUL from the end of raw::REDISMODULE_ERRORMSG_WRONGTYPE
             // before converting &[u8] to &str to ensure CString::new() doesn't
             // panic when this is passed to it.
@@ -136,6 +136,22 @@ impl fmt::Display for RedisError {
 #[cfg(test)]
 mod tests {
     use super::RedisError;
+
+    #[test]
+    fn explicit_user_codes_are_preserved() {
+        assert_eq!(
+            RedisError::Str("CUSTOM user detail").to_string(),
+            "CUSTOM user detail"
+        );
+        assert_eq!(
+            RedisError::String("lowercase owner text".into()).to_string(),
+            "lowercase owner text"
+        );
+        assert_eq!(
+            RedisError::WrongArity.to_string(),
+            "ERR wrong number of arguments"
+        );
+    }
 
     #[test]
     fn redis_error_is_a_std_error() {

@@ -26,7 +26,7 @@ impl<T> PendingRegistration<T> {
         // Resolve availability before allocating/transferring the private Box.
         // An unavailable API also drops any callback captured in `data`.
         let api = api.ok_or_else(|| {
-            RedisError::String(format!("{kind} configuration API is unavailable"))
+            RedisError::String(format!("ERR {kind} configuration API is unavailable"))
         })?;
         let managed = lifecycle::reserve()?;
         Ok((
@@ -52,7 +52,7 @@ impl<T> PendingRegistration<T> {
             // Capture errno before dropping callback data can change it.
             let native_error = std::io::Error::last_os_error();
             return Err(RedisError::String(format!(
-                "{} configuration registration failed: {native_error}",
+                "ERR {} configuration registration failed: {native_error}",
                 self.kind
             )));
         }
@@ -109,7 +109,7 @@ mod tests {
         let drops = Rc::new(Cell::new(0));
         let result = PendingRegistration::prepare::<()>(None, captured_callback(&drops), "Numeric");
         assert!(
-            matches!(result, Err(RedisError::String(ref message)) if message == "Numeric configuration API is unavailable")
+            matches!(result, Err(RedisError::String(ref message)) if message == "ERR Numeric configuration API is unavailable")
         );
         assert_eq!(drops.get(), 1);
     }
@@ -125,7 +125,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .starts_with("Boolean configuration registration failed:")
+                .starts_with("ERR Boolean configuration registration failed:")
         );
         assert_eq!(drops.get(), 1);
     }

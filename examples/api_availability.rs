@@ -44,6 +44,18 @@ fn missing_lookup(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     Err(RedisError::Str("ERR missing lookup unexpectedly succeeded"))
 }
 
+/// Hide the command-name binding for one synchronous missing-API probe.
+fn current_command_name(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let _restore = Restore {
+        slot: std::ptr::addr_of_mut!(raw::RedisModule_GetCurrentCommandName),
+        value: unsafe { raw::RedisModule_GetCurrentCommandName },
+    };
+    if args.get(1).is_some_and(|arg| arg.as_slice() == b"missing") {
+        unsafe { raw::RedisModule_GetCurrentCommandName = None };
+    }
+    ctx.current_command_name().map(Into::into)
+}
+
 static DROPS: AtomicI64 = AtomicI64::new(0);
 static RUNS: AtomicI64 = AtomicI64::new(0);
 
@@ -73,7 +85,7 @@ fn missing_job(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
         feature = "min-redis-compatibility-version-6-2",
         feature = "min-redis-compatibility-version-7-0"
     ))]
-    let missing = matches!(result, Err(ref error) if error == "RedisModule_AddPostNotificationJob does not exists");
+    let missing = matches!(result, Err(ref error) if error == "ERR RedisModule_AddPostNotificationJob does not exists");
     #[cfg(not(any(
         feature = "min-redis-compatibility-version-6-0",
         feature = "min-redis-compatibility-version-6-2",
@@ -170,6 +182,7 @@ redis_module! {
     data_types: [],
     init: init,
     commands: [
+        ["api.current_command", current_command_name, "readonly", 0, 0, 0, ""],
         ["api.available", available, "readonly", 0, 0, 0, ""],
         ["api.missing_lookup", missing_lookup, "readonly", 0, 0, 0, ""],
         ["api.missing_job", missing_job, "readonly", 0, 0, 0, ""],

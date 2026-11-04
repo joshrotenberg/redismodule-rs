@@ -101,6 +101,20 @@ pub(crate) fn panic_while_lent() {
     assert!(!key_data_lent(), "{LENT_ERROR}");
 }
 
+/// Validate both the relative value and the signed absolute deadline.
+fn checked_expiration(expire: Duration, now: i64) -> Result<(i64, i64), RedisError> {
+    let relative = i64::try_from(expire.as_millis()).map_err(|_| {
+        RedisError::Str("ERR invalid expire time: duration exceeds signed milliseconds")
+    })?;
+    let absolute = now
+        .checked_add(relative)
+        .filter(|_| now >= 0)
+        .ok_or(RedisError::Str(
+            "ERR invalid expire time: absolute deadline overflows",
+        ))?;
+    Ok((relative, absolute))
+}
+
 /// A read-only open key, borrowing the runtime context that opened it.
 ///
 /// Dropping the handle closes the native key. It must close before its opening
@@ -297,11 +311,24 @@ impl<'ctx> RedisKey<'ctx> {
         self.key_inner == null_key
     }
 
-    /// A copy of the key's string value; `None` for an empty key.
+    /// Copies the key's string bytes into an owned buffer.
+    ///
+    /// Returns `None` when the key does not exist, and `Some(Vec::new())` for
+    /// an existing empty string. The bytes need not be UTF-8. The returned
+    /// buffer does not borrow the key or its opening context; the key handle
+    /// itself must still close within its context and Redis lock scope.
+    ///
+    /// ```no_run
+    /// use redis_module::{Context, RedisError, RedisString};
+    /// fn copy_value(ctx: &Context, name: &RedisString) -> Result<Option<Vec<u8>>, RedisError> {
+    ///     ctx.open_key(name).read()
+    /// }
+    /// ```
     ///
     /// # Errors
     ///
-    /// Returns an error if the key does not hold a string.
+    /// Returns an error if the key does not hold a string or key data is
+    /// currently lent to a scoped callback.
     pub fn read(&self) -> Result<Option<Vec<u8>>, RedisError> {
         refuse_while_lent()?;
         // SAFETY: the bytes are copied before anything else can run.
@@ -334,7 +361,7 @@ impl<'ctx> RedisKey<'ctx> {
             let mut length: size_t = 0;
             let dma = raw::string_dma(self.key_inner, &mut length, raw::KeyMode::READ);
             if dma.is_null() {
-                Err(RedisError::Str("Could not read key"))
+                Err(RedisError::Str("ERR Could not read key"))
             } else {
                 Ok(Some(unsafe {
                     std::slice::from_raw_parts(dma.cast::<u8>(), length)
@@ -343,6 +370,18 @@ impl<'ctx> RedisKey<'ctx> {
         }
     }
 
+    /// Reads one field from a hash, returning an owned Redis string.
+    ///
+    /// Returns `None` for a missing key or field. The value preserves arbitrary
+    /// bytes; use [`RedisString::try_as_str`] only when text is expected.
+    /// The result owns its reference but remains subject to `RedisString`'s
+    /// thread and Redis-access rules.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RedisError::WrongType`] for a non-hash key, or an error when
+    /// the field contains NUL or key data is lent to a scoped callback. Use
+    /// [`Self::hash_get_by_string`] for a field containing NUL bytes.
     pub fn hash_get(&self, field: impl AsRef<[u8]>) -> Result<Option<RedisString>, RedisError> {
         refuse_while_lent()?;
         let val = if self.is_null() {
@@ -651,6 +690,16 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         raw::hash_del_by_string(self.key_inner, field.as_ptr())
     }
 
+    /// Reads one hash field through this writable handle.
+    ///
+    /// Returns an owned [`RedisString`], or `None` if the key or field is
+    /// missing. Value bytes need not be UTF-8.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RedisError::WrongType`] for a non-hash key, or an error when
+    /// the field contains NUL or key data is lent to a scoped callback. Use
+    /// [`Self::hash_get_by_string`] for a field containing NUL bytes.
     pub fn hash_get(&self, field: &str) -> Result<Option<RedisString>, RedisError> {
         refuse_while_lent()?;
         Ok(hash_mget_key(self.ctx, self.key_inner, &[field])?
@@ -694,7 +743,11 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         })
     }
 
-    // `list_push_head` inserts the specified element at the head of the list stored at this key.
+    /// Inserts `element` at the head of the list, creating it if missing.
+    ///
+    /// Returns [`raw::Status::Err`] for a non-list key or while key data is
+    /// lent to a scoped callback. This write is not propagated automatically;
+    /// the command must arrange replication and AOF propagation.
     #[allow(clippy::must_use_candidate)]
     pub fn list_push_head(&self, element: RedisString) -> raw::Status {
         if key_data_lent() {
@@ -703,7 +756,11 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         raw::list_push(self.key_inner, raw::Where::ListHead, element.as_ptr())
     }
 
-    // `list_push_tail` inserts the specified element at the tail of the list stored at this key.
+    /// Inserts `element` at the tail of the list, creating it if missing.
+    ///
+    /// Returns [`raw::Status::Err`] for a non-list key or while key data is
+    /// lent to a scoped callback. This write is not propagated automatically;
+    /// the command must arrange replication and AOF propagation.
     #[allow(clippy::must_use_candidate)]
     pub fn list_push_tail(&self, element: RedisString) -> raw::Status {
         if key_data_lent() {
@@ -712,10 +769,15 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         raw::list_push(self.key_inner, raw::Where::ListTail, element.as_ptr())
     }
 
-    //  `list_pop_head` pops and returns the first element of the list.
-    //  Returns None when:
-    //     1. The list is empty.
-    //     2. The key is not a list.
+    /// Removes and returns the first element as an owned [`RedisString`].
+    ///
+    /// Returns `None` for an empty/missing list or a non-list key. This write
+    /// is not propagated automatically; the command must arrange replication
+    /// and AOF propagation.
+    ///
+    /// # Panics
+    ///
+    /// Panics while key data is lent to a scoped callback.
     #[allow(clippy::must_use_candidate)]
     pub fn list_pop_head(&self) -> Option<RedisString> {
         panic_while_lent();
@@ -733,10 +795,15 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         })
     }
 
-    //  `list_pop_head` pops and returns the last element of the list.
-    //  Returns None when:
-    //     1. The list is empty.
-    //     2. The key is not a list.
+    /// Removes and returns the last element as an owned [`RedisString`].
+    ///
+    /// Returns `None` for an empty/missing list or a non-list key. This write
+    /// is not propagated automatically; the command must arrange replication
+    /// and AOF propagation.
+    ///
+    /// # Panics
+    ///
+    /// Panics while key data is lent to a scoped callback.
     #[must_use]
     pub fn list_pop_tail(&self) -> Option<RedisString> {
         panic_while_lent();
@@ -754,20 +821,44 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         })
     }
 
+    /// Sets the key's expiry to `expire` after the current Redis time.
+    ///
+    /// Sub-millisecond precision is discarded. A zero duration makes the key
+    /// eligible to expire at the current timestamp; deletion timing follows
+    /// Redis's expiry processing. This operation does not propagate itself to
+    /// replicas or the AOF; the command must arrange propagation.
+    ///
+    /// Rejects a timestamp outside signed Redis milliseconds before changing
+    /// the key. Redis 6.2+ receives the checked
+    /// absolute deadline, avoiding a second native addition. Redis 6.0 has only
+    /// the relative setter: its later wall-clock reading can still differ from
+    /// this precheck, for example after a clock jump at the extreme boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `ERR` error when the duration cannot fit signed
+    /// milliseconds, adding it to the current time overflows, the key is
+    /// missing or not writable, or key data is lent to a scoped callback.
+    /// Rejected overflow leaves the previous value and expiry unchanged.
+    ///
+    /// ```no_run
+    /// use redis_module::{Context, RedisResult, RedisString};
+    /// use std::time::Duration;
+    /// fn expire(ctx: &Context, name: &RedisString) -> RedisResult {
+    ///     ctx.open_key_writable(name).set_expire(Duration::from_secs(60))
+    /// }
+    /// ```
     pub fn set_expire(&self, expire: Duration) -> RedisResult {
         refuse_while_lent()?;
-        let exp_millis = expire.as_millis();
-
-        let exp_time = i64::try_from(exp_millis).map_err(|_| {
-            RedisError::String(format!("Error expire duration {exp_millis} is not allowed"))
-        })?;
-
-        match raw::set_expire(self.key_inner, exp_time) {
+        let (relative, absolute) = checked_expiration(expire, crate::milliseconds())?;
+        let status = match unsafe { raw::RedisModule_SetAbsExpire } {
+            Some(set) => unsafe { set(self.key_inner, absolute) }.into(),
+            None => raw::set_expire(self.key_inner, relative),
+        };
+        match status {
             raw::Status::Ok => REDIS_OK,
-
-            // Error may occur if the key wasn't open for writing or is an
-            // empty key.
-            raw::Status::Err => Err(RedisError::Str("Error while setting key expire")),
+            // The key can be empty or not open for writing.
+            raw::Status::Err => Err(RedisError::Str("ERR Error while setting key expire")),
         }
     }
 
@@ -779,7 +870,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
 
             // Error may occur if the key wasn't open for writing or is an
             // empty key.
-            raw::Status::Err => Err(RedisError::Str("Error while removing key expire")),
+            raw::Status::Err => Err(RedisError::Str("ERR Error while removing key expire")),
         }
     }
 
@@ -788,7 +879,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
         let val_str = RedisString::create(NonNull::new(self.ctx), val);
         match raw::string_set(self.key_inner, val_str.as_ptr()) {
             raw::Status::Ok => REDIS_OK,
-            raw::Status::Err => Err(RedisError::Str("Error while setting key")),
+            raw::Status::Err => Err(RedisError::Str("ERR Error while setting key")),
         }
     }
 
@@ -1009,7 +1100,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
             )
         };
         if res < 0 {
-            Err(RedisError::Str("Failed trimming the stream"))
+            Err(RedisError::Str("ERR Failed trimming the stream"))
         } else {
             Ok(res as usize)
         }
@@ -1150,7 +1241,7 @@ impl<'a> StringDMA<'a> {
         let mut length: size_t = 0;
         let dma = raw::string_dma(key.key_inner, &mut length, raw::KeyMode::WRITE);
         if dma.is_null() {
-            Err(RedisError::Str("Could not read key"))
+            Err(RedisError::Str("ERR Could not read key"))
         } else {
             let buffer = unsafe { std::slice::from_raw_parts_mut(dma.cast::<u8>(), length) };
             Ok(StringDMA { key, buffer })
@@ -1164,7 +1255,7 @@ impl<'a> StringDMA<'a> {
                 let dma = raw::string_dma(self.key.key_inner, &mut length, raw::KeyMode::WRITE);
                 self.buffer = unsafe { std::slice::from_raw_parts_mut(dma.cast::<u8>(), length) };
             } else {
-                return Err(RedisError::Str("Failed to truncate string"));
+                return Err(RedisError::Str("ERR Failed to truncate string"));
             }
         }
         self.buffer[..data.len()].copy_from_slice(data);
@@ -1179,7 +1270,7 @@ impl<'a> StringDMA<'a> {
             let dma = raw::string_dma(self.key.key_inner, &mut length, raw::KeyMode::WRITE);
             self.buffer = unsafe { std::slice::from_raw_parts_mut(dma.cast::<u8>(), length) };
         } else {
-            return Err(RedisError::Str("Failed to truncate string"));
+            return Err(RedisError::Str("ERR Failed to truncate string"));
         }
         self.buffer[current_len..new_len].copy_from_slice(data);
         Ok(self)
@@ -1298,5 +1389,32 @@ mod tests {
             payload.downcast_ref::<String>().map(String::as_str),
             Some("RedisModule_CloseKey is not available in this Redis server")
         );
+    }
+}
+
+#[cfg(test)]
+mod expiration_tests {
+    use super::checked_expiration;
+    use std::time::Duration;
+
+    #[test]
+    fn checked_expiration_keeps_the_signed_deadline_boundary() {
+        assert_eq!(checked_expiration(Duration::ZERO, 0).unwrap(), (0, 0));
+        assert_eq!(
+            checked_expiration(Duration::from_millis(7), i64::MAX - 7).unwrap(),
+            (7, i64::MAX)
+        );
+        for (duration, now) in [
+            (Duration::from_millis(8), i64::MAX - 7),
+            (Duration::from_millis(i64::MAX as u64 + 1), 0),
+            (Duration::ZERO, -1),
+        ] {
+            assert!(
+                checked_expiration(duration, now)
+                    .unwrap_err()
+                    .to_string()
+                    .starts_with("ERR ")
+            );
+        }
     }
 }

@@ -577,7 +577,7 @@ impl<T: Send + 'static> RedisType<T> {
 
         if redis_type.is_null() {
             ctx.log_notice("Error: created data type is null");
-            return Err("Error: created data type is null");
+            return Err("ERR created data type is null");
         }
 
         self.raw_type.store(redis_type, Ordering::Release);

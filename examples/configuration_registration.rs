@@ -48,6 +48,15 @@ fn register(
 
 fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> Status {
     let result = match args.first().map(RedisString::try_as_str) {
+        Some(Ok("bitflags")) => register_enum_configuration(
+            ctx,
+            "flags",
+            &CHOICE,
+            Choice::One,
+            ConfigurationFlags::BITFLAGS,
+            None,
+        )
+        .and_then(|()| load_configurations(ctx)),
         Some(Ok("valid")) => ["i64", "string", "bool", "enum"]
             .into_iter()
             .try_for_each(|kind| register(ctx, kind, kind))

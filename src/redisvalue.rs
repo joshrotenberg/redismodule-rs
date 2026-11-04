@@ -101,7 +101,7 @@ impl TryFrom<RedisValue> for String {
             RedisValue::BulkString(s) => Ok(s),
             RedisValue::BulkRedisString(s) => Ok(s.try_as_str()?.to_string()),
             RedisValue::StringBuffer(s) => Ok(std::str::from_utf8(&s)?.to_string()),
-            _ => Err(RedisError::Str("Can not convert result to String")),
+            _ => Err(RedisError::Str("ERR Can not convert result to String")),
         }
     }
 }
@@ -290,7 +290,7 @@ impl<'root> TryFrom<&CallReply<'root>> for RedisValueKey {
             CallReply::String(reply) => Ok(call_string_key(reply.as_bytes().to_vec())),
             CallReply::Bool(b) => Ok(RedisValueKey::Bool(b.to_bool())),
             _ => Err(RedisError::String(format!(
-                "Given CallReply can not be used as a map key or a set element, {:?}",
+                "ERR Given CallReply can not be used as a map key or a set element, {:?}",
                 reply
             ))),
         }
@@ -300,7 +300,7 @@ impl<'root> TryFrom<&CallReply<'root>> for RedisValueKey {
 impl<'root> From<&CallReply<'root>> for RedisValue {
     fn from(reply: &CallReply<'root>) -> Self {
         match reply {
-            CallReply::Unknown => RedisValue::StaticError("Error on method call"),
+            CallReply::Unknown => RedisValue::StaticError("ERR Error on method call"),
             CallReply::Array(reply) => {
                 RedisValue::Array(reply.iter().map(|v| (&v).into()).collect())
             }
@@ -344,14 +344,14 @@ impl<'root> From<&CallReply<'root>> for RedisValue {
                 .map(RedisValue::BigNumber)
                 .unwrap_or_else(|| {
                     // BigNumber should always be valid UTF-8, but if not, treat as raw bytes
-                    RedisValue::StaticError("Invalid BigNumber: not valid UTF-8")
+                    RedisValue::StaticError("ERR Invalid BigNumber: not valid UTF-8")
                 }),
             CallReply::VerbatimString(reply) => reply
                 .to_parts()
                 .map(RedisValue::VerbatimString)
                 .unwrap_or_else(|| {
                     // VerbatimString format should always be valid UTF-8, but if not, treat as error
-                    RedisValue::StaticError("Invalid VerbatimString: format not valid UTF-8")
+                    RedisValue::StaticError("ERR Invalid VerbatimString: format not valid UTF-8")
                 }),
         }
     }
@@ -374,7 +374,7 @@ impl<'root> TryFrom<&CallResult<'root>> for RedisValueKey {
         reply.as_ref().map_or_else(
             |e| {
                 Err(RedisError::String(
-                    format!("Got an error reply which can not be translated into a map key or set element, {:?}", e),
+                    format!("ERR Got an error reply which can not be translated into a map key or set element, {:?}", e),
                 ))
             },
             |v| v.try_into(),

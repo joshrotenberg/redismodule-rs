@@ -18,9 +18,12 @@ use crate::{RedisString, key::RedisKey, raw};
 ///
 /// The following example command implementation scans all fields and values in the hash key and returns them as an array of RedisString.
 ///
-/// ```ignore
+/// ```no_run
+/// use std::cell::RefCell;
+/// use redis_module::{Context, RedisResult, RedisValue, ScanKeyCursor, key::KeyFlags};
 /// fn example_scan_key_for_each(ctx: &Context) -> RedisResult {
-///    let key = ctx.open_key_with_flags("user:123", KeyFlags::NOEFFECTS | KeyFlags::NOEXPIRE | KeyFlags::ACCESS_EXPIRED );
+///    let name = ctx.create_string("user:123");
+///    let key = ctx.open_key_with_flags(&name, KeyFlags::NOEFFECTS);
 ///    let cursor  = ScanKeyCursor::new(key);
 ///
 ///    let res = RefCell::new(Vec::new());
@@ -79,12 +82,16 @@ impl<'ctx> ScanKeyCursor<'ctx> {
     ///
     /// ## Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// # use redis_module::ScanKeyCursor;
+    /// # fn scan_in_batches(cursor: &ScanKeyCursor<'_>) {
     /// while cursor.scan(|_key, field, value| {
     ///    // do something with field and value
     /// }) {
     ///   // do something between scans if needed, like an early stop
     /// }
+    /// # }
+    /// ```
     pub fn scan<F: FnMut(&RedisKey, &RedisString, Option<&RedisString>)>(&self, mut f: F) -> bool {
         crate::key::panic_while_lent();
         struct CallbackData<F> {
