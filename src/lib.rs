@@ -78,6 +78,7 @@ pub use crate::context::InfoContext;
 #[doc(hidden)]
 pub mod __private {
     pub use crate::configuration::lifecycle::{ConfigurationLoad, ConfigurationUnload};
+    pub use crate::context::CommandArgcScope;
     pub use crate::context::blocked::__command_reply_after_release as command_reply_after_release;
     pub use crate::context::call_reply::{BlockingCallLoadGuard, BlockingCallUnloadGuard};
     pub use crate::context::event_loop::{EventLoopLoadGuard, EventLoopUnloadGuard};
@@ -116,7 +117,9 @@ mod module_version;
 pub use crate::module_version::encode_module_version;
 
 pub use crate::args::ArgCursor;
-pub use crate::context::blocked::{BlockedClient, ReplyingBlockedClient};
+pub use crate::context::blocked::{
+    BlockedClient, KeyBlockingResult, KeyBlockingTimeout, ReplyingBlockedClient,
+};
 pub use crate::context::thread_safe::{
     ContextGuard, DetachedFromClient, RedisGILGuard, RedisLockIndicator, ThreadSafeContext,
 };

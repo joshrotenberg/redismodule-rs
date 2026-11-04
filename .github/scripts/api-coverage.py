@@ -45,12 +45,12 @@ OVERRIDES = {
                          "`redis_module!` calls through `src/redismodule.c`, calls it."),
     "IsModuleNameBusy": ("internal", "the header's inline `RedisModule_Init`, which "
                          "`redis_module!` calls through `src/redismodule.c`, calls it."),
-    "GetClientId": ("internal", "`Context::acl_add_log_entry` and the blocking checks behind "
-                    "`block_client` and `block_client_on_reply` only test that the context has "
-                    "a client, and `Context::get_current_user` passes the id to "
-                    "`GetClientUserNameById` on Redis 6.2; no wrapper returns the id."),
-    "GetClientInfoById": ("internal", "`Context::block_client` only checks, before Redis 6.2, that "
-                          "the client is in the client index; no wrapper returns client data."),
+    "GetClientId": ("internal", "SDK blocking checks, the current-user fallback and ACL logging "
+                    "use the id internally; no wrapper returns it."),
+    "GetClientInfoById": ("internal", "The blocking APIs use the client index, an available "
+                          "strict username-index probe and private V1 flags to prove network "
+                          "identity and reject an already-blocked client; no wrapper returns "
+                          "client metadata."),
     "GetContextUser": ("internal", "`RuntimeContext::scoped_call_user` reads it to restore the "
                        "outer user later; no wrapper returns the context user."),
 }
