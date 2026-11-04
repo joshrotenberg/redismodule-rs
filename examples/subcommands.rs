@@ -92,7 +92,7 @@ redis_module! {
             .arity(2)
             .summary("Reads a key")
             .complexity("O(1)")
-            .since("1.0.0")
+            .since("0.9.0")
             .history("1.1.0", "Reads the value as a copy")
             .history("1.2.0", "Refuses extra arguments")
             .tip("nondeterministic_output")
@@ -104,7 +104,7 @@ redis_module! {
                 FindKeys::new_range(0, 1, 0),
             ))
             .arg(RedisModuleCommandArg::new(
-                "key".to_owned(),
+                "source".to_owned(),
                 redis_module::raw::RedisModuleCommandArgType_REDISMODULE_ARG_TYPE_KEY,
                 Some(0),
                 None,

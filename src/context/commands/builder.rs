@@ -169,6 +169,35 @@ struct Info {
 }
 
 impl Info {
+    /// Refuses what Redis cannot take, before the command is created.
+    fn validate(&self) -> Result<(), RedisError> {
+        let texts = [&self.summary, &self.complexity, &self.since]
+            .into_iter()
+            .flatten()
+            .chain(
+                self.history
+                    .iter()
+                    .flat_map(|(since, changes)| [since, changes]),
+            )
+            .chain(&self.tips);
+        if texts.into_iter().any(|text| text.contains('\0')) {
+            return Err(RedisError::Str("ERR command info contains a NUL byte"));
+        }
+        if self
+            .tips
+            .iter()
+            .any(|tip| tip.is_empty() || tip.contains(' '))
+        {
+            return Err(RedisError::Str(
+                "ERR a command tip must be non-empty and contain no space",
+            ));
+        }
+        self.key_specs.iter().try_for_each(KeySpec::validate)?;
+        self.args
+            .iter()
+            .try_for_each(RedisModuleCommandArg::validate)
+    }
+
     fn is_empty(&self) -> bool {
         self.summary.is_none()
             && self.complexity.is_none()
@@ -275,7 +304,10 @@ impl CommandBuilder {
         self
     }
 
-    /// Adds a key spec; repeated calls accumulate in order. Key specs replace
+    /// Adds a key spec; repeated calls accumulate in order. Registration
+    /// refuses a spec Redis would mishandle: a begin-search index below 1, a
+    /// range or key-count step below 1, a negative limit, or a limit above 1
+    /// without last key -1. Key specs replace
     /// the key range's single spec in `COMMAND INFO`, `COMMAND GETKEYSANDFLAGS`
     /// and key extraction, and their flags decide what `%R~` and `%W~` ACL
     /// key patterns allow: a range's spec allows only a user with full access
@@ -287,7 +319,8 @@ impl CommandBuilder {
 
     /// Adds an argument description, which `COMMAND DOCS` reports; repeated
     /// calls accumulate in order. A key argument's `key_spec_index` refers to
-    /// the definition's key specs.
+    /// one of the definition's key specs, by position; Redis does not check
+    /// that it exists.
     pub fn arg(mut self, arg: RedisModuleCommandArg) -> Self {
         self.info.args.push(arg);
         self
@@ -377,7 +410,7 @@ impl CommandBuilder {
     }
 
     fn register_container(self, ctx: &RegistrationContext<'_>) -> Result<(), RedisError> {
-        if self.keys.is_some() {
+        if self.keys.is_some() || !self.info.key_specs.is_empty() {
             return Err(RedisError::Str("ERR a command container cannot have keys"));
         }
         // Redis 7.0 accepts these in a command name but cannot then look the
@@ -521,6 +554,7 @@ impl CommandBuilder {
         if self.info.arity == Some(0) {
             return Err(RedisError::Str("ERR a command arity must not be 0"));
         }
+        self.info.validate()?;
         if self.legacy_flags.is_none() {
             if let Some(keys) = self.keys {
                 keys.validate()?;
@@ -593,15 +627,6 @@ fn set_command_info(
     let set_info = unsafe { raw::RedisModule_SetCommandInfo }.ok_or(RedisError::Str(
         "ERR command info needs Redis 7.0 or later (RedisModule_SetCommandInfo)",
     ))?;
-    if info
-        .tips
-        .iter()
-        .any(|tip| tip.is_empty() || tip.contains(' '))
-    {
-        return Err(RedisError::Str(
-            "ERR a command tip must be non-empty and contain no space",
-        ));
-    }
     let text = |value: Option<String>| value.map(CString::new).transpose();
     let summary = text(info.summary)?;
     let complexity = text(info.complexity)?;
@@ -665,7 +690,7 @@ fn set_command_info(
     args.unwrap_or_default().iter().for_each(free_command_arg);
     if status != Status::Ok as i32 {
         return Err(RedisError::String(format!(
-            "ERR Redis refused the command info of {} (an invalid key spec or argument, or info already set)",
+            "ERR Redis refused the command info of {}; the server log says why",
             name.to_string_lossy()
         )));
     }

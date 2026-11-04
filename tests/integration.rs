@@ -1827,6 +1827,16 @@ fn test_command_builder_invalid_definitions_fail_the_load() {
             "key-spec-invalid",
             "Redis refused the command info of builder.invalid",
         ),
+        (
+            "key-spec-step-zero",
+            "a key spec's range needs a step of 1 or more",
+        ),
+        (
+            "key-spec-index-zero",
+            "begin-search index must be 1 or more",
+        ),
+        ("key-spec-nul", "key spec notes contains a NUL byte"),
+        ("container-key-spec", "container cannot have keys"),
         ("container-acl", "container cannot have ACL categories"),
         (
             "container-optional-acl",
@@ -3728,12 +3738,12 @@ fn test_command_builder_sets_every_command_info_field() -> Result<()> {
     for expected in [
         "Reads a key",
         "O(1)",
-        "1.0.0",
+        "0.9.0",
         "1.1.0",
         "Reads the value as a copy",
         "1.2.0",
         "Refuses extra arguments",
-        "key",
+        "source",
         "The key to read",
     ] {
         assert!(
