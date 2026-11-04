@@ -46,7 +46,7 @@ set -euo pipefail
 ship_work=$(mktemp -d /tmp/redis-module-ship.XXXXXX)
 git clone https://github.com/joshrotenberg/redismodule-rs "$ship_work/source"
 cd "$ship_work/source"
-git checkout --detach 85791c4be4a1f4b49a2b506500e897eaa3630332
+git checkout --detach 70420ce7083690a146f922543e860741d48234af
 ship_revision=$(git rev-parse HEAD)
 ship_target=$(rustc +1.94.0 -vV | sed -n 's/^host: //p')
 case "$ship_target" in
