@@ -805,7 +805,7 @@ impl Context {
                     Ok(CStr::from_ptr(name).to_string_lossy().into_owned())
                 }
                 None => Err(RedisError::Str(
-                    "API RedisModule_GetCurrentCommandName is not available",
+                    "ERR API RedisModule_GetCurrentCommandName is not available",
                 )),
             }
         }

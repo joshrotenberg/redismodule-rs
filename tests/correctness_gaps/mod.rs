@@ -157,3 +157,28 @@ fn correctness_enum_bitflags_are_refused_before_registration() -> Result<()> {
     assert!(configs.is_empty());
     Ok(())
 }
+
+#[test]
+fn correctness_missing_current_command_api_uses_an_err_code() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    let error = redis::cmd("api.current_command")
+        .arg("missing")
+        .query::<Value>(&mut con)
+        .unwrap_err();
+    assert_eq!(error.code(), Some("ERR"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("RedisModule_GetCurrentCommandName")
+    );
+    let available: i64 = redis::cmd("api.available")
+        .arg("GetCurrentCommandName")
+        .query(&mut con)?;
+    let restored = redis::cmd("api.current_command").query::<String>(&mut con);
+    if available != 0 {
+        assert_eq!(restored?, "api.current_command");
+    } else {
+        assert_eq!(restored.unwrap_err().code(), Some("ERR"));
+    }
+    Ok(())
+}

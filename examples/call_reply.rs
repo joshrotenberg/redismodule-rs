@@ -146,7 +146,7 @@ redis_module! {
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
     commands: [
-        ["call_reply.display", display, "readonly", 0, 0, 0, ""],
+        ["call_reply.display", display, "", 0, 0, 0, ""],
         ["call_reply.echo", echo, "readonly", 0, 0, 0, ""],
         ["call_reply.error_code", error_code, "", 0, 0, 0, ""],
         ["call_reply.protocol", protocol, "readonly", 1, 1, 1, ""],
