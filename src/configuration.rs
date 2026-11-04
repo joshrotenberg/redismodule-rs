@@ -170,7 +170,7 @@ impl<T: Clone + Send> ConfigurationValue<T> for RedisGILGuard<T> {
 
 impl<T: Clone + Send> ConfigurationValue<T> for Mutex<T> {
     fn get(&self, _ctx: &ConfigurationContext) -> T {
-        let value = self.lock().unwrap();
+        let value = self.lock().unwrap_or_else(|error| error.into_inner());
         value.clone()
     }
     fn set(&self, _ctx: &ConfigurationContext, val: T) -> Result<(), RedisError> {
@@ -204,7 +204,7 @@ impl ConfigurationValue<RedisString> for RedisGILGuard<String> {
 
 impl ConfigurationValue<RedisString> for Mutex<String> {
     fn get(&self, _ctx: &ConfigurationContext) -> RedisString {
-        let value = self.lock().unwrap();
+        let value = self.lock().unwrap_or_else(|error| error.into_inner());
         RedisString::create(None, value.as_str())
     }
     fn set(&self, _ctx: &ConfigurationContext, val: RedisString) -> Result<(), RedisError> {
@@ -229,7 +229,7 @@ impl ConfigurationValue<RedisString> for RedisGILGuard<Vec<u8>> {
 /// Binary string configuration storage protected by a Rust mutex.
 impl ConfigurationValue<RedisString> for Mutex<Vec<u8>> {
     fn get(&self, _ctx: &ConfigurationContext) -> RedisString {
-        RedisString::from_bytes(&self.lock().unwrap())
+        RedisString::from_bytes(&self.lock().unwrap_or_else(|error| error.into_inner()))
     }
     fn set(&self, _ctx: &ConfigurationContext, val: RedisString) -> Result<(), RedisError> {
         *self.lock().unwrap() = val.as_slice().to_vec();
@@ -911,5 +911,42 @@ mod memory_tests {
         for bad in ["", "mb", "-1", "1.5mb", "8 mb", "8tb", "99999999999gb"] {
             assert!(parse_memory(bad).is_err(), "{bad}");
         }
+    }
+}
+
+#[cfg(test)]
+mod poisoned_getter_tests {
+    use super::{ConfigurationContext, ConfigurationValue};
+    use std::fmt::Debug;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::Mutex;
+
+    fn stored_value_survives_poison<T: Clone + Send + Debug + PartialEq>(value: T) {
+        let storage = Mutex::new(value.clone());
+        let poisoned = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = storage.lock().unwrap();
+            panic!("configuration writer panicked");
+        }));
+        assert!(poisoned.is_err());
+        assert!(storage.is_poisoned());
+        let ctx = ConfigurationContext::new();
+        for _ in 0..2 {
+            assert_eq!(ConfigurationValue::<T>::get(&storage, &ctx), value);
+            assert!(storage.is_poisoned());
+        }
+    }
+
+    #[test]
+    fn poisoned_mutex_getters_return_the_stored_value_repeatedly() {
+        #[derive(Clone, Debug, PartialEq)]
+        enum Choice {
+            Second,
+        }
+
+        stored_value_survives_poison(73_i64);
+        stored_value_survives_poison(true);
+        stored_value_survives_poison(Choice::Second);
+        stored_value_survives_poison(String::from("unchanged"));
+        stored_value_survives_poison(vec![0_u8, 0xff, 0xfe]);
     }
 }

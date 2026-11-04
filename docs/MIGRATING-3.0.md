@@ -65,6 +65,14 @@ change because `serde_syn` is no longer involved.
 
 ## Changes the compiler reports
 
+### Replication returns a status
+
+`RuntimeContext::replicate` now returns `Status`: check `Status::Err` for a
+refused command name or native replication failure. Calls used as statements
+with a semicolon still compile. Code that required a `()` return, such as a
+function pointer or a unit-returning tail expression, must check or explicitly
+discard the status.
+
 ### Native data types implement `NativeType`
 
 A native data type is a Rust type that implements
@@ -985,6 +993,19 @@ take `&Context` instead of a raw pointer.
   and `Clone`. Modules hold pointers to them, never values.
 
 ## Changes that compile unchanged
+
+### RDB text must be UTF-8
+
+`RedisModuleIO::read_string` now returns an error when the stored bytes are not
+valid UTF-8. Previously it replaced invalid bytes with U+FFFD, and a later save
+could persist the altered value. Read arbitrary bytes with
+`read_string_buffer` and choose an explicit decoding policy if the module's
+format permits lossy text.
+
+Converting native RESP3 maps and sets into `RedisValue` also returns an error
+value for an aggregate containing a key or member outside `RedisValueKey`'s
+supported scalar variants, instead of panicking. Forward the native call
+reply directly when its full representation is required.
 
 ### Missing optional APIs on older Redis 6.0 servers
 

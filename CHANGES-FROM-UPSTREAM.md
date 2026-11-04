@@ -26,6 +26,26 @@ container arity of 1 or -1, and refuses containers before Redis 7.0. Redis
 grants a container's ACL categories to every subcommand, so a container cannot
 have categories; each subcommand sets its own.
 
+## Unusual input and stored values
+
+Command names containing NUL are refused before call or replication arguments
+are converted, rather than panicking through `CString::new(...).unwrap()`
+(#165). `RuntimeContext::replicate` returns the native `Status` so a caller can
+observe refusal; it previously discarded that result. Converting a native RESP3 map whose key is not a supported
+`RedisValueKey`, or a set with an unsupported member, returns an error value
+for that entire aggregate. Nested arrays and map values retain that error in
+the aggregate's slot. Native reply forwarding remains available for callers
+that need Redis's full representation.
+
+Configuration-change event names are decoded with replacement characters for
+invalid UTF-8, inside the callback's panic guard. `catch_panic` leaks caught
+payloads because user-defined payload destructors can panic themselves. Mutex
+configuration getters recover the guarded value from a poisoned lock, keeping
+`CONFIG GET` and `CONFIG REWRITE` from silently substituting fallback values.
+The poison flag itself is retained. `RedisModuleIO::read_string` rejects
+invalid UTF-8; binary RDB strings use `read_string_buffer`. Upstream has no
+issue or pull request for these changes.
+
 ## Redis 6.0 capability fallbacks
 
 Keyspace subscriptions no longer require native flag enumeration (#167).
