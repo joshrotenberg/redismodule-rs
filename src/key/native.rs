@@ -244,7 +244,7 @@ impl Entry {
 }
 
 /// Marks a registered key as mid-call until dropped.
-struct Busy<'a>(&'a Entry);
+pub(crate) struct Busy<'a>(&'a Entry);
 
 impl<'a> Busy<'a> {
     fn begin(entry: &'a Entry) -> Self {
@@ -370,6 +370,14 @@ impl NativeKey {
                 *inner
             }
         }
+    }
+
+    /// Marks the key as mid-call until the guard drops, so no keyspace change
+    /// or open closes it: for a native call that keeps using the key while
+    /// module callbacks run, such as a key scan. `None` for a raw key, which
+    /// the SDK never closes.
+    pub(crate) fn hold(&self) -> Option<Busy<'_>> {
+        self.entry().map(Busy::begin)
     }
 
     /// Runs `f`, a native call that can delete, replace or move key values,

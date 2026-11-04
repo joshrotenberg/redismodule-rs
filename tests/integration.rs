@@ -4086,6 +4086,19 @@ fn test_stream_iterator_stops_after_a_keyspace_change() -> Result<()> {
         "{error}"
     );
     assert_eq!(redis::cmd("XLEN").arg("s").query::<i64>(&mut con)?, 2);
+
+    // The field-at-a-time form panics on the next entry too, instead of
+    // ending the iteration as if the stream were exhausted.
+    let error = redis::cmd("stale.entry_call")
+        .arg("s")
+        .query::<Value>(&mut con)
+        .expect_err("next_entry continued after a keyspace change");
+    assert!(
+        error.to_string().contains(
+            "command panicked: the stream's key was closed by a keyspace change while iterating it"
+        ),
+        "{error}"
+    );
     Ok(())
 }
 
@@ -4141,6 +4154,35 @@ fn test_subscriber_call_leaves_the_key_mid_write_open() -> Result<()> {
         "value"
     );
     assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+/// Opening a key closes keys opened with `ACCESS_EXPIRED`, which may hold an
+/// expired value the open deletes, but not one Redis is scanning: a scan
+/// callback that opens another key leaves the scanned key open. Redis 8.0+.
+#[test]
+fn test_key_scan_of_an_expired_key_survives_opens_in_the_callback() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version = redis_module::Context::version_from_info(RedisValue::BulkString(info))?;
+    if version.major < 8 {
+        return Ok(());
+    }
+    redis::cmd("DEBUG")
+        .arg(&["SET-ACTIVE-EXPIRE", "0"])
+        .query::<()>(&mut con)?;
+    redis::cmd("HSET")
+        .arg(&["h", "a", "1", "b", "2"])
+        .query::<()>(&mut con)?;
+    redis::cmd("PEXPIRE")
+        .arg(&["h", "1"])
+        .query::<()>(&mut con)?;
+    thread::sleep(Duration::from_millis(20));
+    let fields: i64 = redis::cmd("stale.scan_expired_open")
+        .arg(&["h", "other"])
+        .query(&mut con)?;
+    assert_eq!(fields, 2);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
 

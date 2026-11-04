@@ -128,8 +128,9 @@ impl<'ctx> ScanKeyCursor<'ctx> {
         };
         let native = self.key.native.current();
         // Redis keeps scanning the key after each callback, so a callback may
-        // not change the keyspace: removing the key would free what Redis
-        // scans next.
+        // not change the keyspace, and opening a key in it must not close the
+        // one being scanned (an open closes ACCESS_EXPIRED keys).
+        let held = self.key.native.hold();
         let frozen = crate::key::Frozen::begin();
         let res = unsafe {
             scan_key(
@@ -140,6 +141,7 @@ impl<'ctx> ScanKeyCursor<'ctx> {
             )
         };
         drop(frozen);
+        drop(held);
         crate::panic::resume_deferred_panic();
 
         res != 0

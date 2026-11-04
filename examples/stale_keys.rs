@@ -134,6 +134,42 @@ fn stream_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok(entries.into())
 }
 
+/// `stale.entry_call key`: reads one field of each stream entry through
+/// `next_entry` and runs PING before the next entry, which panics.
+fn entry_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let name = args.next_arg()?;
+    args.done()?;
+    let key = ctx.open_key(&name);
+    let mut entries = key.get_stream_iterator(false)?;
+    let mut read: i64 = 0;
+    while let Some(mut entry) = entries.next_entry() {
+        entry.next_field();
+        read += 1;
+        drop(entry);
+        ctx.call("PING", &[] as &[&str])?;
+    }
+    Ok(read.into())
+}
+
+/// `stale.scan_expired_open key other`: scans a hash opened with
+/// `ACCESS_EXPIRED` (Redis 8.0+), opening `other` from the callback. Opening
+/// a key closes `ACCESS_EXPIRED` keys, except one Redis is scanning.
+fn scan_expired_open(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let name = args.next_arg()?;
+    let other = args.next_arg()?;
+    args.done()?;
+    let key = ctx.open_key_with_flags(&name, redis_module::key::KeyFlags::ACCESS_EXPIRED);
+    let cursor = ScanKeyCursor::new(key);
+    let mut fields: i64 = 0;
+    cursor.for_each(|_, _, _| {
+        fields += 1;
+        let _ = ctx.open_key(&other).key_type();
+    });
+    Ok(fields.into())
+}
+
 /// `stale.scan_del key`: scans a hash and tries DEL on it from the callback,
 /// which the SDK refuses while Redis scans the key. Replies with the fields
 /// seen and the first refusal.
@@ -244,6 +280,8 @@ redis_module! {
         ["stale.pop_other", pop_other, "write", 1, 1, 1, ""],
         ["stale.other_db", other_db, "write", 1, 1, 1, ""],
         ["stale.stream_call", stream_call, "readonly", 1, 1, 1, ""],
+        ["stale.entry_call", entry_call, "readonly", 1, 1, 1, ""],
+        ["stale.scan_expired_open", scan_expired_open, "readonly", 1, 1, 1, ""],
         ["stale.scan_del", scan_del, "write", 1, 1, 1, ""],
         ["stale.keys_scan_call", keys_scan_call, "write", 1, 1, 1, ""],
         ["stale.raw_parts_after_call", raw_parts_after_call, "write", 1, 1, 1, ""],

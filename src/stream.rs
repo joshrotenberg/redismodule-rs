@@ -31,7 +31,8 @@ pub struct StreamRecord {
 /// A keyspace change while it iterates, such as a call in the loop body,
 /// closes the key under it (see [`RedisKey`]), and its next step, or the next
 /// field of an entry from [`next_entry`](Self::next_entry), panics: start a
-/// new iterator after the change.
+/// new iterator after the change. For a key opened with
+/// `KeyFlags::ACCESS_EXPIRED`, opening any other key closes it too.
 #[derive(Debug)]
 pub struct StreamIterator<'key> {
     key: &'key RedisKey<'key>,
@@ -179,9 +180,10 @@ impl<'key> StreamIterator<'key> {
     fn drain_fields(&mut self) -> usize {
         // A keyspace change ended the native iterator: nothing to skip, and
         // this runs from Drop, which must not panic.
+        // Leave `finished` unset, so the next entry panics rather than end
+        // the iteration as if the stream were exhausted.
         let Some(native) = self.key.native.unchanged_since(self.token) else {
             self.remaining = 0;
-            self.finished = true;
             return 0;
         };
         let mut skipped = 0;

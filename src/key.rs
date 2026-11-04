@@ -151,7 +151,8 @@ impl<'ctx> RedisKey<'ctx> {
     /// The pointer is valid until the next keyspace change: the SDK closes
     /// the native key before one and re-opens it, at a new address, on the
     /// handle's next use. Call `as_ptr` again after any call, `yield_now` or
-    /// change through another handle.
+    /// change through another handle, and, for a key opened with
+    /// `KeyFlags::ACCESS_EXPIRED`, after opening any other key.
     ///
     /// Native access remains unsafe: keep this owner, its opening context and
     /// Redis lock alive; respect the open mode and all native aliasing rules.
