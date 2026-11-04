@@ -13,6 +13,10 @@ use redis::{ConnectionLike, RedisResult, Value};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(200);
+/// Read and write timeout for a connection once it passes the startup probe:
+/// long enough for SAVE, MODULE LOAD and DEBUG RELOAD on a busy runner, short
+/// enough that a hung command still fails the test.
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 static INSTANCE_ID: AtomicUsize = AtomicUsize::new(0);
 static NATIVE_TEST: Mutex<()> = Mutex::new(());
@@ -288,7 +292,11 @@ fn probe_connection(port: u16, expected_pid: u32) -> Result<Option<Connection>> 
                 .any(|line| line == format!("process_id:{expected_pid}")))
     })();
     match probe {
-        Ok(true) => Ok(Some(connection)),
+        Ok(true) => {
+            connection.socket.set_read_timeout(Some(COMMAND_TIMEOUT))?;
+            connection.socket.set_write_timeout(Some(COMMAND_TIMEOUT))?;
+            Ok(Some(connection))
+        }
         Ok(false) => Ok(None),
         Err(error) if error.is_io_error() || error.code() == Some("LOADING") => Ok(None),
         Err(error) => Err(error.into()),
