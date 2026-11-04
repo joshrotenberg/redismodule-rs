@@ -6,9 +6,14 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 description = "A Redis module that runs WebAssembly components as functions"
+build = "build.rs"
 
 [lib]
 crate-type = ["cdylib"]
+
+[[bin]]
+name = "redis-wasm-compiler"
+path = "src/bin/compiler.rs"
 
 [dependencies]
 # The default API floor: the host looks up newer APIs, such as
@@ -17,8 +22,11 @@ crate-type = ["cdylib"]
 redis-module = { path = ".." }
 redis-module-macros = { path = "../redismodule-rs-macros" }
 # 36 is a long-term support release whose MSRV fits this workspace.
-wasmtime = { version = "36", default-features = false, features = ["cranelift", "runtime", "component-model", "std", "parallel-compilation"] }
+wasmtime = { version = "=36.0.19", default-features = false, features = ["cranelift", "runtime", "component-model", "std", "parallel-compilation"] }
 anyhow = "1"
+libc = "0.2"
+sha2 = "0.10.9"
+tempfile = "3.23"
 
 [dev-dependencies]
 # Unit tests run outside Redis, where RedisAlloc has no allocator to use.

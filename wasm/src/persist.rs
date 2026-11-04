@@ -16,8 +16,8 @@
 //! live only in memory, untouched by loading.
 
 use std::ffi::c_int;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use anyhow::{Context as _, bail};
@@ -162,32 +162,35 @@ fn load(rdb: &mut RedisModuleIO, encver: c_int) -> anyhow::Result<()> {
 
     // The libraries are added now, and compile on a thread: the server serves
     // meanwhile, and a call to a library still compiling waits for it.
-    let compiler = crate::with_host(|host| host.compiler())?;
+    let mut compiler = crate::with_host(|host| host.compiler())??;
     let mut jobs = Vec::with_capacity(count);
     for (name, component, functions) in libraries {
-        let code =
-            crate::with_host(|host| host.restore_compiling(&name, component.clone(), functions))?
-                .with_context(|| format!("library '{name}'"))?;
+        let component = Arc::new(component);
+        let code = crate::with_host(|host| {
+            host.restore_compiling(&name, Arc::clone(&component), functions)
+        })?
+        .with_context(|| format!("library '{name}'"))?;
         jobs.push((code, component));
     }
     if count > 0 {
-        let jobs = Arc::new(Mutex::new(jobs));
-        let compile = {
-            let jobs = Arc::clone(&jobs);
-            move || {
-                let jobs =
-                    std::mem::take(&mut *jobs.lock().unwrap_or_else(PoisonError::into_inner));
-                for (code, component) in jobs {
-                    code.finish(compiler.compile_code(&component));
-                }
+        let supervisor = compiler.supervisor();
+        let codes: Vec<_> = jobs.iter().map(|(code, _)| Arc::clone(code)).collect();
+        if let Err(error) = supervisor.spawn(move || {
+            for (code, component) in jobs {
+                let source = crate::compiler_source::Source::Saved(component);
+                let result = redis_module::panic::catch_panic(|| compiler.compile_code(&source))
+                    .unwrap_or_else(|message| {
+                        Err(anyhow::anyhow!("compiler worker panicked: {message}"))
+                    });
+                code.finish(result);
             }
-        };
-        let spawned = std::thread::Builder::new()
-            .name("wasm-compile".into())
-            .spawn(compile.clone());
-        if spawned.is_err() {
-            // Without a thread, compile here; the load takes longer.
-            compile();
+        }) {
+            for code in codes {
+                code.finish(Err(anyhow::anyhow!(
+                    "compiler worker did not start: {error:#}"
+                )));
+            }
+            return Err(error);
         }
         logging::log_notice(format!(
             "wasm: loaded {count} libraries ({bytes} bytes) from the RDB in {} ms; they compile in the background",

@@ -37,6 +37,11 @@ use redis_module_macros::command;
 
 mod busy;
 mod code;
+mod compiler;
+mod compiler_engine;
+mod compiler_pipe;
+mod compiler_protocol;
+mod compiler_source;
 mod dump;
 mod flags;
 mod host;
@@ -88,15 +93,20 @@ fn error(context: &str, error: &anyhow::Error) -> RedisError {
 fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = ArgCursor::new(&args[1..]);
     let name = args.next_str()?.to_owned();
-    let component = args.next_bytes()?.to_vec();
+    let component = args.next_bytes()?;
     let replace = match args.next() {
         None => false,
         Some(arg) if arg.as_slice().eq_ignore_ascii_case(b"REPLACE") => true,
         Some(_) => return Err(RedisError::Str("ERR the only option is REPLACE")),
     };
     args.done()?;
-    let compiler = with_host(|host| host.check_name(&name, replace).map(|()| host.compiler()))?
-        .map_err(|e| error("WASM.LOAD failed", &e))?;
+    let mut compiler = with_host(|host| {
+        host.check_name(&name, replace)
+            .and_then(|()| host.compiler())
+    })?
+    .map_err(|e| error("WASM.LOAD failed", &e))?;
+    let component =
+        compiler_source::Source::spool(component).map_err(|e| error("WASM.LOAD failed", &e))?;
 
     let Ok(blocked) = ctx.block_client_on_reply(None, finish_load, load_timed_out) else {
         let result = compiler.compile(component);
@@ -111,8 +121,8 @@ fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     };
     // If the thread cannot start, the handle is dropped with it, which
     // unblocks the client with an error reply.
-    let _ = std::thread::Builder::new()
-        .name("wasm-compile".into())
+    let supervisor = compiler.supervisor();
+    supervisor
         .spawn(move || {
             let result = compiler.compile(component);
             blocked.unblock(Loaded {
@@ -120,7 +130,8 @@ fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
                 replace,
                 result,
             });
-        });
+        })
+        .map_err(|e| error("WASM.LOAD failed", &e))?;
     Ok(RedisValue::NoReply)
 }
 
@@ -360,7 +371,7 @@ fn wasm_dump(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 /// `WASM.LOAD`.
 fn wasm_restore(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = ArgCursor::new(&args[1..]);
-    let payload = args.next_bytes()?.to_vec();
+    let payload = args.next_bytes()?;
     let policy = match args.next() {
         None => host::Policy::Append,
         Some(arg) => match arg.as_slice().to_ascii_uppercase().as_slice() {
@@ -375,8 +386,17 @@ fn wasm_restore(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         },
     };
     args.done()?;
-    let libraries = dump::parse(&payload).map_err(|e| error("WASM.RESTORE failed", &e))?;
-    let compiler = with_host(|host| host.compiler())?;
+    let mut compiler =
+        with_host(|host| host.compiler())?.map_err(|e| error("WASM.RESTORE failed", &e))?;
+    let libraries = dump::parse(payload).map_err(|e| error("WASM.RESTORE failed", &e))?;
+    let libraries = libraries
+        .into_iter()
+        .map(|(name, component)| {
+            compiler_source::Source::spool(component).map(|source| (name, source))
+        })
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(|e| error("WASM.RESTORE failed", &e))?;
+    let supervisor = compiler.supervisor();
     let compile = move || -> anyhow::Result<Vec<(String, host::Compiled)>> {
         libraries
             .into_iter()
@@ -398,14 +418,14 @@ fn wasm_restore(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             },
         );
     };
-    let _ = std::thread::Builder::new()
-        .name("wasm-compile".into())
+    supervisor
         .spawn(move || {
             blocked.unblock(Restoring {
                 policy,
                 result: compile(),
             });
-        });
+        })
+        .map_err(|e| error("WASM.RESTORE failed", &e))?;
     Ok(RedisValue::NoReply)
 }
 
@@ -546,6 +566,10 @@ redis_module! {
     ],
     configurations: [
         i64: [
+            ["compiler-memory", &compiler::MEMORY, compiler::DEFAULT_MEMORY, 64 << 20, 16 << 30, ConfigurationFlags::MEMORY | ConfigurationFlags::IMMUTABLE, None],
+            ["compiler-cpu-seconds", &compiler::CPU, compiler::DEFAULT_CPU, 1, 600, ConfigurationFlags::IMMUTABLE, None],
+            ["compiler-wall-seconds", &compiler::WALL, compiler::DEFAULT_WALL, 1, 1200, ConfigurationFlags::IMMUTABLE, None],
+            ["compiler-queue", &compiler::QUEUE, compiler::DEFAULT_QUEUE, 0, 64, ConfigurationFlags::IMMUTABLE, None],
             [
                 "max-memory",
                 &memory::MAX_MEMORY,
