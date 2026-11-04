@@ -306,8 +306,9 @@ impl CommandBuilder {
 
     /// Adds a key spec; repeated calls accumulate in order. Registration
     /// refuses a spec Redis would mishandle: a begin-search index below 1, a
-    /// range or key-count step below 1, a negative limit, or a limit above 1
-    /// without last key -1. Key specs replace
+    /// range or key-count step below 1, a negative limit, a limit above 1
+    /// without last key -1, or any limit with a last key below -1. Key specs
+    /// replace
     /// the key range's single spec in `COMMAND INFO`, `COMMAND GETKEYSANDFLAGS`
     /// and key extraction, and their flags decide what `%R~` and `%W~` ACL
     /// key patterns allow: a range's spec allows only a user with full access

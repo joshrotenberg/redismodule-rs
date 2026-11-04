@@ -51,8 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `COMMAND GETKEYSANDFLAGS` and decide what `%R~` and `%W~` ACL key patterns
   allow, which a key range's spec cannot. Registration checks the info before
   creating the command, refusing key specs Redis accepts but mishandles (a
-  key step of 0 overruns its key buffer; an index of 0 or a limit with a
-  fixed last key fails its assertions), NUL bytes, tips with spaces, and key
+  key step of 0 overruns its key buffer; an index of 0, or a limit with a last
+  key other than -1, fails its assertions), NUL bytes, tips with spaces, and key
   specs on a container. Redis copies every string, and the builder frees them
   after the call, as `#[command]` now also does when the call fails. See
   `examples/subcommands.rs`.

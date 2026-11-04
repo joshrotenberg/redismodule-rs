@@ -103,6 +103,12 @@ fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> St
                 redis_module::commands::BeginSearch::new_index(1),
                 redis_module::commands::FindKeys::new_range(0, 0, 0),
             )),
+            "key-spec-limit-fixed-last" => command.key_spec(redis_module::commands::KeySpec::new(
+                None,
+                redis_module::commands::KeySpecFlags::READ_ONLY,
+                redis_module::commands::BeginSearch::new_index(1),
+                redis_module::commands::FindKeys::new_range(-2, 1, 1),
+            )),
             "key-spec-index-zero" => command.key_spec(redis_module::commands::KeySpec::new(
                 None,
                 redis_module::commands::KeySpecFlags::READ_ONLY,

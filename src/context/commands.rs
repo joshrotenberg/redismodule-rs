@@ -331,13 +331,14 @@ impl KeySpec {
         }
         match &self.find_keys {
             FindKeys::Range(range) => {
+                // Redis asserts on a limit with any last key but -1.
                 if range.steps < 1
                     || range.limit < 0
+                    || (range.limit != 0 && range.last_key < -1)
                     || (range.limit > 1 && range.last_key != -1)
-                    || range.last_key < -1 && range.limit > 1
                 {
                     return Err(RedisError::Str(
-                        "ERR a key spec's range needs a step of 1 or more and a limit of 0 or more, above 1 only with last key -1",
+                        "ERR a key spec's range needs a step of 1 or more and a limit of 0 or more, and a limit other than 0 or 1 only with last key -1 (with a last key below -1, only 0)",
                     ));
                 }
             }
