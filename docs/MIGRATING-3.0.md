@@ -809,6 +809,19 @@ take `&Context` instead of a raw pointer.
 
 ## Changes that compile unchanged
 
+### RDB text must be UTF-8
+
+`RedisModuleIO::read_string` now returns an error when the stored bytes are not
+valid UTF-8. Previously it replaced invalid bytes with U+FFFD, and a later save
+could persist the altered value. Read arbitrary bytes with
+`read_string_buffer` and choose an explicit decoding policy if the module's
+format permits lossy text.
+
+Converting native RESP3 maps and sets into `RedisValue` also returns an error
+value for an aggregate containing a key or member outside `RedisValueKey`'s
+supported scalar variants, instead of panicking. Forward the native call
+reply directly when its full representation is required.
+
 These compile without a change, so the compiler will not point at them. Check
 the code that depends on them, and the tests and clients that match on reply
 text.

@@ -25,8 +25,14 @@ use crate::raw;
 ///
 /// The closure is treated as unwind safe: after a panic, state it shared with
 /// the caller may be partly updated, and a `Mutex` it held is poisoned.
+/// The caught payload is leaked: its destructor can itself panic, so running
+/// it here could unwind out of the callback's panic guard into Redis.
 pub fn catch_panic<R>(f: impl FnOnce() -> R) -> Result<R, String> {
-    catch_unwind(AssertUnwindSafe(f)).map_err(|payload| panic_message(payload.as_ref()))
+    catch_unwind(AssertUnwindSafe(f)).map_err(|payload| {
+        let message = panic_message(payload.as_ref());
+        std::mem::forget(payload);
+        message
+    })
 }
 
 /// The message of a panic payload, for the `&str` and `String` payloads that
@@ -207,6 +213,26 @@ mod tests {
         assert_eq!(run_callback("test", || 1, || 2), 1);
         // Outside Redis the log call is skipped, so only the fallback shows.
         assert_eq!(run_callback("test", || -> i32 { panic!("boom") }, || 2), 2);
+    }
+
+    #[test]
+    fn caught_payload_destructors_cannot_escape_the_panic_guard() {
+        struct PanicOnDrop;
+        impl Drop for PanicOnDrop {
+            fn drop(&mut self) {
+                panic!("panic payload destructor ran");
+            }
+        }
+
+        assert_eq!(
+            catch_panic(|| std::panic::panic_any(PanicOnDrop)),
+            Err("panic payload is not a string".to_owned())
+        );
+        assert_eq!(
+            run_callback("payload test", || std::panic::panic_any(PanicOnDrop), || 42),
+            42
+        );
+        assert_eq!(catch_panic(|| 7), Ok(7));
     }
 
     #[test]

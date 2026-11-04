@@ -1841,6 +1841,49 @@ fn test_call_error_codes_classify_native_and_synthesized_errors() -> Result<()> 
 }
 
 #[test]
+fn test_unusual_input_nul_call_names_return_errors_at_every_floor() -> Result<()> {
+    let mut con = TestConnection::new("call_reply");
+    for command in ["\0PING", "PING\0", "SET\0GET"] {
+        let code: Vec<u8> = redis::cmd("call_reply.error_code")
+            .arg(command)
+            .query(&mut con)?;
+        assert_eq!(code, b"ERR", "{command:?}");
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    assert!(!con.server_log()?.contains("panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "call_reply"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_unusual_input_context_call_rejects_nul_names_without_panicking() -> Result<()> {
+    let mut con = TestConnection::new("call");
+    for command in ["\0PING", "PING\0", "SET\0GET"] {
+        let error = redis::cmd("call.convert")
+            .arg(command)
+            .query::<Value>(&mut con)
+            .expect_err("a NUL command name was accepted");
+        assert!(
+            error
+                .to_string()
+                .contains("command name contains a NUL byte")
+        );
+        assert!(!error.to_string().contains("panicked"));
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+#[test]
 fn test_call_error_codes_do_not_require_utf8_messages() -> Result<()> {
     let mut con = TestConnection::new("call_reply");
     for (script, expected) in [

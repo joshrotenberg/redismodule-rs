@@ -2,6 +2,10 @@ use crate::RedisBuffer;
 use crate::error::Error;
 use crate::raw;
 
+fn decode_string(bytes: Vec<u8>) -> Result<String, Error> {
+    String::from_utf8(bytes).map_err(Error::from)
+}
+
 /// Wrapper around RedisModuleIO for type-safe serialization/deserialization.
 ///
 /// This wrapper provides an ergonomic API for working with RedisModuleIO
@@ -27,14 +31,16 @@ impl RedisModuleIO {
         self.io
     }
 
-    /// Reads a string from the IO stream.
+    /// Reads a UTF-8 string from the IO stream.
     ///
     /// # Errors
-    /// Returns an error if the operation fails or if an IO error occurred.
+    /// Returns an error if the operation fails, an IO error occurred, or the
+    /// stored bytes are not valid UTF-8. Use [`Self::read_string_buffer`] for
+    /// binary strings.
     pub fn read_string(&mut self) -> Result<String, Error> {
         // SAFETY: `new` requires a live callback IO.
         let string_ptr = unsafe { raw::load_string(self.io) }?;
-        Ok(string_ptr.to_string_lossy())
+        decode_string(string_ptr.as_slice().to_vec())
     }
 
     /// Writes a string to the IO stream.
@@ -116,5 +122,24 @@ impl RedisModuleIO {
     pub fn write_slice(&mut self, buf: &[u8]) {
         // SAFETY: `new` requires a live callback IO.
         unsafe { raw::save_slice(self.io, buf) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_string;
+    use crate::error::Error;
+
+    #[test]
+    fn rdb_text_decoding_preserves_valid_bytes_and_refuses_invalid_utf8() {
+        for bytes in [b"".as_slice(), b"a\0b", "héllo".as_bytes()] {
+            assert_eq!(decode_string(bytes.to_vec()).unwrap().as_bytes(), bytes);
+        }
+        for bytes in [b"a\xffb".as_slice(), b"\xf0\x9f\x92"] {
+            let Error::FromUtf8(error) = decode_string(bytes.to_vec()).unwrap_err() else {
+                panic!("invalid RDB text did not return its UTF-8 error");
+            };
+            assert_eq!(error.into_bytes(), bytes);
+        }
     }
 }

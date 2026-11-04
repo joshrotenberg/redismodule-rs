@@ -1003,10 +1003,17 @@ impl RuntimeContext {
         fmt: *const c_char,
         args: T,
     ) -> R {
+        let cmd = match CString::new(command) {
+            Ok(command) => command,
+            Err(_) => {
+                return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                    "ERR command name contains a NUL byte".into(),
+                ))));
+            }
+        };
         let mut call_args: StrCallArgs = args.into();
         let final_args = call_args.args_mut();
 
-        let cmd = CString::new(command).unwrap();
         // RedisModule_Call returns null both for a dry run that would succeed
         // and, without the E flag, for a call that failed; errno tells them
         // apart, so clear it first.
