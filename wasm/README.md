@@ -149,7 +149,7 @@ wasm_code_used                        live and pending page-rounded image reserv
 `CONFIG SET`, for example `CONFIG SET wasm.guest-memory-budget 256mb`.
 Zero is a hard cap on new positive reservations. Lowering a budget below its
 current use preserves valid instances and images, including guest globals;
-further positive admission waits for ownership to end or the limit to rise.
+further positive admission is refused until ownership ends or the limit rises.
 Limit changes and background compiler admission use the same lock.
 
 The guest limiter reserves the requested additional committed wasm pages

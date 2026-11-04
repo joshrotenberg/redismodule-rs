@@ -1848,6 +1848,7 @@ fn admission_failed_initial_instance_and_restore_batch_release_candidates() {
     config_set(&mut con, "wasm.guest-memory-budget", "1gb");
     load(&mut con, "hello");
     assert_eq!(counter(&mut con), 1);
+    let one_guest = info(&mut con)["guest_memory_used"];
     load_bytes(&mut con, "second", prefixed_component(), false).unwrap();
     let payload: Vec<u8> = redis::cmd("WASM.DUMP").query(&mut con).unwrap();
     let before = info(&mut con);
@@ -1870,6 +1871,38 @@ fn admission_failed_initial_instance_and_restore_batch_release_candidates() {
     restore(&mut con, &payload, Some("FLUSH")).unwrap();
     assert_eq!(counter(&mut con), 1);
     assert_eq!(info(&mut con)["code_used"], before["code_used"]);
+
+    // Code has ample headroom; only staging guest memory refuses admission.
+    // REPLACE cannot discard the old store to make the candidate fit.
+    let stable = info(&mut con);
+    config_set(
+        &mut con,
+        "wasm.guest-memory-budget",
+        &stable["guest_memory_used"].to_string(),
+    );
+    let failed =
+        error_text(load_bytes(&mut con, "hello", hello_component(), true).map(|_| Value::Okay));
+    assert!(failed.contains("wasm.guest-memory-budget"), "{failed}");
+    assert_eq!(counter(&mut con), 2);
+    // FLUSH permits its first staging store, then refuses the second. Every
+    // staged image/store must roll back while both old stores stay live.
+    config_set(
+        &mut con,
+        "wasm.guest-memory-budget",
+        &(stable["guest_memory_used"] + one_guest).to_string(),
+    );
+    let failed = error_text(restore(&mut con, &payload, Some("FLUSH")));
+    assert!(failed.contains("wasm.guest-memory-budget"), "{failed}");
+    assert_eq!(info(&mut con)["code_used"], stable["code_used"]);
+    assert_eq!(
+        info(&mut con)["guest_memory_used"],
+        stable["guest_memory_used"]
+    );
+    assert_eq!(counter(&mut con), 3);
+    assert_eq!(
+        call(&mut con, &["budget_counter", "0"]).unwrap(),
+        Value::Int(1)
+    );
 }
 
 #[test]
@@ -2059,4 +2092,75 @@ fn admission_replica_refusal_retains_old_globals_and_fresh_full_sync_repairs() {
             .unwrap(),
         "after-refused-replace"
     );
+}
+
+#[test]
+fn admission_reentrant_transient_store_shares_the_guest_budget_with_outer_kept_store() {
+    // Reuse an existing SDK example unchanged as a module-to-module bridge.
+    // The guest cannot directly invoke WASM.*, but a native module callback
+    // can enter WASM.CALL inside the outer guest's native call.
+    let status = Command::new(env!("CARGO"))
+        .args([
+            "build",
+            "--quiet",
+            "--package",
+            "redis-module",
+            "--example",
+            "call_reply",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let ext = if cfg!(target_os = "macos") {
+        "dylib"
+    } else {
+        "so"
+    };
+    let bridge = target_dir()
+        .join("debug/examples")
+        .join(format!("libcall_reply.{ext}"));
+    let server = Server::start(6650, &["--loadmodule", bridge.to_str().unwrap()]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    assert_eq!(counter(&mut con), 1);
+    let nested = [
+        "run_flat",
+        "0",
+        "call_reply.error_code",
+        "WASM.CALL",
+        "counter",
+        "0",
+    ];
+    assert_eq!(call(&mut con, &nested).unwrap(), Value::Nil);
+    assert_eq!(counter(&mut con), 2);
+    let before = info(&mut con);
+    config_set(
+        &mut con,
+        "wasm.guest-memory-budget",
+        &before["guest_memory_used"].to_string(),
+    );
+    // The outer store is locked and remains live. Its nested call needs a new
+    // store, whose initial pages must be refused before guest code can run.
+    assert_eq!(
+        call(&mut con, &nested).unwrap(),
+        Value::Data(b"ERR".to_vec())
+    );
+    assert_eq!(counter(&mut con), 3);
+    assert_eq!(
+        info(&mut con)["guest_memory_used"],
+        before["guest_memory_used"]
+    );
+    assert_eq!(info(&mut con)["code_used"], before["code_used"]);
+    config_set(
+        &mut con,
+        "wasm.guest-memory-budget",
+        &(2 * before["guest_memory_used"]).to_string(),
+    );
+    assert_eq!(call(&mut con, &nested).unwrap(), Value::Nil);
+    assert_eq!(counter(&mut con), 4);
+    assert_eq!(
+        info(&mut con)["guest_memory_used"],
+        before["guest_memory_used"]
+    );
+    assert_eq!(info(&mut con)["instances"], 1);
 }
