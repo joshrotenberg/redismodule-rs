@@ -1,3 +1,15 @@
+//! Typed views of native replies returned by [`RuntimeContext::call_ext`].
+//!
+//! A root [`CallResult`] owns Redis's reply and borrows the calling context.
+//! Aggregate accessors return child replies borrowing the aggregate, and byte
+//! slices borrow their reply wrapper. Keep each owner alive until its views
+//! are finished. These native wrappers are neither `Send` nor `Sync`; copy
+//! data into ordinary owned Rust values before handing it to another thread.
+//! See [`CallReply`] for examples and the context/thread restrictions.
+//!
+//! `Display` is diagnostic formatting, not Redis protocol serialization.
+//! For bytes that need to remain unchanged, use the typed byte accessors.
+
 use core::slice;
 use std::os::raw::c_char;
 use std::{
@@ -12,6 +24,11 @@ use libc::c_void;
 
 use crate::{EventContext, RedisError, RedisLockIndicator, RuntimeContext, raw::*};
 
+/// A native simple-string or bulk-string call reply.
+///
+/// [`as_bytes`](Self::as_bytes) borrows arbitrary bytes; [`to_string`](Self::to_string)
+/// copies valid UTF-8 into an owned string. A nested reply borrows its parent,
+/// while a root reply borrows the calling context. See [`CallReply`].
 pub struct StringCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,
@@ -76,6 +93,11 @@ impl<'root> Display for StringCallReply<'root> {
     }
 }
 
+/// A native error reply, including its error code and message bytes.
+///
+/// Accessors borrow the native payload; [`to_utf8_string`](Self::to_utf8_string)
+/// makes an owned copy when it is valid UTF-8. No code normalization occurs.
+/// A nested error borrows its parent. See [`ErrorReply`] and [`CallReply`].
 pub struct ErrorCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,
@@ -149,7 +171,9 @@ impl<'root> Display for ErrorCallReply<'root> {
 /// ```
 #[derive(Debug)]
 pub enum ErrorReply<'root> {
+    /// An owned SDK-generated or module-provided error message.
     Message(String),
+    /// An error reply borrowing its native context or aggregate parent.
     RedisError(ErrorCallReply<'root>),
 }
 
@@ -203,6 +227,10 @@ fn error_code(message: &[u8]) -> &[u8] {
     &message[..end]
 }
 
+/// A native signed integer reply. [`to_i64`](Self::to_i64) copies its value.
+///
+/// The wrapper still follows the context/parent lifetime and thread rules of
+/// [`CallReply`]; copying the integer removes that dependency.
 pub struct I64CallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,
@@ -241,6 +269,11 @@ impl<'root> Display for I64CallReply<'root> {
     }
 }
 
+/// A native ordered array reply.
+///
+/// [`get`](Self::get) and [`iter`](Self::iter) return replies borrowing this
+/// array; an element can itself be an error or another aggregate. Out-of-range
+/// access returns `None`. See [`CallReply`] for ownership and thread rules.
 pub struct ArrayCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,
@@ -279,6 +312,10 @@ impl<'root> ArrayCallReply<'root> {
     }
 }
 
+/// Iterates array elements in order, borrowing the array for `'curr`.
+///
+/// Each item is a [`CallResult`] tied to that borrow, including native error
+/// elements. The underlying root owner must remain alive.
 pub struct ArrayCallReplyIterator<'root, 'curr> {
     reply: &'curr ArrayCallReply<'root>,
     index: usize,
@@ -322,6 +359,9 @@ impl<'root> Display for ArrayCallReply<'root> {
     }
 }
 
+/// A native null reply, retaining its context or parent borrow.
+///
+/// This wrapper has no payload; see [`CallReply`] for ownership and thread rules.
 pub struct NullCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,
@@ -354,6 +394,11 @@ impl<'root> Display for NullCallReply<'root> {
     }
 }
 
+/// A native RESP3 map reply.
+///
+/// [`get`](Self::get) addresses a key/value pair by position, not by key, and
+/// returns `None` out of range. Both replies in each pair borrow this map.
+/// Iteration order follows Redis's reply; see [`CallReply`] for lifetime rules.
 pub struct MapCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,
@@ -390,6 +435,9 @@ impl<'root> MapCallReply<'root> {
     }
 }
 
+/// Iterates map key/value pairs, borrowing the map for `'curr`.
+///
+/// Both items in each pair are [`CallResult`] values tied to that borrow.
 pub struct MapCallReplyIterator<'root, 'curr> {
     reply: &'curr MapCallReply<'root>,
     index: usize,
@@ -445,6 +493,11 @@ impl<'root> Display for MapCallReply<'root> {
     }
 }
 
+/// A native RESP3 set reply.
+///
+/// [`get`](Self::get) returns a member by its native reply position, or `None`
+/// out of range; it is not a membership lookup. Member replies borrow this
+/// set, and their order is not specified. See [`CallReply`].
 pub struct SetCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,
@@ -476,6 +529,10 @@ impl<'root> SetCallReply<'root> {
     }
 }
 
+/// Iterates native set members, borrowing the set for `'curr`.
+///
+/// Items are [`CallResult`] values tied to that borrow. Their order is not
+/// specified.
 pub struct SetCallReplyIterator<'root, 'curr> {
     reply: &'curr SetCallReply<'root>,
     index: usize,
@@ -525,6 +582,9 @@ impl<'root> Display for SetCallReply<'root> {
     }
 }
 
+/// A native RESP3 boolean reply. [`to_bool`](Self::to_bool) copies its value.
+///
+/// See [`CallReply`] for the wrapper's context/parent lifetime and thread rules.
 pub struct BoolCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,
@@ -563,13 +623,17 @@ impl<'root> Display for BoolCallReply<'root> {
     }
 }
 
+/// A native RESP3 floating-point reply.
+///
+/// [`to_double`](Self::to_double) copies the value into an `f64`. The wrapper
+/// follows [`CallReply`]'s lifetime and thread rules.
 pub struct DoubleCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,
 }
 
 impl<'root> DoubleCallReply<'root> {
-    /// Return the double value of the [BoolCallReply] as f64.
+    /// Copies the floating-point value into an `f64`.
     pub fn to_double(&self) -> f64 {
         call_reply_double(self.reply.as_ptr())
     }
@@ -601,6 +665,10 @@ impl<'root> Display for DoubleCallReply<'root> {
     }
 }
 
+/// A native RESP3 arbitrary-precision integer, exposed as decimal text.
+///
+/// [`to_string`](Self::to_string) copies valid UTF-8; it does not narrow the
+/// number to a Rust integer. See [`CallReply`] for the wrapper's lifetime rules.
 pub struct BigNumberCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,
@@ -640,6 +708,11 @@ impl<'root> Display for BigNumberCallReply<'root> {
     }
 }
 
+/// A native RESP3 verbatim string with a three-byte format and a byte payload.
+///
+/// [`as_parts`](Self::as_parts) borrows both parts; [`to_parts`](Self::to_parts)
+/// copies them. The payload need not be UTF-8. See [`CallReply`] for lifetime
+/// and thread rules.
 pub struct VerbatimStringCallReply<'root> {
     reply: NonNull<RedisModuleCallReply>,
     _dummy: PhantomData<&'root ()>,

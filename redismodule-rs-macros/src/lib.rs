@@ -1,8 +1,9 @@
 //! Registration attributes and reply derives for the `redis-module` SDK.
 //!
-//! The generated handlers use SDK context and reply types. See the
-//! [SDK migration guide](https://github.com/joshrotenberg/redismodule-rs/blob/master/docs/MIGRATING-3.0.md)
-//! for their public paths and capabilities.
+//! The generated handlers use SDK context and reply types. See
+//! `docs/MIGRATING-3.0.md` in the SDK dependency source revision pinned by
+//! `Cargo.lock` for their public paths and capabilities. The source README
+//! links to the matching guides.
 
 use proc_macro::TokenStream;
 

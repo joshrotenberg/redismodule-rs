@@ -6,24 +6,39 @@ use crate::{InfoContext, RedisResult, raw};
 use crate::{RedisError, context::EventContext};
 use linkme::distributed_slice;
 
+/// The server's new replication role, delivered after a role change.
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub enum ServerRole {
+    /// The server became a primary.
     Primary,
+    /// The server became a replica.
     Replica,
 }
 
+/// A phase of loading a dataset from persistence or replication.
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub enum LoadingSubevent {
+    /// Loading an RDB file started.
     RdbStarted,
+    /// Loading an AOF started.
     AofStarted,
+    /// Loading data from a primary during replication started.
     ReplStarted,
+    /// Loading completed successfully.
     Ended,
+    /// Loading failed. Unrecognized native loading subevents also map here.
     Failed,
 }
 
+/// A phase of `FLUSHDB` or `FLUSHALL`.
+///
+/// For an asynchronous flush, `Ended` means the old keyspace was detached;
+/// background freeing can still be running. See [`FlushInfo`] for the database.
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub enum FlushSubevent {
+    /// The flush is about to start.
     Started,
+    /// Redis finished the synchronous part of the flush.
     Ended,
 }
 
@@ -68,9 +83,12 @@ pub struct SwapDbInfo {
     pub second: i32,
 }
 
+/// A module was successfully loaded or unloaded.
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Debug)]
 pub enum ModuleChangeSubevent {
+    /// A module finished loading.
     Loaded,
+    /// A module finished unloading.
     Unloaded,
 }
 
@@ -82,13 +100,21 @@ pub enum ModuleChangeSubevent {
 pub enum ServerEventHandler {
     /// Replication role changes. The historical variant name is preserved.
     RuleChanged(fn(&EventContext, ServerRole)),
+    /// Dataset loading phases.
     Loading(fn(&EventContext, LoadingSubevent)),
+    /// Flush phases without database details.
     Flush(fn(&EventContext, FlushSubevent)),
+    /// Flush phases and copied database details.
     FlushInfo(fn(&EventContext, FlushSubevent, FlushInfo)),
+    /// Copied database identifiers after `SWAPDB`.
     SwapDb(fn(&EventContext, SwapDbInfo)),
+    /// Module load and unload notifications.
     ModuleChange(fn(&EventContext, ModuleChangeSubevent)),
+    /// Changed configuration names, borrowed for this invocation only.
     ConfigChanged(fn(&EventContext, &[&str])),
+    /// A server cron tick with Redis's configured frequency in Hz.
     Cron(fn(&EventContext, u64)),
+    /// The server is shutting down.
     Shutdown(fn(&EventContext)),
 }
 
@@ -599,6 +625,23 @@ fn register_single_server_event_type(
     Ok(())
 }
 
+/// Subscribes this module's attribute-registered server-event handlers.
+///
+/// `redis_module!` calls this during module loading; modules using that entry
+/// point do not call it themselves. It installs a native subscription only for
+/// event lists that contain handlers. Both flush lists share one subscription,
+/// so phase-only and database-aware handlers can coexist. Each handler runs
+/// inside its own panic boundary.
+///
+/// For dynamic registration from load, command or event callbacks, use
+/// [`EventContext::subscribe_to_server_event`] instead. Contexts and borrowed
+/// payloads passed to either kind of handler last only for that invocation.
+///
+/// # Errors
+///
+/// Returns an error if a needed subscription API is unavailable or Redis
+/// refuses an event. Earlier subscriptions in this call may already be active;
+/// the `redis_module!` failed-load cleanup releases them before returning.
 pub fn register_server_events(ctx: &EventContext) -> Result<(), RedisError> {
     register_single_server_event_type(
         ctx,
