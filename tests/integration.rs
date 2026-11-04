@@ -7384,14 +7384,30 @@ fn test_defrag() -> Result<()> {
         .query::<()>(&mut con)
         .with_context(|| "failed to run 'config set active-defrag-cycle-min 99'")?;
 
-    // enable active defrag
-    if redis::cmd("config")
+    // The designated jemalloc CI job must exercise defrag rather than skip.
+    let required = std::env::var_os("TEST_REDIS_REQUIRE_DEFRAG").is_some();
+    if let Err(error) = redis::cmd("config")
         .arg(&["set", "activedefrag", "yes"])
         .query::<String>(&mut con)
-        .is_err()
     {
-        // Server the does not support active defrag, avoid failing the test.
+        if required {
+            return Err(error.into());
+        }
+        eprintln!("Skipping active defrag on a server without support: {error}");
         return Ok(());
+    }
+
+    // Leave holes in jemalloc and retain native values for the per-key hook.
+    for index in 0..256 {
+        redis::cmd("alloc.set")
+            .arg(format!("defrag:{index}"))
+            .arg(4096)
+            .query::<i64>(&mut con)?;
+    }
+    for index in (0..256).step_by(2) {
+        redis::cmd("DEL")
+            .arg(format!("defrag:{index}"))
+            .query::<i64>(&mut con)?;
     }
 
     let start = SystemTime::now();
@@ -7402,16 +7418,21 @@ fn test_defrag() -> Result<()> {
         let num_defrag_globals = res.get("num_defrag_globals").ok_or_else(|| {
             anyhow::Error::msg("Failed getting 'num_defrag_globals' value from result")
         })?;
-        // Wait till we will get at least 2 defrag cycles.
-        // We are looking at num_defrag_globals because this is supported by all Redis versions
-        // that supports defrag.
-        if *num_defrag_globals > 2 {
+        let keys = res.get("num_keys_defrag").copied().unwrap_or(0);
+        let began = res.get("num_defrag_start").copied().unwrap_or(0);
+        let ended = res.get("num_defrag_end").copied().unwrap_or(0);
+        // Redis 6.2+ has the global hook; start/end hooks need Redis 8.0+.
+        // The required CI server supplies all four callbacks.
+        if *num_defrag_globals > 2 && keys > 0 && (!required || (began > 0 && ended > 0)) {
+            println!("Observed native defrag callbacks: {res:?}");
             break;
         }
-        let duration = SystemTime::now().duration_since(start)?;
-        if duration > Duration::from_secs(30) {
-            return Err(anyhow::Error::msg("Failed waiting for defrag cycle"));
+        if start.elapsed()? > Duration::from_secs(30) {
+            return Err(anyhow::anyhow!(
+                "Timed out waiting for native defrag callbacks: {res:?}"
+            ));
         }
+        std::thread::sleep(Duration::from_millis(10));
     }
 
     Ok(())
