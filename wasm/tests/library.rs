@@ -1949,3 +1949,114 @@ fn admission_unload_and_reload_release_real_owners_and_restore_config_defaults()
     load(&mut con, "hello");
     assert_eq!(counter(&mut con), 1);
 }
+
+#[test]
+fn admission_aof_command_refusal_preserves_later_keys_and_matching_restart_repairs_library() {
+    let args = [
+        "--appendonly",
+        "yes",
+        "--appendfsync",
+        "always",
+        "--aof-use-rdb-preamble",
+        "no",
+    ];
+    let server = Server::start(6647, &args);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    let _: () = redis::cmd("SET")
+        .arg(&["admission:aof", "after-load"])
+        .query(&mut con)
+        .unwrap();
+    server.shutdown();
+    let refused_args = [
+        "--appendonly",
+        "yes",
+        "--appendfsync",
+        "always",
+        "--aof-use-rdb-preamble",
+        "no",
+        "--wasm.code-budget",
+        "0",
+    ];
+    let server = Server::restart(6647, &refused_args);
+    let mut con = server.connection();
+    assert!(list(&mut con).is_empty());
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("admission:aof")
+            .query::<String>(&mut con)
+            .unwrap(),
+        "after-load"
+    );
+    assert_eq!(info(&mut con)["code_used"], 0);
+    assert_eq!(info(&mut con)["guest_memory_used"], 0);
+    assert!(server.log().contains("wasm.code-budget"));
+    assert!(server.log().contains("AOF-loading-client"));
+    server.shutdown();
+    let server = Server::restart(6647, &args);
+    let mut con = server.connection();
+    assert_eq!(counter(&mut con), 1);
+    assert!(info(&mut con)["code_used"] > 0);
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("admission:aof")
+            .query::<String>(&mut con)
+            .unwrap(),
+        "after-load"
+    );
+}
+
+#[test]
+fn admission_replica_refusal_retains_old_globals_and_fresh_full_sync_repairs() {
+    let primary = Server::start(6648, &[]);
+    let mut p = primary.connection();
+    load(&mut p, "hello");
+    assert_eq!(counter(&mut p), 1);
+    let replica = Server::start(6649, &["--replicaof", "127.0.0.1", "6648"]);
+    let mut r = replica.connection();
+    wait_for("admission replica initial full sync", || {
+        let text: String = redis::cmd("INFO").arg("replication").query(&mut r).ok()?;
+        text.contains("master_link_status:up").then_some(())
+    });
+    assert_eq!(counter(&mut r), 1);
+    let before = info(&mut r);
+    config_set(&mut r, "wasm.code-budget", &before["code_used"].to_string());
+    load_bytes(&mut p, "hello", hello_component(), true).unwrap();
+    assert_eq!(counter(&mut p), 1);
+    let _: () = redis::cmd("SET")
+        .arg(&["admission:replica", "after-refused-replace"])
+        .query(&mut p)
+        .unwrap();
+    let acked: i64 = redis::cmd("WAIT").arg(1).arg(5000).query(&mut p).unwrap();
+    assert_eq!(acked, 1);
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("admission:replica")
+            .query::<String>(&mut r)
+            .unwrap(),
+        "after-refused-replace"
+    );
+    assert_eq!(counter(&mut r), 2); // old instance survived rejected replacement
+    assert_eq!(info(&mut r)["code_used"], before["code_used"]);
+    assert!(replica.log().contains("wasm.code-budget"));
+    // A fresh replica with matching limits must perform a full RDB sync,
+    // rather than assume acknowledged offsets replay the refused command.
+    drop(r);
+    drop(replica);
+    let replica = Server::start(6649, &["--replicaof", "127.0.0.1", "6648"]);
+    let mut r = replica.connection();
+    wait_for("admission replica repaired full sync", || {
+        let text: String = redis::cmd("INFO").arg("replication").query(&mut r).ok()?;
+        text.contains("master_link_status:up").then_some(())
+    });
+    assert_eq!(counter(&mut r), 1);
+    assert_eq!(list(&mut r), listed(&["hello"]));
+    assert!(info(&mut r)["code_used"] > 0);
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("admission:replica")
+            .query::<String>(&mut r)
+            .unwrap(),
+        "after-refused-replace"
+    );
+}
