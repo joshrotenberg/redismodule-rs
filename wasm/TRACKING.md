@@ -62,6 +62,18 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 
 ### Current checkpoint
 
+The bounded compiler work from
+[PR 192](https://github.com/joshrotenberg/redismodule-rs/pull/192) is merged at
+`eb3b46d`. Aggregate admission in
+[PR 198](https://github.com/joshrotenberg/redismodule-rs/pull/198) adds
+`wasm.guest-memory-budget` and `wasm.code-budget`, each defaulting to `1gb`.
+The guest limiter preserves the per-instance limit and retained globals;
+full compiled images reserve host-page-rounded bytes before mapping. Paired
+owners span prepared code and the entire Store lifetime. Lowering limits
+does not evict valid state, and replacements require old-plus-new headroom.
+Its final validation and measured budget-boundary evidence belong to PR 198;
+the earlier memory and timing measurements below remain historical.
+
 The repository's [contributing rules](../CONTRIBUTING.md) record the review,
 merge and sync workflow, and the issue backlog is the work list. SDK functional
 changes through `0538802` are integrated. PR 79 is merged as `b787fef`;

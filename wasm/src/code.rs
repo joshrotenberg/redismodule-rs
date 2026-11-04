@@ -3,11 +3,11 @@
 //! compiling waits for it. Its client blocks, or, where a client cannot block
 //! (inside `MULTI` or a script), the call waits in place.
 
-use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
 use redis_module::ReplyingBlockedClient;
 
-use crate::host::{CallState, LibraryPre};
+use crate::image::Pre;
 
 /// A call of a function, held while its library compiles.
 pub(crate) struct WaitingCall {
@@ -22,13 +22,13 @@ type Waiter = (ReplyingBlockedClient<WaitingCall>, WaitingCall);
 enum State {
     /// Compiling; these blocked calls run when it is done.
     Compiling(Vec<Waiter>),
-    Ready(LibraryPre<CallState>),
+    Ready(Arc<Pre>),
     Failed(String),
 }
 
 /// What a library's code is now.
 pub(crate) enum Now {
-    Ready(LibraryPre<CallState>),
+    Ready(Arc<Pre>),
     Compiling,
     Failed(String),
 }
@@ -39,7 +39,7 @@ pub(crate) struct Code {
 }
 
 impl Code {
-    pub(crate) fn ready(pre: LibraryPre<CallState>) -> Self {
+    pub(crate) fn ready(pre: Arc<Pre>) -> Self {
         Self::new(State::Ready(pre))
     }
 
@@ -68,7 +68,7 @@ impl Code {
 
     /// Records the compiled code, or why compiling failed, and runs the calls
     /// that waited for it.
-    pub(crate) fn finish(&self, result: anyhow::Result<LibraryPre<CallState>>) {
+    pub(crate) fn finish(&self, result: anyhow::Result<Arc<Pre>>) {
         let next = match result {
             Ok(pre) => State::Ready(pre),
             Err(e) => State::Failed(format!("{e:#}")),

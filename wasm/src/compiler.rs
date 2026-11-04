@@ -2,7 +2,7 @@
 //! No worker acquires Redis's lock: shutdown can kill/reap/join under that lock.
 use crate::{
     compiler_engine, compiler_process::Process, compiler_protocol as protocol,
-    compiler_source::Source,
+    compiler_source::Source, image::Image,
 };
 use anyhow::{Context as _, bail, ensure};
 use redis_module::{EventContext, logging};
@@ -21,7 +21,7 @@ use std::{
     thread::JoinHandle,
     time::{Duration, Instant},
 };
-use wasmtime::{Engine, component::Component};
+use wasmtime::Engine;
 
 pub(crate) const DEFAULT_MEMORY: i64 = 2 << 30;
 pub(crate) const DEFAULT_CPU: i64 = 60;
@@ -206,7 +206,7 @@ impl Supervisor {
         Ok(())
     }
 
-    fn run(&self, engine: &Engine, source: &Source) -> anyhow::Result<Component> {
+    fn run(&self, engine: &Engine, source: &Source) -> anyhow::Result<Arc<Image>> {
         let started = Instant::now();
         let result = self.exchange(engine, source);
         match &result {
@@ -224,7 +224,7 @@ impl Supervisor {
         result
     }
 
-    fn exchange(&self, engine: &Engine, source: &Source) -> anyhow::Result<Component> {
+    fn exchange(&self, engine: &Engine, source: &Source) -> anyhow::Result<Arc<Image>> {
         ensure!(
             source.len() <= protocol::MAX_INPUT,
             "component exceeds compiler input bound"
@@ -291,8 +291,7 @@ impl Supervisor {
         // point. The private file has no open writable descriptor, is 0400,
         // and is not exposed to another writer. Wasmtime owns its mmap before
         // TempPath unlinks it. External serialized artifacts have no entrypoint.
-        unsafe { Component::deserialize_file(engine, &artifact.path) }
-            .context("deserialize owned compiler artifact")
+        unsafe { Image::deserialize_owned(engine, &artifact.path, response.len) }
     }
 }
 
@@ -342,7 +341,7 @@ impl Reservation {
         &mut self,
         engine: &Engine,
         source: &Source,
-    ) -> anyhow::Result<Component> {
+    ) -> anyhow::Result<Arc<Image>> {
         self.enter()?;
         self.supervisor.run(engine, source)
     }

@@ -77,9 +77,23 @@ fn hello_component() -> &'static [u8] {
 
 /// Builds the example guest and turns the core module into a component.
 fn build_hello_component() -> Vec<u8> {
+    build_hello_variant(false)
+}
+
+fn prefixed_component() -> &'static [u8] {
+    static COMPONENT: OnceLock<Vec<u8>> = OnceLock::new();
+    COMPONENT.get_or_init(|| build_hello_variant(true))
+}
+
+fn build_hello_variant(prefixed: bool) -> Vec<u8> {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("guests/hello/Cargo.toml");
-    let guest_target = target_dir().join("wasm-guests");
-    let status = Command::new("cargo")
+    let guest_target = target_dir().join(if prefixed {
+        "wasm-budget-guests"
+    } else {
+        "wasm-guests"
+    });
+    let mut command = Command::new("cargo");
+    command
         .args([
             "build",
             "--quiet",
@@ -89,9 +103,11 @@ fn build_hello_component() -> Vec<u8> {
         ])
         .arg("--manifest-path")
         .arg(&manifest)
-        .env("CARGO_TARGET_DIR", &guest_target)
-        .status()
-        .expect("run cargo for the guest");
+        .env("CARGO_TARGET_DIR", &guest_target);
+    if prefixed {
+        command.args(["--features", "admission-test-prefix"]);
+    }
+    let status = command.status().expect("run cargo for the guest");
     assert!(status.success(), "building the guest failed");
     let core = std::fs::read(guest_target.join("wasm32-unknown-unknown/release/hello_guest.wasm"))
         .expect("read the guest module");
@@ -1710,4 +1726,226 @@ fn compiler_rdb_failure_completes_waiters_and_can_retry_after_deployment_repair(
         info(&mut con)["component_bytes"],
         hello_component().len() as i64
     );
+}
+
+fn load_bytes(
+    con: &mut Connection,
+    name: &str,
+    bytes: &[u8],
+    replace: bool,
+) -> RedisResult<Vec<String>> {
+    let mut command = redis::cmd("WASM.LOAD");
+    command.arg(name).arg(bytes);
+    if replace {
+        command.arg("REPLACE");
+    }
+    command.query(con)
+}
+
+#[test]
+fn admission_code_counts_full_images_and_preserves_old_state_until_commit() {
+    let server = Server::start(6641, &[]);
+    let mut con = server.connection();
+    let fresh = info(&mut con);
+    assert_eq!(fresh["guest_memory_budget"], 1 << 30);
+    assert_eq!(fresh["code_budget"], 1 << 30);
+    load(&mut con, "hello");
+    assert_eq!(counter(&mut con), 1);
+    let first = info(&mut con);
+    let code = first["code_used"];
+    let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    assert!(code > 0 && first["code_bytes"] > 0 && code >= first["code_bytes"]);
+    assert!(code - first["code_bytes"] < page);
+    assert_eq!(code % page, 0);
+    config_set(&mut con, "wasm.code-budget", &(code - 1).to_string());
+    let refused = load_bytes(&mut con, "hello", hello_component(), true);
+    assert!(error_text(refused.map(|_| Value::Okay)).contains("wasm.code-budget"));
+    assert_eq!(counter(&mut con), 2);
+    assert_eq!(info(&mut con)["code_used"], code);
+
+    // A second independently callable library shares both aggregate budgets.
+    config_set(&mut con, "wasm.code-budget", "1gb");
+    load_bytes(&mut con, "second", prefixed_component(), false).unwrap();
+    assert_eq!(
+        call(&mut con, &["budget_counter", "0"]).unwrap(),
+        Value::Int(1)
+    );
+    let both = info(&mut con);
+    assert!(both["code_used"] > code);
+    config_set(&mut con, "wasm.code-budget", &both["code_used"].to_string());
+    assert!(load_bytes(&mut con, "hello", hello_component(), true).is_err());
+    assert_eq!(counter(&mut con), 3);
+    assert_eq!(
+        call(&mut con, &["budget_counter", "0"]).unwrap(),
+        Value::Int(2)
+    );
+    assert_eq!(info(&mut con)["code_used"], both["code_used"]);
+
+    let _: () = redis::cmd("WASM.FLUSH").query(&mut con).unwrap();
+    assert_eq!(info(&mut con)["code_used"], 0);
+    config_set(&mut con, "wasm.code-budget", &code.to_string());
+    load(&mut con, "hello"); // exact full-image fit
+    assert_eq!(info(&mut con)["code_used"], code);
+    assert!(load_bytes(&mut con, "hello", hello_component(), true).is_err());
+    config_set(&mut con, "wasm.code-budget", &(2 * code).to_string());
+    load_bytes(&mut con, "hello", hello_component(), true).unwrap();
+    assert_eq!(counter(&mut con), 1);
+    assert_eq!(info(&mut con)["code_used"], code);
+}
+
+#[test]
+fn admission_guest_refusal_drops_only_the_failed_store_and_keeps_other_globals() {
+    let server = Server::start(6642, &[]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    load_bytes(&mut con, "second", prefixed_component(), false).unwrap();
+    assert_eq!(counter(&mut con), 1);
+    assert_eq!(
+        call(&mut con, &["budget_counter", "0"]).unwrap(),
+        Value::Int(1)
+    );
+    let before = info(&mut con);
+    let used = before["guest_memory_used"];
+    config_set(&mut con, "wasm.guest-memory-budget", &used.to_string());
+    let failed = error_text(grow(&mut con, 1 << 20));
+    assert!(failed.contains("wasm.guest-memory-budget"), "{failed}");
+    let after = info(&mut con);
+    assert!(after["guest_memory_used"] > 0 && after["guest_memory_used"] < used);
+    assert_eq!(after["code_used"], before["code_used"]);
+    assert_eq!(
+        call(&mut con, &["budget_counter", "0"]).unwrap(),
+        Value::Int(2)
+    );
+    config_set(&mut con, "wasm.guest-memory-budget", "1gb");
+    assert_eq!(counter(&mut con), 1); // only the trapped instance restarts
+    config_set(&mut con, "wasm.guest-memory-budget", "0");
+    config_set(&mut con, "wasm.code-budget", "0");
+    assert_eq!(counter(&mut con), 2);
+    assert_eq!(
+        call(&mut con, &["budget_counter", "0"]).unwrap(),
+        Value::Int(3)
+    );
+    assert!(info(&mut con)["guest_memory_used"] > 0);
+    assert!(load_bytes(&mut con, "hello", hello_component(), true).is_err());
+    let _: () = redis::cmd("WASM.FLUSH").query(&mut con).unwrap();
+    let empty = info(&mut con);
+    assert_eq!(empty["guest_memory_used"], 0);
+    assert_eq!(empty["code_used"], 0);
+}
+
+#[test]
+fn admission_failed_initial_instance_and_restore_batch_release_candidates() {
+    let server = Server::start(6643, &[]);
+    let mut con = server.connection();
+    config_set(&mut con, "wasm.guest-memory-budget", "0");
+    assert!(
+        error_text(load_bytes(&mut con, "hello", hello_component(), false).map(|_| Value::Okay))
+            .contains("wasm.guest-memory-budget")
+    );
+    assert!(list(&mut con).is_empty());
+    assert_eq!(info(&mut con)["guest_memory_used"], 0);
+    assert_eq!(info(&mut con)["code_used"], 0);
+    config_set(&mut con, "wasm.guest-memory-budget", "1gb");
+    load(&mut con, "hello");
+    assert_eq!(counter(&mut con), 1);
+    load_bytes(&mut con, "second", prefixed_component(), false).unwrap();
+    let payload: Vec<u8> = redis::cmd("WASM.DUMP").query(&mut con).unwrap();
+    let before = info(&mut con);
+    // Even FLUSH retains old code and instances until all new ones stage.
+    config_set(
+        &mut con,
+        "wasm.code-budget",
+        &(before["code_used"] * 2 - 1).to_string(),
+    );
+    assert!(error_text(restore(&mut con, &payload, Some("FLUSH"))).contains("wasm.code-budget"));
+    let after = info(&mut con);
+    assert_eq!(after["code_used"], before["code_used"]);
+    assert_eq!(after["guest_memory_used"], before["guest_memory_used"]);
+    assert_eq!(counter(&mut con), 2);
+    assert_eq!(
+        call(&mut con, &["budget_counter", "0"]).unwrap(),
+        Value::Int(1)
+    );
+    config_set(&mut con, "wasm.code-budget", "1gb");
+    restore(&mut con, &payload, Some("FLUSH")).unwrap();
+    assert_eq!(counter(&mut con), 1);
+    assert_eq!(info(&mut con)["code_used"], before["code_used"]);
+}
+
+#[test]
+fn admission_rdb_refusal_is_visible_and_recoverable_without_unbudgeted_images() {
+    let server = Server::start(6644, &["--enable-debug-command", "yes"]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    let _: () = redis::cmd("SAVE").query(&mut con).unwrap();
+    server.shutdown();
+    let server = Server::restart(
+        6644,
+        &["--enable-debug-command", "yes", "--wasm.code-budget", "0"],
+    );
+    let mut con = server.connection();
+    let failed = error_text(call(&mut con, &["hello", "0"]));
+    assert!(failed.contains("wasm.code-budget"), "{failed}");
+    assert_eq!(info(&mut con)["compiling"], 0);
+    assert_eq!(info(&mut con)["code_used"], 0);
+    assert_eq!(info(&mut con)["guest_memory_used"], 0);
+    assert_eq!(list(&mut con), listed(&["hello"]));
+    config_set(&mut con, "wasm.code-budget", "1gb");
+    let _: () = redis::cmd("DEBUG").arg("RELOAD").query(&mut con).unwrap();
+    assert_eq!(counter(&mut con), 1);
+    assert!(info(&mut con)["code_used"] > 0);
+}
+
+#[test]
+fn admission_shared_memory_is_refused_by_the_real_helper() {
+    let server = Server::start(6645, &[]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    assert_eq!(counter(&mut con), 1);
+    let before = info(&mut con);
+    // Component containing a valid core (module (memory 1 1 shared)).
+    let mut component = b"\0asm\x0d\0\x01\0\x01\x0e".to_vec();
+    component.extend_from_slice(b"\0asm\x01\0\0\0\x05\x04\x01\x03\x01\x01");
+    let error = error_text(load_bytes(&mut con, "shared", &component, false).map(|_| Value::Okay));
+    assert!(
+        error.contains("shared") || error.contains("threads"),
+        "{error}"
+    );
+    assert_eq!(info(&mut con)["code_used"], before["code_used"]);
+    assert_eq!(
+        info(&mut con)["guest_memory_used"],
+        before["guest_memory_used"]
+    );
+    assert_eq!(counter(&mut con), 2);
+}
+
+#[test]
+fn admission_unload_and_reload_release_real_owners_and_restore_config_defaults() {
+    let server = Server::start(
+        6646,
+        &["--enable-module-command", "yes", "--wasm.persist", "no"],
+    );
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    assert!(info(&mut con)["code_used"] > 0);
+    assert!(info(&mut con)["guest_memory_used"] > 0);
+    config_set(&mut con, "wasm.code-budget", "0");
+    assert_eq!(counter(&mut con), 1);
+    let _: () = redis::cmd("MODULE")
+        .arg(&["UNLOAD", "wasm"])
+        .query(&mut con)
+        .unwrap();
+    let _: () = redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(module_path().to_str().unwrap())
+        .arg(&["persist", "no"])
+        .query(&mut con)
+        .unwrap();
+    let fresh = info(&mut con);
+    assert_eq!(fresh["code_used"], 0);
+    assert_eq!(fresh["guest_memory_used"], 0);
+    assert_eq!(fresh["code_budget"], 1 << 30);
+    assert_eq!(fresh["guest_memory_budget"], 1 << 30);
+    load(&mut con, "hello");
+    assert_eq!(counter(&mut con), 1);
 }

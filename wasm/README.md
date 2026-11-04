@@ -133,12 +133,71 @@ count them; `INFO wasm` reports them:
 ```text
 wasm_libraries, wasm_functions        what is loaded
 wasm_component_bytes                  the components' bytes, which the RDB keeps
-wasm_code_bytes                       compiled code
+wasm_code_bytes                       full images of registered ready libraries
 wasm_compiling                        libraries still compiling after an RDB load
 wasm_instances                        live instances, kept or running
 wasm_instance_memory_bytes            their linear memory
 wasm_max_memory                       the limit
+wasm_guest_memory_budget              aggregate guest-byte limit
+wasm_guest_memory_used                live and pending guest-byte reservations
+wasm_code_budget                      aggregate compiled-image limit
+wasm_code_used                        live and pending page-rounded image reservations
 ```
+
+`wasm.guest-memory-budget` and `wasm.code-budget` each default to `1gb`
+(1,073,741,824 bytes). They accept Redis memory units at module load and in
+`CONFIG SET`, for example `CONFIG SET wasm.guest-memory-budget 256mb`.
+Zero is a hard cap on new positive reservations. Lowering a budget below its
+current use preserves valid instances and images, including guest globals;
+further positive admission waits for ownership to end or the limit to rise.
+Limit changes and background compiler admission use the same lock.
+
+The guest limiter reserves the requested additional committed wasm pages
+before instantiation or growth, over every live store and every memory in
+that store. The per-instance `wasm.max-memory` still applies. A denied growth
+traps its call, dropping that call's instance as other traps do. Other valid
+instances remain intact. A native growth failure rolls back its own delta;
+failed initial allocation can retain a provisional charge until its entire
+failed store is destroyed. Shared wasm memory is rejected by the pinned
+engine's disabled threads feature, since Wasmtime's limiter excludes it.
+
+Compiled-image admission counts the complete verified artifact file, including
+metadata and data sections, rounded up to the OS page size. It occurs before
+the host maps the artifact. Each independently deserialized mapping is charged
+once; prepared calls, pre-instantiated code, kept stores and in-flight stores
+share its owner. A deleted library can therefore have charged owners still
+finishing. `code_bytes` describes registered libraries' exact image spans;
+`code_used` also includes pending and still-live owners and page rounding.
+Both resource leases outlive full store destruction, including Wasmtime's
+internal code references. `INFO` uses `-1` when a budget snapshot cannot be
+read during a crash report.
+
+Replacement needs old-plus-new image and staging-instance headroom. A failed
+`WASM.LOAD REPLACE` or `WASM.RESTORE` retains the old libraries; even RESTORE
+FLUSH admits and stages all candidates before committing. Traps, failed or
+cancelled loads, deletion, flush and successful unload release resources when
+their final owners end. Refused unload retains their owners and the compiler
+quarantine. There is no silent recycling of valid guest instances.
+
+RDB restoration admits images through the same background compiler path. If a
+saved image cannot fit, its source/function metadata remains listed, its code
+slot becomes failed, and calls report the budget error. Other admitted
+libraries remain usable. Increasing the budget and restoring or reloading the
+saved libraries retries admission. Initial guest memory is admitted on the
+first call. AOF and replication commands also use normal admission. Redis can
+continue a command-only AOF or replication stream after a refused module
+command: other key commands apply, but that library is absent or its previous
+version remains. A replica can acknowledge later commands even when a library
+load failed. Provision compatible node-local limits, inspect replay errors
+and compare library readiness. After repairing limits, retry from saved
+component source/dump, or reload/full-sync the RDB as appropriate. `PING`, link
+status and replication acknowledgements alone do not establish library parity.
+
+These counters distinguish logical guest commitment, mapped image extent and
+Redis-accounted lasting heap. They do not measure resident physical pages or
+RSS: demand paging, CoW, virtual reservations, allocator retention and file
+cache can differ. Keep a separate server/process memory ceiling and the
+compiler allowance below; Redis `maxmemory` does not cover these mappings.
 
 The runtime's lasting heap, including metadata, stores and saved component
 bytes, uses Redis's allocator and remains counted in `used_memory`.
@@ -175,7 +234,7 @@ Admission occurs before spooling source or starting an operation worker. A full
 queue fails immediately. A restore or RDB batch owns one reservation and
 compiles its components sequentially through the same path. Individual source
 components are limited to 64 MiB and serialized artifacts to 512 MiB. These are
-compiler bounds, not aggregate library/code/instance budgets; those are #132.
+compiler bounds. The aggregate guest/image budgets above apply independently.
 
 On macOS, the startup VM includes a large shared-cache reservation, so the hard
 address-space ceiling is startup VM plus the configured allowance. The helper

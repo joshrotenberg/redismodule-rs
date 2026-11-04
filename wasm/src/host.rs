@@ -43,11 +43,13 @@ use redis_module::{
 use wasmtime::component::{HasSelf, Linker};
 use wasmtime::{Engine, Store};
 
+use crate::budget::{Lease, Retained};
 use crate::busy::{self, Running, Ticker};
 use crate::code::{Code, Now};
 use crate::compiler::{Reservation, Supervisor};
 use crate::compiler_source::Source;
 use crate::flags::{self, Mode};
+use crate::image::Pre;
 use crate::memory::{LibrarySizes, Live, Memory};
 use crate::reply::{flat_call_result, push_call_result};
 
@@ -96,13 +98,13 @@ pub(crate) struct CallState {
 unsafe impl Send for CallState {}
 
 impl CallState {
-    fn new() -> Self {
+    fn new(memory: Memory) -> Self {
         Self {
             ctx: None,
             mode: Mode::loading(),
             resp3: true,
             options: std::array::from_fn(|i| call_options(i & 4 != 0, i & 2 != 0, i & 1 != 0)),
-            memory: Memory::default(),
+            memory,
         }
     }
 
@@ -297,25 +299,36 @@ type KeptInstance = Arc<Mutex<Option<Instance>>>;
 
 /// An instance of a library and its store.
 struct Instance {
-    store: Store<CallState>,
     library: Library,
+    runtime: InstanceStore,
     _live: Live,
 }
 
+/// Store data is destroyed before its memories and code registry. These outer
+/// owners, after `store`, keep both charges until Store destruction completes,
+/// including failed instantiation and unwinding before an Instance exists.
+type InstanceStore = Retained<Store<CallState>, (Lease, Arc<Pre>)>;
+
 impl Instance {
-    fn new(engine: &Engine, pre: &LibraryPre<CallState>, ctx: &Context) -> anyhow::Result<Self> {
-        let mut store = Store::new(engine, CallState::new());
+    fn new(engine: &Engine, pre: &Arc<Pre>, ctx: &Context) -> anyhow::Result<Self> {
+        let memory = Memory::default();
+        let guest = memory.lease();
+        let mut runtime = InstanceStore {
+            resource: Store::new(engine, CallState::new(memory)),
+            _owners: (guest, Arc::clone(pre)),
+        };
+        let store = &mut runtime.resource;
         store.limiter(|state| &mut state.memory);
         store.epoch_deadline_callback(|store| busy::on_epoch(store.data().ctx()));
         // Instantiating can run guest code, so it runs like a call, in the
         // loading mode CallState starts in.
         store.data_mut().ctx = Some(NonNull::from(ctx));
         store.set_epoch_deadline(1);
-        let library = pre.instantiate(&mut store);
+        let library = pre.instantiate(store);
         store.data_mut().ctx = None;
         Ok(Self {
-            store,
             library: library?,
+            runtime,
             _live: Live::new(),
         })
     }
@@ -328,13 +341,13 @@ impl Instance {
         mode: Mode,
         f: impl FnOnce(&Library, &mut Store<CallState>) -> anyhow::Result<R>,
     ) -> anyhow::Result<R> {
-        let state = self.store.data_mut();
+        let state = self.runtime.resource.data_mut();
         state.ctx = Some(NonNull::from(ctx));
         state.mode = mode;
         state.resp3 = true;
-        self.store.set_epoch_deadline(1);
-        let result = f(&self.library, &mut self.store);
-        self.store.data_mut().ctx = None;
+        self.runtime.resource.set_epoch_deadline(1);
+        let result = f(&self.library, &mut self.runtime.resource);
+        self.runtime.resource.data_mut().ctx = None;
         result
     }
 }
@@ -593,8 +606,7 @@ impl Host {
             sizes.component_bytes += library.component.len();
             match library.code.now() {
                 Now::Ready(pre) => {
-                    let code = pre.instance_pre().component().image_range();
-                    sizes.code_bytes += code.end as usize - code.start as usize;
+                    sizes.code_bytes += pre.image_bytes();
                 }
                 Now::Compiling => sizes.compiling += 1,
                 Now::Failed(_) => {}
@@ -653,7 +665,7 @@ pub(crate) enum Policy {
 
 /// A compiled component, linked and ready to instantiate, and its bytes.
 pub(crate) struct Compiled {
-    pre: LibraryPre<CallState>,
+    pre: Arc<Pre>,
     component: Source,
 }
 
@@ -676,12 +688,9 @@ impl Compiler {
     }
 
     /// Compiles a component without keeping its bytes.
-    pub(crate) fn compile_code(
-        &mut self,
-        component: &Source,
-    ) -> anyhow::Result<LibraryPre<CallState>> {
+    pub(crate) fn compile_code(&mut self, component: &Source) -> anyhow::Result<Arc<Pre>> {
         let compiled = self.reservation.compile(&self.engine, component)?;
-        LibraryPre::new(self.linker.instantiate_pre(&compiled)?)
+        compiled.link(&self.linker)
     }
 }
 
@@ -703,7 +712,7 @@ pub(crate) enum Prepared {
 /// library drops it too.
 pub(crate) struct PreparedCall {
     engine: Engine,
-    pre: LibraryPre<CallState>,
+    pre: Arc<Pre>,
     kept: KeptInstance,
     flags: FunctionFlags,
 }
