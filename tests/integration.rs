@@ -261,6 +261,73 @@ fn test_api_availability_missing_job_releases_captures_without_panicking() -> Re
     Ok(())
 }
 
+#[test]
+fn test_api_availability_missing_try_lock_is_nonblocking() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    con.set_read_timeout(Some(Duration::from_secs(5)))?;
+    for _ in 0..2 {
+        let refused: Vec<i64> = redis::cmd("api.missing_try_lock").query(&mut con)?;
+        assert_eq!(refused, [1, 1], "both owners return None without waiting");
+    }
+    assert!(!con.server_log()?.contains("panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "api_availability"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_api_availability_missing_keyspace_flags_preserves_requested_mask() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    redis::cmd("api.missing_keyspace_flags").query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("api.keyspace_events").query::<i64>(&mut con)?, 0);
+    redis::cmd("SET")
+        .arg(&["api:subscribed", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(
+        redis::cmd("api.keyspace_events").query::<i64>(&mut con)?,
+        1,
+        "the requested STRING subscription survives missing flag enumeration"
+    );
+    assert!(!con.server_log()?.contains("panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "api_availability"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["api:unloaded", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_api_availability_missing_subscription_is_refused_and_recovers() -> Result<()> {
+    let mut con = TestConnection::new("api_availability");
+    let refused: Vec<i64> = redis::cmd("api.missing_keyspace_subscription").query(&mut con)?;
+    assert_eq!(
+        refused,
+        [1, 1, 1],
+        "required API fails preflight and both masks"
+    );
+    redis::cmd("SET")
+        .arg(&["api:refused", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("api.keyspace_events").query::<i64>(&mut con)?, 0);
+    // The diagnostic restored the binding, so a real subscription works now.
+    redis::cmd("api.missing_keyspace_flags").query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["api:recovered", "value"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("api.keyspace_events").query::<i64>(&mut con)?, 1);
+    assert!(!con.server_log()?.contains("panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "api_availability"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
 #[cfg(feature = "redis-7-2-examples")]
 #[test]
 fn test_notification_job_rejection_releases_captures() -> Result<()> {
@@ -1732,6 +1799,29 @@ fn test_command_builder_invalid_definitions_fail_the_load() {
         ("nul-name", "nul byte"),
         ("empty-name", "command name must not be empty"),
         ("duplicate", "failed to register command builder.ping"),
+        ("arity-zero", "arity must not be 0"),
+        ("subcommand-on-command", "only a container"),
+        ("container-keys", "container cannot have keys"),
+        ("container-arity-one", "arity must require a subcommand"),
+        (
+            "container-arity-minus-one",
+            "arity must require a subcommand",
+        ),
+        ("nested-container", "subcommand cannot be a container"),
+        ("nested-subcommand", "subcommand cannot have subcommands"),
+        ("subcommand-pipe", "cannot contain spaces"),
+        ("subcommand-name", "cannot contain spaces"),
+        ("container-name", "container name cannot contain"),
+        ("subcommand-empty", "must be non-empty"),
+        ("subcommand-duplicate", "duplicate subcommand CHILD"),
+        ("subcommand-key-range", "invalid command key range"),
+        ("subcommand-arity-one", "cannot be 1"),
+        ("container-empty", "needs at least one subcommand"),
+        ("container-acl", "container cannot have ACL categories"),
+        (
+            "container-optional-acl",
+            "container cannot have ACL categories",
+        ),
     ] {
         let error = match TestConnection::try_with_args("command_builder", &[mode]) {
             Ok(_) => panic!("invalid definition {mode} loaded"),
@@ -1837,6 +1927,203 @@ fn test_call_error_codes_classify_native_and_synthesized_errors() -> Result<()> 
         .arg(&["PING"])
         .query(&mut con)?;
     assert_eq!(code, None, "a successful call had an error code");
+    Ok(())
+}
+
+#[test]
+fn test_unusual_input_nul_call_names_return_errors_at_every_floor() -> Result<()> {
+    let mut con = TestConnection::new("call_reply");
+    for command in ["\0PING", "PING\0", "SET\0GET"] {
+        let code: Vec<u8> = redis::cmd("call_reply.error_code")
+            .arg(command)
+            .query(&mut con)?;
+        assert_eq!(code, b"ERR", "{command:?}");
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    assert!(!con.server_log()?.contains("panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "call_reply"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_unusual_input_context_call_rejects_nul_names_without_panicking() -> Result<()> {
+    let mut con = TestConnection::new("call");
+    for command in ["\0PING", "PING\0", "SET\0GET"] {
+        let error = redis::cmd("call.convert")
+            .arg(command)
+            .query::<Value>(&mut con)
+            .expect_err("a NUL command name was accepted");
+        assert!(
+            error
+                .to_string()
+                .contains("command name contains a NUL byte")
+        );
+        assert!(!error.to_string().contains("panicked"));
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_unusual_input_replication_reports_refused_command_names() -> Result<()> {
+    let mut con = TestConnection::new("call");
+    for command in ["\0SET", "SET\0", "SET\0GET"] {
+        assert_eq!(
+            redis::cmd("call.replicate")
+                .arg(command)
+                .arg("replication:refused")
+                .arg("value")
+                .query::<i64>(&mut con)?,
+            0,
+            "{command:?}"
+        );
+    }
+    assert_eq!(
+        redis::cmd("call.replicate")
+            .arg("NOSUCHCOMMAND")
+            .query::<i64>(&mut con)?,
+        0
+    );
+    assert_eq!(
+        redis::cmd("call.replicate")
+            .arg("SET")
+            .arg(b"replication:\0key".as_slice())
+            .arg(b"\0\xffvalue".as_slice())
+            .query::<i64>(&mut con)?,
+        1
+    );
+    // Replicate appends to propagation only; it does not execute locally.
+    assert_eq!(
+        redis::cmd("EXISTS")
+            .arg(b"replication:\0key".as_slice())
+            .query::<i64>(&mut con)?,
+        0
+    );
+    assert!(!con.server_log()?.contains("panicked"));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_unusual_input_resp3_aggregate_keys_return_errors_and_preserve_framing() -> Result<()> {
+    let mut con = TestConnection::new("call");
+    for (shape, message) in [
+        ("map", "ERR call reply map contains an unsupported key"),
+        ("set", "ERR call reply set contains an unsupported element"),
+    ] {
+        for key in [
+            "{double=1.5}",
+            "false",
+            "{1,2}",
+            "redis.error_reply('ERR key')",
+        ] {
+            let value = if shape == "map" { "'value'" } else { "true" };
+            let aggregate = format!("{{{shape} = {{[{key}] = {value}}}}}");
+            let script = format!("return {aggregate}");
+            let error = redis::cmd("call.convert3")
+                .arg(&["EVAL", &script, "0"])
+                .query::<Value>(&mut con)
+                .expect_err("an unsupported RESP3 key or member was accepted");
+            assert_eq!(error.code(), Some("ERR"), "{shape} {key}: {error}");
+            assert!(
+                error
+                    .to_string()
+                    .contains(message.trim_start_matches("ERR ")),
+                "{shape} {key}: {error}"
+            );
+            assert!(!error.to_string().contains("panicked"));
+
+            let nested = format!("return {{1, {aggregate}, 3}}");
+            let expected = format!("*3\r\n:1\r\n-{message}\r\n:3\r\n");
+            assert_eq!(
+                raw_reply(&con, &["call.convert3", "EVAL", &nested, "0"], &expected)?,
+                expected,
+                "{shape} {key}"
+            );
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        }
+    }
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_unusual_input_resp3_conversion_keeps_supported_scalar_keys() -> Result<()> {
+    let mut con = TestConnection::new("call");
+    for shape in ["map", "set"] {
+        for (key, expected_key) in [
+            ("7", Value::Int(7)),
+            ("true", Value::Int(1)),
+            ("false", Value::Int(0)),
+            ("'key'", Value::BulkString(b"key".to_vec())),
+            ("redis.status_reply('OK')", Value::Okay),
+        ] {
+            let value = if shape == "map" { "9" } else { "true" };
+            let script = format!("redis.setresp(3); return {{{shape} = {{[{key}] = {value}}}}}");
+            let reply: Value = redis::cmd("call.convert3")
+                .arg(&["EVAL", &script, "0"])
+                .query(&mut con)?;
+            let mut expected = vec![expected_key];
+            if shape == "map" {
+                expected.push(Value::Int(9));
+            }
+            assert_eq!(reply, Value::Array(expected), "{shape} {key}");
+        }
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_unusual_input_poisoned_configuration_getters_keep_stored_values() -> Result<()> {
+    let mut con = TestConnection::new("configuration");
+    for (kind, name, value) in [
+        ("string", "configuration.mutex_string", "preserved text"),
+        ("enum", "configuration.enum_mutex", "Val2"),
+    ] {
+        redis::cmd("CONFIG")
+            .arg(&["SET", name, value])
+            .query::<()>(&mut con)?;
+        let error = redis::cmd("configuration.poison")
+            .arg(kind)
+            .query::<Value>(&mut con)
+            .expect_err("poison diagnostic did not panic under the command guard");
+        assert!(error.to_string().contains("poison probe"), "{error}");
+        for _ in 0..2 {
+            let values: Vec<String> = redis::cmd("CONFIG").arg(&["GET", name]).query(&mut con)?;
+            assert_eq!(values, [name, value]);
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        }
+    }
+    assert!(!con.server_log()?.contains("configuration getter panicked"));
+    redis::cmd("MODULE")
+        .arg(&["UNLOAD", "configuration"])
+        .query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
 
@@ -3289,6 +3576,160 @@ fn test_key_at_pos_refuses_positions_past_the_arguments() -> Result<()> {
         "ERR key position 3 is not an argument position of the command (1 to 2)"
     );
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// Every bulk and simple string in a reply, depth first.
+fn reply_strings(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::BulkString(bytes) => out.push(String::from_utf8_lossy(bytes).into_owned()),
+        Value::SimpleString(text) => out.push(text.clone()),
+        Value::Array(items) | Value::Set(items) => {
+            items.iter().for_each(|item| reply_strings(item, out))
+        }
+        Value::Map(pairs) => pairs.iter().for_each(|(key, value)| {
+            reply_strings(key, out);
+            reply_strings(value, out);
+        }),
+        _ => {}
+    }
+}
+
+/// `COMMAND INFO <name>`'s entry: name, arity, flags, first, last, step,
+/// categories and so on.
+fn command_info(con: &mut TestConnection, name: &str) -> Result<Vec<Value>> {
+    let reply: Vec<Value> = redis::cmd("COMMAND").arg(&["INFO", name]).query(con)?;
+    match reply.into_iter().next() {
+        Some(Value::Array(entry)) => Ok(entry),
+        other => Err(anyhow::anyhow!(
+            "no COMMAND INFO entry for {name}: {other:?}"
+        )),
+    }
+}
+
+/// A container dispatches to its subcommands, which get the panic guard and
+/// arity checks of a top-level command; the container alone and an unknown
+/// subcommand get Redis's errors instead of running a handler.
+#[test]
+fn test_subcommands_dispatch() -> Result<()> {
+    let mut con = TestConnection::new("subcommands");
+    redis::cmd("subcmd.kv")
+        .arg(&["set", "k", "v"])
+        .query::<()>(&mut con)?;
+    let value: String = redis::cmd("subcmd.kv").arg(&["get", "k"]).query(&mut con)?;
+    assert_eq!(value, "v");
+    let value: String = redis::cmd("SUBCMD.KV").arg(&["GET", "k"]).query(&mut con)?;
+    assert_eq!(value, "v");
+
+    for args in [&["set", "k"][..], &["get"], &[]] {
+        let error = redis::cmd("subcmd.kv")
+            .arg(args)
+            .query::<Value>(&mut con)
+            .expect_err("a call with the wrong arity ran");
+        assert!(
+            error.to_string().contains("wrong number of arguments"),
+            "{args:?}: {error}"
+        );
+    }
+    let error = redis::cmd("subcmd.kv")
+        .arg("nosuch")
+        .query::<Value>(&mut con)
+        .expect_err("an unknown subcommand ran");
+    assert!(error.to_string().contains("unknown subcommand"), "{error}");
+    let error = redis::cmd("subcmd.kv")
+        .arg("panic")
+        .query::<Value>(&mut con)
+        .expect_err("a panicking subcommand replied");
+    assert!(
+        error
+            .to_string()
+            .contains("command panicked: subcommand failed"),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// COMMAND INFO, COMMAND DOCS and COMMAND GETKEYS describe the container and
+/// its subcommands from their arity, summary, key range and categories.
+#[test]
+fn test_subcommands_command_metadata() -> Result<()> {
+    let mut con = TestConnection::new("subcommands");
+
+    let container = command_info(&mut con, "subcmd.kv")?;
+    assert_eq!(container[1], Value::Int(-2));
+    let mut strings = Vec::new();
+    reply_strings(&Value::Array(container), &mut strings);
+    for child in ["subcmd.kv|set", "subcmd.kv|get", "subcmd.kv|panic"] {
+        assert!(strings.iter().any(|s| s == child), "{child}: {strings:?}");
+    }
+
+    for (name, arity, flag, first, category) in [
+        ("subcmd.kv|set", 4, "write", 2, Some("@write")),
+        ("subcmd.kv|get", 3, "readonly", 2, Some("@read")),
+        ("subcmd.kv|panic", 2, "module", 0, None),
+    ] {
+        let info = command_info(&mut con, name)?;
+        let mut strings = Vec::new();
+        reply_strings(&Value::Array(info.clone()), &mut strings);
+        assert_eq!(strings.first().map(String::as_str), Some(name));
+        assert_eq!(info[1], Value::Int(arity), "{name}");
+        assert!(strings.iter().any(|s| s == flag), "{name}: {strings:?}");
+        assert_eq!(info[3], Value::Int(first), "{name}");
+        if let Some(category) = category {
+            assert!(strings.iter().any(|s| s == category), "{name}: {strings:?}");
+        }
+    }
+
+    let docs: Value = redis::cmd("COMMAND")
+        .arg(&["DOCS", "subcmd.kv"])
+        .query(&mut con)?;
+    let mut strings = Vec::new();
+    reply_strings(&docs, &mut strings);
+    for summary in ["Reads and writes string keys", "Sets a key", "Gets a key"] {
+        assert!(
+            strings.iter().any(|s| s == summary),
+            "{summary}: {strings:?}"
+        );
+    }
+
+    let keys: Vec<String> = redis::cmd("COMMAND")
+        .arg(&["GETKEYS", "subcmd.kv", "set", "mykey", "value"])
+        .query(&mut con)?;
+    assert_eq!(keys, ["mykey"]);
+    let keys: Vec<String> = redis::cmd("COMMAND")
+        .arg(&["GETKEYS", "subcmd.kv", "get", "other"])
+        .query(&mut con)?;
+    assert_eq!(keys, ["other"]);
+    Ok(())
+}
+
+/// A subcommand's ACL categories decide who can run it: a user granted only
+/// `@read` can run `get` but not `set`, or `panic`, which has no categories.
+#[test]
+fn test_subcommands_acl_categories() -> Result<()> {
+    let mut con = TestConnection::new("subcommands");
+    redis::cmd("SET").arg(&["k", "v"]).query::<()>(&mut con)?;
+    redis::cmd("ACL")
+        .arg(&["SETUSER", "reader", "on", "nopass", "~*", "-@all", "+@read"])
+        .query::<()>(&mut con)?;
+    let mut reader = con.connection()?;
+    redis::cmd("AUTH")
+        .arg(&["reader", "unused"])
+        .query::<()>(&mut reader)?;
+    let value: String = redis::cmd("subcmd.kv")
+        .arg(&["get", "k"])
+        .query(&mut reader)?;
+    assert_eq!(value, "v");
+    for args in [&["set", "k", "w"][..], &["panic"]] {
+        let error = redis::cmd("subcmd.kv")
+            .arg(args)
+            .query::<Value>(&mut reader)
+            .expect_err("a reader ran a subcommand outside @read");
+        assert_eq!(error.code(), Some("NOPERM"), "{args:?}: {error}");
+    }
+    let value: String = redis::cmd("GET").arg("k").query(&mut con)?;
+    assert_eq!(value, "v");
     Ok(())
 }
 
@@ -7729,6 +8170,500 @@ fn test_alloc_fallible_reserve() -> Result<()> {
             .expect_err("the exhaustion probe must refuse an aborting allocator");
         assert!(error.to_string().contains("requires TryAlloc"), "{error}");
     }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+struct KeyBlockingWire {
+    stream: std::net::TcpStream,
+    parser: redis::Parser,
+    id: i64,
+}
+
+impl KeyBlockingWire {
+    fn connect(con: &TestConnection) -> Result<Self> {
+        let address = std::net::SocketAddr::from(([127, 0, 0, 1], con.port()));
+        let timeout = Duration::from_secs(5);
+        let stream = std::net::TcpStream::connect_timeout(&address, timeout)?;
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+        let mut wire = Self {
+            stream,
+            parser: redis::Parser::new(),
+            id: 0,
+        };
+        wire.send(redis::cmd("CLIENT").arg("ID"))?;
+        wire.id = match wire.read()? {
+            Value::Int(id) => id,
+            reply => anyhow::bail!("unexpected client id {reply:?}"),
+        };
+        Ok(wire)
+    }
+
+    fn send(&mut self, command: &redis::Cmd) -> Result<()> {
+        use std::io::Write;
+        self.stream.write_all(&command.get_packed_command())?;
+        Ok(())
+    }
+
+    fn read(&mut self) -> Result<Value> {
+        Ok(self.parser.parse_value(&mut self.stream)?.extract_error()?)
+    }
+
+    fn ping(&mut self) -> Result<()> {
+        self.send(&redis::cmd("PING"))?;
+        assert_eq!(self.read()?, Value::SimpleString("PONG".to_owned()));
+        Ok(())
+    }
+}
+
+fn key_blocking_stats(con: &mut TestConnection) -> Result<Vec<i64>> {
+    Ok(redis::cmd("keyblock.stats").query(con)?)
+}
+
+fn key_blocking_live(con: &mut TestConnection, live: i64, drops: i64) -> Result<()> {
+    utils::wait_until(
+        Duration::from_secs(5),
+        "key waiter ownership transition",
+        || {
+            let stats = key_blocking_stats(con)?;
+            Ok(stats[0] == live && stats[1] == drops)
+        },
+    )
+}
+
+#[test]
+fn test_key_blocking_readiness_rechecks_and_copies_binary_ready_keys() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    assert!(!redis::cmd("keyblock.ready_outside").query::<bool>(&mut con)?);
+    let key: &[u8] = b"keyblock:binary\0\xff";
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(
+        redis::cmd("keyblock.wait")
+            .arg((0, 2, "normal", "keyblock:other"))
+            .arg(key),
+    )?;
+    key_blocking_live(&mut con, 1, 0)?;
+    redis::cmd("RPUSH")
+        .arg(key)
+        .arg("one")
+        .query::<usize>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "first readiness attempt", || {
+        let stats = key_blocking_stats(&mut con)?;
+        Ok(stats[0] == 1 && stats[2] >= 1)
+    })?;
+    redis::cmd("keyblock.signal")
+        .arg(key)
+        .query::<String>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "explicit readiness attempt", || {
+        let stats = key_blocking_stats(&mut con)?;
+        Ok(stats[0] == 1 && stats[2] >= 2)
+    })?;
+    redis::cmd("RPUSH")
+        .arg(key)
+        .arg("two")
+        .query::<usize>(&mut con)?;
+    // Redis automatically signals a list when it becomes nonempty. Further
+    // list pushes need the module producer to signal its own readiness rule.
+    redis::cmd("keyblock.signal")
+        .arg(key)
+        .query::<String>(&mut con)?;
+    assert_eq!(
+        client.read()?,
+        Value::Array(vec![
+            Value::BulkString(key.to_vec()),
+            Value::Array(vec![
+                Value::BulkString(b"one".to_vec()),
+                Value::BulkString(b"two".to_vec())
+            ]),
+        ])
+    );
+    client.ping()?;
+    key_blocking_live(&mut con, 0, 1)?;
+    assert_eq!(key_blocking_stats(&mut con)?[3], 0);
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_denied_contexts_keep_the_nonblocking_fallback() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let key = "keyblock:denied";
+    assert_eq!(
+        redis::cmd("EVAL")
+            .arg("return redis.call('keyblock.wait', '0', '1', 'normal', KEYS[1])")
+            .arg(1)
+            .arg(key)
+            .query::<Value>(&mut con)?,
+        Value::Nil
+    );
+    key_blocking_live(&mut con, 0, 1)?;
+    redis::cmd("MULTI").query::<String>(&mut con)?;
+    redis::cmd("keyblock.wait")
+        .arg((0, 1, "normal", key))
+        .query::<String>(&mut con)?;
+    assert_eq!(
+        redis::cmd("EXEC").query::<Value>(&mut con)?,
+        Value::Array(vec![Value::Nil])
+    );
+    key_blocking_live(&mut con, 0, 2)?;
+    assert_eq!(
+        redis::cmd("keyblock.call_wait")
+            .arg(key)
+            .query::<Value>(&mut con)?,
+        Value::Nil
+    );
+    key_blocking_live(&mut con, 0, 3)?;
+    let k_reply = redis::cmd("keyblock.call_wait_k")
+        .arg(key)
+        .query::<Value>(&mut con)?;
+    if k_reply == Value::Nil {
+        key_blocking_live(&mut con, 0, 4)?;
+    } else {
+        assert_eq!(k_reply, Value::SimpleString("unsupported".to_owned()));
+    }
+    let stats = key_blocking_stats(&mut con)?;
+    assert_eq!(&stats[2..4], &[0, 0]);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_panics_no_reply_and_timeouts_finish_once() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let mut drops = 0;
+    for (mode, ready, expected) in [
+        ("panic-ready", true, "key blocking callback panicked"),
+        (
+            "no-reply-ready",
+            true,
+            "key blocking callback returned NoReply",
+        ),
+        ("panic-timeout", false, "key blocking callback panicked"),
+        (
+            "no-reply-timeout",
+            false,
+            "key blocking callback returned NoReply",
+        ),
+    ] {
+        let key = format!("keyblock:{mode}");
+        let mut client = KeyBlockingWire::connect(&con)?;
+        client.send(redis::cmd("keyblock.wait").arg((
+            if ready { 0 } else { 10 },
+            1,
+            mode,
+            &key,
+        )))?;
+        if ready {
+            key_blocking_live(&mut con, 1, drops)?;
+            redis::cmd("RPUSH")
+                .arg((&key, "one"))
+                .query::<usize>(&mut con)?;
+        }
+        let error = client
+            .read()
+            .expect_err("callback refusal must be an error");
+        assert!(format!("{error:#}").contains(expected), "{error:#}");
+        client.ping()?;
+        drops += 1;
+        key_blocking_live(&mut con, 0, drops)?;
+    }
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((10, 1, "panic-drop", "keyblock:drop")))?;
+    assert_eq!(client.read()?, Value::Nil);
+    client.ping()?;
+    drops += 1;
+    key_blocking_live(&mut con, 0, drops)?;
+    // The client-identity probe's owned username is released through its
+    // producer context, removing its automatic-memory entry before return.
+    client.send(redis::cmd("keyblock.wait").arg((10, 1, "auto-memory", "keyblock:auto-memory")))?;
+    assert_eq!(client.read()?, Value::Nil);
+    client.ping()?;
+    drops += 1;
+    key_blocking_live(&mut con, 0, drops)?;
+    for timeout in [-1, i64::MAX, i64::MAX - i64::MAX / 1000 + 1] {
+        let error = redis::cmd("keyblock.wait")
+            .arg((timeout, 1, "normal", "keyblock:bad"))
+            .query::<Value>(&mut con)
+            .expect_err("invalid timeout was accepted");
+        assert!(
+            error
+                .to_string()
+                .contains("key blocking timeout is out of range"),
+            "{error}"
+        );
+    }
+    key_blocking_live(&mut con, 0, drops)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_deletion_disconnect_and_unload_release_waiters() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let key = "keyblock:deleted";
+    redis::cmd("RPUSH")
+        .arg((key, "one"))
+        .query::<usize>(&mut con)?;
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((0, 2, "normal", key)))?;
+    key_blocking_live(&mut con, 1, 0)?;
+    let deletion = key_blocking_stats(&mut con)?[4] == 1;
+    redis::cmd("DEL").arg(key).query::<usize>(&mut con)?;
+    if deletion {
+        let error = client.read().expect_err("deletion should wake the waiter");
+        assert!(
+            error.to_string().contains("the blocked key was deleted"),
+            "{error}"
+        );
+    } else {
+        // The old API has no delete flag. Explicit timeout cancellation is
+        // still supported and owns the same waiter rather than new privdata.
+        redis::cmd("CLIENT")
+            .arg(("UNBLOCK", client.id, "TIMEOUT"))
+            .query::<usize>(&mut con)?;
+        assert_eq!(client.read()?, Value::Nil);
+    }
+    client.ping()?;
+    key_blocking_live(&mut con, 0, 1)?;
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((0, 1, "normal", "keyblock:disconnect")))?;
+    key_blocking_live(&mut con, 1, 1)?;
+    let error = redis::cmd("MODULE")
+        .arg(("UNLOAD", "key_blocking"))
+        .query::<Value>(&mut con)
+        .expect_err("a module with a native key waiter unloaded");
+    assert!(
+        error.to_string().to_lowercase().contains("blocked"),
+        "{error}"
+    );
+    drop(client);
+    key_blocking_live(&mut con, 0, 2)?;
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "key_blocking"))
+        .query::<String>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_failed_load_k_call_leaves_no_waiter() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    let loaded = redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("key_blocking")?)
+        .arg("fail-load-k")
+        .query::<Value>(&mut con);
+    assert!(loaded.is_err(), "the fixture must refuse the load");
+    let log = con.server_log()?;
+    assert!(
+        log.contains("keyblock: load K call denied without a waiter")
+            || log.contains("keyblock: load K call unsupported"),
+        "{log}"
+    );
+    redis::cmd("RPUSH")
+        .arg(("keyblock:load-k", "after failed load"))
+        .query::<usize>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    // Successful reloading and unloading also prove no old waiter pins the image.
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("key_blocking")?)
+        .query::<String>(&mut con)?;
+    assert_eq!(key_blocking_stats(&mut con)?[0], 0);
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "key_blocking"))
+        .query::<String>(&mut con)?;
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_real_client_during_yielded_load_is_refused() -> Result<()> {
+    let mut con = TestConnection::new("hello");
+    if redis::cmd("CONFIG")
+        .arg(("SET", "busy-reply-threshold", 1))
+        .query::<String>(&mut con)
+        .is_err()
+    {
+        eprintln!(
+            "Redis lacks Yield client processing; old-server K refusal is covered separately"
+        );
+        return Ok(());
+    }
+    let path = utils::module_path("key_blocking")?;
+    let mut loader = con.connection()?;
+    let mut during_load = con.connection()?;
+    let load = std::thread::spawn(move || {
+        redis::cmd("MODULE")
+            .arg("LOAD")
+            .arg(path)
+            .arg("fail-load-yield")
+            .query::<Value>(&mut loader)
+    });
+    utils::wait_until(
+        Duration::from_secs(5),
+        "keyblock yielding load entered",
+        || {
+            Ok(con
+                .server_log()?
+                .contains("keyblock: waiting for a real client during load"))
+        },
+    )?;
+    // A failed native load removes its command metadata. Use a dedicated
+    // invocation client and retire it: Redis caches that metadata on a client
+    // which executes a command admitted by a yielded, later-failed OnLoad.
+    let reply = redis::cmd("keyblock.wait")
+        .arg((0, 1, "normal", "keyblock:load-yield"))
+        .query::<Value>(&mut during_load);
+    drop(during_load);
+    assert!(
+        reply
+            .unwrap_err()
+            .to_string()
+            .contains("key blocking requires an active SDK module")
+    );
+    assert!(load.join().expect("load thread").is_err());
+    assert!(
+        con.server_log()?
+            .contains("keyblock: real client refused while loading; live=0 drops=1")
+    );
+    redis::cmd("RPUSH")
+        .arg(("keyblock:load-yield", "after failed load"))
+        .query::<usize>(&mut con)
+        .with_context(|| format!("after yielded failed load: {:?}", con.server_log()))?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_real_client_during_yielded_unload_is_refused() -> Result<()> {
+    let mut con = TestConnection::with_args("key_blocking", &["yield-unload"]);
+    if redis::cmd("CONFIG")
+        .arg(("SET", "busy-reply-threshold", 1))
+        .query::<String>(&mut con)
+        .is_err()
+    {
+        eprintln!(
+            "Redis lacks Yield client processing; ordinary unload refusal is covered separately"
+        );
+        return Ok(());
+    }
+    let mut unloader = con.connection()?;
+    let mut during_unload = con.connection()?;
+    let unload = std::thread::spawn(move || {
+        redis::cmd("MODULE")
+            .arg(("UNLOAD", "key_blocking"))
+            .query::<String>(&mut unloader)
+    });
+    utils::wait_until(
+        Duration::from_secs(5),
+        "keyblock yielding unload entered",
+        || {
+            Ok(con
+                .server_log()?
+                .contains("keyblock: waiting for a real client during unload"))
+        },
+    )?;
+    let reply = redis::cmd("keyblock.wait")
+        .arg((0, 1, "normal", "keyblock:unload-yield"))
+        .query::<Value>(&mut during_unload);
+    drop(during_unload);
+    assert!(
+        reply
+            .unwrap_err()
+            .to_string()
+            .contains("key blocking requires an active SDK module")
+    );
+    assert_eq!(unload.join().expect("unload thread")?, "OK");
+    assert!(
+        con.server_log()?
+            .contains("keyblock: real client refused while unloading; live=0 drops=1")
+    );
+    redis::cmd("RPUSH")
+        .arg(("keyblock:unload-yield", "after unload"))
+        .query::<usize>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_repeated_registration_preserves_the_first_waiter() -> Result<()> {
+    for command in ["keyblock.double_key", "keyblock.key_then_plain"] {
+        let mut con = TestConnection::new("key_blocking");
+        let key = "keyblock:twice";
+        let mut client = KeyBlockingWire::connect(&con)?;
+        client.send(redis::cmd(command).arg((0, 1, "normal", key)))?;
+        let rejected_data = i64::from(command == "keyblock.double_key");
+        key_blocking_live(&mut con, 1, rejected_data)?;
+        assert_eq!(key_blocking_stats(&mut con)?[5], 1, "{command}");
+        redis::cmd("RPUSH")
+            .arg((key, "first waiter"))
+            .query::<usize>(&mut con)?;
+        assert_eq!(
+            client.read()?,
+            Value::Array(vec![
+                Value::BulkString(key.as_bytes().to_vec()),
+                Value::Array(vec![Value::BulkString(b"first waiter".to_vec())]),
+            ])
+        );
+        client.ping()?;
+        key_blocking_live(&mut con, 0, rejected_data + 1)?;
+        redis::cmd("MODULE")
+            .arg(("UNLOAD", "key_blocking"))
+            .query::<String>(&mut con)?;
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    let mut con = TestConnection::new("key_blocking");
+    assert_eq!(
+        redis::cmd("keyblock.plain_then_key")
+            .arg((0, 1, "normal", "keyblock:plain-first"))
+            .query::<String>(&mut con)?,
+        "OK"
+    );
+    key_blocking_live(&mut con, 0, 1)?;
+    assert_eq!(key_blocking_stats(&mut con)?[5], 1);
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "key_blocking"))
+        .query::<String>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_example_guards_early_and_denied_destructors() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    redis::cmd("RPUSH")
+        .arg(("keyblock:already-ready", "ready"))
+        .query::<usize>(&mut con)?;
+    assert!(matches!(
+        redis::cmd("keyblock.wait")
+            .arg((0, 1, "panic-drop", "keyblock:already-ready"))
+            .query::<Value>(&mut con)?,
+        Value::Array(_)
+    ));
+    key_blocking_live(&mut con, 0, 1)?;
+    redis::cmd("SET")
+        .arg(("keyblock:wrong-type", "string"))
+        .query::<String>(&mut con)?;
+    assert!(
+        redis::cmd("keyblock.wait")
+            .arg((0, 1, "panic-drop", "keyblock:wrong-type"))
+            .query::<Value>(&mut con)
+            .is_err()
+    );
+    key_blocking_live(&mut con, 0, 2)?;
+    assert_eq!(
+        redis::cmd("EVAL")
+            .arg("return redis.call('keyblock.wait', '0', '1', 'panic-drop', KEYS[1])")
+            .arg(1)
+            .arg("keyblock:denied-drop")
+            .query::<Value>(&mut con)?,
+        Value::Nil
+    );
+    key_blocking_live(&mut con, 0, 3)?;
+    assert_eq!(&key_blocking_stats(&mut con)?[2..4], &[0, 0]);
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "key_blocking"))
+        .query::<String>(&mut con)?;
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }

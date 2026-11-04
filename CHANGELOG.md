@@ -7,7 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Command containers and native subcommands (#178).
+  `CommandBuilder::container(name)` declares a command without a handler, and
+  `.subcommand(redis_command!("child", handler))` registers each child as
+  `name|child` through `RedisModule_CreateSubcommand`. A child keeps the flags,
+  key range, required and optional ACL categories, panic guard and reply
+  handling of a top-level command, and its handler receives the container and
+  child names as its first two arguments. `.summary(text)` and `.arity(n)` set
+  what `COMMAND DOCS` and `COMMAND INFO` report on any builder definition.
+  Containers, summaries and arities need Redis 7.0 or later. Registration
+  checks a container and all its children before creating anything, and
+  refuses a container before 7.0, without subcommands, with keys, with ACL
+  categories (Redis grants them to every subcommand), or with an arity that
+  accepts a call without a subcommand. It refuses a child that is a container,
+  has children, repeats another child's name ignoring case, has an empty name,
+  or has an arity of 1, and a container or child name with a space, line
+  break or any of `|@=,`, which Redis 7.2 and later refuse. See `examples/subcommands.rs`.
+
 ### Fixed
+
+- Unusual input no longer panics or silently changes stored data (#165).
+  Calls and replication reject NUL command names before creating native
+  arguments. Converting a RESP3 map with an unsupported key, or a set with an
+  unsupported member, produces an error value for that aggregate. Configuration
+  change event names use replacement characters for invalid UTF-8 inside the
+  panic guard, and caught panic payloads are leaked so their destructors cannot
+  panic out of the guard. Built-in mutex configuration getters recover their
+  stored values after poisoning instead of substituting defaults.
+
+- **Breaking:** `RedisModuleIO::read_string` returns an error for invalid UTF-8
+  instead of replacing bytes (#165). Read binary data with
+  `read_string_buffer`.
+
+- **Breaking:** `RuntimeContext::replicate` now returns Redis's `Status`, including
+  `Status::Err` for a command name containing NUL or a native refusal, instead
+  of discarding it (#165). Existing calls that ignore the result as a statement
+  remain valid.
+
+- Keyspace subscriptions and nonblocking context locks tolerate missing Redis
+  6.2 capability APIs on older Redis 6.0 servers (#167). Without flag
+  enumeration, keyspace handlers request their mask unchanged, including all
+  SDK-known bits for `NotifyEvent::all()`. Both `try_lock` methods return
+  `None` when the native nonblocking lock API is unavailable; they do not
+  acquire a blocking lock instead.
 
 - **Breaking:** `Context::key_at_pos` returns `Result<(), RedisError>` and
   refuses a position that is not an argument position of the running command
@@ -129,6 +173,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   captures immediately, preventing callbacks from surviving a failed load.
 
 ### Added
+
+- `Context::block_client_on_keys` transfers an owned, typed waiter to Redis
+  (#177). Only indexed network clients in an active SDK-bound module may
+  wait; scripts, transactions and all module calls return owned fallback data.
+  Loading, unloading and unbound custom loaders are refused. Blocking an
+  already-blocked network client is refused across the SDK blocking APIs.
+  Ready callbacks may keep waiting or return a reply; timeout and disconnect
+  cleanup release the data once. Callback/destructor panics are
+  guarded, a validated timeout avoids native overflow, and denied blocking
+  returns the data for a non-blocking fallback. Redis 7.2+ can wake on deletion;
+  older servers report their ordinary-readiness fallback. `signal_key_as_ready`
+  and `blocked_client_ready_key` expose signaling and an owned ready-key copy.
 
 - The SDK package declares `links = "redismodule"`, allowing Cargo to reject
   another package declaring the same native library identity (#169).
