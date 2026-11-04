@@ -1,6 +1,6 @@
-use crate::RedisBuffer;
 use crate::error::Error;
 use crate::raw;
+use crate::{RedisBuffer, RedisString};
 
 /// Wrapper around RedisModuleIO for type-safe serialization/deserialization.
 ///
@@ -35,6 +35,21 @@ impl RedisModuleIO {
         // SAFETY: `new` requires a live callback IO.
         let string_ptr = unsafe { raw::load_string(self.io) }?;
         Ok(string_ptr.to_string_lossy())
+    }
+
+    /// Reads a binary-safe string from the IO stream.
+    ///
+    /// # Errors
+    /// Returns an error if the operation fails or if an IO error occurred.
+    pub fn read_redis_string(&mut self) -> Result<RedisString, Error> {
+        // SAFETY: `new` requires a live callback IO.
+        unsafe { raw::load_string(self.io) }
+    }
+
+    /// Writes a binary-safe string to the IO stream.
+    pub fn write_redis_string(&mut self, s: &RedisString) {
+        // SAFETY: `new` requires a live callback IO.
+        unsafe { raw::save_redis_string(self.io, s) };
     }
 
     /// Writes a string to the IO stream.

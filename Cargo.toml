@@ -170,6 +170,10 @@ name = "data_type"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "native_type"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "load_unload"
 crate-type = ["cdylib"]
 

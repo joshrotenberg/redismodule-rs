@@ -34,8 +34,14 @@ use crate::{AclCategory, EventContext, ModuleOptions, RedisError, Status, raw};
 /// Data-type registration has the same requirement:
 ///
 /// ```compile_fail,E0308
-/// use redis_module::{Context, native_types::RedisType};
-/// fn register(ty: &RedisType, ctx: &Context) { ty.create_data_type(ctx).unwrap(); }
+/// use redis_module::{Context, native_types::{NativeType, RedisType}};
+/// # use redis_module::{error::Error, io::RedisModuleIO};
+/// # struct V;
+/// # impl NativeType for V {
+/// #     fn rdb_load(_: &mut RedisModuleIO, _: i32) -> Result<Self, Error> { Ok(V) }
+/// #     fn rdb_save(&self, _: &mut RedisModuleIO) {}
+/// # }
+/// fn register(ty: &RedisType<V>, ctx: &Context) { ty.create_data_type(ctx).unwrap(); }
 /// ```
 ///
 /// Module options are not exposed on runtime contexts:
