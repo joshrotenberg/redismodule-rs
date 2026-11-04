@@ -201,8 +201,12 @@ impl<'ctx> RedisKey<'ctx> {
 
     /// Calls `f` with the key's value, read as the type `redis_type` stores,
     /// and returns what it returns; `None` for an empty key. `f` must be
-    /// `Send`, so it cannot hold the context, a key handle or a `RedisString`
-    /// and change the key while it borrows the value:
+    /// `Send`, so it cannot hold the context, a key handle or a `RedisString`,
+    /// and while it runs the SDK refuses calls and key access on this thread
+    /// (returning `ERR key data is lent to a closure`, or panicking where the
+    /// API returns no `Result`, as opening a key and locking a context do), so
+    /// it cannot change the key while it borrows the value. A closure that
+    /// captures the context does not compile:
     ///
     /// ```compile_fail,E0277
     /// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, native_types::{NativeType, RedisType}, Context, RedisError, RedisString};
@@ -518,8 +522,17 @@ impl<'ctx> RedisKeyWritable<'ctx> {
 
     /// Calls `f` with direct access to the string value's buffer and returns
     /// what it returns. `f` must be `Send`, so it cannot hold the context, a
-    /// key handle or a `RedisString` and change the key while it holds the
-    /// buffer:
+    /// key handle or a `RedisString`, and while it runs the SDK refuses calls
+    /// and key access on this thread except through the buffer, so it cannot
+    /// change the key while it holds the buffer.
+    ///
+    /// Writing to an empty key creates it, and Redis raises the `new`
+    /// keyspace event synchronously: this module's subscribers run with the
+    /// data still lent, so their calls fail and opening a key panics, which
+    /// the SDK logs. Another module's subscribers are outside this guard;
+    /// Redis forbids writes from notification callbacks.
+    ///
+    /// A closure that captures the context does not compile:
     ///
     /// ```compile_fail,E0277
     /// # use redis_module::{Context, RedisError, RedisString};

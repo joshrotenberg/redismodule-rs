@@ -420,6 +420,9 @@ impl DetachedContext {
     /// call waited for the lock. A worker that outlives a reload locks the new
     /// load's context, so stop workers before the module unloads.
     pub fn lock(&self) -> DetachedContextGuard<'_> {
+        // This thread already holds the lock while key data is lent, so
+        // locking again would deadlock the server.
+        crate::key::panic_while_lent();
         let c = self.ctx.load(Ordering::Acquire);
         assert!(!c.is_null(), "Detached context has not been initialized");
         // Redis only takes the lock here; it does not read the context.
