@@ -1732,6 +1732,23 @@ fn test_command_builder_invalid_definitions_fail_the_load() {
         ("nul-name", "nul byte"),
         ("empty-name", "command name must not be empty"),
         ("duplicate", "failed to register command builder.ping"),
+        ("arity-zero", "arity must not be 0"),
+        ("subcommand-on-command", "only a container"),
+        ("container-keys", "container cannot have keys"),
+        ("container-arity-one", "arity must require a subcommand"),
+        (
+            "container-arity-minus-one",
+            "arity must require a subcommand",
+        ),
+        ("nested-container", "subcommand cannot be a container"),
+        ("nested-subcommand", "subcommand cannot have subcommands"),
+        ("subcommand-pipe", "contain no '|'"),
+        ("subcommand-empty", "must be non-empty"),
+        (
+            "subcommand-duplicate",
+            "failed to register subcommand builder.container|CHILD",
+        ),
+        ("subcommand-key-range", "invalid command key range"),
     ] {
         let error = match TestConnection::try_with_args("command_builder", &[mode]) {
             Ok(_) => panic!("invalid definition {mode} loaded"),
@@ -3289,6 +3306,160 @@ fn test_key_at_pos_refuses_positions_past_the_arguments() -> Result<()> {
         "ERR key position 3 is not an argument position of the command (1 to 2)"
     );
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// Every bulk and simple string in a reply, depth first.
+fn reply_strings(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::BulkString(bytes) => out.push(String::from_utf8_lossy(bytes).into_owned()),
+        Value::SimpleString(text) => out.push(text.clone()),
+        Value::Array(items) | Value::Set(items) => {
+            items.iter().for_each(|item| reply_strings(item, out))
+        }
+        Value::Map(pairs) => pairs.iter().for_each(|(key, value)| {
+            reply_strings(key, out);
+            reply_strings(value, out);
+        }),
+        _ => {}
+    }
+}
+
+/// `COMMAND INFO <name>`'s entry: name, arity, flags, first, last, step,
+/// categories and so on.
+fn command_info(con: &mut TestConnection, name: &str) -> Result<Vec<Value>> {
+    let reply: Vec<Value> = redis::cmd("COMMAND").arg(&["INFO", name]).query(con)?;
+    match reply.into_iter().next() {
+        Some(Value::Array(entry)) => Ok(entry),
+        other => Err(anyhow::anyhow!(
+            "no COMMAND INFO entry for {name}: {other:?}"
+        )),
+    }
+}
+
+/// A container dispatches to its subcommands, which get the panic guard and
+/// arity checks of a top-level command; the container alone and an unknown
+/// subcommand get Redis's errors instead of running a handler.
+#[test]
+fn test_subcommands_dispatch() -> Result<()> {
+    let mut con = TestConnection::new("subcommands");
+    redis::cmd("subcmd.kv")
+        .arg(&["set", "k", "v"])
+        .query::<()>(&mut con)?;
+    let value: String = redis::cmd("subcmd.kv").arg(&["get", "k"]).query(&mut con)?;
+    assert_eq!(value, "v");
+    let value: String = redis::cmd("SUBCMD.KV").arg(&["GET", "k"]).query(&mut con)?;
+    assert_eq!(value, "v");
+
+    for args in [&["set", "k"][..], &["get"], &[]] {
+        let error = redis::cmd("subcmd.kv")
+            .arg(args)
+            .query::<Value>(&mut con)
+            .expect_err("a call with the wrong arity ran");
+        assert!(
+            error.to_string().contains("wrong number of arguments"),
+            "{args:?}: {error}"
+        );
+    }
+    let error = redis::cmd("subcmd.kv")
+        .arg("nosuch")
+        .query::<Value>(&mut con)
+        .expect_err("an unknown subcommand ran");
+    assert!(error.to_string().contains("unknown subcommand"), "{error}");
+    let error = redis::cmd("subcmd.kv")
+        .arg("panic")
+        .query::<Value>(&mut con)
+        .expect_err("a panicking subcommand replied");
+    assert!(
+        error
+            .to_string()
+            .contains("command panicked: subcommand failed"),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// COMMAND INFO, COMMAND DOCS and COMMAND GETKEYS describe the container and
+/// its subcommands from their arity, summary, key range and categories.
+#[test]
+fn test_subcommands_command_metadata() -> Result<()> {
+    let mut con = TestConnection::new("subcommands");
+
+    let container = command_info(&mut con, "subcmd.kv")?;
+    assert_eq!(container[1], Value::Int(-2));
+    let mut strings = Vec::new();
+    reply_strings(&Value::Array(container), &mut strings);
+    for child in ["subcmd.kv|set", "subcmd.kv|get", "subcmd.kv|panic"] {
+        assert!(strings.iter().any(|s| s == child), "{child}: {strings:?}");
+    }
+
+    for (name, arity, flag, first, category) in [
+        ("subcmd.kv|set", 4, "write", 2, Some("@write")),
+        ("subcmd.kv|get", 3, "readonly", 2, Some("@read")),
+        ("subcmd.kv|panic", 2, "module", 0, None),
+    ] {
+        let info = command_info(&mut con, name)?;
+        let mut strings = Vec::new();
+        reply_strings(&Value::Array(info.clone()), &mut strings);
+        assert_eq!(strings.first().map(String::as_str), Some(name));
+        assert_eq!(info[1], Value::Int(arity), "{name}");
+        assert!(strings.iter().any(|s| s == flag), "{name}: {strings:?}");
+        assert_eq!(info[3], Value::Int(first), "{name}");
+        if let Some(category) = category {
+            assert!(strings.iter().any(|s| s == category), "{name}: {strings:?}");
+        }
+    }
+
+    let docs: Value = redis::cmd("COMMAND")
+        .arg(&["DOCS", "subcmd.kv"])
+        .query(&mut con)?;
+    let mut strings = Vec::new();
+    reply_strings(&docs, &mut strings);
+    for summary in ["Reads and writes string keys", "Sets a key", "Gets a key"] {
+        assert!(
+            strings.iter().any(|s| s == summary),
+            "{summary}: {strings:?}"
+        );
+    }
+
+    let keys: Vec<String> = redis::cmd("COMMAND")
+        .arg(&["GETKEYS", "subcmd.kv", "set", "mykey", "value"])
+        .query(&mut con)?;
+    assert_eq!(keys, ["mykey"]);
+    let keys: Vec<String> = redis::cmd("COMMAND")
+        .arg(&["GETKEYS", "subcmd.kv", "get", "other"])
+        .query(&mut con)?;
+    assert_eq!(keys, ["other"]);
+    Ok(())
+}
+
+/// A subcommand's ACL categories decide who can run it: a user granted only
+/// `@read` can run `get` but not `set`, or `panic`, which has no categories.
+#[test]
+fn test_subcommands_acl_categories() -> Result<()> {
+    let mut con = TestConnection::new("subcommands");
+    redis::cmd("SET").arg(&["k", "v"]).query::<()>(&mut con)?;
+    redis::cmd("ACL")
+        .arg(&["SETUSER", "reader", "on", "nopass", "~*", "-@all", "+@read"])
+        .query::<()>(&mut con)?;
+    let mut reader = con.connection()?;
+    redis::cmd("AUTH")
+        .arg(&["reader", "unused"])
+        .query::<()>(&mut reader)?;
+    let value: String = redis::cmd("subcmd.kv")
+        .arg(&["get", "k"])
+        .query(&mut reader)?;
+    assert_eq!(value, "v");
+    for args in [&["set", "k", "w"][..], &["panic"]] {
+        let error = redis::cmd("subcmd.kv")
+            .arg(args)
+            .query::<Value>(&mut reader)
+            .expect_err("a reader ran a subcommand outside @read");
+        assert_eq!(error.code(), Some("NOPERM"), "{args:?}: {error}");
+    }
+    let value: String = redis::cmd("GET").arg("k").query(&mut con)?;
+    assert_eq!(value, "v");
     Ok(())
 }
 

@@ -11,6 +11,18 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Command containers and subcommands
+
+Upstream has no wrapper for `RedisModule_CreateSubcommand`, and its command
+macros always supply a handler, so a container such as `XGROUP` needed raw
+bindings and a hand-written dispatcher without the SDK's panic guard (#178).
+`CommandBuilder::container` declares a container, `.subcommand` registers
+children with the same metadata and callback handling as top-level commands,
+and `.summary` and `.arity` set the command info `COMMAND DOCS` and
+`COMMAND INFO` report. Redis keeps a container's handler NULL and would call
+it for a call its arity accepts without a subcommand, so registration refuses a
+container arity of 1 or -1, and refuses containers before Redis 7.0.
+
 ## Checked key positions
 
 `Context::key_at_pos` was a safe function, but `RedisModule_KeyAtPos` checks

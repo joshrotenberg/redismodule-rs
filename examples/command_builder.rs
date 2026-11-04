@@ -1,7 +1,7 @@
 //! Fluent and legacy command definitions may share the same module.
 use redis_module::{
-    CommandFlags, Context, KeyRange, RedisError, RedisResult, RedisString, RedisValue, Status,
-    redis_command, redis_module,
+    CommandBuilder, CommandFlags, Context, KeyRange, RedisError, RedisResult, RedisString,
+    RedisValue, Status, redis_command, redis_module,
 };
 
 fn callback(_: &Context, _: Vec<RedisString>) -> RedisResult {
@@ -72,6 +72,27 @@ fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> St
         "empty-name" => redis_command!("", ping),
         "nul-name" => redis_command!("builder\0invalid", ping),
         "duplicate" => redis_command!("builder.ping", ping),
+        "arity-zero" => command.arity(0),
+        "subcommand-on-command" => command.subcommand(redis_command!("child", ping)),
+        "container-keys" => CommandBuilder::container("builder.container").key(1),
+        "container-arity-one" => CommandBuilder::container("builder.container").arity(1),
+        "container-arity-minus-one" => CommandBuilder::container("builder.container").arity(-1),
+        "nested-container" => CommandBuilder::container("builder.container")
+            .subcommand(CommandBuilder::container("inner")),
+        "nested-subcommand" => CommandBuilder::container("builder.container").subcommand(
+            redis_command!("child", ping).subcommand(redis_command!("grandchild", ping)),
+        ),
+        "subcommand-pipe" => {
+            CommandBuilder::container("builder.container").subcommand(redis_command!("a|b", ping))
+        }
+        "subcommand-empty" => {
+            CommandBuilder::container("builder.container").subcommand(redis_command!("", ping))
+        }
+        "subcommand-duplicate" => CommandBuilder::container("builder.container")
+            .subcommand(redis_command!("child", ping))
+            .subcommand(redis_command!("CHILD", ping)),
+        "subcommand-key-range" => CommandBuilder::container("builder.container")
+            .subcommand(redis_command!("child", ping).key(0)),
         _ => return Status::Err,
     };
     match command.register(ctx) {
