@@ -40,8 +40,10 @@ mod code;
 mod compiler;
 mod compiler_engine;
 mod compiler_pipe;
+mod compiler_process;
 mod compiler_protocol;
 mod compiler_source;
+mod compiler_watch;
 mod dump;
 mod flags;
 mod host;
@@ -122,16 +124,18 @@ fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     // If the thread cannot start, the handle is dropped with it, which
     // unblocks the client with an error reply.
     let supervisor = compiler.supervisor();
-    supervisor
-        .spawn(move || {
-            let result = compiler.compile(component);
-            blocked.unblock(Loaded {
-                name,
-                replace,
-                result,
-            });
-        })
-        .map_err(|e| error("WASM.LOAD failed", &e))?;
+    if let Err(error) = supervisor.spawn(move || {
+        let result = compiler.compile(component);
+        blocked.unblock(Loaded {
+            name,
+            replace,
+            result,
+        });
+    }) {
+        // The failed spawn dropped its captured blocked handle, which owns
+        // the one eventual error reply. Returning another error would send two.
+        ctx.log_warning(&format!("wasm compiler worker did not start: {error:#}"));
+    }
     Ok(RedisValue::NoReply)
 }
 
@@ -418,14 +422,14 @@ fn wasm_restore(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             },
         );
     };
-    supervisor
-        .spawn(move || {
-            blocked.unblock(Restoring {
-                policy,
-                result: compile(),
-            });
-        })
-        .map_err(|e| error("WASM.RESTORE failed", &e))?;
+    if let Err(error) = supervisor.spawn(move || {
+        blocked.unblock(Restoring {
+            policy,
+            result: compile(),
+        });
+    }) {
+        ctx.log_warning(&format!("wasm compiler worker did not start: {error:#}"));
+    }
     Ok(RedisValue::NoReply)
 }
 
@@ -538,8 +542,15 @@ fn init(ctx: &RegistrationContext<'_>, _args: &[RedisString]) -> Status {
     }
 }
 
-fn deinit(_ctx: &EventContext) -> Status {
-    if let Some(host) = host().take() {
+fn deinit(ctx: &EventContext) -> Status {
+    let mut current = host();
+    if let Some(host) = current.as_ref() {
+        if let Err(error) = host.stop_compiler() {
+            ctx.log_warning(&format!("wasm compiler prevents unload: {error:#}"));
+            return Status::Err;
+        }
+    }
+    if let Some(host) = current.take() {
         host.shutdown();
     }
     Status::Ok
@@ -580,6 +591,7 @@ redis_module! {
                 None
             ],
         ],
+        string: [["compiler-path", &compiler::PATH, "", ConfigurationFlags::IMMUTABLE, None]],
         bool: [
             [
                 "persist",

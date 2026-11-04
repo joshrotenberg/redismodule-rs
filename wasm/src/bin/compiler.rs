@@ -2,6 +2,8 @@
 //! requires Redis. Only engine/protocol/limit source is shared with the host.
 #[path = "../compiler_engine.rs"]
 mod compiler_engine;
+#[path = "../compiler_launcher.rs"]
+mod compiler_launcher;
 #[path = "../compiler_limits.rs"]
 mod compiler_limits;
 #[path = "../compiler_protocol.rs"]
@@ -15,13 +17,9 @@ use std::io::{Read, Write};
 #[global_allocator]
 static ALLOCATOR: std::alloc::System = std::alloc::System;
 
-fn run() -> anyhow::Result<()> {
-    let args: Vec<_> = std::env::args().skip(1).collect();
-    ensure!(
-        args.len() == 2,
-        "compiler expects address-space allowance and CPU seconds"
-    );
-    let (baseline, ceiling) = compiler_limits::apply(args[0].parse()?, args[1].parse()?)?;
+fn compile(memory: u64, cpu: u64, watch: libc::c_int, parent: libc::pid_t) -> anyhow::Result<()> {
+    let (baseline, ceiling) = compiler_limits::apply(memory, cpu)?;
+    compiler_launcher::watch_launcher(watch, parent)?;
     let engine = compiler_engine::engine()?;
     let fingerprint = compiler_engine::fingerprint(&engine);
     let mut input = std::io::stdin().lock();
@@ -34,7 +32,7 @@ fn run() -> anyhow::Result<()> {
     ensure!(input.read(&mut extra)? == 0, "extra compiler input");
     let result = engine
         .precompile_component(&wasm)
-        .context("component compilation failed");
+        .context("invalid component");
     drop(wasm);
     let (failed, bytes) = match result {
         Ok(bytes) => {
@@ -69,6 +67,38 @@ fn run() -> anyhow::Result<()> {
 }
 
 fn main() {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let run = || -> anyhow::Result<()> {
+        match args.first().map(String::as_str) {
+            Some("--launch") if args.len() == 8 => {
+                ensure!(
+                    args[7] == env!("WASM_COMPILER_BUILD"),
+                    "compiler launcher build identity mismatch"
+                );
+                let raw = args[5].as_bytes();
+                ensure!(raw.len() == 64, "invalid private nonce");
+                let mut nonce = [0; 32];
+                for (i, byte) in nonce.iter_mut().enumerate() {
+                    *byte = u8::from_str_radix(std::str::from_utf8(&raw[i * 2..i * 2 + 2])?, 16)?;
+                }
+                compiler_launcher::run(
+                    args[1].parse()?,
+                    args[2].parse()?,
+                    args[3].parse()?,
+                    args[4].parse()?,
+                    nonce,
+                    args[6].parse()?,
+                )
+            }
+            Some("--compile") if args.len() == 5 => compile(
+                args[1].parse()?,
+                args[2].parse()?,
+                args[3].parse()?,
+                args[4].parse()?,
+            ),
+            _ => anyhow::bail!("compiler expects its private launcher protocol"),
+        }
+    };
     if let Err(error) = run() {
         eprintln!("wasm compiler: {error:#}");
         std::process::exit(1);

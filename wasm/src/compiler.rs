@@ -1,7 +1,7 @@
 //! Owned compiler processes, bounded admission and deadline-driven pipe IO.
 //! No worker acquires Redis's lock: shutdown can kill/reap/join under that lock.
 use crate::{
-    compiler_engine, compiler_pipe::exchange_io, compiler_protocol as protocol,
+    compiler_engine, compiler_process::Process, compiler_protocol as protocol,
     compiler_source::Source,
 };
 use anyhow::{Context as _, bail, ensure};
@@ -12,8 +12,8 @@ use std::{
     ffi::{CStr, OsStr},
     fs::File,
     io::Read,
+    os::unix::net::UnixStream,
     path::PathBuf,
-    process::{Child, Command, Stdio},
     sync::{
         Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak,
         atomic::{AtomicI64, AtomicU64, Ordering},
@@ -31,6 +31,7 @@ pub(crate) static MEMORY: AtomicI64 = AtomicI64::new(DEFAULT_MEMORY);
 pub(crate) static CPU: AtomicI64 = AtomicI64::new(DEFAULT_CPU);
 pub(crate) static WALL: AtomicI64 = AtomicI64::new(DEFAULT_WALL);
 pub(crate) static QUEUE: AtomicI64 = AtomicI64::new(DEFAULT_QUEUE);
+pub(crate) static PATH: Mutex<String> = Mutex::new(String::new());
 static ACTIVE: Mutex<Weak<Supervisor>> = Mutex::new(Weak::new());
 
 #[derive(Clone, Copy)]
@@ -45,8 +46,9 @@ struct State {
     next: u64,
     queued: VecDeque<u64>,
     active: Option<u64>,
-    child: Option<u32>,
+    control: Option<UnixStream>,
     stopped: bool,
+    uncertain: Option<Process>,
 }
 
 pub(crate) struct Supervisor {
@@ -57,6 +59,9 @@ pub(crate) struct Supervisor {
     workers: Mutex<Vec<JoinHandle<()>>>,
     completed: AtomicU64,
     failed: AtomicU64,
+    baseline: AtomicU64,
+    ceiling: AtomicU64,
+    cpu_ms: AtomicU64,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -71,23 +76,39 @@ impl Supervisor {
             wall: Duration::from_secs(u64::try_from(WALL.load(Ordering::Relaxed))?),
             queue: usize::try_from(QUEUE.load(Ordering::Relaxed))?,
         };
-        let supervisor = Arc::new(Self {
-            helper: helper_path()?,
+        let configured = lock(&PATH).clone();
+        let helper = if configured.is_empty() {
+            helper_path()?
+        } else {
+            let path = PathBuf::from(configured);
+            ensure!(path.is_absolute(), "compiler-path must be an absolute path");
+            path
+        };
+        let supervisor = Self::configured(helper, limits);
+        *lock(&ACTIVE) = Arc::downgrade(&supervisor);
+        Ok(supervisor)
+    }
+
+    fn configured(helper: PathBuf, limits: Limits) -> Arc<Self> {
+        Arc::new(Self {
+            helper,
             limits,
             state: Mutex::new(State {
                 next: 0,
                 queued: VecDeque::new(),
                 active: None,
-                child: None,
+                control: None,
                 stopped: false,
+                uncertain: None,
             }),
             changed: Condvar::new(),
             workers: Mutex::new(Vec::new()),
             completed: AtomicU64::new(0),
             failed: AtomicU64::new(0),
-        });
-        *lock(&ACTIVE) = Arc::downgrade(&supervisor);
-        Ok(supervisor)
+            baseline: AtomicU64::new(0),
+            ceiling: AtomicU64::new(0),
+            cpu_ms: AtomicU64::new(0),
+        })
     }
 
     /// Reserve before source spooling/copying and before creating a worker.
@@ -95,7 +116,11 @@ impl Supervisor {
     /// A restore/RDB batch owns one reservation and compiles sequentially.
     pub(crate) fn reserve(self: &Arc<Self>) -> anyhow::Result<Reservation> {
         let mut state = lock(&self.state);
-        ensure!(!state.stopped, "compiler is shut down");
+        Self::recover(&mut state)?;
+        ensure!(
+            !state.stopped && state.uncertain.is_none(),
+            "compiler cleanup is uncertain; new admission is refused"
+        );
         ensure!(
             state.queued.len() + usize::from(state.active.is_some()) < self.limits.queue + 1,
             "compiler queue is full"
@@ -138,22 +163,47 @@ impl Supervisor {
         Ok(())
     }
 
-    pub(crate) fn shutdown(&self) {
+    fn recover(state: &mut State) -> anyhow::Result<()> {
+        if let Some(process) = &mut state.uncertain {
+            if process.poll_cleanup()? {
+                state.uncertain = None;
+                state.active = None;
+                state.control = None;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn shutdown(&self) -> anyhow::Result<()> {
         {
             let mut state = lock(&self.state);
             state.stopped = true;
-            if let Some(pid) = state.child {
-                // The child is unreaped and remains owned while this mutex is
-                // held, so its PID cannot refer to a different process.
-                unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+            if let Some(control) = &mut state.control {
+                let _ = std::io::Write::write(control, b"X");
             }
             self.changed.notify_all();
         }
-        // Workers only use pipe IO, Wasmtime linking, Redis's allocator and
-        // thread-safe UnblockClient; none waits for the Redis lock.
-        for worker in std::mem::take(&mut *lock(&self.workers)) {
-            let _ = worker.join();
+        let deadline = Instant::now() + Duration::from_secs(6);
+        let mut workers = lock(&self.workers);
+        while workers.iter().any(|worker| !worker.is_finished()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
         }
+        let mut running = Vec::new();
+        for worker in workers.drain(..) {
+            if worker.is_finished() {
+                let _ = worker.join();
+            } else {
+                running.push(worker);
+            }
+        }
+        *workers = running;
+        let mut state = lock(&self.state);
+        let recovered = Self::recover(&mut state);
+        if recovered.is_err() || state.uncertain.is_some() || !workers.is_empty() {
+            state.stopped = false;
+            bail!("compiler cleanup is not proven complete; module unload is refused");
+        }
+        Ok(())
     }
 
     fn run(&self, engine: &Engine, source: &Source) -> anyhow::Result<Component> {
@@ -189,51 +239,35 @@ impl Supervisor {
             .canonicalize()
             .with_context(|| format!("compiler helper is missing: {}", self.helper.display()))?;
         ensure!(path.is_file(), "compiler helper is not a regular file");
-        let child = Command::new(path)
-            .args([self.limits.memory.to_string(), self.limits.cpu.to_string()])
-            .env("MallocNanoZone", "0")
-            .env("RAYON_NUM_THREADS", "2")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("start bounded compiler helper")?;
-        let mut child = OwnedChild {
-            child,
-            supervisor: self,
-            reaped: false,
-        };
+        let mut process = Process::spawn(
+            &path,
+            self.limits.memory,
+            self.limits.cpu,
+            self.limits.wall,
+            nonce,
+        )?;
         {
             let mut state = lock(&self.state);
-            if state.stopped {
-                bail!("compiler operation cancelled");
-            }
-            state.child = Some(child.child.id());
+            state.control = Some(process.control.try_clone()?);
         }
-        let result = exchange_io(
-            &mut child.child,
-            source,
-            &request,
-            nonce,
-            fingerprint,
-            self.limits.wall,
-            || lock(&self.state).stopped,
-        );
-        // All success and failure paths reap before releasing PID ownership.
-        // IO receives EOF only after the helper closed stdout/stderr. A helper
-        // which closes them and hangs is still governed by the same deadline.
-        let (artifact, response) = result?;
+        let output = process.exchange(source, &request, fingerprint, || lock(&self.state).stopped);
+        let cleaned = process
+            .cleanup(Instant::now() + Duration::from_secs(5))
+            .unwrap_or(false);
+        if !cleaned {
+            let mut state = lock(&self.state);
+            state.uncertain = Some(process);
+            bail!("compiler cleanup is uncertain; capacity remains reserved until exit proof");
+        }
+        lock(&self.state).control = None;
+        let (artifact, response) = output?;
         ensure!(
             response.ceiling.checked_sub(response.baseline) == Some(self.limits.memory),
             "compiler address-space allowance mismatch"
         );
-        let status = child.wait_until(Instant::now() + Duration::from_millis(100))?;
-        ensure!(
-            !response.failed,
-            "compiler refused component ({status}): {}",
-            std::fs::read_to_string(&artifact.path).unwrap_or_default()
-        );
-        ensure!(status.success(), "compiler helper exited {status}");
+        self.baseline.store(response.baseline, Ordering::Relaxed);
+        self.ceiling.store(response.ceiling, Ordering::Relaxed);
+        self.cpu_ms.store(response.cpu_ms, Ordering::Relaxed);
         logging::log_notice(format!(
             "wasm compiler: input={} artifact={} baseline_vm={} ceiling_vm={} cpu_ms={}",
             source.len(),
@@ -263,14 +297,11 @@ impl Reservation {
         Arc::clone(&self.supervisor)
     }
 
-    pub(crate) fn compile(
-        &mut self,
-        engine: &Engine,
-        source: &Source,
-    ) -> anyhow::Result<Component> {
+    fn enter(&mut self) -> anyhow::Result<()> {
         if !self.entered {
             let mut state = lock(&self.supervisor.state);
             while !state.stopped
+                && state.uncertain.is_none()
                 && (state.active.is_some() || state.queued.front() != Some(&self.id))
             {
                 state = self
@@ -279,15 +310,30 @@ impl Reservation {
                     .wait(state)
                     .unwrap_or_else(PoisonError::into_inner);
             }
-            ensure!(!state.stopped, "compiler operation cancelled");
+            ensure!(
+                !state.stopped && state.uncertain.is_none(),
+                "compiler operation cancelled or cleanup uncertain"
+            );
             state.queued.pop_front();
             state.active = Some(self.id);
             self.entered = true;
         }
         ensure!(
-            !lock(&self.supervisor.state).stopped,
+            {
+                let state = lock(&self.supervisor.state);
+                !state.stopped && state.uncertain.is_none()
+            },
             "compiler operation cancelled"
         );
+        Ok(())
+    }
+
+    pub(crate) fn compile(
+        &mut self,
+        engine: &Engine,
+        source: &Source,
+    ) -> anyhow::Result<Component> {
+        self.enter()?;
         self.supervisor.run(engine, source)
     }
 }
@@ -295,47 +341,11 @@ impl Reservation {
 impl Drop for Reservation {
     fn drop(&mut self) {
         let mut state = lock(&self.supervisor.state);
-        if state.active == Some(self.id) {
+        if state.active == Some(self.id) && state.uncertain.is_none() {
             state.active = None;
         }
         state.queued.retain(|id| *id != self.id);
         self.supervisor.changed.notify_all();
-    }
-}
-
-struct OwnedChild<'a> {
-    child: Child,
-    supervisor: &'a Supervisor,
-    reaped: bool,
-}
-
-impl OwnedChild<'_> {
-    fn wait_until(&mut self, deadline: Instant) -> anyhow::Result<std::process::ExitStatus> {
-        loop {
-            let mut state = lock(&self.supervisor.state);
-            if let Some(status) = self.child.try_wait()? {
-                self.reaped = true;
-                state.child = None;
-                return Ok(status);
-            }
-            drop(state);
-            ensure!(
-                Instant::now() < deadline,
-                "compiler did not exit after completing its output"
-            );
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    }
-}
-
-impl Drop for OwnedChild<'_> {
-    fn drop(&mut self) {
-        if !self.reaped {
-            let mut state = lock(&self.supervisor.state);
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-            state.child = None;
-        }
     }
 }
 
@@ -370,6 +380,101 @@ fn helper_path() -> anyhow::Result<PathBuf> {
 fn shutdown(_ctx: &EventContext) {
     let supervisor = lock(&ACTIVE).upgrade();
     if let Some(supervisor) = supervisor {
-        supervisor.shutdown();
+        if let Err(error) = supervisor.shutdown() {
+            logging::log_warning(format!("wasm compiler shutdown: {error:#}"));
+        }
+    }
+}
+
+/// INFO can be requested in a crash report while a worker owns either mutex.
+/// Never wait on a worker, a lifecycle join or the host from this snapshot.
+pub(crate) fn diagnostics() -> [i64; 8] {
+    let Some(supervisor) = ACTIVE.try_lock().ok().and_then(|active| active.upgrade()) else {
+        return [0; 8];
+    };
+    let (active, queued, uncertain) = supervisor
+        .state
+        .try_lock()
+        .map(|state| {
+            (
+                u64::from(state.active.is_some()),
+                state.queued.len() as u64,
+                u64::from(state.uncertain.is_some()),
+            )
+        })
+        .unwrap_or_default();
+    [
+        active,
+        queued,
+        supervisor.completed.load(Ordering::Relaxed),
+        supervisor.failed.load(Ordering::Relaxed),
+        supervisor.baseline.load(Ordering::Relaxed),
+        supervisor.ceiling.load(Ordering::Relaxed),
+        supervisor.cpu_ms.load(Ordering::Relaxed),
+        uncertain,
+    ]
+    .map(|n| i64::try_from(n).unwrap_or(i64::MAX))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    fn supervisor(queue: usize) -> Arc<Supervisor> {
+        Supervisor::configured(
+            PathBuf::from("/missing/compiler"),
+            Limits {
+                memory: 64 << 20,
+                cpu: 1,
+                wall: Duration::from_millis(50),
+                queue,
+            },
+        )
+    }
+
+    #[test]
+    fn admission_bounds_workers_preserves_fifo_and_releases_cancelled_reservations() {
+        let supervisor = supervisor(1);
+        let mut first = supervisor.reserve().unwrap();
+        first.enter().unwrap();
+        let second = supervisor.reserve().unwrap();
+        assert!(supervisor.reserve().is_err());
+        drop(second);
+        let mut third = supervisor.reserve().unwrap();
+        assert_eq!(lock(&supervisor.state).queued.front(), Some(&third.id));
+        let (sent, received) = mpsc::channel();
+        supervisor
+            .spawn(move || {
+                third.enter().unwrap();
+                sent.send(()).unwrap();
+            })
+            .unwrap();
+        assert!(received.recv_timeout(Duration::from_millis(30)).is_err());
+        drop(first);
+        received.recv_timeout(Duration::from_secs(2)).unwrap();
+        supervisor.shutdown().unwrap();
+        assert!(lock(&supervisor.state).queued.is_empty());
+        assert!(lock(&supervisor.state).active.is_none());
+        assert!(supervisor.reserve().is_err());
+    }
+
+    #[test]
+    fn shutdown_wakes_waiting_operations_without_a_redis_lock() {
+        let supervisor = supervisor(1);
+        let mut active = supervisor.reserve().unwrap();
+        active.enter().unwrap();
+        let mut waiting = supervisor.reserve().unwrap();
+        let (sent, received) = mpsc::channel();
+        supervisor
+            .spawn(move || {
+                sent.send(waiting.enter().is_err()).unwrap();
+            })
+            .unwrap();
+        supervisor.shutdown().unwrap();
+        assert!(received.recv_timeout(Duration::from_secs(2)).unwrap());
+        drop(active);
+        assert!(lock(&supervisor.state).queued.is_empty());
+        assert!(lock(&supervisor.workers).is_empty());
     }
 }

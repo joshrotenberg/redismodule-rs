@@ -60,6 +60,8 @@ pub(crate) fn exchange_io(
     let mut header = [0; protocol::RESPONSE_SIZE];
     let mut header_len = 0;
     let mut response = None;
+    let mut trailer = [0; protocol::TRAILER_SIZE];
+    let mut trailer_len = 0;
     let mut body_len = 0;
     let mut checksum = Sha256::new();
     let mut diagnostic = VecDeque::new();
@@ -68,12 +70,16 @@ pub(crate) fn exchange_io(
         .tempdir()?;
     let mut artifact = tempfile::NamedTempFile::new_in(directory.path())?;
     let deadline = Instant::now() + wall;
-    while !(output_eof && error_eof && input_done) {
+    while !(trailer_len == trailer.len() && input_done) {
         ensure!(!cancelled(), "compiler operation cancelled");
         ensure!(
             Instant::now() < deadline,
             "compiler wall timeout after {} seconds",
             wall.as_secs()
+        );
+        ensure!(
+            !output_eof,
+            "compiler output ended before its complete frame and successful-exit proof"
         );
         let mut fds = [
             libc::pollfd {
@@ -119,8 +125,8 @@ pub(crate) fn exchange_io(
                 }
             }
         }
-        for index in 1..=2 {
-            if fds[index].revents == 0 {
+        for (index, fd) in fds.iter().enumerate().skip(1) {
+            if fd.revents == 0 {
                 continue;
             }
             let mut bytes = [0; 65536];
@@ -159,13 +165,17 @@ pub(crate) fn exchange_io(
                     if !bytes.is_empty() {
                         let response =
                             response.as_ref().context("missing compiler frame header")?;
+                        let count = bytes.len().min(response.len - body_len);
+                        artifact.write_all(&bytes[..count])?;
+                        checksum.update(&bytes[..count]);
+                        body_len += count;
+                        bytes = &bytes[count..];
                         ensure!(
-                            body_len + bytes.len() <= response.len,
+                            trailer_len + bytes.len() <= trailer.len(),
                             "compiler emitted excess output"
                         );
-                        artifact.write_all(bytes)?;
-                        checksum.update(bytes);
-                        body_len += bytes.len();
+                        trailer[trailer_len..trailer_len + bytes.len()].copy_from_slice(bytes);
+                        trailer_len += bytes.len();
                     }
                 }
                 Err(error)
@@ -188,6 +198,14 @@ pub(crate) fn exchange_io(
         actual == response.checksum,
         "compiler artifact checksum mismatch"
     );
+    if response.failed {
+        let message = std::fs::read(artifact.path())?;
+        bail!(
+            "compiler refused component: {}",
+            String::from_utf8_lossy(&message)
+        );
+    }
+    protocol::verify_exit_trailer(&trailer, nonce)?;
     artifact
         .as_file()
         .set_permissions(Permissions::from_mode(0o400))?;
@@ -229,12 +247,15 @@ size=(1<<30) if mode=='oversized' else len(body)
 checksum=hashlib.sha256(body).digest()
 if mode=='checksum': checksum=b'x'*32
 header=b'RWCres01'+struct.pack('<I',1)+nonce+fingerprint+struct.pack('<IQQQQ',0,size,100,1000,1)+checksum+b'\0'*4
+trailer=b'RWCdone1'+struct.pack('<I',1)+nonce+struct.pack('<I',0)
 if mode=='partial': body=body[:-1]
 if mode=='extra': body+=b'x'
 if mode=='fragmented':
-    for byte in header+body:
+    for byte in header+body+trailer:
         sys.stdout.buffer.write(bytes([byte])); sys.stdout.buffer.flush()
-else: sys.stdout.buffer.write(header+body)
+else:
+    sys.stdout.buffer.write(header+body+trailer);sys.stdout.buffer.flush()
+    if mode=='held-writer': time.sleep(0.3)
 "#;
         TestChild(
             Command::new("python3")
@@ -249,7 +270,7 @@ else: sys.stdout.buffer.write(header+body)
 
     #[test]
     fn transport_streams_verified_output_and_removes_private_artifacts() {
-        for mode in ["normal", "fragmented", "stderr"] {
+        for mode in ["normal", "fragmented", "stderr", "held-writer"] {
             let mut child = child(mode);
             let source = Source::spool(&vec![1; 1 << 20]).unwrap();
             let request = protocol::request([1; 32], [2; 32], source.len()).unwrap();
@@ -264,6 +285,12 @@ else: sys.stdout.buffer.write(header+body)
             )
             .unwrap();
             let directory = artifact.path.parent().unwrap().to_owned();
+            if mode == "held-writer" {
+                assert!(
+                    child.0.try_wait().unwrap().is_none(),
+                    "transport incorrectly waited for inherited-writer EOF"
+                );
+            }
             assert_eq!(
                 std::fs::read(&artifact.path).unwrap(),
                 b"owned compiler artifact"

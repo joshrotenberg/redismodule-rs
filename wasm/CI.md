@@ -46,10 +46,14 @@ After setup and dependency fetching, [ci/check.sh](ci/check.sh) runs these gates
 | Guest helpers | Format, strict native all-target Clippy and unit tests |
 | Rust hello and benchmark guests | Format, strict wasm32 Clippy and release wasm32 builds |
 
-The harness builds the native host explicitly before loading it and builds the
+The harness builds the native host and its sibling `redis-wasm-compiler`
+executable explicitly before loading it and builds the
 Rust hello component using the pinned guest lockfile. This prevents a test from
 loading a stale module. The pinned Redis directory is added to `PATH` for host
 tests, and `TEST_REDIS_SERVER_BIN` selects the same binary for SDK tests.
+The compiler executable uses System allocation independently of the module's
+Redis allocator. Keep both artifacts from the same build together when testing
+or deploying; the private protocol rejects a build/configuration mismatch.
 
 ## Bounds, diagnostics and cost
 

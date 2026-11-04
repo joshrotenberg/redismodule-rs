@@ -64,3 +64,19 @@ impl Source {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn persisted_jobs_share_one_source_and_spools_materialize_once() {
+        let bytes = Arc::new(vec![4; 1024]);
+        let mut saved = Source::Saved(Arc::clone(&bytes));
+        saved.materialize().unwrap();
+        let owner = saved.into_saved().unwrap();
+        assert!(Arc::ptr_eq(&bytes, &owner));
+        let source = Source::spool(&bytes).unwrap();
+        assert_eq!(source.into_saved().unwrap().as_slice(), bytes.as_slice());
+        assert!(Source::spool(&[]).is_err());
+    }
+}

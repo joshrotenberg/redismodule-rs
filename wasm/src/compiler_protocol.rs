@@ -12,6 +12,60 @@ pub const MAX_ARTIFACT: usize = 512 << 20;
 pub const MAX_DIAGNOSTIC: usize = 8192;
 pub const REQUEST_SIZE: usize = 84;
 pub const RESPONSE_SIZE: usize = 148;
+pub const TRAILER_SIZE: usize = 48;
+pub const CONTROL_SIZE: usize = 80;
+pub const HELLO: u32 = 1;
+pub const ALIVE: u32 = 2;
+pub const EXIT: u32 = 3;
+const TRAILER_MAGIC: [u8; 8] = *b"RWCdone1";
+
+pub fn control_frame(kind: u32, nonce: [u8; 32], pid: u32, detail: [u8; 32]) -> [u8; CONTROL_SIZE] {
+    let mut bytes = [0; CONTROL_SIZE];
+    bytes[..8].copy_from_slice(b"RWCctl01");
+    bytes[8..12].copy_from_slice(&kind.to_le_bytes());
+    bytes[12..44].copy_from_slice(&nonce);
+    bytes[44..48].copy_from_slice(&pid.to_le_bytes());
+    bytes[48..].copy_from_slice(&detail);
+    bytes
+}
+pub fn parse_control(
+    bytes: &[u8; CONTROL_SIZE],
+    nonce: [u8; 32],
+) -> anyhow::Result<(u32, u32, [u8; 32])> {
+    ensure!(
+        &bytes[..8] == b"RWCctl01" && bytes[12..44] == nonce,
+        "compiler control identity mismatch"
+    );
+    let kind = u32_at(bytes, 8);
+    ensure!(
+        matches!(kind, HELLO | ALIVE | EXIT),
+        "invalid compiler control frame"
+    );
+    Ok((kind, u32_at(bytes, 44), bytes[48..].try_into().unwrap()))
+}
+
+/// Written by the bounded launcher only after it reaped its compiler child.
+/// Redis can reap the launcher, but cannot steal this grandchild's exit status.
+pub fn exit_trailer(nonce: [u8; 32], status: u32) -> [u8; TRAILER_SIZE] {
+    let mut bytes = [0; TRAILER_SIZE];
+    bytes[..8].copy_from_slice(&TRAILER_MAGIC);
+    bytes[8..12].copy_from_slice(&VERSION.to_le_bytes());
+    bytes[12..44].copy_from_slice(&nonce);
+    bytes[44..48].copy_from_slice(&status.to_le_bytes());
+    bytes
+}
+
+pub fn verify_exit_trailer(bytes: &[u8; TRAILER_SIZE], nonce: [u8; 32]) -> anyhow::Result<()> {
+    ensure!(
+        bytes[..8] == TRAILER_MAGIC && u32_at(bytes, 8) == VERSION && bytes[12..44] == nonce,
+        "compiler successful-exit proof is missing or mismatched"
+    );
+    ensure!(
+        u32_at(bytes, 44) == 0,
+        "compiler child did not exit successfully"
+    );
+    Ok(())
+}
 
 pub fn request(
     nonce: [u8; 32],
@@ -160,6 +214,9 @@ mod tests {
         let mut bad = bytes;
         bad[80..88].copy_from_slice(&u64::MAX.to_le_bytes());
         assert!(Response::parse(&bad, [1; 32], [2; 32]).is_err());
+        assert!(verify_exit_trailer(&exit_trailer([1; 32], 0), [1; 32]).is_ok());
+        assert!(verify_exit_trailer(&exit_trailer([1; 32], 1), [1; 32]).is_err());
+        assert!(verify_exit_trailer(&exit_trailer([1; 32], 0), [2; 32]).is_err());
         let mut bad = bytes;
         bad[144] = 1;
         assert!(Response::parse(&bad, [1; 32], [2; 32]).is_err());

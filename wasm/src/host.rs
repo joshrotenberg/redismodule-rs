@@ -35,7 +35,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex, TryLockError};
 
-use anyhow::{Context as _, bail};
+use anyhow::bail;
 use redis_module::logging::RedisLogLevel;
 use redis_module::{
     CallOptionResp, CallOptions, CallOptionsBuilder, CallResult, Context, RedisString,
@@ -353,16 +353,18 @@ pub(crate) struct Host {
 impl Host {
     pub(crate) fn new() -> anyhow::Result<Self> {
         let engine = crate::compiler_engine::engine()?;
-        let ticker = Ticker::start(engine.clone())?;
         let mut linker = Linker::new(&engine);
         Library::add_to_linker::<CallState, HasSelf<CallState>>(&mut linker, |state| state)?;
+        let compiler = Supervisor::new()?;
+        // Start the owned thread only after all other fallible setup succeeds.
+        let ticker = Ticker::start(engine.clone())?;
         Ok(Self {
             engine,
             ticker,
             linker,
             libraries: BTreeMap::new(),
             functions: BTreeMap::new(),
-            compiler: Supervisor::new()?,
+            compiler,
         })
     }
 
@@ -547,9 +549,12 @@ impl Host {
         Ok(())
     }
 
-    /// Stops the epoch thread, so the module can be unloaded.
+    pub(crate) fn stop_compiler(&self) -> anyhow::Result<()> {
+        self.compiler.shutdown()
+    }
+
+    /// Only after compiler cleanup succeeds; a refused unload retains Host/ticker.
     pub(crate) fn shutdown(self) {
-        self.compiler.shutdown();
         self.ticker.stop();
     }
 
