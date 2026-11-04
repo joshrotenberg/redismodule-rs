@@ -308,8 +308,9 @@ its deadline, and retains a checked relative fallback on Redis 6.0.
 `KeyExists`, `RandomKey` and `ResetDataset` take no key and fit runtime.
 `SignalModifiedKey` fits runtime and matters to a module that sets
 `ModuleOptions::NO_IMPLICIT_SIGNAL_MODIFIED`, which the SDK exposes: such a
-module has no safe way to signal a change. `RedisKey::to_raw_parts` gives
-`unsafe` code the key pointer for any of these.
+module has no safe way to signal a change. `RedisKey::as_ptr` and
+`RedisKeyWritable::as_ptr` borrow the open handle for unsafe native calls while
+keeping SDK cleanup; `to_raw_parts` is for an ownership transfer.
 
 ### Lists, hashes, sorted sets and streams
 
@@ -321,9 +322,9 @@ parse command-specific markers such as XREADGROUP's `>`.
 Lists have push and pop; `ListGet`, `ListSet`, `ListInsert` and `ListDelete`
 (7.0) are missing. Hashes lack `HashFieldMinExpire` (8.0). No sorted-set API is
 wrapped. Streams have iteration and `StreamTrimByID`; `StreamAdd`,
-`StreamDelete`, `StreamIteratorDelete`, `StreamTrimByLength` and the stream ID
-string conversions are missing. The key operations fit `RedisKey` or
-`RedisKeyWritable`; the stream ID conversions are context-free.
+`StreamDelete`, `StreamIteratorDelete`, `StreamTrimByLength` and
+`CreateStringFromStreamID` are missing. The key operations fit `RedisKey` or
+`RedisKeyWritable`; `CreateStringFromStreamID` is context-free.
 
 ### Native data types
 

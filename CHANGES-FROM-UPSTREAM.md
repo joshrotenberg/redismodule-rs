@@ -64,7 +64,9 @@ configuration whose setter rejects combined values; enum module arguments
 ignore ASCII case. The SDK crash-info dispatcher omits backtrace capture and
 symbolization while preserving module callbacks and their crash-report flag.
 This does not make arbitrary INFO callbacks async-signal-safe. These changes
-correct the inherited implementations in this fork.
+correct the inherited implementations in this fork. A follow-up migration note
+for #166 replaces the obsolete SDK-backtrace description with the retained
+Redis crash diagnostics and module INFO callback contract.
 
 ## Scoped key data borrows
 

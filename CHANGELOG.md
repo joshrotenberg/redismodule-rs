@@ -76,7 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#166). Module-argument enum names now ignore ASCII case, as Redis does.
 - The SDK's crash-info dispatcher no longer captures or symbolizes a Rust
   backtrace (#166). Module INFO callbacks still run with the original
-  crash-report flag; their own crash-path restrictions continue to apply.
+  crash-report flag; their own crash-path restrictions continue to apply. A
+  follow-up migration note for #166 removes the obsolete SDK-backtrace recipe.
 
 - **Breaking:** safe code can no longer change a key while holding data
   borrowed from it (#162). `RedisKey::read` returns an owned `Vec<u8>`;
