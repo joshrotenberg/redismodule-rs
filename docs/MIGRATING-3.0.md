@@ -143,6 +143,33 @@ clients get one reply" under
 [Changes that compile unchanged](#changes-that-compile-unchanged), and
 [block.rs](../examples/block.rs).
 
+### Clients blocked on keys
+
+Use `Context::block_client_on_keys` for main-thread readiness callbacks rather
+than putting a key-blocked native handle in a `BlockedClient`. Redis owns this
+waiter and frees it after readiness, timeout or disconnect; no worker unblock
+handle is returned. Supply owned `Send + 'static` data, a `KeyBlockingTimeout`,
+a ready callback returning `Result<Option<RedisValue>, RedisError>` and a
+timeout callback returning `RedisResult`. `Ok(None)` means keep waiting;
+`Ok(Some(value))` or an error replies and unblocks. Callback `NoReply` becomes
+an error because a completed wait must send one reply.
+
+Return `RedisValue::NoReply` only for `KeyBlockingResult::Blocked`.
+`KeyBlockingResult::Denied(data)` preserves the data for a non-blocking reply
+inside a transaction, script or call without blocking permission. The new API
+requires a tracked SDK command callback; a raw command callback can invoke
+its handler through the unsafe SDK `panic::run_command` trampoline.
+
+`KeyBlockingTimeout::try_from(0_i64)` and `INFINITE` have no deadline; duration
+conversions round zero and submillisecond values up to one millisecond.
+Negative or excessive millisecond counts fail before native allocation.
+Requested deletion wakeups are enabled on Redis 7.2+ and fall back to ordinary
+readiness on older servers; the `Blocked` result reports the actual flag.
+The ready callback must recheck key state. `blocked_client_ready_key` copies
+Redis's borrowed name into a separate native owner, and `signal_key_as_ready`
+signals the calling client's selected database. See
+[key_blocking.rs](../examples/key_blocking.rs) for a complete example.
+
 ### Blocked-client contexts are not `Sync`
 
 `ThreadSafeContext<BlockedClient>` is `Send` but no longer `Sync`. Its `reply`

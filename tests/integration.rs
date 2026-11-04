@@ -7419,3 +7419,254 @@ fn test_alloc_fallible_reserve() -> Result<()> {
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
+
+struct KeyBlockingWire {
+    stream: std::net::TcpStream,
+    parser: redis::Parser,
+    id: i64,
+}
+
+impl KeyBlockingWire {
+    fn connect(con: &TestConnection) -> Result<Self> {
+        let address = std::net::SocketAddr::from(([127, 0, 0, 1], con.port()));
+        let timeout = Duration::from_secs(5);
+        let stream = std::net::TcpStream::connect_timeout(&address, timeout)?;
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+        let mut wire = Self {
+            stream,
+            parser: redis::Parser::new(),
+            id: 0,
+        };
+        wire.send(redis::cmd("CLIENT").arg("ID"))?;
+        wire.id = match wire.read()? {
+            Value::Int(id) => id,
+            reply => anyhow::bail!("unexpected client id {reply:?}"),
+        };
+        Ok(wire)
+    }
+
+    fn send(&mut self, command: &redis::Cmd) -> Result<()> {
+        use std::io::Write;
+        self.stream.write_all(&command.get_packed_command())?;
+        Ok(())
+    }
+
+    fn read(&mut self) -> Result<Value> {
+        Ok(self.parser.parse_value(&mut self.stream)?.extract_error()?)
+    }
+
+    fn ping(&mut self) -> Result<()> {
+        self.send(&redis::cmd("PING"))?;
+        assert_eq!(self.read()?, Value::SimpleString("PONG".to_owned()));
+        Ok(())
+    }
+}
+
+fn key_blocking_stats(con: &mut TestConnection) -> Result<Vec<i64>> {
+    Ok(redis::cmd("keyblock.stats").query(con)?)
+}
+
+fn key_blocking_live(con: &mut TestConnection, live: i64, drops: i64) -> Result<()> {
+    utils::wait_until(
+        Duration::from_secs(5),
+        "key waiter ownership transition",
+        || {
+            let stats = key_blocking_stats(con)?;
+            Ok(stats[0] == live && stats[1] == drops)
+        },
+    )
+}
+
+#[test]
+fn test_key_blocking_readiness_rechecks_and_copies_binary_ready_keys() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    assert!(!redis::cmd("keyblock.ready_outside").query::<bool>(&mut con)?);
+    let key = b"keyblock:binary\0\xff";
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(
+        redis::cmd("keyblock.wait")
+            .arg((0, 2, "normal", "keyblock:other"))
+            .arg(key),
+    )?;
+    key_blocking_live(&mut con, 1, 0)?;
+    redis::cmd("RPUSH")
+        .arg(key)
+        .arg("one")
+        .query::<usize>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "first readiness attempt", || {
+        let stats = key_blocking_stats(&mut con)?;
+        Ok(stats[0] == 1 && stats[2] >= 1)
+    })?;
+    redis::cmd("keyblock.signal")
+        .arg(key)
+        .query::<String>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "explicit readiness attempt", || {
+        let stats = key_blocking_stats(&mut con)?;
+        Ok(stats[0] == 1 && stats[2] >= 2)
+    })?;
+    redis::cmd("RPUSH")
+        .arg(key)
+        .arg("two")
+        .query::<usize>(&mut con)?;
+    assert_eq!(
+        client.read()?,
+        Value::Array(vec![
+            Value::BulkString(key.to_vec()),
+            Value::Array(vec![
+                Value::BulkString(b"one".to_vec()),
+                Value::BulkString(b"two".to_vec())
+            ]),
+        ])
+    );
+    client.ping()?;
+    key_blocking_live(&mut con, 0, 1)?;
+    assert_eq!(key_blocking_stats(&mut con)?[3], 0);
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_denied_contexts_keep_the_nonblocking_fallback() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let key = "keyblock:denied";
+    assert_eq!(
+        redis::cmd("EVAL")
+            .arg("return redis.call('keyblock.wait', '0', '1', 'normal', KEYS[1])")
+            .arg(1)
+            .arg(key)
+            .query::<Value>(&mut con)?,
+        Value::Nil
+    );
+    key_blocking_live(&mut con, 0, 1)?;
+    redis::cmd("MULTI").query::<String>(&mut con)?;
+    redis::cmd("keyblock.wait")
+        .arg((0, 1, "normal", key))
+        .query::<String>(&mut con)?;
+    assert_eq!(
+        redis::cmd("EXEC").query::<Value>(&mut con)?,
+        Value::Array(vec![Value::Nil])
+    );
+    key_blocking_live(&mut con, 0, 2)?;
+    assert_eq!(
+        redis::cmd("keyblock.call_wait")
+            .arg(key)
+            .query::<Value>(&mut con)?,
+        Value::Nil
+    );
+    key_blocking_live(&mut con, 0, 3)?;
+    let stats = key_blocking_stats(&mut con)?;
+    assert_eq!(&stats[2..4], &[0, 0]);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_panics_no_reply_and_timeouts_finish_once() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let mut drops = 0;
+    for (mode, ready, expected) in [
+        ("panic-ready", true, "key blocking callback panicked"),
+        (
+            "no-reply-ready",
+            true,
+            "key blocking callback returned NoReply",
+        ),
+        ("panic-timeout", false, "key blocking callback panicked"),
+        (
+            "no-reply-timeout",
+            false,
+            "key blocking callback returned NoReply",
+        ),
+    ] {
+        let key = format!("keyblock:{mode}");
+        let mut client = KeyBlockingWire::connect(&con)?;
+        client.send(redis::cmd("keyblock.wait").arg((
+            if ready { 0 } else { 10 },
+            1,
+            mode,
+            &key,
+        )))?;
+        if ready {
+            key_blocking_live(&mut con, 1, drops)?;
+            redis::cmd("RPUSH")
+                .arg((&key, "one"))
+                .query::<usize>(&mut con)?;
+        }
+        let error = client
+            .read()
+            .expect_err("callback refusal must be an error");
+        assert!(format!("{error:#}").contains(expected), "{error:#}");
+        client.ping()?;
+        drops += 1;
+        key_blocking_live(&mut con, 0, drops)?;
+    }
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((10, 1, "panic-drop", "keyblock:drop")))?;
+    assert_eq!(client.read()?, Value::Nil);
+    client.ping()?;
+    drops += 1;
+    key_blocking_live(&mut con, 0, drops)?;
+    for timeout in [-1, i64::MAX, i64::MAX - i64::MAX / 1000 + 1] {
+        let error = redis::cmd("keyblock.wait")
+            .arg((timeout, 1, "normal", "keyblock:bad"))
+            .query::<Value>(&mut con)
+            .expect_err("invalid timeout was accepted");
+        assert!(
+            error
+                .to_string()
+                .contains("key blocking timeout is out of range"),
+            "{error}"
+        );
+    }
+    key_blocking_live(&mut con, 0, drops)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_deletion_disconnect_and_unload_release_waiters() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let key = "keyblock:deleted";
+    redis::cmd("RPUSH")
+        .arg((key, "one"))
+        .query::<usize>(&mut con)?;
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((0, 2, "normal", key)))?;
+    key_blocking_live(&mut con, 1, 0)?;
+    let deletion = key_blocking_stats(&mut con)?[4] == 1;
+    redis::cmd("DEL").arg(key).query::<usize>(&mut con)?;
+    if deletion {
+        let error = client.read().expect_err("deletion should wake the waiter");
+        assert!(
+            error.to_string().contains("the blocked key was deleted"),
+            "{error}"
+        );
+    } else {
+        // The old API has no delete flag. Explicit timeout cancellation is
+        // still supported and owns the same waiter rather than new privdata.
+        redis::cmd("CLIENT")
+            .arg(("UNBLOCK", client.id, "TIMEOUT"))
+            .query::<usize>(&mut con)?;
+        assert_eq!(client.read()?, Value::Nil);
+    }
+    client.ping()?;
+    key_blocking_live(&mut con, 0, 1)?;
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((0, 1, "normal", "keyblock:disconnect")))?;
+    key_blocking_live(&mut con, 1, 1)?;
+    let error = redis::cmd("MODULE")
+        .arg(("UNLOAD", "key_blocking"))
+        .query::<Value>(&mut con)
+        .expect_err("a module with a native key waiter unloaded");
+    assert!(
+        error.to_string().to_lowercase().contains("blocked"),
+        "{error}"
+    );
+    drop(client);
+    key_blocking_live(&mut con, 0, 2)?;
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "key_blocking"))
+        .query::<String>(&mut con)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}

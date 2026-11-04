@@ -92,6 +92,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Context::block_client_on_keys` transfers an owned, typed waiter to Redis
+  (#177). Ready callbacks may keep waiting or return a reply; timeout and
+  disconnect cleanup release the data once. Callback/destructor panics are
+  guarded, a validated timeout avoids native overflow, and denied blocking
+  returns the data for a non-blocking fallback. Redis 7.2+ can wake on deletion;
+  older servers report their ordinary-readiness fallback. `signal_key_as_ready`
+  and `blocked_client_ready_key` expose signaling and an owned ready-key copy.
+
 - **Breaking:** `RedisValue::NullArray` replies as a null array in RESP2
   (`*-1`) and null in RESP3 (`_`), including inside aggregates (#180).
   `Null` still sends a RESP2 null bulk string; `None` and `()` conversions
