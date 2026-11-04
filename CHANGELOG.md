@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Command containers and native subcommands (#178).
+  `CommandBuilder::container(name)` declares a command without a handler, and
+  `.subcommand(redis_command!("child", handler))` registers each child as
+  `name|child` through `RedisModule_CreateSubcommand`. A child keeps the flags,
+  key range, required and optional ACL categories, panic guard and reply
+  handling of a top-level command, and its handler receives the container and
+  child names as its first two arguments. `.summary(text)` and `.arity(n)` set
+  what `COMMAND DOCS` and `COMMAND INFO` report on any builder definition.
+  Containers, summaries and arities need Redis 7.0 or later. Registration
+  checks a container and all its children before creating anything, and
+  refuses a container before 7.0, without subcommands, with keys, with ACL
+  categories (Redis grants them to every subcommand), or with an arity that
+  accepts a call without a subcommand. It refuses a child that is a container,
+  has children, repeats another child's name ignoring case, has an empty name,
+  or has an arity of 1, and a container or child name with a space, line
+  break or any of `|@=,`, which Redis 7.2 and later refuse. See `examples/subcommands.rs`.
+
 ### Fixed
 
 - **Breaking:** data borrowed from a key can no longer outlive a change to the
