@@ -107,13 +107,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wait; scripts, transactions and all module calls return owned fallback data.
   Loading, unloading and unbound custom loaders are refused. Blocking an
   already-blocked network client is refused across the SDK blocking APIs.
-  Ready callbacks
-  may keep waiting or return a reply; timeout and
-  disconnect cleanup release the data once. Callback/destructor panics are
+  Ready callbacks may keep waiting or return a reply; timeout and disconnect
+  cleanup release the data once. Callback/destructor panics are
   guarded, a validated timeout avoids native overflow, and denied blocking
   returns the data for a non-blocking fallback. Redis 7.2+ can wake on deletion;
   older servers report their ordinary-readiness fallback. `signal_key_as_ready`
   and `blocked_client_ready_key` expose signaling and an owned ready-key copy.
+
+- The SDK package declares `links = "redismodule"`, allowing Cargo to reject
+  another package declaring the same native library identity (#169).
+  Legacy SDKs without a `links` declaration still require a dependency audit.
+  The generated crate reference now introduces contexts, commands, keys,
+  replies and floors; module guides cover master/local dependency overrides,
+  post-notification unload guards and raw ownership transitions.
 
 - **Breaking:** `RedisValue::NullArray` replies as a null array in RESP2
   (`*-1`) and null in RESP3 (`_`), including inside aggregates (#180).
