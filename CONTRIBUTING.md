@@ -159,7 +159,8 @@ crates.io.
   not exist until it is pushed.
 - The pull request updates the tag in the dependency snippets of README.md,
   docs/MIGRATING-3.0.md and docs/COMPATIBILITY-FLOORS.md, and the fixed source
-  checkout in docs/SHIPPING-MODULES.md. It moves the CHANGELOG's Unreleased entries into a section named for the tag, with a
+  checkout in docs/SHIPPING-MODULES.md. It moves the CHANGELOG's Unreleased
+  entries into a section named for the tag, with a
   compare link from the previous tag and the date the tag will be pushed. Before
   tagging, check that the section lists exactly the changes the tagged commit
   contains, and fix the date if the tag goes out on a later day.

@@ -1,6 +1,7 @@
 //! Typed views of native replies returned by [`RuntimeContext::call_ext`].
 //!
-//! A root [`CallResult`] owns Redis's reply and borrows the calling context.
+//! A native root reply from a call owns Redis's result and borrows the calling
+//! context; [`CallResult`] also represents owned error messages.
 //! Aggregate accessors return child replies borrowing the aggregate, and byte
 //! slices borrow their reply wrapper. Keep each owner alive until its views
 //! are finished. These native wrappers are neither `Send` nor `Sync`; copy
@@ -864,16 +865,45 @@ impl<'root> Display for VerbatimStringCallReply<'root> {
 /// ```
 #[derive(Debug)]
 pub enum CallReply<'root> {
+    /// A reply kind this SDK does not wrap. There is no native payload to
+    /// inspect or forward through this variant.
     Unknown,
+    /// A signed integer; `to_i64()` copies it into an owned `i64`.
     I64(I64CallReply<'root>),
+    /// A simple or bulk string. `as_bytes()` borrows arbitrary bytes, and
+    /// `to_string()` copies valid UTF-8 into an owned `String` (otherwise
+    /// `None`). Neither operation changes a simple string into a bulk string
+    /// in the native reply; `is_simple_string()` distinguishes them.
     String(StringCallReply<'root>),
+    /// An ordered array. `len()` counts its elements; `get(index)` returns
+    /// `None` out of range, and `iter()` visits each element in order. Each
+    /// element is a `CallResult` borrowing this array, so nested errors are
+    /// represented as `Err`, not discarded. Keep the parent alive.
     Array(ArrayCallReply<'root>),
+    /// A null value, such as a missing `GET` result. It is a successful call
+    /// reply with no payload, distinct from an error in [`CallResult`].
     Null(NullCallReply<'root>),
+    /// A RESP3 map. `len()` counts pairs; `get(index)` and `iter()` expose
+    /// `(CallResult, CallResult)` key/value pairs borrowing this map. The
+    /// index is a position in the native reply, not a key lookup. Out-of-range
+    /// access returns `None`, and the iteration order follows Redis's reply.
     Map(MapCallReply<'root>),
+    /// A RESP3 set. `len()` counts members; `get(index)` and `iter()` expose
+    /// `CallResult` members borrowing this set. The index is a native reply
+    /// position, not a membership query. Out-of-range access returns `None`,
+    /// and member order is unspecified.
     Set(SetCallReply<'root>),
+    /// A RESP3 boolean; `to_bool()` copies it into an owned `bool`.
     Bool(BoolCallReply<'root>),
+    /// A RESP3 floating-point value; `to_double()` copies it into an `f64`.
     Double(DoubleCallReply<'root>),
+    /// A RESP3 arbitrary-precision integer. `to_string()` copies valid UTF-8
+    /// decimal text, or returns `None`; it does not narrow it to a Rust integer.
     BigNumber(BigNumberCallReply<'root>),
+    /// A RESP3 verbatim string. `as_parts()` borrows the three-byte format
+    /// as `&str` and payload as `&[u8]`; `to_parts()` copies them into a format
+    /// wrapper and `Vec<u8>`. Both return `None` for an invalid format, and
+    /// the payload need not be UTF-8. Borrowed parts cannot outlive the reply.
     VerbatimString(VerbatimStringCallReply<'root>),
 }
 
