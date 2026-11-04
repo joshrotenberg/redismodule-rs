@@ -11,6 +11,29 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Clients blocked on keys
+
+`Context::block_client_on_keys` wraps key-based blocking with typed owned
+private data (#177). A ready callback returns no value to keep waiting, or a
+value/error to reply and unblock. Timeout, disconnect and null-handle paths
+release the waiter once. Callbacks and data destructors cannot unwind into
+Redis, including when a panic payload has a panicking destructor; owned
+callback snapshots and a nonblocking mutex also protect reentrant cleanup.
+
+`KeyBlockingTimeout` rejects negative and excessively large timeouts before
+native registration, leaving conservative clock headroom. Scripts,
+transactions and all module calls, including calls using `K`, receive
+`Denied(data)` for an immediate fallback. Only indexed network clients can
+wait, and an active SDK lifecycle binding is required: loading, unloading and
+unbound custom-loader invocations are refused before native registration.
+An existing lifecycle lease remains held through callbacks and captured data
+destructors. The SDK blocking APIs refuse a second registration on the same
+network client before it can overwrite the first native handle. The flag-aware
+API requests deletion wakeups where available and otherwise reports ordinary
+readiness behavior. Signaling and an independent owned copy of the callback's ready-key name are available as
+context methods. Redis's blocked-client count prevents unload while a key
+waiter remains. Upstream has no equivalent safe wrapper.
+
 ## Checked key positions
 
 `Context::key_at_pos` was a safe function, but `RedisModule_KeyAtPos` checks

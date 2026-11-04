@@ -130,6 +130,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Context::block_client_on_keys` transfers an owned, typed waiter to Redis
+  (#177). Only indexed network clients in an active SDK-bound module may
+  wait; scripts, transactions and all module calls return owned fallback data.
+  Loading, unloading and unbound custom loaders are refused. Blocking an
+  already-blocked network client is refused across the SDK blocking APIs.
+  Ready callbacks may keep waiting or return a reply; timeout and disconnect
+  cleanup release the data once. Callback/destructor panics are
+  guarded, a validated timeout avoids native overflow, and denied blocking
+  returns the data for a non-blocking fallback. Redis 7.2+ can wake on deletion;
+  older servers report their ordinary-readiness fallback. `signal_key_as_ready`
+  and `blocked_client_ready_key` expose signaling and an owned ready-key copy.
+
 - The SDK package declares `links = "redismodule"`, allowing Cargo to reject
   another package declaring the same native library identity (#169).
   Legacy SDKs without a `links` declaration still require a dependency audit.
