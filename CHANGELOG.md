@@ -28,6 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Breaking:** safe code can no longer change a key while holding data
+  borrowed from it (#162). `RedisKey::read` returns an owned `Vec<u8>`;
+  `RedisKey::with_value`, `RedisKeyWritable::with_value_mut` and
+  `RedisKeyWritable::with_string_dma` lend the value or the string buffer to a
+  closure that must be `Send`, so it cannot hold the context, a key handle or
+  a `RedisString`, and while it runs the SDK refuses calls, key opening and
+  scans, other key operations, `yield_now` and keyspace notifications on that
+  thread, so a context reached another way, such as from a thread local,
+  cannot change the key either. The borrowing forms, `read_borrowed`,
+  `get_value` and `as_string_dma`, are `unsafe`. A handle opened before the
+  same key was deleted or replaced through another handle or a call can still
+  point at a freed value; #197 tracks that.
+
 - Unusual input no longer panics or silently changes stored data (#165).
   Calls and replication reject NUL command names before creating native
   arguments. Converting a RESP3 map with an unsupported key, or a set with an

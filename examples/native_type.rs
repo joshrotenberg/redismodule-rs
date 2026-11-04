@@ -144,8 +144,8 @@ fn get(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     args.done()?;
     Ok(ctx
         .open_key(&key)
-        .get_value(&NOTE_TYPE)?
-        .map_or(RedisValue::Null, |note| note.text.clone().into()))
+        .with_value(&NOTE_TYPE, |note| note.text.clone())?
+        .map_or(RedisValue::Null, RedisValue::from))
 }
 
 /// `note.set_unregistered key text`: stores through a type that was never
@@ -168,8 +168,8 @@ fn get_unregistered(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     args.done()?;
     Ok(ctx
         .open_key(&key)
-        .get_value(&UNREGISTERED_TYPE)?
-        .map_or(RedisValue::Null, |note| note.text.clone().into()))
+        .with_value(&UNREGISTERED_TYPE, |note| note.text.clone())?
+        .map_or(RedisValue::Null, RedisValue::from))
 }
 
 /// `note.aux value`: the aux data the next RDB saves.

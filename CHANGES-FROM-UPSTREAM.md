@@ -11,6 +11,26 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Scoped key data borrows
+
+Upstream's `RedisKey::read` returns a slice into the string value,
+`as_string_dma` a mutable view of it, and `get_value` a reference to a native
+type's value, each borrowing only the key handle. `Context::call`, opening the
+same key again, and string DMA through another handle (which can replace a
+shared value) all take `&self`, so safe code could delete, replace or move the
+value while still holding the borrow, a use after free (#162).
+
+`read` now copies, and `with_value`, `with_value_mut` and `with_string_dma`
+lend the data to a closure that must be `Send`. The context, key handles and
+`RedisString` are not `Sync`, so such a closure cannot hold them. A context can
+still be reached without a capture, for example a worker's lock guard kept in
+a thread local, so while the closure runs the SDK also refuses calls, key
+opening and scans, other key operations, `yield_now` and keyspace
+notifications on that thread. The borrowing forms are `unsafe` with their
+rules stated. A handle opened before another handle or a call deleted or
+replaced the same key's value still points at the freed value (#197).
+Upstream has no issue or pull request for this.
+
 ## Command containers and subcommands
 
 Upstream has no wrapper for `RedisModule_CreateSubcommand`, and its command
