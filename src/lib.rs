@@ -44,8 +44,9 @@
 //! other values. [`RedisValue::Null`] is a RESP2 null bulk string;
 //! [`RedisValue::NullArray`] is a RESP2 null array; both are null in RESP3.
 //! [`RedisValue::NoReply`] is for commands whose reply is supplied another way.
-//! [`CallResult`] and [`CallReply`] borrow their native reply owner; copy data
-//! before that owner or its legal Redis-access scope ends.
+//! Root [`CallResult`]/[`CallReply`] values own the native result and are
+//! scoped to the calling context. Nested replies and views borrow their parent.
+//! Copy data before the relevant owner or legal Redis-access scope ends.
 //!
 //! # API floors and build requirements
 //!

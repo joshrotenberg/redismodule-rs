@@ -412,10 +412,10 @@ TEST_REDIS_SERVER_BIN=/tmp/sdk-server/redis-server cargo test
 CI keeps the fifteen server/floor matrix jobs and adds focused coverage:
 
 - Redis 6.0.20 and 6.2.24 run the legacy transport, reply, blocking and timer
-  subsets, plus failed-load subscription cleanup. The 6.2 leg uses the 6.2 API
-  floor. `TEST_REDIS_SERVER_LEGACY_OPTIONS=1` omits startup options these older
+  subsets. The 6.2 leg uses the 6.2 API floor. `TEST_REDIS_SERVER_LEGACY_OPTIONS=1` omits startup options these older
   servers do not recognize; these subsets do not establish full-suite support.
-- Redis 7.0.15 checks configuration ownership and older-server lifecycle paths.
+- Redis 7.0.15 checks configuration ownership, older-server lifecycle paths
+  and failed-load subscription cleanup.
 - Redis 8.10.2 built with jemalloc exercises active defrag. The designated job
   sets `TEST_REDIS_REQUIRE_DEFRAG=1`, so inability to enable defrag or missing
   global, per-key, start or end callbacks fails the test. Portable libc builds
