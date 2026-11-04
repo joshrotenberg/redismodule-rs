@@ -37,6 +37,31 @@ The tag is a pre-release; the crates inside it are version `3.0.0`. To build
 against a later commit, use `rev = "<commit>"` instead of `tag`, the same in
 both lines.
 
+For a module developed alongside this fork, use `branch = "master"` in both
+dependency entries and commit the module's `Cargo.lock`. The lockfile pins the
+actual revision until `cargo update -p redis-module` resolves the SDK packages
+again; review that lockfile diff before deploying it. APIs described on master
+may be newer than the current pre-release tag.
+
+To test an SDK checkout before pushing it, put these overrides in the
+**consuming workspace's root** manifest, keeping the Git dependency entries:
+
+```toml
+[patch."https://github.com/joshrotenberg/redismodule-rs"]
+redis-module = { path = "../redismodule-rs" }
+redis-module-macros = { path = "../redismodule-rs/redismodule-rs-macros" }
+redis-module-macros-internals = { path = "../redismodule-rs/redismodule-rs-macros-internals" }
+```
+
+Use paths to your checkout, update the lockfile, and inspect `cargo tree` to
+confirm the intended local packages were selected. Remove the overrides and
+update the lockfile again when returning to the Git source.
+
+The SDK declares `links = "redismodule"`, so Cargo rejects two packages that
+declare that same native library identity. Legacy SDKs without a `links` key
+are not protected by that check: inspect `cargo tree -d` and avoid linking an
+upstream 2.x SDK alongside this fork's API globals in one module.
+
 A module that used 2.x: [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) lists
 what to change. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version.
 
@@ -88,7 +113,7 @@ fn hello_mul(_: &Context, args: Vec<RedisString>) -> RedisResult {
 
 redis_module! {
     name: "hello",
-    version: 1,
+    version: redis_module::module_version!(),
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
     commands: [
@@ -373,8 +398,9 @@ loads; run `cargo build --examples` first, or plain `cargo test`.
 
 CI uses the releases and SHA-256 checksums in [.github/servers.json](.github/servers.json).
 The [build helper](.github/scripts/build-server.py) verifies downloaded archives,
-builds with two compiler jobs and the system allocator, and checks the product
-and exact version of both fresh and cached binaries. The workflow passes that
+builds with two compiler jobs and libc by default, and checks the product,
+exact version and allocator of both fresh and cached binaries. Linux defrag
+coverage selects jemalloc explicitly with `--allocator jemalloc`. The workflow passes that
 binary through `TEST_REDIS_SERVER_BIN`, without installing into `/usr/local`.
 To reproduce a server leg locally:
 
@@ -383,23 +409,46 @@ python3 .github/scripts/build-server.py redis-8.10.2 /tmp/sdk-server
 TEST_REDIS_SERVER_BIN=/tmp/sdk-server/redis-server cargo test
 ```
 
-CI also runs a focused direct-blocking regression on Redis 6.0.20, which lacks
-the newer context flag for denied blocking. This job sets
-`TEST_REDIS_SERVER_LEGACY_OPTIONS=1` to omit command-policy settings that old
-servers do not recognize. It runs only
-`test_direct_client_blocking_rejects_denied_invocations`; it does not establish
-that the full integration suite works with Redis 6.0.
+CI keeps the fifteen server/floor matrix jobs and adds focused coverage:
+
+- Redis 6.0.20 and 6.2.24 run the legacy transport, reply, blocking and timer
+  subsets, plus failed-load subscription cleanup. The 6.2 leg uses the 6.2 API
+  floor. `TEST_REDIS_SERVER_LEGACY_OPTIONS=1` omits startup options these older
+  servers do not recognize; these subsets do not establish full-suite support.
+- Redis 7.0.15 checks configuration ownership and older-server lifecycle paths.
+- Redis 8.10.2 built with jemalloc exercises active defrag. The designated job
+  sets `TEST_REDIS_REQUIRE_DEFRAG=1`, so inability to enable defrag or missing
+  global, per-key, start or end callbacks fails the test. Portable libc builds
+  may explicitly skip unsupported defrag.
+- One job per API floor family runs bootstrap doctests to check expected
+  `compile_fail` error codes. Rust 1.87 checking covers all six floor choices.
+- The parser fuzz job uses pinned nightly-2026-08-01 and cargo-fuzz 0.13.2 for
+  bounded ASAN runs, with system-allocator fallback controls and a negative
+  check that the unavailable Redis allocator refuses standalone startup.
+
+To reproduce the dedicated defrag setup on a supported Linux host:
+
+```bash
+python3 .github/scripts/build-server.py redis-8.10.2 /tmp/sdk-defrag --allocator jemalloc
+cargo build --examples
+TEST_REDIS_SERVER_BIN=/tmp/sdk-defrag/redis-server TEST_REDIS_REQUIRE_DEFRAG=1 \
+  cargo test --test integration test_defrag -- --exact
+```
 
 Use a separate destination for each server version. When updating a release,
 copy its SHA-256 from [redis/redis-hashes](https://github.com/redis/redis-hashes)
 or [valkey-io/valkey-hashes](https://github.com/valkey-io/valkey-hashes), update the
 matrix, and run the helper. Binary caches include the runner platform,
-architecture, concrete image version, release, manifest and build helper. Failed matrix jobs upload
+architecture, concrete image version, release, allocator, manifest and build helper. Failed matrix jobs upload
 server build output and the integration instance directories for seven days;
 these contain the local test servers' logs and persistence files.
 
 API documentation: `cargo doc --open`. The pages on docs.rs are for the upstream
-crate's published 2.x versions.
+crate's published 2.x versions. Read the README and guides from the same source
+revision as your dependency: use its tag/commit in GitHub's revision selector,
+or open the `docs/` directory next to its `Cargo.toml`. `cargo metadata` reports
+that manifest's local path. The generated 3.0 crate overview links the context,
+key, reply and registration APIs.
 
 ## License
 
