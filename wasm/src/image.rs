@@ -4,7 +4,7 @@
 use anyhow::{Context as _, ensure};
 use std::{path::Path, sync::Arc};
 use wasmtime::{
-    Engine, Store,
+    AsContextMut, Engine,
     component::{Component, Linker},
 };
 
@@ -85,7 +85,10 @@ pub(crate) struct Pre {
 // pairing such errors with this owner or converting them to owned text.
 
 impl Pre {
-    pub(crate) fn instantiate(&self, store: &mut Store<CallState>) -> anyhow::Result<Library> {
+    pub(crate) fn instantiate(
+        &self,
+        store: impl AsContextMut<Data = CallState>,
+    ) -> anyhow::Result<Library> {
         self.inner.instantiate(store)
     }
 
@@ -100,6 +103,7 @@ mod tests {
     use crate::budget::{Budget, Retained};
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
+    use wasmtime::Store;
 
     #[test]
     fn full_image_admission_and_pre_store_aliases_release_only_after_last_owner() {

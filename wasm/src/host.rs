@@ -7,20 +7,27 @@
 //! that runs the guest, but a store's data must be `'static`, so `CallState`
 //! holds that context as a raw pointer. It is sound because:
 //!
-//! - `Instance::call` sets the pointer from the command's `&Context`, runs the
-//!   guest, and clears it. The guest runs synchronously inside that call, so
-//!   every use, from an import or the epoch callback, comes while the borrow
-//!   it was made from is live. `Instance::new` does the same around
-//!   instantiation.
+//! - Every guest run, `Instance::call` and `Instance::new` (instantiating runs
+//!   guest code), goes through [`invoke`], which sets the pointer from the
+//!   command's `&Context` and holds an [`Invocation`] whose `Drop` clears it.
+//!   The guest runs synchronously inside the invocation, so every use, from an
+//!   import or the epoch callback, comes while the borrow it was made from is
+//!   live, and the pointer is `None` after every exit: a return, an error, a
+//!   guest trap, and a panic from an import, which wasmtime carries back
+//!   through the guest's frames and resumes as a Rust panic. An import that
+//!   runs with no invocation, which nothing does, panics in `CallState::ctx`
+//!   rather than use a stale pointer.
 //! - A call that re-enters the host, through a command the guest runs that
-//!   runs `WASM.CALL` again, finds the kept instance locked and uses a new
-//!   instance with its own pointer; the outer pointer stays valid below it on
-//!   the stack. While a guest yields, Redis runs only `allow-busy` commands,
-//!   and `WASM.CALL` is not one.
-//! - If an import panics, the pointer is not cleared, but the instance is a
-//!   local value of `PreparedCall::run` or `Host::add` and is put back as the
-//!   kept instance only after a call that returned `Ok`, so the unwinding drops
-//!   it with the stale pointer.
+//!   runs `WASM.CALL` again, uses another store: a new instance when it calls
+//!   the same library, whose kept instance is taken, or the other library's
+//!   instance. The outer pointer stays valid below it on the stack. A guest
+//!   cannot run `WASM.*` commands itself (they deny scripts). While a guest
+//!   yields, Redis runs only `allow-busy` commands; `WASM.CALL` is not one,
+//!   and one from another module that runs `WASM.CALL` is such a re-entry.
+//! - An instance whose call failed or panicked is a local value of
+//!   `PreparedCall::run` or `Host::stage` (which `WASM.LOAD` and
+//!   `WASM.RESTORE` use) and is dropped, not kept; it is put back as the kept
+//!   instance only after a call that returned `Ok`.
 //! - Instances live in the host's state and are only touched on the main
 //!   thread. The fork that saves an RDB reads only component bytes, and the
 //!   compile threads hold clones of the engine and linker and the code slots
@@ -28,8 +35,9 @@
 //!   `Send` so that the host can sit in a static `Mutex`, and the pointer is
 //!   `None` whenever no call runs.
 //!
-//! The SDK has no lifetime-safe way to give a store the context (S3 in
-//! `TRACKING.md`).
+//! The SDK gives callbacks a borrowed `Context` and no `'static` handle to one
+//! (issue 54), so the invocation is the scope: a store holds the pointer only
+//! while one runs (S3 in `TRACKING.md`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ptr::NonNull;
@@ -41,7 +49,7 @@ use redis_module::{
     CallOptionResp, CallOptions, CallOptionsBuilder, CallResult, Context, RedisString,
 };
 use wasmtime::component::{HasSelf, Linker};
-use wasmtime::{Engine, Store};
+use wasmtime::{AsContextMut, Engine, Store, StoreContextMut};
 
 use crate::budget::{Lease, Retained};
 use crate::busy::{self, Running, Ticker};
@@ -176,14 +184,56 @@ impl CallState {
     }
 
     /// The context of the command running the guest. Host imports and the
-    /// epoch callback run only inside a call.
+    /// epoch callback run only inside an invocation.
     fn ctx(&self) -> &Context {
         let ctx = self.ctx.expect("guest code runs only inside a call");
-        // SAFETY: Instance::call sets the pointer from the command's &Context
-        // and clears it before returning, and the guest runs synchronously in
-        // that call, so the Context outlives every use.
+        // SAFETY: only an Invocation sets the pointer, from the command's
+        // &Context, and its Drop clears it; the guest runs synchronously inside
+        // it, so the Context outlives every use.
         unsafe { ctx.as_ref() }
     }
+}
+
+/// One guest run's hold on the command's context. [`invoke`] puts the context
+/// in the store's data and creates this; its `Drop` takes the context out, on
+/// every exit from the run, including a panic unwinding through it. See "The
+/// context pointer".
+struct Invocation<'s> {
+    store: &'s mut Store<CallState>,
+}
+
+impl Drop for Invocation<'_> {
+    fn drop(&mut self) {
+        self.store.data_mut().ctx = None;
+    }
+}
+
+/// Runs guest code on `store` with `ctx` as the context of its imports and
+/// `mode` for its calls, yielding to Redis at each epoch. Every guest run, a
+/// call or an instantiation, goes through here, and `run` gets the store only
+/// as a `StoreContextMut`, so it cannot swap the store out of the invocation.
+///
+/// # Safety
+///
+/// `ctx` must come from the running command's `&Context`, borrowed for at
+/// least this call: the guest's imports and the epoch callback dereference it
+/// (`CallState::ctx`) until `invoke` returns or unwinds.
+unsafe fn invoke<R>(
+    store: &mut Store<CallState>,
+    ctx: NonNull<Context>,
+    mode: Mode,
+    run: impl FnOnce(StoreContextMut<'_, CallState>) -> R,
+) -> R {
+    // An invocation holds the store mutably, so no other one runs on it; a
+    // nested call runs on another instance's store.
+    debug_assert!(store.data().ctx.is_none(), "a store has one invocation");
+    let state = store.data_mut();
+    state.ctx = Some(ctx);
+    state.mode = mode;
+    state.resp3 = true;
+    let invocation = Invocation { store };
+    invocation.store.set_epoch_deadline(1);
+    run(invocation.store.as_context_mut())
 }
 
 /// The options for a guest's calls, like those of redis.call in a script:
@@ -320,12 +370,15 @@ impl Instance {
         let store = &mut runtime.resource;
         store.limiter(|state| &mut state.memory);
         store.epoch_deadline_callback(|store| busy::on_epoch(store.data().ctx()));
-        // Instantiating can run guest code, so it runs like a call, in the
-        // loading mode CallState starts in.
-        store.data_mut().ctx = Some(NonNull::from(ctx));
-        store.set_epoch_deadline(1);
-        let library = pre.instantiate(store);
-        store.data_mut().ctx = None;
+        // Instantiating can run guest code, so it runs like a call, in loading
+        // mode. The outer runtime still retains both budget owners throughout
+        // this invocation and the entire Store's later destruction.
+        // SAFETY: ctx is the command's context, borrowed for this call.
+        let library = unsafe {
+            invoke(store, NonNull::from(ctx), Mode::loading(), |store| {
+                pre.instantiate(store)
+            })
+        };
         Ok(Self {
             library: library?,
             runtime,
@@ -339,16 +392,18 @@ impl Instance {
         &mut self,
         ctx: &Context,
         mode: Mode,
-        f: impl FnOnce(&Library, &mut Store<CallState>) -> anyhow::Result<R>,
+        f: impl FnOnce(&Library, StoreContextMut<'_, CallState>) -> anyhow::Result<R>,
     ) -> anyhow::Result<R> {
-        let state = self.runtime.resource.data_mut();
-        state.ctx = Some(NonNull::from(ctx));
-        state.mode = mode;
-        state.resp3 = true;
-        self.runtime.resource.set_epoch_deadline(1);
-        let result = f(&self.library, &mut self.runtime.resource);
-        self.runtime.resource.data_mut().ctx = None;
-        result
+        let library = &self.library;
+        // SAFETY: ctx is the command's context, borrowed for this call.
+        unsafe {
+            invoke(
+                &mut self.runtime.resource,
+                NonNull::from(ctx),
+                mode,
+                |store| f(library, store),
+            )
+        }
     }
 }
 
@@ -753,5 +808,129 @@ impl PreparedCall {
             **kept = Some(instance);
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    use redis_module_wasm::host::redis::Host as _;
+    use wasmtime::{Caller, Linker, Module, Trap};
+
+    use super::*;
+
+    /// A core module, encoded by hand since the crate has no text-format
+    /// parser: `boom` calls the host import `host.boom`, and `trap` runs
+    /// `unreachable`.
+    const GUEST: &[u8] = &[
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic, version 1
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // types: () -> ()
+        0x02, 0x0d, 0x01, 0x04, b'h', b'o', b's', b't', 0x04, b'b', b'o', b'o', b'm', 0x00,
+        0x00, // import host.boom
+        0x03, 0x03, 0x02, 0x00, 0x00, // two functions of type 0
+        0x07, 0x0f, 0x02, 0x04, b'b', b'o', b'o', b'm', 0x00, 0x01, 0x04, b't', b'r', b'a', b'p',
+        0x00, 0x02, // exports boom (1) and trap (2)
+        0x0a, 0x0a, 0x02, 0x04, 0x00, 0x10, 0x00, 0x0b, 0x03, 0x00, 0x00,
+        0x0b, // boom: call 0; trap: unreachable
+    ];
+
+    /// A store as `Instance::new` makes one, with `GUEST` instantiated in it
+    /// and a `host.boom` import that panics. The context is never
+    /// dereferenced, so a dangling pointer stands in for it.
+    fn guest() -> (Store<CallState>, wasmtime::Instance) {
+        let engine = crate::compiler_engine::engine().unwrap();
+        let module = Module::new(&engine, GUEST).unwrap();
+        let mut linker = Linker::new(&engine);
+        linker
+            .func_wrap("host", "boom", |caller: Caller<'_, CallState>| {
+                // It runs inside an invocation, so it sees the context, and
+                // panics there; without one it returns, failing the test.
+                if caller.data().ctx.is_some() {
+                    panic!("a host import panicked");
+                }
+            })
+            .unwrap();
+        let mut store = Store::new(&engine, CallState::new(Memory::default()));
+        let instance =
+            invoke_in_test(&mut store, |store| linker.instantiate(store, &module)).unwrap();
+        assert!(store.data().ctx.is_none(), "after instantiating");
+        (store, instance)
+    }
+
+    /// `invoke` with a dangling context, which only the test guest's import
+    /// and `CallState::ctx` look at, and only to see whether one is set.
+    fn invoke_in_test<R>(
+        store: &mut Store<CallState>,
+        run: impl FnOnce(StoreContextMut<'_, CallState>) -> R,
+    ) -> R {
+        // SAFETY: nothing dereferences the context: the test guest's only
+        // import checks whether it is set, the store has no epoch callback,
+        // and no test calls an import that uses it inside an invocation.
+        unsafe { invoke(store, NonNull::dangling(), Mode::loading(), run) }
+    }
+
+    fn run(
+        store: &mut Store<CallState>,
+        instance: &wasmtime::Instance,
+        name: &str,
+    ) -> anyhow::Result<()> {
+        invoke_in_test(store, |mut store| {
+            assert!(store.data().ctx.is_some());
+            let function = instance.get_typed_func::<(), ()>(&mut store, name)?;
+            function.call(&mut store, ())
+        })
+    }
+
+    #[test]
+    fn every_exit_from_an_invocation_clears_the_context() {
+        let (mut store, instance) = guest();
+
+        invoke_in_test(&mut store, |store| assert!(store.data().ctx.is_some()));
+        assert!(store.data().ctx.is_none(), "after a return");
+
+        let failed = invoke_in_test(&mut store, |_| -> anyhow::Result<()> {
+            Err(CallError("ERR this function always fails".into()).into())
+        });
+        assert!(failed.is_err());
+        assert!(store.data().ctx.is_none(), "after an error");
+
+        let trapped = run(&mut store, &instance, "trap").unwrap_err();
+        assert_eq!(
+            trapped.downcast_ref::<Trap>(),
+            Some(&Trap::UnreachableCodeReached)
+        );
+        assert!(store.data().ctx.is_none(), "after a guest trap");
+
+        let panicked = catch_unwind(AssertUnwindSafe(|| run(&mut store, &instance, "boom")));
+        let payload = panicked.expect_err("the import's panic unwound through the guest");
+        assert_eq!(
+            payload.downcast_ref::<&str>(),
+            Some(&"a host import panicked")
+        );
+        assert!(store.data().ctx.is_none(), "after a panic in a host import");
+
+        // The store takes a new invocation after each of them.
+        let trapped = run(&mut store, &instance, "trap").unwrap_err();
+        assert_eq!(
+            trapped.downcast_ref::<Trap>(),
+            Some(&Trap::UnreachableCodeReached)
+        );
+        assert!(store.data().ctx.is_none());
+    }
+
+    #[test]
+    fn a_host_import_after_the_invocation_returned_cannot_reach_the_context() {
+        let (mut store, _) = guest();
+        invoke_in_test(&mut store, |store| assert!(store.data().ctx.is_some()));
+        let state = store.data_mut();
+        let reached = catch_unwind(AssertUnwindSafe(|| {
+            state.log(LogLevel::Notice, "after the invocation".into());
+        }));
+        let payload = reached.expect_err("an import reached the context after its invocation");
+        assert_eq!(
+            payload.downcast_ref::<String>().map(String::as_str),
+            Some("guest code runs only inside a call")
+        );
     }
 }
