@@ -31,6 +31,7 @@ pub(crate) struct Process {
     buffer: [u8; protocol::CONTROL_SIZE],
     buffered: usize,
     confirmed: bool,
+    control_closed: bool,
     wall: Duration,
 }
 
@@ -41,6 +42,17 @@ impl Process {
         cpu: u64,
         wall: Duration,
         nonce: [u8; 32],
+    ) -> anyhow::Result<Self> {
+        Self::spawn_with_output(path, memory, cpu, wall, nonce, Stdio::piped())
+    }
+
+    fn spawn_with_output(
+        path: &Path,
+        memory: u64,
+        cpu: u64,
+        wall: Duration,
+        nonce: [u8; 32],
+        stdout: Stdio,
     ) -> anyhow::Result<Self> {
         let (control, endpoint) = UnixStream::pair()?;
         control.set_nonblocking(true)?;
@@ -66,7 +78,7 @@ impl Process {
             .env("MallocNanoZone", "0")
             .env("RAYON_NUM_THREADS", "2")
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
+            .stdout(stdout)
             .stderr(Stdio::piped());
         unsafe {
             command.pre_exec(move || {
@@ -90,17 +102,35 @@ impl Process {
             buffer: [0; protocol::CONTROL_SIZE],
             buffered: 0,
             confirmed: false,
+            control_closed: false,
             wall,
         })
     }
 
     fn frame(&mut self) -> anyhow::Result<Option<(u32, u32, [u8; 32])>> {
+        if self.control_closed {
+            return Ok(None);
+        }
         while self.buffered < self.buffer.len() {
             match self.control.read(&mut self.buffer[self.buffered..]) {
-                Ok(0) => return Ok(None),
+                Ok(0) => {
+                    self.control_closed = true;
+                    return Ok(None);
+                }
                 Ok(n) => self.buffered += n,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::ConnectionReset
+                            | std::io::ErrorKind::BrokenPipe
+                            | std::io::ErrorKind::NotConnected
+                    ) =>
+                {
+                    self.control_closed = true;
+                    return Ok(None);
+                }
                 Err(error) => return Err(error.into()),
             }
         }
@@ -210,6 +240,7 @@ impl Process {
         match self.child.try_wait() {
             Ok(Some(_)) => self.reaped = true,
             Err(error) if error.raw_os_error() == Some(libc::ECHILD) => self.reaped = true,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
             Err(error) => return Err(error.into()),
             Ok(None) => {}
         }
@@ -223,7 +254,10 @@ impl Process {
     pub(crate) fn poll_cleanup(&mut self) -> anyhow::Result<bool> {
         // Read a late HELLO/EXIT too: a temporarily stopped launcher may resume
         // after the original operation entered bounded-wait quarantine.
-        while self.frame()?.is_some() {}
+        // A transport error does not prove exit, but must not suppress valid
+        // EXIT/watch evidence or reaping. Linux can reset this socket after L
+        // sent EXIT if a raced CANCEL was left unread when L closed it.
+        while matches!(self.frame(), Ok(Some(_))) {}
         self.try_reap()?;
         let compiler_dead = self.exit_proof
             || self
@@ -277,15 +311,33 @@ mod tests {
         path
     }
 
-    struct Owned(Process);
+    struct Owned(Option<Process>);
     impl Owned {
         fn spawn(memory: u64) -> Self {
-            Self(Process::spawn(&helper(), memory, 5, Duration::from_secs(10), [17; 32]).unwrap())
+            Self(Some(
+                Process::spawn(&helper(), memory, 5, Duration::from_secs(10), [17; 32]).unwrap(),
+            ))
+        }
+        fn into_inner(mut self) -> Process {
+            self.0.take().unwrap()
+        }
+    }
+    impl std::ops::Deref for Owned {
+        type Target = Process;
+        fn deref(&self) -> &Process {
+            self.0.as_ref().unwrap()
+        }
+    }
+    impl std::ops::DerefMut for Owned {
+        fn deref_mut(&mut self) -> &mut Process {
+            self.0.as_mut().unwrap()
         }
     }
     impl Drop for Owned {
         fn drop(&mut self) {
-            let _ = self.0.cleanup(Instant::now() + Duration::from_secs(5));
+            if let Some(process) = &mut self.0 {
+                let _ = process.cleanup(Instant::now() + Duration::from_secs(5));
+            }
         }
     }
 
@@ -300,14 +352,13 @@ mod tests {
     #[test]
     fn actual_helper_compiles_only_owned_matching_artifacts_and_reaps() {
         let mut owned = Owned::spawn(2 << 30);
-        let (artifact, response) = compile(&mut owned.0, b"\0asm\x0d\0\x01\0").unwrap();
+        let (artifact, response) = compile(&mut owned, b"\0asm\x0d\0\x01\0").unwrap();
         assert!(
             owned
-                .0
                 .cleanup(Instant::now() + Duration::from_secs(2))
                 .unwrap()
         );
-        assert!(owned.0.confirmed && owned.0.exit_proof && owned.0.reaped);
+        assert!(owned.confirmed && owned.exit_proof && owned.reaped);
         assert_eq!(response.ceiling - response.baseline, 2 << 30);
         let engine = compiler_engine::engine().unwrap();
         // Same owned helper proof and immutable private artifact as production.
@@ -322,30 +373,27 @@ mod tests {
     #[test]
     fn actual_helper_refusal_and_pre_spawn_failure_release_all_processes() {
         let mut failed = Owned::spawn(2 << 30);
-        let error = compile(&mut failed.0, b"invalid wasm").err().unwrap();
+        let error = compile(&mut failed, b"invalid wasm").err().unwrap();
         assert!(
             format!("{error:#}").contains("invalid component"),
             "{error:#}"
         );
         assert!(
             failed
-                .0
                 .cleanup(Instant::now() + Duration::from_secs(2))
                 .unwrap()
         );
         let mut before_spawn = Owned::spawn(1);
-        assert!(before_spawn.0.handshake(&|| false).is_err());
+        assert!(before_spawn.handshake(&|| false).is_err());
         assert!(
             before_spawn
-                .0
                 .cleanup(Instant::now() + Duration::from_secs(2))
                 .unwrap()
         );
-        assert!(before_spawn.0.pid.is_none() && before_spawn.0.exit_proof);
+        assert!(before_spawn.pid.is_none() && before_spawn.exit_proof);
         let mut cancelled = Owned::spawn(2 << 30);
         assert!(
             cancelled
-                .0
                 .cleanup(Instant::now() + Duration::from_secs(2))
                 .unwrap()
         );
@@ -354,7 +402,7 @@ mod tests {
     #[test]
     fn successful_owned_compiler_proof_survives_external_launcher_reaping() {
         let mut owned = Owned::spawn(2 << 30);
-        let launcher = owned.0.child.id();
+        let launcher = owned.child.id();
         // Models Redis's independent SIGCHLD path consuming our direct child.
         // It cannot consume the compiler grandchild's status owned by L.
         let reaper = std::thread::spawn(move || {
@@ -362,37 +410,36 @@ mod tests {
             let waited = unsafe { libc::waitpid(launcher as libc::pid_t, &mut status, 0) };
             (waited, status)
         });
-        let result = compile(&mut owned.0, b"\0asm\x0d\0\x01\0");
+        let result = compile(&mut owned, b"\0asm\x0d\0\x01\0");
         let (waited, status) = reaper.join().unwrap();
         result.unwrap();
         assert_eq!(waited, launcher as libc::pid_t);
         assert_eq!(status, 0);
         assert!(
             owned
-                .0
                 .cleanup(Instant::now() + Duration::from_secs(2))
                 .unwrap()
         );
-        assert!(owned.0.confirmed && owned.0.exit_proof && owned.0.reaped);
+        assert!(owned.confirmed && owned.exit_proof && owned.reaped);
     }
 
     #[test]
     fn killed_launcher_never_releases_capacity_without_actual_compiler_exit() {
         let mut owned = Owned::spawn(2 << 30);
-        owned.0.handshake(&|| false).unwrap();
-        let compiler = owned.0.pid.unwrap() as libc::pid_t;
-        let launcher = owned.0.child.id() as libc::pid_t;
+        owned.handshake(&|| false).unwrap();
+        let compiler = owned.pid.unwrap() as libc::pid_t;
+        let launcher = owned.child.id() as libc::pid_t;
         // TEST-ONLY fault injection: production never signals PIDs from Redis.
         assert_eq!(unsafe { libc::kill(compiler, libc::SIGSTOP) }, 0);
         assert_eq!(unsafe { libc::kill(launcher, libc::SIGKILL) }, 0);
-        let first = owned.0.cleanup(Instant::now() + Duration::from_millis(100));
+        let first = owned.cleanup(Instant::now() + Duration::from_millis(100));
         // Resume before asserting, so even a failed assertion cannot leak a
         // stopped worker. Linux PDEATHSIG may already have killed this C.
-        let exited = owned.0.watch.as_mut().unwrap().exited().unwrap();
+        let exited = owned.watch.as_mut().unwrap().exited().unwrap();
         if !exited {
             unsafe { libc::kill(compiler, libc::SIGCONT) };
         }
-        let final_cleanup = owned.0.cleanup(Instant::now() + Duration::from_secs(3));
+        let final_cleanup = owned.cleanup(Instant::now() + Duration::from_secs(3));
         #[cfg(target_os = "macos")]
         assert!(
             !first.unwrap(),
@@ -405,8 +452,136 @@ mod tests {
             "watchdog/PDEATHSIG must eventually prove C exit"
         );
         assert!(
-            !owned.0.exit_proof,
+            !owned.exit_proof,
             "L was killed, so only the stable exit watch proves cleanup"
         );
+    }
+    #[test]
+    fn full_output_pipe_with_retained_readers_cannot_trap_launcher_cleanup() {
+        use std::os::fd::FromRawFd;
+        let mut initial = Owned::spawn(2 << 30);
+        let (_, response) = compile(&mut initial, b"\0asm\x0d\0\x01\0").unwrap();
+        assert!(
+            initial
+                .cleanup(Instant::now() + Duration::from_secs(2))
+                .unwrap()
+        );
+        let frame_size = protocol::RESPONSE_SIZE + response.len;
+        let mut fds = [0; 2];
+        assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+        for fd in fds {
+            assert_eq!(
+                unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) },
+                0
+            );
+        }
+        let mut reader = unsafe { File::from_raw_fd(fds[0]) };
+        let mut writer = unsafe { File::from_raw_fd(fds[1]) };
+        let flags = unsafe { libc::fcntl(fds[1], libc::F_GETFL) };
+        assert_eq!(
+            unsafe { libc::fcntl(fds[1], libc::F_SETFL, flags | libc::O_NONBLOCK) },
+            0
+        );
+        let mut capacity = 0;
+        loop {
+            match writer.write(&[0; 4096]) {
+                Ok(n) => capacity += n,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(error) => panic!("fill output pipe: {error}"),
+            }
+        }
+        assert!(
+            frame_size < capacity,
+            "empty component frame must fit in one pipe"
+        );
+        reader.read_exact(&mut vec![0; frame_size]).unwrap();
+        // Restore a blocking writer, just as normal Stdio::piped creates.
+        assert_eq!(unsafe { libc::fcntl(fds[1], libc::F_SETFL, flags) }, 0);
+        let inherited_reader = reader.try_clone().unwrap();
+        let mut owned = Owned(Some(
+            Process::spawn_with_output(
+                &helper(),
+                2 << 30,
+                5,
+                Duration::from_secs(10),
+                [17; 32],
+                Stdio::from(writer),
+            )
+            .unwrap(),
+        ));
+        owned.handshake(&|| false).unwrap();
+        let engine = compiler_engine::engine().unwrap();
+        let request =
+            protocol::request([17; 32], compiler_engine::fingerprint(&engine), 8).unwrap();
+        let mut input = owned.child.stdin.take().unwrap();
+        input.write_all(&request).unwrap();
+        input.write_all(b"\0asm\x0d\0\x01\0").unwrap();
+        drop(input);
+        let exited = owned
+            .next_frame(Instant::now() + Duration::from_secs(5), &|| false)
+            .unwrap();
+        assert_eq!(exited.0, protocol::EXIT);
+        assert_eq!(exited.2[..4], [0; 4]);
+        // C has successfully written exactly the remaining pipe capacity. L
+        // must observe X while trying to append its trailer, although these
+        // otherwise-unused readers keep the full pipe alive.
+        let bounded = owned.cleanup(Instant::now() + Duration::from_millis(300));
+        drop(inherited_reader);
+        drop(reader);
+        let reaped = owned.cleanup(Instant::now() + Duration::from_secs(2));
+        assert!(
+            bounded.unwrap(),
+            "full trailer pipe prevented bounded cancellation"
+        );
+        assert!(reaped.unwrap() && owned.exit_proof && owned.reaped);
+        // Feed that actual compiler/launcher exit proof into admission recovery.
+        let process = owned.into_inner();
+        crate::compiler::tests::assert_recovery_after_exit(process);
+    }
+    #[test]
+    fn terminal_control_reset_neither_discards_valid_exit_nor_invents_proof() {
+        for proof in [false, true] {
+            let (control, mut endpoint) = UnixStream::pair().unwrap();
+            control.set_nonblocking(true).unwrap();
+            let mut child = Command::new("true").spawn().unwrap();
+            child.wait().unwrap();
+            let mut process = Process {
+                child,
+                control,
+                nonce: [17; 32],
+                pid: None,
+                watch: None,
+                exit_proof: false,
+                exit_status: None,
+                reaped: false,
+                buffer: [0; protocol::CONTROL_SIZE],
+                buffered: 0,
+                confirmed: false,
+                control_closed: false,
+                wall: Duration::from_secs(1),
+            };
+            if proof {
+                endpoint
+                    .write_all(&protocol::control_frame(
+                        protocol::EXIT,
+                        [17; 32],
+                        0,
+                        [0; 32],
+                    ))
+                    .unwrap();
+            }
+            // Leave a CANCEL unread when the peer closes: AF_UNIX can report
+            // ECONNRESET after its already queued EXIT, instead of plain EOF.
+            process.control.write_all(b"X").unwrap();
+            drop(endpoint);
+            assert_eq!(
+                process
+                    .cleanup(Instant::now() + Duration::from_millis(30))
+                    .unwrap(),
+                proof
+            );
+            assert_eq!(process.exit_proof, proof);
+            assert!(process.reaped && process.control_closed);
+        }
     }
 }

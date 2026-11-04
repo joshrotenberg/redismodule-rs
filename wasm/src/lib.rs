@@ -112,6 +112,7 @@ fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 
     let Ok(blocked) = ctx.block_client_on_reply(None, finish_load, load_timed_out) else {
         let result = compiler.compile(component);
+        drop(compiler);
         return finish_load(
             ctx,
             Loaded {
@@ -126,6 +127,9 @@ fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let supervisor = compiler.supervisor();
     if let Err(error) = supervisor.spawn(move || {
         let result = compiler.compile(component);
+        // Release proven compiler capacity before the main-thread callback can
+        // reply. A fast client may submit its next load immediately afterward.
+        drop(compiler);
         blocked.unblock(Loaded {
             name,
             replace,
@@ -403,7 +407,7 @@ fn wasm_restore(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         .map_err(|e| error("WASM.RESTORE failed", &e))?;
     let supervisor = compiler.supervisor();
     let compile = move || -> anyhow::Result<Vec<(String, host::Compiled)>> {
-        libraries
+        let result = libraries
             .into_iter()
             .map(|(name, component)| {
                 let compiled = compiler
@@ -411,7 +415,9 @@ fn wasm_restore(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
                     .with_context(|| format!("library '{name}'"))?;
                 Ok((name, compiled))
             })
-            .collect()
+            .collect();
+        drop(compiler);
+        result
     };
 
     let Ok(blocked) = ctx.block_client_on_reply(None, finish_restore, restore_timed_out) else {

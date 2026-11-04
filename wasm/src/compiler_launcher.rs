@@ -265,10 +265,87 @@ pub fn run(
     // unreliable because Redis fork children can inherit pipe/socket handles.
     control.write_all(&protocol::control_frame(protocol::EXIT, nonce, pid, detail))?;
     result?;
-    std::io::stdout().write_all(&protocol::exit_trailer(nonce, status_code(status)))?;
-    std::io::stdout().flush()?;
+    write_trailer(
+        &mut control,
+        parent,
+        deadline,
+        &protocol::exit_trailer(nonce, status_code(status)),
+    )?;
     ensure!(status.success(), "compiler worker exited {status}");
     Ok(())
+}
+
+fn write_trailer(
+    control: &mut UnixStream,
+    parent: libc::pid_t,
+    deadline: Instant,
+    bytes: &[u8],
+) -> anyhow::Result<()> {
+    // C is already reaped. Even this small write must not wait forever behind
+    // a full pipe whose reader was inherited by a Redis BGSAVE/AOF child.
+    nonblocking(libc::STDOUT_FILENO)?;
+    let mut at = 0;
+    while at < bytes.len() {
+        ensure!(
+            Instant::now() < deadline,
+            "compiler exit-trailer wall timeout"
+        );
+        ensure!(unsafe { libc::getppid() } == parent, "compiler host exited");
+        let mut fds = [
+            libc::pollfd {
+                fd: control.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: libc::STDOUT_FILENO,
+                events: libc::POLLOUT,
+                revents: 0,
+            },
+        ];
+        if unsafe { libc::poll(fds.as_mut_ptr(), 2, 20) } < 0 {
+            if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(std::io::Error::last_os_error()).context("compiler exit-trailer poll");
+        }
+        ensure!(
+            fds[0].revents == 0,
+            "compiler operation cancelled after worker exit"
+        );
+        if fds[1].revents != 0 {
+            let written = unsafe {
+                libc::write(
+                    libc::STDOUT_FILENO,
+                    bytes[at..].as_ptr().cast(),
+                    bytes.len() - at,
+                )
+            };
+            if written < 0 {
+                let error = std::io::Error::last_os_error();
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) {
+                    continue;
+                }
+                return Err(error).context("compiler exit-trailer write");
+            }
+            ensure!(written > 0, "compiler exit-trailer write closed");
+            at += written as usize;
+        }
+    }
+    Ok(())
+}
+
+/// Diagnostics must never prevent exit if a fork inherited a stderr reader.
+pub fn report_error(error: &anyhow::Error) {
+    if nonblocking(libc::STDERR_FILENO).is_ok() {
+        let mut message = format!("wasm compiler: {error:#}\n").into_bytes();
+        message.truncate(protocol::MAX_DIAGNOSTIC);
+        // Best effort, one bounded nonblocking write, no panic on EPIPE/EAGAIN.
+        unsafe { libc::write(libc::STDERR_FILENO, message.as_ptr().cast(), message.len()) };
+    }
 }
 
 fn forward_and_wait(

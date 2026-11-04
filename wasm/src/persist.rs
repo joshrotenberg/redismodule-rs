@@ -118,7 +118,7 @@ fn load(rdb: &mut RdbReader, encver: i32) -> anyhow::Result<()> {
     }
     let started = Instant::now();
     // Reserve the entire sequential RDB batch before reading/copying sources.
-    let mut compiler = crate::with_host(|host| host.compiler())??;
+    let compiler = crate::with_host(|host| host.compiler())??;
     let mut libraries = Vec::new();
     for _ in 0..rdb.read_unsigned()? {
         let name = rdb.read_string()?;
@@ -165,12 +165,20 @@ fn load(rdb: &mut RdbReader, encver: i32) -> anyhow::Result<()> {
         let supervisor = compiler.supervisor();
         let codes: Vec<_> = jobs.iter().map(|(code, _)| Arc::clone(code)).collect();
         if let Err(error) = supervisor.spawn(move || {
-            for (code, component) in jobs {
+            let mut compiler = Some(compiler);
+            for (index, (code, component)) in jobs.into_iter().enumerate() {
                 let source = crate::compiler_source::Source::Saved(component);
-                let result = redis_module::panic::catch_panic(|| compiler.compile_code(&source))
-                    .unwrap_or_else(|message| {
-                        Err(anyhow::anyhow!("compiler worker panicked: {message}"))
-                    });
+                let result = redis_module::panic::catch_panic(|| {
+                    compiler.as_mut().unwrap().compile_code(&source)
+                })
+                .unwrap_or_else(|message| {
+                    Err(anyhow::anyhow!("compiler worker panicked: {message}"))
+                });
+                if index + 1 == count {
+                    // Earlier libraries become ready while this batch remains
+                    // active. Release before notifying the final set of waiters.
+                    drop(compiler.take());
+                }
                 code.finish(result);
             }
         }) {

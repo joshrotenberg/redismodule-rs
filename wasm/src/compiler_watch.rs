@@ -91,7 +91,11 @@ impl ExitWatch {
             };
             let ready = unsafe { libc::poll(&mut poll, 1, 0) };
             if ready < 0 {
-                return Err(std::io::Error::last_os_error()).context("poll compiler exit");
+                let error = std::io::Error::last_os_error();
+                if error.kind() == std::io::ErrorKind::Interrupted {
+                    return Ok(false);
+                }
+                return Err(error).context("poll compiler exit");
             }
             self.exited = ready > 0 && poll.revents & (libc::POLLIN | libc::POLLHUP) != 0;
         }
@@ -105,7 +109,11 @@ impl ExitWatch {
             let ready =
                 unsafe { libc::kevent(fd, std::ptr::null(), 0, event.as_mut_ptr(), 1, &timeout) };
             if ready < 0 {
-                return Err(std::io::Error::last_os_error()).context("poll compiler exit");
+                let error = std::io::Error::last_os_error();
+                if error.kind() == std::io::ErrorKind::Interrupted {
+                    return Ok(false);
+                }
+                return Err(error).context("poll compiler exit");
             }
             if ready > 0 {
                 let event = unsafe { event.assume_init() };

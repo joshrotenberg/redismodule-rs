@@ -427,7 +427,7 @@ pub(crate) fn diagnostics() -> [i64; 8] {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::mpsc;
 
@@ -487,11 +487,23 @@ mod tests {
         assert!(lock(&supervisor.state).queued.is_empty());
         assert!(lock(&supervisor.workers).is_empty());
     }
-    #[test]
-    fn recovered_capacity_cannot_be_reused_by_the_old_batch() {
+    pub(crate) fn assert_recovery_after_exit(process: Process) {
         let supervisor = supervisor(1);
         let mut old = supervisor.reserve().unwrap();
         old.enter().unwrap();
+        // Recover a late proven exit while the original RDB batch still owns
+        // its reservation. It must not compile its next entry under the new
+        // operation's active identity.
+        lock(&supervisor.state).uncertain = Some(process);
+        let mut next = supervisor.reserve().unwrap();
+        next.enter().unwrap();
+        assert!(old.enter().is_err());
+        drop(next);
+        drop(old);
+        supervisor.shutdown().unwrap();
+    }
+    #[test]
+    fn recovered_capacity_cannot_be_reused_by_the_old_batch() {
         let helper = std::env::current_exe()
             .unwrap()
             .parent()
@@ -506,15 +518,6 @@ mod tests {
                 .cleanup(Instant::now() + Duration::from_secs(2))
                 .unwrap()
         );
-        // Recover a late proven exit while the original RDB batch still owns
-        // its reservation. It must not compile its next entry under the new
-        // operation's active identity.
-        lock(&supervisor.state).uncertain = Some(process);
-        let mut next = supervisor.reserve().unwrap();
-        next.enter().unwrap();
-        assert!(old.enter().is_err());
-        drop(next);
-        drop(old);
-        supervisor.shutdown().unwrap();
+        assert_recovery_after_exit(process);
     }
 }

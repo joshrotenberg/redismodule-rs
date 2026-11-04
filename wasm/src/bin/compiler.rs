@@ -97,7 +97,7 @@ fn main() {
         }
     };
     if let Err(error) = run() {
-        eprintln!("wasm compiler: {error:#}");
+        compiler_launcher::report_error(&error);
         std::process::exit(1);
     }
 }
