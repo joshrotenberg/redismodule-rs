@@ -136,8 +136,9 @@ static MY_TYPE: RedisType<MyType> =
   the `unsafe` `get_value`; see
   [Key data borrows are scoped](#key-data-borrows-are-scoped)) take
   `&RedisType<T>` and take or lend `T`, so the turbofish is no longer needed
-  and reading a value as another type does not compile. `T` must be `Send + 'static`: Redis can free values on a
-  background thread, as `UNLINK`, `FLUSHALL ASYNC` and, since Redis 7.4, a
+  and reading a value as another type does not compile. `T` must be
+  `Send + 'static`: Redis can free values on a background thread, as
+  `UNLINK`, `FLUSHALL ASYNC` and, since Redis 7.4, a
   plain `FLUSHALL` do. Hold shared data in an `Arc` rather than an `Rc`. A
   value that holds a `RedisString` needs a wrapper whose `unsafe impl Send`
   states why that is sound, as
@@ -163,13 +164,16 @@ Data borrowed from a key could be freed while still borrowed: the borrow tied
 it to the key handle only, and `Context::call`, opening the key again or
 another handle's string DMA could delete, replace or move the value (#162).
 The safe APIs now copy, or lend the data to a closure that must be `Send`, so
-it cannot hold the context, a key handle or a `RedisString` and change the key
-meanwhile. The borrowing forms remain as `unsafe` functions whose safety
+it cannot hold the context, a key handle or a `RedisString`. While the
+closure runs, the SDK also refuses calls, key opening and scans, other key
+operations, `yield_now` and keyspace notifications on that thread, with an
+`ERR key data is lent to a closure` error, or a panic where the API returns no
+`Result`. The borrowing forms remain as `unsafe` functions whose safety
 sections state the rules.
 
 | 2.x and earlier 3.0 | 3.0 |
 |---|---|
-| `RedisKey::read() -> Option<&[u8]>` | `read() -> Option<Vec<u8>>`, or `unsafe read_borrowed()` |
+| `RedisKey::read() -> Result<Option<&[u8]>>` | `read() -> Result<Option<Vec<u8>>>`, or `unsafe read_borrowed()` |
 | `RedisKey::get_value(&TYPE) -> Option<&T>` | `with_value(&TYPE, \|value\| ...)`, or `unsafe get_value` |
 | `RedisKeyWritable::get_value(&TYPE) -> Option<&mut T>` | `with_value_mut(&TYPE, \|value\| ...)`, or `unsafe get_value` |
 | `RedisKeyWritable::as_string_dma() -> StringDMA` | `with_string_dma(\|data\| ...)`, or `unsafe as_string_dma` |

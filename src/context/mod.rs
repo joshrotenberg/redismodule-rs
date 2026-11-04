@@ -1095,6 +1095,12 @@ impl RuntimeContext {
         fmt: *const c_char,
         args: T,
     ) -> R {
+        // A closure holding key data could change that key through a call.
+        if crate::key::key_data_lent() {
+            return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                crate::key::LENT_ERROR.into(),
+            ))));
+        }
         let cmd = match CString::new(command) {
             Ok(command) => command,
             Err(_) => {
@@ -1380,6 +1386,10 @@ impl RuntimeContext {
         event: &[u8],
         keyname: &RedisString,
     ) -> Result<(), RedisError> {
+        // Subscribers run synchronously and could change the lent key.
+        if crate::key::key_data_lent() {
+            return Err(RedisError::Str(crate::key::LENT_ERROR));
+        }
         let event = CString::new(event)
             .map_err(|_| RedisError::Str("ERR keyspace event name contains a NUL byte"))?;
         let status: Status = unsafe {
@@ -1801,6 +1811,10 @@ impl EventContext {
     /// verified as the Redis main thread. Thread verification supports Linux
     /// and macOS; other platforms refuse yielding.
     pub fn yield_now(&self, mode: YieldMode, busy_reply: Option<&str>) -> Result<(), RedisError> {
+        // Other clients' commands run during a yield.
+        if crate::key::key_data_lent() {
+            return Err(RedisError::Str(crate::key::LENT_ERROR));
+        }
         // Native calls can invoke module callbacks synchronously on a worker;
         // neither this view nor the thread which loaded the module proves it.
         if !crate::configuration::lifecycle::is_main_thread() {

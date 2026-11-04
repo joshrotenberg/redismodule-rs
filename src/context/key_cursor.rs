@@ -86,6 +86,7 @@ impl<'ctx> ScanKeyCursor<'ctx> {
     ///   // do something between scans if needed, like an early stop
     /// }
     pub fn scan<F: FnMut(&RedisKey, &RedisString, Option<&RedisString>)>(&self, mut f: F) -> bool {
+        crate::key::panic_while_lent();
         struct CallbackData<F> {
             ctx: *mut raw::RedisModuleCtx,
             callback: F,
