@@ -372,7 +372,7 @@ impl DetachedContext {
     pub fn set_context(&self, ctx: &EventContext) -> Result<(), RedisError> {
         let c = self.ctx.load(Ordering::Relaxed);
         if !c.is_null() {
-            return Err(RedisError::Str("Detached context is already set"));
+            return Err(RedisError::Str("ERR Detached context is already set"));
         }
         let ctx =
             unsafe { crate::__available_api!(RedisModule_GetDetachedThreadSafeContext)(ctx.ctx) };
@@ -1427,7 +1427,7 @@ impl RuntimeContext {
                 return Ok(version);
             }
         }
-        Err(RedisError::Str("Error getting redis_version"))
+        Err(RedisError::Str("ERR Error getting redis_version"))
     }
 
     fn get_redis_version_internal(&self, force_use_rm_call: bool) -> Result<Version, RedisError> {
@@ -1441,7 +1441,7 @@ impl RuntimeContext {
                 if let Ok(info) = self.call("info", &["server"]) {
                     Self::version_from_info(info)
                 } else {
-                    Err(RedisError::Str("Error calling \"info server\""))
+                    Err(RedisError::Str("ERR Error calling \"info server\""))
                 }
             }
         }
@@ -1733,7 +1733,7 @@ impl RuntimeContext {
         let info = match info_res {
             RedisValue::BulkRedisString(res) => res.try_as_str()?,
             RedisValue::SimpleString(res) | RedisValue::BulkString(res) => res.as_str(),
-            _ => return Err(RedisError::Str("Mismatch call reply type")),
+            _ => return Err(RedisError::Str("ERR Mismatch call reply type")),
         };
         Ok(info.contains("rlec_version:"))
     }
@@ -1952,7 +1952,7 @@ impl EventContext {
         // ownership transfer, at every floor. The 7.2+ wrapper maps it to
         // Status::Err instead of using the required-API panic path.
         let add_job = unsafe { raw::RedisModule_AddPostNotificationJob }
-            .ok_or_else(|| "RedisModule_AddPostNotificationJob does not exists".to_owned())?;
+            .ok_or_else(|| "ERR RedisModule_AddPostNotificationJob does not exists".to_owned())?;
         let Some(callback) = post_notification::Job::new(callback) else {
             return Ok(Status::Err);
         };
@@ -2415,7 +2415,7 @@ impl<'a> InfoContextBuilderDictionaryBuilder<'a> {
     ) -> RedisResult<Self> {
         if self.fields.iter().any(|k| k.0.0 == name) {
             return Err(RedisError::String(format!(
-                "Found duplicate key '{name}' in the info dictionary '{}'",
+                "ERR Found duplicate key '{name}' in the info dictionary '{}'",
                 self.name
             )));
         }
@@ -2458,7 +2458,7 @@ impl<'a> InfoContextBuilderSectionBuilder<'a> {
     ) -> RedisResult<Self> {
         if self.fields.iter().any(|(k, _)| k == name) {
             return Err(RedisError::String(format!(
-                "Found duplicate key '{name}' in the info section '{}'",
+                "ERR Found duplicate key '{name}' in the info section '{}'",
                 self.name
             )));
         }
@@ -2484,7 +2484,7 @@ impl<'a> InfoContextBuilderSectionBuilder<'a> {
             .any(|(k, _)| k == &self.name)
         {
             return Err(RedisError::String(format!(
-                "Found duplicate section in the Info reply: {}",
+                "ERR Found duplicate section in the Info reply: {}",
                 self.name
             )));
         }

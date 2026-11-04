@@ -10,6 +10,7 @@ use redis::{RedisError, RedisResult, Value, VerbatimFormat};
 use redis_module::RedisValue;
 
 mod configuration_ownership;
+mod correctness_gaps;
 mod utils;
 
 #[test]

@@ -28,6 +28,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SDK-generated error replies consistently start with `ERR` or a specific
+  Redis error code (#166), including argument parsing, key operations,
+  configuration, registration and API-availability errors. Forwarded server
+  errors and explicit module-provided messages keep their codes and text.
+- `RedisKeyWritable::set_expire` rejects durations whose signed millisecond
+  deadline overflows, preserving the old value and expiry (#166). Redis 6.2+
+  receives the checked absolute deadline. Redis 6.0 keeps a checked relative
+  fallback, whose later native clock reading still has an extreme-boundary
+  clock-change limitation.
+- Array, map and set call-reply `Display` separates every element (#166).
+- **Breaking:** typed enum configurations reject `ConfigurationFlags::BITFLAGS`
+  during registration, since their setter cannot represent combined flags
+  (#166). Module-argument enum names now ignore ASCII case, as Redis does.
+- The SDK's crash-info dispatcher no longer captures or symbolizes a Rust
+  backtrace (#166). Module INFO callbacks still run with the original
+  crash-report flag; their own crash-path restrictions continue to apply.
+
 - **Breaking:** safe code can no longer change a key while holding data
   borrowed from it (#162). `RedisKey::read` returns an owned `Vec<u8>`;
   `RedisKey::with_value`, `RedisKeyWritable::with_value_mut` and

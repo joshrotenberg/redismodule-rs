@@ -11,6 +11,27 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## SDK error codes, expirations and callback diagnostics
+
+SDK-generated failures now carry `ERR` or an existing specific Redis code
+(#166). This includes argument and string parsing, key/stream operations,
+configuration parsing and registration, command metadata, INFO builder errors,
+logging initialization and missing-API result strings. Error text supplied by
+module authors or forwarded from Redis is preserved, including custom codes.
+
+`RedisKeyWritable::set_expire` checks conversion and current-time addition
+before mutation, and uses `RedisModule_SetAbsExpire` when available (Redis 6.2+)
+so the native setter cannot add time again. Redis 6.0 has only the relative
+setter, so its later fresh clock reading can still differ at the extreme signed
+boundary, for example after a wall-clock jump. No command is issued while a
+key handle is open. Array, map and set call-reply formatting inserts each
+separator. Typed enum registration refuses `BITFLAGS` instead of accepting a
+configuration whose setter rejects combined values; enum module arguments
+ignore ASCII case. The SDK crash-info dispatcher omits backtrace capture and
+symbolization while preserving module callbacks and their crash-report flag.
+This does not make arbitrary INFO callbacks async-signal-safe. These changes
+correct the inherited implementations in this fork.
+
 ## Scoped key data borrows
 
 Upstream's `RedisKey::read` returns a slice into the string value,

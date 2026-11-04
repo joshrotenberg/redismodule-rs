@@ -421,7 +421,7 @@ impl RedisString {
     /// ```
     pub fn try_as_str(&self) -> Result<&str, RedisError> {
         str::from_utf8(self.as_slice())
-            .map_err(|_| RedisError::Str("Couldn't parse as UTF-8 string"))
+            .map_err(|_| RedisError::Str("ERR Couldn't parse as UTF-8 string"))
     }
 
     #[must_use]
@@ -476,14 +476,14 @@ impl RedisString {
     pub fn parse_unsigned_integer(&self) -> Result<u64, RedisError> {
         let val = self.parse_integer()?;
         u64::try_from(val)
-            .map_err(|_| RedisError::Str("Couldn't parse negative number as unsigned integer"))
+            .map_err(|_| RedisError::Str("ERR Couldn't parse negative number as unsigned integer"))
     }
 
     pub fn parse_integer(&self) -> Result<i64, RedisError> {
         let mut val: i64 = 0;
         match raw::string_to_longlong(self.as_ptr(), &mut val) {
             raw::Status::Ok => Ok(val),
-            raw::Status::Err => Err(RedisError::Str("Couldn't parse as integer")),
+            raw::Status::Err => Err(RedisError::Str("ERR Couldn't parse as integer")),
         }
     }
 
@@ -491,7 +491,7 @@ impl RedisString {
         let mut val: f64 = 0.0;
         match raw::string_to_double(self.as_ptr(), &mut val) {
             raw::Status::Ok => Ok(val),
-            raw::Status::Err => Err(RedisError::Str("Couldn't parse as float")),
+            raw::Status::Err => Err(RedisError::Str("ERR Couldn't parse as float")),
         }
     }
 

@@ -312,7 +312,7 @@ impl<'root> Display for ArrayCallReply<'root> {
         self.iter()
             .enumerate()
             .try_for_each(|(index, v)| -> fmt::Result {
-                if index > 1 {
+                if index > 0 {
                     f.write_str(", ")?;
                 }
                 fmt_call_result(v, f)
@@ -432,7 +432,7 @@ impl<'root> Display for MapCallReply<'root> {
         self.iter()
             .enumerate()
             .try_for_each(|(index, (key, val))| -> fmt::Result {
-                if index > 1 {
+                if index > 0 {
                     f.write_str(", ")?;
                 }
                 f.write_str("")?;
@@ -515,7 +515,7 @@ impl<'root> Display for SetCallReply<'root> {
         self.iter()
             .enumerate()
             .try_for_each(|(index, v)| -> fmt::Result {
-                if index > 1 {
+                if index > 0 {
                     f.write_str(", ")?;
                 }
                 fmt_call_result(v, f)
@@ -665,14 +665,14 @@ impl TryFrom<&str> for VerbatimStringFormat {
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if value.len() != 3 {
             return Err(RedisError::String(format!(
-                "Verbatim format length must be {VERBATIM_FORMAT_LENGTH}."
+                "ERR Verbatim format length must be {VERBATIM_FORMAT_LENGTH}."
             )));
         }
         let mut res = VerbatimStringFormat::default();
         value.chars().take(3).enumerate().try_for_each(|(i, c)| {
             if c as u32 >= 127 {
                 return Err(RedisError::String(
-                    "Verbatim format must contains only ASCI values.".to_owned(),
+                    "ERR Verbatim format must contains only ASCI values.".to_owned(),
                 ));
             }
             res.0[i] = c as c_char;

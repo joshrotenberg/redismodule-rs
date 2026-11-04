@@ -26,6 +26,19 @@ fn error_code(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     })
 }
 
+/// Formats the native reply without converting it to RedisValue first.
+fn display(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let command = args.get(1).ok_or(RedisError::WrongArity)?.try_as_str()?;
+    let call_args: Vec<_> = args.iter().skip(2).map(RedisString::as_slice).collect();
+    let options = CallOptionsBuilder::new()
+        .resp(CallOptionResp::Resp3)
+        .build();
+    let reply: CallReply = ctx
+        .call_ext::<_, CallResult>(command, &options, call_args.as_slice())
+        .map_err(RedisError::from)?;
+    Ok(reply.to_string().into())
+}
+
 /// `call_reply.protocol key [2|3|auto ...]`: report HGETALL's native reply
 /// kind after applying protocol selections in order. The label is a simple
 /// string so both RESP2 and RESP3 clients can read it.
@@ -133,6 +146,7 @@ redis_module! {
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
     data_types: [],
     commands: [
+        ["call_reply.display", display, "readonly", 0, 0, 0, ""],
         ["call_reply.echo", echo, "readonly", 0, 0, 0, ""],
         ["call_reply.error_code", error_code, "", 0, 0, 0, ""],
         ["call_reply.protocol", protocol, "readonly", 1, 1, 1, ""],

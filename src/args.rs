@@ -84,7 +84,7 @@ impl<'a> ArgCursor<'a> {
     /// Consume one argument, rejecting invalid UTF-8 without replacing bytes.
     pub fn next_str(&mut self) -> Result<&'a str, RedisError> {
         std::str::from_utf8(self.next_bytes()?)
-            .map_err(|_| RedisError::Str("Couldn't parse as UTF-8 string"))
+            .map_err(|_| RedisError::Str("ERR Couldn't parse as UTF-8 string"))
     }
 
     /// Parse with Redis's integer parser, as [`crate::NextArg::next_i64`] does.

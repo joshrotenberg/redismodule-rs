@@ -966,7 +966,25 @@ or map, where 2.x gave `StringBuffer` with the error's bytes. A module that
 forwards the reply now replies with the error, as Redis did; one that read the
 bytes from `StringBuffer` reads the message from `Error` instead.
 
+### Expiration and crash INFO
+
+`RedisKeyWritable::set_expire` rejects an overflowing absolute millisecond
+value without changing the existing key or TTL (#166). Redis 6.2+ uses the
+checked absolute setter. On Redis 6.0 the checked relative fallback cannot
+atomically share its clock sample with the native setter's later reading, so
+an extreme-boundary clock change remains subject to that old native API.
+
+The default crash-info path no longer adds a Rust backtrace section. Module
+INFO callbacks still receive the same crash-report flag. Continue skipping
+ordinary shared-state access in those callbacks; omitting backtrace capture
+is not a general async-signal-safety guarantee.
+
 ### Errors
+
+SDK-generated failures now start with `ERR` or a specific Redis code (#166).
+Update exact-message assertions and any code that treated the old first word,
+such as `Couldn't`, as an error code. Explicit `RedisError::Str`/`String`
+messages and errors forwarded from Redis keep their supplied text and code.
 
 `RedisError` implements `std::error::Error`. That replaces 2.x's blanket
 `impl<T: std::error::Error> From<T> for RedisError` with an explicit list of
@@ -983,6 +1001,10 @@ let value = parse(text).map_err(RedisError::from_error)?;
 
 ### Configuration
 
+- `register_enum_configuration` rejects `ConfigurationFlags::BITFLAGS`
+  before native registration (#166). Remove this flag for an ordinary enum;
+  combined flags are not represented by the typed enum setter. Module-argument
+  option names now ignore ASCII case, matching Redis's parser.
 - `register_i64_configuration`, `register_string_configuration`,
   `register_bool_configuration` and `register_enum_configuration` return
   `Result<(), RedisError>`. A module that registers configurations outside

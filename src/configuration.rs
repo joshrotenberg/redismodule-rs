@@ -94,7 +94,7 @@ macro_rules! enum_configuration {
             fn try_from(v: i32) -> Result<Self, Self::Error> {
                 match v {
                     $(x if x == $name::$vname as i32 => Ok($name::$vname),)*
-                    _ => Err($crate::RedisError::Str("Value is not supported")),
+                    _ => Err($crate::RedisError::Str("ERR Value is not supported")),
                 }
             }
         }
@@ -371,7 +371,7 @@ pub fn register_i64_configuration<T: ConfigurationValue<i64>>(
 ) -> Result<(), RedisError> {
     if default < min || default > max {
         return Err(RedisError::String(format!(
-            "Numeric configuration '{name}' default must be between {min} and {max}"
+            "ERR Numeric configuration '{name}' default must be between {min} and {max}"
         )));
     }
     let name = CString::new(name).unwrap();
@@ -416,7 +416,7 @@ pub fn get_i64_default_config_value(
     find_config_value(args, name).map_or(Ok(default), |arg| {
         arg.try_as_str()?
             .parse::<i64>()
-            .map_err(|e| RedisError::String(e.to_string()))
+            .map_err(RedisError::from_error)
     })
 }
 
@@ -443,7 +443,7 @@ fn parse_memory(text: &str) -> Result<i64, RedisError> {
         ("k", 1_000),
         ("b", 1),
     ];
-    let invalid = || RedisError::String(format!("invalid memory amount '{text}'"));
+    let invalid = || RedisError::String(format!("ERR invalid memory amount '{text}'"));
     let lower = text.to_ascii_lowercase();
     let (digits, unit) = UNITS
         .iter()
@@ -660,7 +660,7 @@ pub fn get_bool_default_config_value(
             Ok(false)
         } else {
             Err(RedisError::String(format!(
-                "Boolean configuration '{name}' must be 'yes' or 'no'"
+                "ERR Boolean configuration '{name}' must be 'yes' or 'no'"
             )))
         }
     })
@@ -715,6 +715,10 @@ extern "C" fn enum_configuration_get<
 
 /// Registers an enum configuration. Call it during module OnLoad.
 ///
+/// `BITFLAGS` is rejected: the typed setter accepts individual variants, not
+/// arbitrary combinations. Module-argument option names ignore ASCII case,
+/// matching Redis's configuration parser.
+///
 /// Returns an error if the Redis API is missing or Redis rejects the
 /// registration (for example a duplicate or invalid name); the private data and
 /// `on_changed` callback of a rejected registration are dropped. Outside the
@@ -732,6 +736,13 @@ pub fn register_enum_configuration<G: EnumConfigurationValue, T: ConfigurationVa
     flags: ConfigurationFlags,
     on_changed: Option<OnUpdatedCallback<T>>,
 ) -> Result<(), RedisError> {
+    // The typed setter accepts exact enum variants, not arbitrary unions.
+    // Refuse unsupported flags before any native registration or ownership.
+    if flags.contains(ConfigurationFlags::BITFLAGS) {
+        return Err(RedisError::Str(
+            "ERR enum configurations do not support BITFLAGS",
+        ));
+    }
     let name = CString::new(name).unwrap();
     let (names, vals) = default.get_options();
     assert_eq!(names.len(), vals.len());
@@ -779,9 +790,9 @@ pub fn get_enum_default_config_value<G: EnumConfigurationValue>(
         let (index, _name) = names
             .into_iter()
             .enumerate()
-            .find(|(_index, item)| item.as_bytes().eq(arg.as_slice()))
+            .find(|(_index, item)| item.as_bytes().eq_ignore_ascii_case(arg.as_slice()))
             .ok_or(RedisError::String(format!(
-                "Enum '{}' not exists",
+                "ERR Enum '{}' not exists",
                 arg.to_string_lossy()
             )))?;
         G::try_from(vals[index])
@@ -814,7 +825,7 @@ pub fn load_configurations(ctx: &RegistrationContext<'_>) -> Result<(), RedisErr
         Ok(())
     } else {
         Err(RedisError::Str(
-            "Redis rejected a module configuration value; see the Redis log",
+            "ERR Redis rejected a module configuration value; see the Redis log",
         ))
     }
 }
@@ -846,7 +857,7 @@ pub fn module_config_get(
     let res = res.map_err(|e| {
         RedisError::String(
             e.to_utf8_string()
-                .unwrap_or("Failed converting error to utf8".into()),
+                .unwrap_or("ERR Failed converting error to utf8".into()),
         )
     })?;
     Ok((&res).into())
@@ -886,7 +897,7 @@ pub fn module_config_set(
     let res = res.map_err(|e| {
         RedisError::String(
             e.to_utf8_string()
-                .unwrap_or("Failed converting error to utf8".into()),
+                .unwrap_or("ERR Failed converting error to utf8".into()),
         )
     })?;
     Ok((&res).into())
