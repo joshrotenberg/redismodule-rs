@@ -1095,10 +1095,17 @@ impl RuntimeContext {
         fmt: *const c_char,
         args: T,
     ) -> R {
+        let cmd = match CString::new(command) {
+            Ok(command) => command,
+            Err(_) => {
+                return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                    "ERR command name contains a NUL byte".into(),
+                ))));
+            }
+        };
         let mut call_args: StrCallArgs = args.into();
         let final_args = call_args.args_mut();
 
-        let cmd = CString::new(command).unwrap();
         // RedisModule_Call returns null both for a dry run that would succeed
         // and, without the E flag, for a call that failed; errno tells them
         // apart, so clear it first.
@@ -1316,9 +1323,12 @@ impl RuntimeContext {
         unsafe { RedisKeyWritable::open_with_flags(self.ctx, key, flags) }
     }
 
-    /// Replicate command to the replica and AOF.
-    pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) {
-        raw::replicate(self.ctx, command, args);
+    /// Replicate a command to the replica and AOF.
+    ///
+    /// Returns [`Status::Err`](raw::Status::Err) if the command name contains
+    /// NUL or Redis refuses the replication. Arguments remain binary-safe.
+    pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> raw::Status {
+        raw::replicate(self.ctx, command, args)
     }
 
     /// How much memory Redis uses relative to its `maxmemory` setting, through

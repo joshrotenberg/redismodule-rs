@@ -514,6 +514,26 @@ fn call_convert(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ctx.call(command.try_as_str()?, args.as_slice())
 }
 
+/// `call.convert3 command [arg ...]`: converts a native RESP3 reply to an
+/// owned RedisValue before replying.
+fn call_convert3(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
+    let args: Vec<&RedisString> = args.iter().collect();
+    let options = CallOptionsBuilder::new()
+        .resp(CallOptionResp::Resp3)
+        .errors_as_replies()
+        .build();
+    let result: CallResult = ctx.call_ext(command.try_as_str()?, &options, args.as_slice());
+    Ok(RedisValue::from(&result))
+}
+
+/// Exposes Redis's replication status without executing the command locally.
+fn call_replicate(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
+    let args: Vec<&RedisString> = args.iter().collect();
+    Ok(i64::from(ctx.replicate(command.try_as_str()?, args.as_slice()) == Status::Ok).into())
+}
+
 /// `call.dry_run command [arg ...]`: checks the command without running it.
 fn call_dry_run(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
@@ -560,6 +580,8 @@ redis_module! {
         ["call.forward", call_forward, "", 0, 0, 0, ""],
         ["call.forward3", call_forward3, "", 0, 0, 0, ""],
         ["call.convert", call_convert, "", 0, 0, 0, ""],
+        ["call.convert3", call_convert3, "", 0, 0, 0, ""],
+        ["call.replicate", call_replicate, "write", 0, 0, 0, ""],
         ["call.dry_run", call_dry_run, "", 0, 0, 0, ""],
     ],
 }

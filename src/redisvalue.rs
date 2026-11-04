@@ -20,6 +20,13 @@ pub enum RedisValueKey {
     SimpleString(String),
 }
 
+/// An owned value to send as a Redis reply.
+///
+/// Converting a [`CallReply`] map with an unsupported key, or a set with an
+/// unsupported member, returns an error value for that entire aggregate. Keys
+/// and members support the scalar variants of [`RedisValueKey`]. Forward the
+/// native reply with [`crate::Context::reply_with_call_reply`] when its full
+/// RESP3 representation must be preserved.
 #[derive(Debug, PartialEq, Clone)]
 pub enum RedisValue {
     SimpleStringStatic(&'static str),
@@ -306,29 +313,30 @@ impl<'root> From<&CallReply<'root>> for RedisValue {
             }
             CallReply::String(reply) => call_string_value(reply.as_bytes().to_vec()),
             CallReply::Null(_) => RedisValue::Null,
-            CallReply::Map(reply) => RedisValue::Map(
-                reply
-                    .iter()
-                    .map(|(key, val)| {
-                        (
-                            (&key).try_into().unwrap_or_else(|e| {
-                                panic!("Got unhashable map key from Redis, {key:?}, {e}")
-                            }),
-                            (&val).into(),
-                        )
-                    })
-                    .collect(),
-            ),
-            CallReply::Set(reply) => RedisValue::Set(
-                reply
-                    .iter()
-                    .map(|v| {
-                        (&v).try_into().unwrap_or_else(|e| {
-                            panic!("Got unhashable set element from Redis, {v:?}, {e}")
-                        })
-                    })
-                    .collect(),
-            ),
+            CallReply::Map(reply) => {
+                let mut values = HashMap::new();
+                for (key, value) in reply.iter() {
+                    let Ok(key) = (&key).try_into() else {
+                        return RedisValue::StaticError(
+                            "ERR call reply map contains an unsupported key",
+                        );
+                    };
+                    values.insert(key, (&value).into());
+                }
+                RedisValue::Map(values)
+            }
+            CallReply::Set(reply) => {
+                let mut values = HashSet::new();
+                for value in reply.iter() {
+                    let Ok(value) = (&value).try_into() else {
+                        return RedisValue::StaticError(
+                            "ERR call reply set contains an unsupported element",
+                        );
+                    };
+                    values.insert(value);
+                }
+                RedisValue::Set(values)
+            }
             CallReply::Bool(reply) => RedisValue::Bool(reply.to_bool()),
             CallReply::Double(reply) => RedisValue::Float(reply.to_double()),
             CallReply::BigNumber(reply) => reply

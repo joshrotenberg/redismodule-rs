@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Unusual input no longer panics or silently changes stored data (#165).
+  Calls and replication reject NUL command names before creating native
+  arguments. Converting a RESP3 map with an unsupported key, or a set with an
+  unsupported member, produces an error value for that aggregate. Configuration
+  change event names use replacement characters for invalid UTF-8 inside the
+  panic guard, and caught panic payloads are leaked so their destructors cannot
+  panic out of the guard. Built-in mutex configuration getters recover their
+  stored values after poisoning instead of substituting defaults.
+
+- **Breaking:** `RedisModuleIO::read_string` returns an error for invalid UTF-8
+  instead of replacing bytes (#165). Read binary data with
+  `read_string_buffer`.
+
+- **Breaking:** `RuntimeContext::replicate` now returns Redis's `Status`, including
+  `Status::Err` for a command name containing NUL or a native refusal, instead
+  of discarding it (#165). Existing calls that ignore the result as a statement
+  remain valid.
+
 - Keyspace subscriptions and nonblocking context locks tolerate missing Redis
   6.2 capability APIs on older Redis 6.0 servers (#167). Without flag
   enumeration, keyspace handlers request their mask unchanged, including all
