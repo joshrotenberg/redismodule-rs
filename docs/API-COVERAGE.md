@@ -928,7 +928,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `GetDetachedThreadSafeContext` | 6.0 | 6.0 | available, direct | safe | `DetachedContext::set_context` |  |  |
 | `FreeThreadSafeContext` | 6.0 | 6.0 | required, direct | safe | `ContextGuard::drop (Drop)`, `ThreadSafeContext::drop (Drop)` |  |  |
 | `ThreadSafeContextLock` | 6.0 | 6.0 | required | safe | `DetachedContext::lock`, `ThreadSafeContext::lock` |  |  |
-| `ThreadSafeContextTryLock` | 6.0 | 6.0 | required | safe | `DetachedContext::try_lock`, `ThreadSafeContext::try_lock` |  | #89 |
+| `ThreadSafeContextTryLock` | 6.0 | 6.0 | direct | safe | `DetachedContext::try_lock`, `ThreadSafeContext::try_lock` |  | #89 |
 | `ThreadSafeContextUnlock` | 6.0 | 6.0 | required | safe | `ContextGuard::drop (Drop)`, `DetachedContextGuard::drop (Drop)` |  |  |
 
 #### Timers
