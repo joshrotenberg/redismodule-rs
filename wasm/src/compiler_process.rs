@@ -490,15 +490,16 @@ mod tests {
                 Err(error) => panic!("fill output pipe: {error}"),
             }
         }
-        assert!(
-            frame_size < capacity,
-            "empty component frame must fit in one pipe"
-        );
-        // Linux's pipe uses page slots: draining only part of a head page
-        // does not free that space for a new tail write. Start empty, then
-        // refill so the remaining tail is mergeable by C's complete frame.
+        assert!(capacity > 0);
+        // The total prefix + frame is an exact capacity multiple. Drain all
+        // but its last capacity while C writes, leaving a full pipe for L's
+        // trailer even when the component frame is larger than this pipe.
+        // Linux page slots are freed in whole-capacity/page multiples, and
+        // the partial initial tail stays mergeable. No privileged resize.
+        let prefix = (capacity - frame_size % capacity) % capacity;
+        let drain = prefix + frame_size - capacity;
         reader.read_exact(&mut vec![0; capacity]).unwrap();
-        writer.write_all(&vec![0; capacity - frame_size]).unwrap();
+        writer.write_all(&vec![0; prefix]).unwrap();
         // Restore a blocking writer, just as normal Stdio::piped creates.
         assert_eq!(unsafe { libc::fcntl(fds[1], libc::F_SETFL, flags) }, 0);
         let inherited_reader = reader.try_clone().unwrap();
@@ -521,6 +522,27 @@ mod tests {
         input.write_all(&request).unwrap();
         input.write_all(b"\0asm\x0d\0\x01\0").unwrap();
         drop(input);
+        let read_flags = unsafe { libc::fcntl(fds[0], libc::F_GETFL) };
+        assert_eq!(
+            unsafe { libc::fcntl(fds[0], libc::F_SETFL, read_flags | libc::O_NONBLOCK) },
+            0
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut remaining = drain;
+        let mut chunk = [0; 8192];
+        while remaining > 0 {
+            assert!(Instant::now() < deadline, "compiler frame drain timed out");
+            let limit = remaining.min(chunk.len());
+            match reader.read(&mut chunk[..limit]) {
+                Ok(0) => panic!("compiler closed before its complete frame"),
+                Ok(n) => remaining -= n,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(2))
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => panic!("compiler frame drain: {error}"),
+            }
+        }
         let exited = owned
             .next_frame(Instant::now() + Duration::from_secs(5), &|| false)
             .unwrap();
