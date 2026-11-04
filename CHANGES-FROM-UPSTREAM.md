@@ -11,6 +11,29 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Typed native data types
+
+Upstream's `RedisType` takes a raw `RedisModuleTypeMethods`, and
+`get_value::<T>` and `set_value::<T>` accept any `T`, checking only that the key
+holds the native type. Safe code could store a `u8` and read it back as a
+`String`, and the type's `free` then dropped a box of the wrong type. A type
+used before registration had a null native type, which the check compared
+equal to a string key's, so storing through it left Redis a value with a null
+type that crashed the next `DEL`, `TYPE` or save. Values could hold
+non-`Send` data although Redis frees them on lazyfree threads. The callbacks
+were the module's own `extern "C"` functions, unguarded against panics, and
+nothing required `rdb_load`, `rdb_save` and `free`, which Redis calls without
+checking; the canonical `data_type` example left the RDB callbacks out
+(#154, #155).
+
+A type now implements `NativeType` and is declared as `RedisType<T>`; the SDK
+generates every callback for `T`, inside a panic guard with a safe fallback,
+and optional callbacks are traits registered only when the type asks for them.
+`get_value` and `set_value` are typed by the `RedisType<T>`, `T` must be
+`Send`, an unregistered type is refused, and a refused value is dropped. The
+`data_type` example's swapped defrag start and end attributes are fixed. Upstream
+has no issue or pull request for these.
+
 ## SDK crate orientation and native package identity
 
 The crate overview introduces the module entry point, context views, keys,
