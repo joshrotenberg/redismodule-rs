@@ -30,6 +30,19 @@ The poison flag itself is retained. `RedisModuleIO::read_string` rejects
 invalid UTF-8; binary RDB strings use `read_string_buffer`. Upstream has no
 issue or pull request for these changes.
 
+## SDK crate orientation and native package identity
+
+The crate overview introduces the module entry point, context views, keys,
+replies and compatibility floors (#169 part 1). The README documents matching
+Git pins and local workspace overrides, and the guides describe post-notification
+unload guards and explicit raw ownership transitions. The root package adds the
+fork maintainer while retaining its upstream authors.
+
+`links = "redismodule"` identifies the SDK's native API stub to Cargo. Two
+packages declaring that identity are rejected before linking; an upstream 2.x
+package with no `links` declaration is not covered by that resolver check.
+This does not change Redis's module loading or native API ABI.
+
 ## Configuration wrapper permissions
 
 The `module_config_get` and `module_config_set` commands `redis_module!`
