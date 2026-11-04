@@ -885,10 +885,11 @@ pub(crate) fn replicate<'a, T: Into<StrCallArgs<'a>>>(
     command: &str,
     args: T,
 ) -> Status {
+    let Ok(cmd) = CString::new(command) else {
+        return Status::Err;
+    };
     let mut call_args: StrCallArgs = args.into();
     let final_args = call_args.args_mut();
-
-    let cmd = CString::new(command).unwrap();
 
     unsafe {
         crate::__required_api!(RedisModule_Replicate)(

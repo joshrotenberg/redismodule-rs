@@ -5,7 +5,8 @@ use std::sync::{
 
 use lazy_static::lazy_static;
 use redis_module::{
-    ConfigurationValue, Context, RedisGILGuard, RedisResult, RedisString, RedisValue, Status,
+    ConfigurationValue, Context, RedisError, RedisGILGuard, RedisResult, RedisString, RedisValue,
+    Status,
     configuration::{ConfigurationContext, ConfigurationFlags},
     enum_configuration, redis_module,
 };
@@ -47,6 +48,21 @@ fn num_changes(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Integer(*val))
 }
 
+/// Diagnostic: poison an existing mutex without replacing its stored value.
+fn poison(_: &Context, args: Vec<RedisString>) -> RedisResult {
+    match args.get(1).ok_or(RedisError::WrongArity)?.try_as_str()? {
+        "string" => {
+            let _guard = CONFIGURATION_MUTEX_STRING.lock().unwrap();
+            panic!("configuration mutex string poison probe");
+        }
+        "enum" => {
+            let _guard = CONFIGURATION_MUTEX_ENUM.lock().unwrap();
+            panic!("configuration mutex enum poison probe");
+        }
+        _ => Err(RedisError::Str("ERR expected string or enum")),
+    }
+}
+
 /// Runs after the configuration values are applied, so it sees the loaded value.
 fn init(ctx: &redis_module::RegistrationContext<'_>, _: &[RedisString]) -> Status {
     let value = *CONFIGURATION_I64.lock(ctx);
@@ -64,6 +80,7 @@ redis_module! {
     init: init,
     commands: [
         ["configuration.num_changes", num_changes, "", 0, 0, 0, ""],
+        ["configuration.poison", poison, "", 0, 0, 0, ""],
     ],
     configurations: [
         i64: [

@@ -430,9 +430,11 @@ impl DetachedContext {
 
     /// Attempts to acquire the Redis lock without waiting.
     ///
-    /// Returns `None` if the lock cannot be acquired immediately. On success,
-    /// returns the same borrowed worker guard as [`Self::lock`]; dropping it
-    /// releases the lock. Workers can check a stop flag between attempts so
+    /// Returns `None` if the lock cannot be acquired immediately or the server
+    /// has no nonblocking-lock API (older Redis 6.0 servers). It never falls
+    /// back to waiting. On success, returns the same borrowed worker guard as
+    /// [`Self::lock`]; dropping it releases the lock. Workers can check a stop
+    /// flag between attempts so
     /// `MODULE UNLOAD` can join them while holding the Redis lock. Stop workers
     /// before unloading the module, as with [`Self::lock`].
     ///
@@ -457,7 +459,8 @@ impl DetachedContext {
         let c = self.ctx.load(Ordering::Acquire);
         assert!(!c.is_null(), "Detached context has not been initialized");
         // Like Lock, TryLock does not read the context in supported servers.
-        let status = unsafe { crate::__required_api!(RedisModule_ThreadSafeContextTryLock)(c) };
+        let try_lock = unsafe { raw::RedisModule_ThreadSafeContextTryLock }?;
+        let status = unsafe { try_lock(c) };
         if raw::Status::from(status) != raw::Status::Ok {
             return None;
         }
@@ -575,6 +578,45 @@ impl<'a> StrCallArgs<'a> {
     }
 }
 
+/// The context and argument count of the SDK command callback running on this
+/// thread, or a null context outside one.
+type CommandArgs = (*mut raw::RedisModuleCtx, c_int);
+
+thread_local! {
+    /// The running SDK command callback's context and argument count, for
+    /// [`Context::key_at_pos`]. A `Cell` of a `Copy` pair has no destructor,
+    /// which would keep glibc from unloading the module.
+    static COMMAND_ARGS: std::cell::Cell<CommandArgs> =
+        const { std::cell::Cell::new((ptr::null_mut(), 0)) };
+}
+
+/// Records the running SDK command callback's context and argument count until
+/// dropped, restoring the previous ones for a command that another command
+/// called. Used by the SDK's command callbacks.
+#[doc(hidden)]
+pub struct CommandArgcScope {
+    previous: CommandArgs,
+}
+
+impl CommandArgcScope {
+    /// # Safety
+    ///
+    /// `ctx` and `argc` must be the context and argument count Redis passed to
+    /// the running command callback, and the scope must end before it returns.
+    #[must_use]
+    pub unsafe fn begin(ctx: *mut raw::RedisModuleCtx, argc: c_int) -> Self {
+        Self {
+            previous: COMMAND_ARGS.replace((ctx, argc)),
+        }
+    }
+}
+
+impl Drop for CommandArgcScope {
+    fn drop(&mut self) {
+        COMMAND_ARGS.set(self.previous);
+    }
+}
+
 impl Context {
     /// Runs a call-user scope while preserving client capabilities.
     /// See [`RuntimeContext::with_call_user`] for restoration and error behavior.
@@ -638,12 +680,62 @@ impl Context {
         (unsafe { crate::__required_api!(RedisModule_IsKeysPositionRequest)(self.ctx) }) != 0
     }
 
+    /// Reports the argument at `pos` as one of the command's keys, in a
+    /// keys-position request (see [`Self::is_keys_position_request`]).
+    /// Position 0 is the command name, so keys start at 1. Outside a
+    /// keys-position request it does nothing, as Redis does.
+    ///
+    /// # Errors
+    ///
+    /// In a keys-position request, returns an error, without telling Redis, if
+    /// `pos` is not an argument position of the running command (1 to its
+    /// argument count minus one), or if this context is not the one of an SDK
+    /// command callback, which records the context and argument count of the
+    /// command callbacks it generates. Redis checks only that `pos` is positive
+    /// and later reads the argument at it, so a position past the arguments
+    /// would read past them; from a callback registered another way, use
+    /// [`Self::key_at_pos_unchecked`].
+    ///
+    /// # Panics
+    ///
+    /// Will panic if `RedisModule_IsKeysPositionRequest` or
+    /// `RedisModule_KeyAtPos` is missing in redismodule.h
+    pub fn key_at_pos(&self, pos: i32) -> Result<(), RedisError> {
+        if !self.is_keys_position_request() {
+            return Ok(());
+        }
+        let (ctx, argc) = COMMAND_ARGS.get();
+        if ctx != self.ctx {
+            return Err(RedisError::Str(
+                "ERR key positions can only be checked in an SDK command callback",
+            ));
+        }
+        if pos < 1 || pos >= argc {
+            return Err(RedisError::String(match argc {
+                ..=1 => format!("ERR key position {pos}: the command has no arguments"),
+                _ => format!(
+                    "ERR key position {pos} is not an argument position of the command (1 to {})",
+                    argc - 1
+                ),
+            }));
+        }
+        // SAFETY: pos is an argument position of the running command.
+        unsafe { self.key_at_pos_unchecked(pos) };
+        Ok(())
+    }
+
+    /// Reports the argument at `pos` as one of the command's keys without
+    /// checking the position, as [`Self::key_at_pos`] does.
+    ///
+    /// # Safety
+    ///
+    /// `pos` must be between 1 and the running command's argument count
+    /// minus one: Redis reads the argument at it without a bound check.
+    ///
     /// # Panics
     ///
     /// Will panic if `RedisModule_KeyAtPos` is missing in redismodule.h
-    pub fn key_at_pos(&self, pos: i32) {
-        // TODO: This will crash redis if `pos` is out of range.
-        // Think of a way to make this safe by checking the range.
+    pub unsafe fn key_at_pos_unchecked(&self, pos: i32) {
         unsafe {
             crate::__required_api!(RedisModule_KeyAtPos)(self.ctx, pos as c_int);
         }
@@ -1003,10 +1095,17 @@ impl RuntimeContext {
         fmt: *const c_char,
         args: T,
     ) -> R {
+        let cmd = match CString::new(command) {
+            Ok(command) => command,
+            Err(_) => {
+                return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                    "ERR command name contains a NUL byte".into(),
+                ))));
+            }
+        };
         let mut call_args: StrCallArgs = args.into();
         let final_args = call_args.args_mut();
 
-        let cmd = CString::new(command).unwrap();
         // RedisModule_Call returns null both for a dry run that would succeed
         // and, without the E flag, for a call that failed; errno tells them
         // apart, so clear it first.
@@ -1224,9 +1323,12 @@ impl RuntimeContext {
         unsafe { RedisKeyWritable::open_with_flags(self.ctx, key, flags) }
     }
 
-    /// Replicate command to the replica and AOF.
-    pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) {
-        raw::replicate(self.ctx, command, args);
+    /// Replicate a command to the replica and AOF.
+    ///
+    /// Returns [`Status::Err`](raw::Status::Err) if the command name contains
+    /// NUL or Redis refuses the replication. Arguments remain binary-safe.
+    pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> raw::Status {
+        raw::replicate(self.ctx, command, args)
     }
 
     /// How much memory Redis uses relative to its `maxmemory` setting, through
@@ -2835,5 +2937,32 @@ mod big_number_tests {
         ] {
             assert!(!is_big_number(text), "{text:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod command_args_tests {
+    use super::{COMMAND_ARGS, CommandArgcScope};
+    use std::ptr;
+
+    #[test]
+    fn scopes_nest_and_restore_after_a_panic() {
+        assert!(!std::mem::needs_drop::<std::cell::Cell<super::CommandArgs>>());
+        let outer_ctx = ptr::dangling_mut();
+        let inner_ctx = ptr::dangling_mut::<u64>().cast();
+        // SAFETY: test only; no Redis call reads these values.
+        let outer = unsafe { CommandArgcScope::begin(outer_ctx, 6) };
+        {
+            let _inner = unsafe { CommandArgcScope::begin(inner_ctx, 2) };
+            assert_eq!(COMMAND_ARGS.get(), (inner_ctx, 2));
+        }
+        assert_eq!(COMMAND_ARGS.get(), (outer_ctx, 6));
+        let _ = std::panic::catch_unwind(|| {
+            let _inner = unsafe { CommandArgcScope::begin(inner_ctx, 2) };
+            panic!("command failed");
+        });
+        assert_eq!(COMMAND_ARGS.get(), (outer_ctx, 6));
+        drop(outer);
+        assert_eq!(COMMAND_ARGS.get(), (ptr::null_mut(), 0));
     }
 }
