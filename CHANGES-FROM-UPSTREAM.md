@@ -11,6 +11,29 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Incremental stream entries and native pointer borrows
+
+The existing stream iterator creates every field/value string in a
+`StreamRecord`, even when a predicate can reject an entry after one field.
+`next_entry` instead lends a `StreamEntry` with a copied ID and individual
+owned field reads (#179 parts 1, 2 and 4). Its explicit skip and Drop use
+`StreamIteratorNextField` with two null outputs, which advances without
+creating returned strings. The iterator tracks remaining fields independently
+of the handle, so forgetting one cannot make the next native ID read start in
+field data. The legacy Iterator shares that state and still collects all
+fields. An unexpected field failure stops further cursor advancement.
+
+Key pointer access no longer needs an ownership round trip through
+`to_raw_parts` and `from_raw_parts`: borrowing `as_ptr` accessors preserve the
+key owner. They do not grant native access, transfer ownership or permit
+mutation while iterating or while scoped key data is lent. This does not
+change the inherited multiple-key-handle mutation restriction tracked in #197.
+`RedisString::parse_stream_id` uses native `StringToStreamID` where available,
+without imposing a Rust text/grammar parser. Numeric IDs and range endpoints
+follow Redis, while command-specific markers are separate. No AutoMemory
+optimization is included; the producer-aware string-adoption path is retained,
+and part 3 of #179 remains open.
+
 ## Module-author reference and macro packages
 
 The remaining readiness documentation work (#169) adds rustdoc for key reads,
@@ -41,7 +64,9 @@ configuration whose setter rejects combined values; enum module arguments
 ignore ASCII case. The SDK crash-info dispatcher omits backtrace capture and
 symbolization while preserving module callbacks and their crash-report flag.
 This does not make arbitrary INFO callbacks async-signal-safe. These changes
-correct the inherited implementations in this fork.
+correct the inherited implementations in this fork. A follow-up migration note
+for #166 replaces the obsolete SDK-backtrace description with the retained
+Redis crash diagnostics and module INFO callback contract.
 
 ## Scoped key data borrows
 

@@ -115,6 +115,12 @@ fn checked_expiration(expire: Duration, now: i64) -> Result<(i64, i64), RedisErr
     Ok((relative, absolute))
 }
 
+#[cfg(test)]
+pub(crate) fn with_test_key_loan<R>(f: impl FnOnce() -> R) -> R {
+    let _loan = Lent::begin();
+    f()
+}
+
 /// A read-only open key, borrowing the runtime context that opened it.
 ///
 /// Dropping the handle closes the native key. It must close before its opening
@@ -127,6 +133,24 @@ pub struct RedisKey<'ctx> {
 }
 
 impl<'ctx> RedisKey<'ctx> {
+    /// Borrows the native open-key pointer without transferring ownership.
+    /// The pointer can be null for a read-only open of a missing key.
+    ///
+    /// Native access remains unsafe: keep this owner, its opening context and
+    /// Redis lock alive; respect the open mode and all native aliasing rules.
+    /// Do not close the pointer, build another owner, retain it past this key,
+    /// or use raw APIs to bypass a scoped key-data loan. In particular, do not
+    /// delete or replace a stream while its iterator is active. Use
+    /// [`Self::to_raw_parts`] only when ownership transfer is intended.
+    ///
+    /// # Panics
+    /// Panics while key data is lent to an SDK scoped callback.
+    #[must_use]
+    pub fn as_ptr(&self) -> *mut raw::RedisModuleKey {
+        panic_while_lent();
+        self.key_inner
+    }
+
     /// Opens `key` for reading.
     ///
     /// # Safety
@@ -489,6 +513,18 @@ pub struct RedisKeyWritable<'ctx> {
 }
 
 impl<'ctx> RedisKeyWritable<'ctx> {
+    /// Borrows the native open-key pointer; this handle still closes it.
+    /// No ownership or additional native-access permission is transferred.
+    /// Follow [`RedisKey::as_ptr`]'s context, lock, aliasing and loan rules.
+    ///
+    /// # Panics
+    /// Panics while key data is lent to an SDK scoped callback.
+    #[must_use]
+    pub fn as_ptr(&self) -> *mut raw::RedisModuleKey {
+        panic_while_lent();
+        self.key_inner
+    }
+
     /// Opens `key` for reading and writing.
     ///
     /// # Safety
@@ -1416,5 +1452,32 @@ mod expiration_tests {
                     .starts_with("ERR ")
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod pointer_loan_tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[test]
+    fn borrowed_pointers_obey_the_scoped_key_loan_guard() {
+        // No native key is allocated or accessed: these tokens exercise only
+        // pointer borrowing and the guard before it, without native Drop.
+        let read = ManuallyDrop::new(RedisKey {
+            ctx: ptr::null_mut(),
+            key_inner: ptr::null_mut(),
+            _context: PhantomData,
+        });
+        let write = ManuallyDrop::new(RedisKeyWritable {
+            ctx: ptr::null_mut(),
+            key_inner: ptr::null_mut(),
+            _context: PhantomData,
+        });
+        assert!(read.as_ptr().is_null());
+        assert!(write.as_ptr().is_null());
+        let _loan = Lent::begin();
+        assert!(catch_unwind(AssertUnwindSafe(|| read.as_ptr())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| write.as_ptr())).is_err());
     }
 }

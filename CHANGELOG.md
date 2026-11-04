@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Incremental stream entries through `StreamIterator::next_entry` and
+  `StreamEntry::next_field`, `remaining_fields` and `skip_fields` (#179,
+  parts 1, 2 and 4). Skipping or dropping an entry uses native null outputs
+  without creating field/value strings. Pending fields remain tracked by the
+  iterator, so forgetting an entry and mixing incremental and legacy reads
+  still advances at entry boundaries. The existing `Iterator` returns complete
+  `StreamRecord`s. All public cursor advances honor scoped key-data loans;
+  an unexpected field failure ends the cursor instead of reusing its state.
+- Borrowing `RedisKey::as_ptr` and `RedisKeyWritable::as_ptr` accessors keep
+  the SDK owner and its cleanup responsibility in place (#179). Native calls
+  remain unsafe and subject to key lifetime, lock, mode and aliasing rules.
+- `RedisString::parse_stream_id` forwards to native `StringToStreamID`, with
+  an error if unavailable or refused (#179). The running server defines its
+  numeric/range-ID grammar; command markers such as XREADGROUP's `>` remain
+  separate. AutoMemory adoption is unchanged; part 3 of #179 remains open.
+
 - Complete the module-author rustdoc for key reads, hash fields, list writes,
   expiry, native call replies and server events (#169). Cursor examples now
   compile against the current API, macro input syntax uses the current callback
@@ -60,7 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#166). Module-argument enum names now ignore ASCII case, as Redis does.
 - The SDK's crash-info dispatcher no longer captures or symbolizes a Rust
   backtrace (#166). Module INFO callbacks still run with the original
-  crash-report flag; their own crash-path restrictions continue to apply.
+  crash-report flag; their own crash-path restrictions continue to apply. A
+  follow-up migration note for #166 removes the obsolete SDK-backtrace recipe.
 
 - **Breaking:** safe code can no longer change a key while holding data
   borrowed from it (#162). `RedisKey::read` returns an owned `Vec<u8>`;
