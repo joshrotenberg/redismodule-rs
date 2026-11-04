@@ -18,10 +18,12 @@ registers forward to `CONFIG GET` and `CONFIG SET`, but upstream registers them
 with no command flags and calls `CONFIG` without ACL verification, so Redis ran
 `CONFIG` for any user allowed the wrapper, including users denied `@admin`, and
 for Lua scripts, which `CONFIG` refuses (#160). The wrappers now take
-`CONFIG`'s flags (`admin deny-script allow-loading allow-stale`), which puts
-them in `@admin` and `@dangerous`, and call `CONFIG` with the `C` flag, so a
-user allowed a wrapper by name still needs `CONFIG` permission. Upstream has no
-issue or pull request for this.
+`CONFIG`'s flags (`admin deny-script allow-loading allow-stale`), so scripts
+cannot call them, and its ACL categories `@admin` and `@dangerous` as optional
+categories, set on Redis 7.2 and later; Redis derives no categories from a
+module command's flags. They call `CONFIG` with the `C` flag, so a user
+allowed a wrapper by name, or through `+@all`, still needs `CONFIG`
+permission. Upstream has no issue or pull request for this.
 
 ## Event loop lifecycle
 

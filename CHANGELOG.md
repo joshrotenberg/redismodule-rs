@@ -11,11 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The `module_config_get` and `module_config_set` commands that
   `redis_module!` registers require the same permissions as `CONFIG` (#160).
-  They are registered with the flags `admin deny-script allow-loading
-  allow-stale`, so Redis places them in `@admin` and `@dangerous` and scripts
-  cannot call them, and they call `CONFIG` with ACL verification for the
-  calling user. Before, a user without `@admin`, or a script, could read and
-  change the module's configurations through them.
+  They are registered with `CONFIG`'s flags (`admin deny-script allow-loading
+  allow-stale`), so scripts cannot call them, and in the `@admin` and
+  `@dangerous` ACL categories on Redis 7.2 and later, and they call `CONFIG`
+  with ACL verification for the calling user. Before, any user allowed the
+  wrapper, including one denied `@admin`, or a script could read and change
+  the module's configurations through them. Callers with no user, such as a
+  module's own `ctx.call` of a wrapper, now get an error.
 
 - Event loop callbacks no longer outlive their module or loop forever after a
   panic (#159). With `redis_module!`, a successful unload stops watching every

@@ -5331,11 +5331,42 @@ fn test_configuration() -> Result<()> {
 }
 
 /// The `module_config_get` and `module_config_set` wrappers need the same
-/// permissions as CONFIG: their admin flag keeps them from users without
-/// `@admin` and from scripts, and the call checks the user's CONFIG access.
+/// permissions as CONFIG: they are in `@admin` and `@dangerous`, scripts
+/// cannot call them, and the call checks the user's CONFIG access. Runs on
+/// Redis 7.2 and later, which set module command categories.
 #[test]
 fn test_module_config_wrappers_require_config_permissions() -> Result<()> {
     let mut con = TestConnection::new("configuration");
+
+    for category in ["admin", "dangerous"] {
+        let commands: Vec<String> = redis::cmd("ACL").arg(&["CAT", category]).query(&mut con)?;
+        for wrapper in ["configuration.config_get", "configuration.config_set"] {
+            assert!(
+                commands.iter().any(|command| command == wrapper),
+                "{wrapper} is not in @{category}"
+            );
+        }
+    }
+    // A user with @admin, which includes CONFIG, can use the wrappers.
+    redis::cmd("ACL")
+        .arg(&[
+            "SETUSER",
+            "admin-only",
+            "on",
+            "nopass",
+            "~*",
+            "-@all",
+            "+@admin",
+        ])
+        .query::<()>(&mut con)?;
+    let mut admin_con = con.connection()?;
+    redis::cmd("AUTH")
+        .arg(&["admin-only", "unused"])
+        .query::<()>(&mut admin_con)?;
+    let value: Vec<String> = redis::cmd("configuration.config_get")
+        .arg("i64")
+        .query(&mut admin_con)?;
+    assert_eq!(value, ["configuration.i64", "10"]);
 
     let value: Vec<String> = redis::cmd("configuration.config_get")
         .arg("i64")
