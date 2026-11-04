@@ -136,6 +136,8 @@ impl<'key> StreamIterator<'key> {
         if self.finished {
             return None;
         }
+        // Panics after a keyspace change, before draining skips quietly.
+        self.native();
         self.drain_fields();
         if self.finished {
             return None;
