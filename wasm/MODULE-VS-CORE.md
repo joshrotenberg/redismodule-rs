@@ -439,10 +439,10 @@ What the numbers say about module against core:
   core could keep signal handlers (inferred).
 
 The demo's JavaScript load is not a benchmark. On an Apple M3 busy with other
-work, it took 17.7 s through the debug build's helper at a load average of 8
-to 20, with 291 `PING`s answered meanwhile and the slowest in 112 ms; 29.2 s
-in an earlier debug run at 23 to 35; and 8.2 s with `DEMO_PROFILE=release` at
-24 to 30.
+work, it took 17.7 s through the debug build's helper at 1- and 5-minute load
+averages of 8 to 20, with 291 `PING`s answered meanwhile and the slowest in
+112 ms; 29.2 s in an earlier debug run at 23 to 38; and 8.2 s with
+`DEMO_PROFILE=release` at 24 to 30, with 129 `PING`s and the slowest in 35 ms.
 
 ## Operability
 
