@@ -134,42 +134,61 @@ pub fn run(
     control_fd: RawFd,
     nonce: [u8; 32],
     parent: libc::pid_t,
+    build: &str,
 ) -> anyhow::Result<()> {
     fd_valid(control_fd)?;
     let mut control = unsafe { UnixStream::from_raw_fd(control_fd) };
-    nonblocking(control_fd)?;
-    ensure!(
-        unsafe { libc::getppid() } == parent,
-        "compiler host exited before launcher setup"
-    );
-    compiler_limits::apply_launcher(memory, cpu)?;
-    ensure!(
-        unsafe { libc::fcntl(control_fd, libc::F_SETFD, libc::FD_CLOEXEC) } == 0,
-        "launcher control close-on-exec"
-    );
-    let (watch, endpoint) = UnixStream::pair()?;
-    nonblocking(watch.as_raw_fd())?;
-    let fd = endpoint.as_raw_fd();
-    let launcher = unsafe { libc::getpid() };
-    let mut command = Command::new(std::env::current_exe()?);
-    command
-        .args([
-            "--compile",
-            &memory.to_string(),
-            &cpu.to_string(),
-            &fd.to_string(),
-            &launcher.to_string(),
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    unsafe { inherit_fd(&mut command, fd) };
-    let child = command.spawn().context("spawn compiler worker")?;
-    drop(endpoint);
-    let mut worker = Worker {
-        child,
-        watch,
-        status: None,
+    // Every ordinary failure before spawning C proves that no worker exists.
+    // Abrupt launcher death before this proof remains conservatively uncertain.
+    let prepare = || -> anyhow::Result<Worker> {
+        nonblocking(control_fd)?;
+        ensure!(
+            build == env!("WASM_COMPILER_BUILD"),
+            "compiler launcher build identity mismatch"
+        );
+        ensure!(
+            unsafe { libc::getppid() } == parent,
+            "compiler host exited before launcher setup"
+        );
+        compiler_limits::apply_launcher(memory, cpu)?;
+        ensure!(
+            unsafe { libc::fcntl(control_fd, libc::F_SETFD, libc::FD_CLOEXEC) } == 0,
+            "launcher control close-on-exec"
+        );
+        let (watch, endpoint) = UnixStream::pair()?;
+        nonblocking(watch.as_raw_fd())?;
+        let fd = endpoint.as_raw_fd();
+        let launcher = unsafe { libc::getpid() };
+        let mut command = Command::new(std::env::current_exe()?);
+        command
+            .args([
+                "--compile",
+                &memory.to_string(),
+                &cpu.to_string(),
+                &fd.to_string(),
+                &launcher.to_string(),
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        unsafe { inherit_fd(&mut command, fd) };
+        let child = command.spawn().context("spawn compiler worker")?;
+        drop(endpoint);
+        // Nothing fallible between successful spawn and installing its owner.
+        Ok(Worker {
+            child,
+            watch,
+            status: None,
+        })
+    };
+    let mut worker = match prepare() {
+        Ok(worker) => worker,
+        Err(error) => {
+            let mut detail = [0; 32];
+            detail[..4].copy_from_slice(&1_u32.to_le_bytes());
+            let _ = control.write_all(&protocol::control_frame(protocol::EXIT, nonce, 0, detail));
+            return Err(error);
+        }
     };
     let pid = worker.child.id();
     let deadline = Instant::now() + Duration::from_secs(wall);

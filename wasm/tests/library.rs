@@ -1557,3 +1557,157 @@ fn a_restart_serves_while_saved_libraries_compile() {
     assert_eq!(compiled["compiling"], 0);
     assert!(compiled["code_bytes"] > 0);
 }
+
+#[test]
+fn compiler_missing_helper_preserves_replacement_and_restore_state() {
+    use std::os::unix::fs::symlink;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("owned-compiler");
+    symlink(target_dir().join("debug/redis-wasm-compiler"), &path).unwrap();
+    let server = Server::start(6636, &["--wasm.compiler-path", path.to_str().unwrap()]);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    assert_eq!(counter(&mut con), 1);
+    let payload: Vec<u8> = redis::cmd("WASM.DUMP").query(&mut con).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    let replace = redis::cmd("WASM.LOAD")
+        .arg("hello")
+        .arg(hello_component())
+        .arg("REPLACE")
+        .query(&mut con);
+    assert!(error_text(replace).contains("helper is missing"));
+    assert_eq!(counter(&mut con), 2);
+    assert!(error_text(restore(&mut con, &payload, Some("REPLACE"))).contains("helper is missing"));
+    assert_eq!(counter(&mut con), 3);
+    let stats = info(&mut con);
+    assert_eq!(stats["compiler_active"], 0);
+    assert_eq!(stats["compiler_queued"], 0);
+    assert_eq!(stats["compiler_uncertain"], 0);
+    // Restoring the trusted deployment allows another load without reload.
+    symlink(target_dir().join("debug/redis-wasm-compiler"), &path).unwrap();
+    assert_eq!(
+        restore(&mut con, &payload, Some("REPLACE")).unwrap(),
+        Value::Okay
+    );
+    assert_eq!(counter(&mut con), 1);
+}
+
+#[test]
+fn compiler_resource_refusal_is_atomic_and_releases_admission() {
+    let Some(component) = js_component() else {
+        return;
+    };
+    for (port, setting) in [
+        (6637, "--wasm.compiler-cpu-seconds"),
+        (6640, "--wasm.compiler-wall-seconds"),
+    ] {
+        let server = Server::start(port, &[setting, "1"]);
+        let mut con = server.connection();
+        load(&mut con, "hello");
+        assert_eq!(counter(&mut con), 1);
+        let failed = redis::cmd("WASM.LOAD")
+            .arg("hello")
+            .arg(component)
+            .arg("REPLACE")
+            .query(&mut con);
+        let message = error_text(failed);
+        assert!(message.contains("compiler"), "{message}");
+        assert_eq!(counter(&mut con), 2);
+        let stats = info(&mut con);
+        assert_eq!(stats["compiler_active"], 0);
+        assert_eq!(stats["compiler_uncertain"], 0);
+        assert_eq!(stats["compiler_failed"], 1);
+        let _: Vec<String> = redis::cmd("WASM.LOAD")
+            .arg("hello")
+            .arg(hello_component())
+            .arg("REPLACE")
+            .query(&mut con)
+            .unwrap();
+        assert_eq!(counter(&mut con), 1);
+    }
+}
+
+#[test]
+fn compiler_admission_survives_redis_background_forks() {
+    let Some(component) = js_component() else {
+        return;
+    };
+    let server = Server::start(6638, &["--wasm.compiler-queue", "0", "--appendonly", "yes"]);
+    let mut con = server.connection();
+    // The large guest gives the real BGSAVE/AOF child-reaper path time to race
+    // launcher completion and to inherit descriptors during active compilation.
+    let mut loader = server.connection();
+    let loading = std::thread::spawn(move || {
+        redis::cmd("WASM.LOAD")
+            .arg("js")
+            .arg(component)
+            .query::<Vec<String>>(&mut loader)
+    });
+    wait_for("one active compiler", || {
+        (info(&mut con)["compiler_active"] == 1).then_some(())
+    });
+    let refused = redis::cmd("WASM.LOAD")
+        .arg("other")
+        .arg(hello_component())
+        .query(&mut con);
+    assert!(error_text(refused).contains("queue is full"));
+    let mut save = false;
+    let mut rewrite = false;
+    while !loading.is_finished() {
+        let _: String = redis::cmd("PING").query(&mut con).unwrap();
+        assert!(info(&mut con)["compiler_active"] <= 1);
+        save |= redis::cmd("BGSAVE").query::<Value>(&mut con).is_ok();
+        rewrite |= redis::cmd("BGREWRITEAOF").query::<Value>(&mut con).is_ok();
+        sleep(Duration::from_millis(50));
+    }
+    loading.join().unwrap().unwrap();
+    assert!(
+        save && rewrite,
+        "exercise both native background fork paths"
+    );
+    wait_for("compiler reservation release", || {
+        (info(&mut con)["compiler_active"] == 0).then_some(())
+    });
+    assert_eq!(info(&mut con)["compiler_uncertain"], 0);
+    assert_eq!(
+        call(&mut con, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+}
+
+#[test]
+fn compiler_rdb_failure_completes_waiters_and_can_retry_after_deployment_repair() {
+    use std::os::unix::fs::symlink;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("owned-compiler");
+    symlink(target_dir().join("debug/redis-wasm-compiler"), &path).unwrap();
+    let args = [
+        "--wasm.compiler-path",
+        path.to_str().unwrap(),
+        "--enable-debug-command",
+        "yes",
+    ];
+    let server = Server::start(6639, &args);
+    let mut con = server.connection();
+    load(&mut con, "hello");
+    let _: () = redis::cmd("SAVE").query(&mut con).unwrap();
+    server.shutdown();
+    std::fs::remove_file(&path).unwrap();
+    let server = Server::restart(6639, &args);
+    let mut con = server.connection();
+    con.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    assert!(error_text(call(&mut con, &["hello", "0"])).contains("helper is missing"));
+    assert_eq!(info(&mut con)["compiling"], 0);
+    assert_eq!(info(&mut con)["compiler_uncertain"], 0);
+    symlink(target_dir().join("debug/redis-wasm-compiler"), &path).unwrap();
+    let _: () = redis::cmd("DEBUG").arg("RELOAD").query(&mut con).unwrap();
+    assert_eq!(
+        call(&mut con, &["hello", "0"]).unwrap(),
+        Value::Status("hello, world".into())
+    );
+    assert_eq!(info(&mut con)["compiling"], 0);
+    assert_eq!(
+        info(&mut con)["component_bytes"],
+        hello_component().len() as i64
+    );
+}

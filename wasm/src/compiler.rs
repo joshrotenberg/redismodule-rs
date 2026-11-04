@@ -246,11 +246,18 @@ impl Supervisor {
             self.limits.wall,
             nonce,
         )?;
-        {
-            let mut state = lock(&self.state);
-            state.control = Some(process.control.try_clone()?);
-        }
-        let output = process.exchange(source, &request, fingerprint, || lock(&self.state).stopped);
+        // Every error or unwind after spawn still reaches owned cleanup. In
+        // particular, a failed descriptor clone cannot detach a live process.
+        let output = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            lock(&self.state).control = Some(process.control.try_clone()?);
+            process.exchange(source, &request, fingerprint, || lock(&self.state).stopped)
+        }))
+        .unwrap_or_else(|payload| {
+            // A panic payload's Drop can itself panic. Do not let it bypass
+            // cleanup or escape this operation's error completion.
+            std::mem::forget(payload);
+            Err(anyhow::anyhow!("compiler transport panicked"))
+        });
         let cleaned = process
             .cleanup(Instant::now() + Duration::from_secs(5))
             .unwrap_or(false);
@@ -260,7 +267,10 @@ impl Supervisor {
             bail!("compiler cleanup is uncertain; capacity remains reserved until exit proof");
         }
         lock(&self.state).control = None;
-        let (artifact, response) = output?;
+        let (artifact, response) = output.with_context(|| format!(
+            "bounded compiler (address-space allowance={} bytes, CPU={} seconds, wall={} seconds, child exit={:?})",
+            self.limits.memory, self.limits.cpu, self.limits.wall.as_secs(), process.exit_status()
+        ))?;
         ensure!(
             response.ceiling.checked_sub(response.baseline) == Some(self.limits.memory),
             "compiler address-space allowance mismatch"
@@ -321,7 +331,7 @@ impl Reservation {
         ensure!(
             {
                 let state = lock(&self.supervisor.state);
-                !state.stopped && state.uncertain.is_none()
+                !state.stopped && state.uncertain.is_none() && state.active == Some(self.id)
             },
             "compiler operation cancelled"
         );
@@ -476,5 +486,35 @@ mod tests {
         drop(active);
         assert!(lock(&supervisor.state).queued.is_empty());
         assert!(lock(&supervisor.workers).is_empty());
+    }
+    #[test]
+    fn recovered_capacity_cannot_be_reused_by_the_old_batch() {
+        let supervisor = supervisor(1);
+        let mut old = supervisor.reserve().unwrap();
+        old.enter().unwrap();
+        let helper = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("redis-wasm-compiler");
+        let mut process =
+            Process::spawn(&helper, 2 << 30, 5, Duration::from_secs(10), [7; 32]).unwrap();
+        assert!(
+            process
+                .cleanup(Instant::now() + Duration::from_secs(2))
+                .unwrap()
+        );
+        // Recover a late proven exit while the original RDB batch still owns
+        // its reservation. It must not compile its next entry under the new
+        // operation's active identity.
+        lock(&supervisor.state).uncertain = Some(process);
+        let mut next = supervisor.reserve().unwrap();
+        next.enter().unwrap();
+        assert!(old.enter().is_err());
+        drop(next);
+        drop(old);
+        supervisor.shutdown().unwrap();
     }
 }

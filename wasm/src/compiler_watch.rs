@@ -5,7 +5,6 @@ use anyhow::{Context as _, ensure};
 use std::{
     fs::File,
     os::fd::{AsRawFd, FromRawFd},
-    time::Duration,
 };
 
 pub(crate) struct ExitWatch {
@@ -119,16 +118,6 @@ impl ExitWatch {
         }
         Ok(self.exited)
     }
-
-    pub(crate) fn wait(&mut self) -> anyhow::Result<()> {
-        // Retain the active admission if an externally stopped compiler cannot
-        // run its liveness watchdog. Never turn a cleanup timeout into capacity
-        // for an overlapping compiler; the server keeps serving other clients.
-        while !self.exited()? {
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -137,7 +126,7 @@ mod tests {
     use std::{
         io::Write,
         process::{Command, Stdio},
-        time::Instant,
+        time::{Duration, Instant},
     };
     #[test]
     fn stable_exit_event_survives_reaping_on_another_path() {

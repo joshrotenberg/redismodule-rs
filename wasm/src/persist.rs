@@ -117,10 +117,18 @@ fn load(rdb: &mut RdbReader, encver: i32) -> anyhow::Result<()> {
         bail!("unknown encoding version {encver}");
     }
     let started = Instant::now();
+    // Reserve the entire sequential RDB batch before reading/copying sources.
+    let mut compiler = crate::with_host(|host| host.compiler())??;
     let mut libraries = Vec::new();
     for _ in 0..rdb.read_unsigned()? {
         let name = rdb.read_string()?;
-        let component = rdb.read_string_buffer()?.as_ref().to_vec();
+        let bytes = rdb.read_string_buffer()?;
+        anyhow::ensure!(
+            bytes.as_ref().len() <= crate::compiler_protocol::MAX_INPUT,
+            "RDB component exceeds compiler input bound"
+        );
+        let component = bytes.as_ref().to_vec();
+        drop(bytes);
         let functions = (0..rdb.read_unsigned()?)
             .map(|_| {
                 let name = rdb.read_string()?;
@@ -144,7 +152,6 @@ fn load(rdb: &mut RdbReader, encver: i32) -> anyhow::Result<()> {
 
     // The libraries are added now, and compile on a thread: the server serves
     // meanwhile, and a call to a library still compiling waits for it.
-    let mut compiler = crate::with_host(|host| host.compiler())??;
     let mut jobs = Vec::with_capacity(count);
     for (name, component, functions) in libraries {
         let component = Arc::new(component);

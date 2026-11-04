@@ -71,10 +71,6 @@ fn main() {
     let run = || -> anyhow::Result<()> {
         match args.first().map(String::as_str) {
             Some("--launch") if args.len() == 8 => {
-                ensure!(
-                    args[7] == env!("WASM_COMPILER_BUILD"),
-                    "compiler launcher build identity mismatch"
-                );
                 let raw = args[5].as_bytes();
                 ensure!(raw.len() == 64, "invalid private nonce");
                 let mut nonce = [0; 32];
@@ -88,6 +84,7 @@ fn main() {
                     args[4].parse()?,
                     nonce,
                     args[6].parse()?,
+                    &args[7],
                 )
             }
             Some("--compile") if args.len() == 5 => compile(
