@@ -426,7 +426,7 @@ impl<T: NativeType> RedisType<T> {
     /// # Safety
     ///
     /// The callbacks must treat each value as a `Box<T>`: values that
-    /// [`set_value`](crate::RedisKeyWritable::set_value) stores are
+    /// [`set_value`](crate::key::RedisKeyWritable::set_value) stores are
     /// `Box::into_raw(Box::new(value))`, `rdb_load` and `copy` must return
     /// such a pointer, `free` must drop it as a `Box<T>`, and none may unwind.
     /// `rdb_load`, `rdb_save` and `free` must be set: Redis calls them without
