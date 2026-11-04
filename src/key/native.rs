@@ -39,6 +39,8 @@ thread_local! {
     static FROZEN: Cell<u32> = const { Cell::new(0) };
     /// How many native key writes are in progress on this thread.
     static MID_WRITE: Cell<u32> = const { Cell::new(0) };
+    /// How many keyspace scans are running on this thread.
+    static KEYSPACE_SCANS: Cell<u32> = const { Cell::new(0) };
 }
 
 /// The error for a keyspace change inside a key or keyspace scan callback.
@@ -74,7 +76,10 @@ const UNSEEN: u64 = u64::MAX;
 /// Refuses while a key or keyspace scan callback runs on this thread, and
 /// while a native key write is in progress on it.
 pub(crate) fn keyspace_will_change(acting: Option<&NativeKey>) -> Result<(), RedisError> {
-    if FROZEN.get() != 0 {
+    // The key Redis lends a scan callback may read through string DMA: Redis
+    // keeps that key current, and the change replaces only its own value.
+    let lent = acting.is_some_and(NativeKey::is_lent);
+    if FROZEN.get() != 0 && !lent {
         return Err(RedisError::Str(FROZEN_ERROR));
     }
     if MID_WRITE.get() != 0 {
@@ -126,17 +131,54 @@ fn close_expired_access(except: Option<&Entry>) {
     });
 }
 
-/// `NOEXPIRE` while this thread holds an `ACCESS_EXPIRED` key Redis is using,
-/// such as one a key scan is scanning: a plain open of that key would delete
-/// its expired value under the scan. Otherwise no flags.
+/// `NOEXPIRE` while a keyspace scan runs on this thread, which lends its
+/// callback keys that may have expired, or while this thread holds an
+/// `ACCESS_EXPIRED` key Redis is using, such as one a key scan is scanning: a
+/// plain open of such a key would delete its expired value under Redis.
+/// Otherwise no flags. Redis honors `NOEXPIRE` from 7.2; before that the flag
+/// is ignored and an open can still delete an expired key.
 fn expiry_guard() -> c_int {
     let access_expired = super::KeyFlags::ACCESS_EXPIRED.bits();
-    let mut held = false;
+    let mut held = KEYSPACE_SCANS.get() != 0;
     each_entry(|entry| held |= entry.busy.get() != 0 && entry.flags & access_expired != 0);
     if held {
         super::KeyFlags::NOEXPIRE.bits()
     } else {
         0
+    }
+}
+
+/// Closes the keys opened under the expiry guard once it has lifted, so they
+/// re-open with their own flags: a write through a key opened with `NOEXPIRE`
+/// on an expired key would make Redis add a key that is still there.
+pub(crate) fn close_guarded() {
+    if expiry_guard() != 0 {
+        return;
+    }
+    each_entry(|entry| {
+        if entry.guarded.get() && entry.busy.get() == 0 {
+            entry.close();
+            entry.guarded.set(false);
+        }
+    });
+}
+
+/// Marks a keyspace scan as running on this thread until dropped, which also
+/// refuses keyspace changes as `Frozen` does; dropping it closes the keys its
+/// callbacks opened under the expiry guard.
+pub(crate) struct KeyspaceScan(Frozen);
+
+impl KeyspaceScan {
+    pub(crate) fn begin() -> Self {
+        KEYSPACE_SCANS.set(KEYSPACE_SCANS.get() + 1);
+        KeyspaceScan(Frozen::begin())
+    }
+}
+
+impl Drop for KeyspaceScan {
+    fn drop(&mut self) {
+        KEYSPACE_SCANS.set(KEYSPACE_SCANS.get() - 1);
+        close_guarded();
     }
 }
 
@@ -200,6 +242,9 @@ struct Entry {
     busy: Cell<u32>,
     /// Counts closes, so a stream iterator can tell its native iterator ended.
     epoch: Cell<u64>,
+    /// Opened, or last re-opened, under the expiry guard, and so with
+    /// `NOEXPIRE`; closed when the guard lifts.
+    guarded: Cell<bool>,
     /// The key's name: taken when the key closes, or at open for a missing
     /// key opened for reading, which has no native key to ask.
     name: Cell<Option<RedisString>>,
@@ -273,7 +318,9 @@ impl Entry {
             unsafe { select(self.ctx, self.db) };
         }
         let mode = raw::KeyMode::from_bits_truncate(self.mode);
-        let flags = self.flags | expiry_guard();
+        let guard = expiry_guard();
+        self.guarded.set(guard != 0);
+        let flags = self.flags | guard;
         let inner = raw::open_key_with_flags(self.ctx, name.as_ptr(), mode, flags);
         if selected != self.db {
             unsafe { select(self.ctx, selected) };
@@ -312,6 +359,8 @@ enum State {
     Raw {
         inner: *mut raw::RedisModuleKey,
         seen: Cell<u64>,
+        /// Lent to a scan callback by Redis, which keeps it current.
+        lent: bool,
     },
 }
 
@@ -333,7 +382,8 @@ impl NativeKey {
         close_expired_access(None);
         let key_hash = key_hash(name);
         // The entry keeps the requested flags; the guard covers this open only.
-        let inner = raw::open_key_with_flags(ctx, name, mode, flags | expiry_guard());
+        let guard = expiry_guard();
+        let inner = raw::open_key_with_flags(ctx, name, mode, flags | guard);
         let db = unsafe { crate::__required_api!(RedisModule_GetSelectedDb)(ctx) };
         // A missing key opened for reading has no native key to ask its name.
         let kept_name = if inner.is_null() {
@@ -347,6 +397,7 @@ impl NativeKey {
             closed: Cell::new(false),
             busy: Cell::new(0),
             epoch: Cell::new(0),
+            guarded: Cell::new(guard != 0),
             name: Cell::new(kept_name),
             mode: mode_bits,
             flags,
@@ -366,6 +417,7 @@ impl NativeKey {
         Self(State::Raw {
             inner,
             seen: Cell::new(UNSEEN),
+            lent: false,
         })
     }
 
@@ -374,7 +426,12 @@ impl NativeKey {
         Self(State::Raw {
             inner,
             seen: Cell::new(CHANGES.get()),
+            lent: true,
         })
+    }
+
+    fn is_lent(&self) -> bool {
+        matches!(self.0, State::Raw { lent: true, .. })
     }
 
     fn entry(&self) -> Option<&Entry> {
@@ -403,7 +460,7 @@ impl NativeKey {
             State::Opened(_) => unreachable!(),
             // A missing key has nothing that can be stale.
             State::Raw { inner, .. } if inner.is_null() => ptr::null_mut(),
-            State::Raw { inner, seen } => {
+            State::Raw { inner, seen, .. } => {
                 let changes = CHANGES.get();
                 if seen.get() == UNSEEN {
                     seen.set(changes);
@@ -423,13 +480,15 @@ impl NativeKey {
     }
 
     /// Runs `f`, a native call that can delete, replace or move key values,
-    /// with the native key, after closing the thread's other open keys. The
-    /// key stays open if a callback Redis raises during `f` changes the
-    /// keyspace.
+    /// with the native key, after closing the thread's other open keys that
+    /// it can affect. While `f` runs, keyspace changes from callbacks Redis
+    /// raises during it are refused.
     ///
     /// # Errors
     ///
-    /// Refuses while a key scan callback runs on this thread.
+    /// Refuses while a key or keyspace scan callback runs on this thread,
+    /// except for a string read through the key Redis lent the callback, and
+    /// while another native key write is in progress on it.
     pub(crate) fn changing<R>(
         &self,
         f: impl FnOnce(*mut raw::RedisModuleKey) -> R,

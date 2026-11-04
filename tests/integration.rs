@@ -4141,7 +4141,7 @@ fn test_key_handles_reopen_for_raw_parts_and_after_yield() -> Result<()> {
 /// creating the key is refused: a change then would leave Redis writing a
 /// freed value.
 #[test]
-fn test_subscriber_call_leaves_the_key_mid_write_open() -> Result<()> {
+fn test_subscriber_cannot_change_the_keyspace_mid_write() -> Result<()> {
     let mut con = TestConnection::new("stale_keys");
     // The subscriber's call is refused while the write is in progress.
     let reply: (i64, String, String) = redis::cmd("stale.create_with_subscriber")
@@ -4154,6 +4154,13 @@ fn test_subscriber_call_leaves_the_key_mid_write_open() -> Result<()> {
             .query::<String>(&mut con)?,
         "value"
     );
+    // A subscriber raised by a client's write can call.
+    let (calls_before, _): (i64, i64) = redis::cmd("stale.new_calls").query(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["created:client", "v"])
+        .query::<()>(&mut con)?;
+    let (calls_after, _): (i64, i64) = redis::cmd("stale.new_calls").query(&mut con)?;
+    assert_eq!(calls_after, calls_before + 1);
     assert!(!con.server_log()?.contains("panicked"));
     Ok(())
 }
@@ -4190,20 +4197,63 @@ fn test_key_scan_of_an_expired_key_survives_opens_in_the_callback() -> Result<()
 }
 
 /// Redis closes each key a keyspace scan lends its callback after the callback,
-/// reading the key's value, so the SDK refuses keyspace changes from it.
+/// reading the key's value, so the SDK refuses keyspace changes from it. The
+/// lent key's string value can still be read, and the keys can be changed
+/// once the scan returns.
 #[test]
 fn test_keyspace_scan_callback_refuses_keyspace_changes() -> Result<()> {
     let mut con = TestConnection::new("stale_keys");
     for key in ["a", "b"] {
         redis::cmd("SET").arg(&[key, "1"]).query::<()>(&mut con)?;
     }
-    let (keys, refusal): (i64, String) = redis::cmd("stale.keys_scan_del").query(&mut con)?;
-    assert_eq!(keys, 2);
+    let (keys, read, refusal, deleted): (i64, i64, String, i64) =
+        redis::cmd("stale.keys_scan_del").query(&mut con)?;
+    assert_eq!((keys, read), (2, 2));
     assert_eq!(
         refusal,
         "ERR a key scan callback is running; the keyspace cannot change until it returns"
     );
+    assert_eq!(deleted, 2, "the keys change once the scan returns");
+    assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut con)?, 0);
+    Ok(())
+}
+
+/// A keyspace scan lends keys that expired but are not yet deleted. Opening
+/// one from the callback does not delete it under the scan, and a writable
+/// handle opened there and kept past the scan re-opens normally for its
+/// write. Redis 7.2+, which honors `NOEXPIRE`.
+#[test]
+fn test_keyspace_scan_opens_leave_expired_keys_in_place() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version = redis_module::Context::version_from_info(RedisValue::BulkString(info))?;
+    if (version.major, version.minor) < (7, 2) {
+        return Ok(());
+    }
+    redis::cmd("DEBUG")
+        .arg(&["SET-ACTIVE-EXPIRE", "0"])
+        .query::<()>(&mut con)?;
+    for key in ["e1", "e2"] {
+        redis::cmd("SET")
+            .arg(&[key, "v", "PX", "1"])
+            .query::<()>(&mut con)?;
+    }
+    thread::sleep(Duration::from_millis(20));
+    let opened: i64 = redis::cmd("stale.keys_scan_open").query(&mut con)?;
+    assert_eq!(opened, 2);
     assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut con)?, 2);
+
+    let key_type: String = redis::cmd("stale.keys_scan_keep")
+        .arg(&["e1", "new"])
+        .query(&mut con)?;
+    assert_eq!(key_type, "hash");
+    assert_eq!(
+        redis::cmd("HGET")
+            .arg(&["e1", "f"])
+            .query::<String>(&mut con)?,
+        "new"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
 

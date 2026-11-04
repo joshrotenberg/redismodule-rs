@@ -25,7 +25,7 @@ use bitflags::bitflags;
 
 mod native;
 
-pub(crate) use native::{Frozen, NativeKey, keyspace_will_change};
+pub(crate) use native::{Frozen, KeyspaceScan, NativeKey, close_guarded, keyspace_will_change};
 
 /// Access requested when opening a native Redis key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

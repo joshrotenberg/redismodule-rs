@@ -12,6 +12,10 @@ use redis_module::{
     YieldMode, redis_module,
 };
 
+/// The refusal a subscriber gets while the write that raised its event runs.
+const MID_WRITE_ERROR: &str =
+    "ERR a key write is in progress; the keyspace cannot change from a callback it raised";
+
 /// Calls the `new` subscriber made for keys named `created:*`, and how many
 /// the SDK refused because the write that raised the event was in progress.
 static NEW_CALLS: AtomicI64 = AtomicI64::new(0);
@@ -197,25 +201,85 @@ fn scan_del(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ]))
 }
 
-/// `stale.keys_scan_del`: scans the keyspace and tries DEL on each key from
-/// the callback, which the SDK refuses: Redis closes the lent key after the
-/// callback, reading its value. Replies with the keys seen and the first
-/// refusal.
+/// `stale.keys_scan_del`: scans the keyspace, reads each string key through
+/// the key Redis lends the callback, and tries DEL on it, which the SDK
+/// refuses: Redis closes the lent key after the callback, reading its value.
+/// After the scan it deletes the keys it collected. Replies with the keys
+/// seen, the strings read, the first refusal and the keys deleted after.
 fn keys_scan_del(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);
     args.done()?;
     let cursor = KeysCursor::new();
-    let mut keys: i64 = 0;
+    let mut names = Vec::new();
+    let mut read: i64 = 0;
     let mut refusal = None;
-    while cursor.scan(ctx, &mut |ctx, name, _| {
-        keys += 1;
+    while cursor.scan(ctx, &mut |ctx, name, key| {
+        names.push(name.clone());
+        if key.is_some_and(|key| matches!(key.read(), Ok(Some(_)))) {
+            read += 1;
+        }
         if let Err(error) = ctx.call("DEL", &[name]) {
             refusal.get_or_insert(error.to_string());
         }
     }) {}
+    let mut deleted: i64 = 0;
+    for name in &names {
+        if let Ok(redis_module::RedisValue::Integer(count)) = ctx.call("DEL", &[name]) {
+            deleted += count;
+        }
+    }
     Ok(RedisValue::Array(vec![
-        keys.into(),
+        i64::try_from(names.len()).unwrap_or(i64::MAX).into(),
+        read.into(),
         refusal.map_or(RedisValue::Null, RedisValue::BulkString),
+        deleted.into(),
+    ]))
+}
+
+/// `stale.keys_scan_open`: scans the keyspace and opens each key by name from
+/// the callback. Redis lends keys that expired but are not yet deleted, and
+/// the callback's opens use `NOEXPIRE` (Redis 7.2+), so they do not delete
+/// one under the scan.
+fn keys_scan_open(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    args.done()?;
+    let cursor = KeysCursor::new();
+    let mut opened: i64 = 0;
+    while cursor.scan(ctx, &mut |_, name, _| {
+        let _ = ctx.open_key(name).key_type();
+        opened += 1;
+    }) {}
+    Ok(opened.into())
+}
+
+/// `stale.keys_scan_keep key value`: scans the keyspace, keeps a writable
+/// handle to `key` opened in the callback, and sets field `f` to `value`
+/// through it after the scan. The handle opened with `NOEXPIRE`, so for an
+/// expired key it holds no value while the key is still in the keyspace, and
+/// a hash write through it would make Redis add a key that exists; the SDK
+/// closes it when the scan ends, and the write re-opens it normally.
+fn keys_scan_keep(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let wanted = args.next_arg()?;
+    let value = args.next_string()?;
+    args.done()?;
+    let cursor = KeysCursor::new();
+    let mut kept = None;
+    while cursor.scan(ctx, &mut |_, name, _| {
+        if name.as_slice() == wanted.as_slice() {
+            kept = Some(ctx.open_key_writable(name));
+        }
+    }) {}
+    let key = kept.unwrap_or_else(|| ctx.open_key_writable(&wanted));
+    key.hash_set("f", ctx.create_string(value))?;
+    Ok(key_type_name(key.key_type()).into())
+}
+
+/// `stale.new_calls`: calls the `new` subscriber made, and refusals it got.
+fn new_calls(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::Array(vec![
+        NEW_CALLS.load(Ordering::SeqCst).into(),
+        NEW_REFUSALS.load(Ordering::SeqCst).into(),
     ]))
 }
 
@@ -275,9 +339,14 @@ fn on_new(ctx: &redis_module::EventContext, _: NotifyEvent, _: &str, key: &[u8])
         return;
     }
     match ctx.call("EXISTS", &[name]) {
-        Ok(_) => NEW_CALLS.fetch_add(1, Ordering::SeqCst),
-        Err(_) => NEW_REFUSALS.fetch_add(1, Ordering::SeqCst),
-    };
+        Ok(_) => {
+            NEW_CALLS.fetch_add(1, Ordering::SeqCst);
+        }
+        Err(error) if error.to_string() == MID_WRITE_ERROR => {
+            NEW_REFUSALS.fetch_add(1, Ordering::SeqCst);
+        }
+        Err(_) => {}
+    }
 }
 
 //////////////////////////////////////////////////////
@@ -298,6 +367,9 @@ redis_module! {
         ["stale.scan_expired_open", scan_expired_open, "readonly", 1, 1, 1, ""],
         ["stale.scan_del", scan_del, "write", 1, 1, 1, ""],
         ["stale.keys_scan_del", keys_scan_del, "write", 0, 0, 0, ""],
+        ["stale.keys_scan_open", keys_scan_open, "readonly", 0, 0, 0, ""],
+        ["stale.keys_scan_keep", keys_scan_keep, "write", 1, 1, 1, ""],
+        ["stale.new_calls", new_calls, "readonly", 0, 0, 0, ""],
         ["stale.raw_parts_after_call", raw_parts_after_call, "write", 1, 1, 1, ""],
         ["stale.yield_then_read", yield_then_read, "readonly", 1, 1, 1, ""],
         ["stale.create_with_subscriber", create_with_subscriber, "write", 1, 1, 1, ""],

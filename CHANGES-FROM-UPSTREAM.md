@@ -106,9 +106,11 @@ from raw parts panic when used after a change. Redis itself holds a key's value
 in three more places, which closing the SDK's handles cannot fix (#205): a
 keyspace scan closes the key it lent each callback, reading its value; a write
 that creates a key raises the `new` event before storing the value; and a plain
-open of a key scanned with `ACCESS_EXPIRED` deletes its expired value. The fork
-refuses keyspace changes from those callbacks and opens keys with `NOEXPIRE`
-during such a scan.
+open of an expired key a scan is using deletes its value. The fork refuses
+keyspace changes from those callbacks and opens keys with `NOEXPIRE` during
+such scans (Redis 7.2+). A client's write that creates a key raises the same
+`new` event, and a subscriber that changes the key there still leaves Redis
+on a freed value; only the SDK's own writes are guarded.
 
 ## The lists example
 
