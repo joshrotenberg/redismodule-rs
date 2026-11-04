@@ -127,6 +127,17 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-04: merged SDK master `1aef05d` into the branch as `a8d97aa`. It
+  brings SDK PRs for #166 (`514dc47`: SDK error replies start with `ERR` or a
+  specific code, `set_expire` refuses an overflowing deadline, call-reply
+  `Display` separators, enum configuration and crash-report fixes) and #169
+  part 2 (`1aef05d`: completed rustdoc and macro crate packaging). The host
+  matches none of the changed error strings and needed no adaptation. The
+  full `wasm/ci/check.sh` ran on Rust 1.94.0 and Redis 8.10.2: 554 tests
+  passed and none failed (the host's 33 unit, 5 compiler and 35 library tests,
+  the SDK's 88 unit, 225 integration and 146 doc tests, and 22 others), and the
+  four lockfiles were unchanged.
+
 - 2026-11-04: merged SDK master `6f459d7` into the branch as `345cdb0`, on top
   of the branch's PRs 199 (#189: the context pointer scoped to each
   invocation) and 198 (#132: aggregate guest and image memory budgets). It
