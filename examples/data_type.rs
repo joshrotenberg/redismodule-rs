@@ -5,7 +5,7 @@
 use lazy_static::lazy_static;
 use redis_module::defrag::DefragContext;
 use redis_module::error::Error;
-use redis_module::io::RedisModuleIO;
+use redis_module::io::{RdbReader, RdbWriter};
 use redis_module::native_types::{Defrag, DefragStatus, NativeType, RedisType};
 use redis_module::redisvalue::RedisValueKey;
 use redis_module::{
@@ -19,13 +19,13 @@ struct MyType {
 }
 
 impl NativeType for MyType {
-    fn rdb_load(io: &mut RedisModuleIO, _encver: i32) -> Result<Self, Error> {
+    fn rdb_load(io: &mut RdbReader, _encver: i32) -> Result<Self, Error> {
         Ok(MyType {
             data: io.read_string()?,
         })
     }
 
-    fn rdb_save(&self, io: &mut RedisModuleIO) {
+    fn rdb_save(&self, io: &mut RdbWriter) {
         io.write_string(&self.data);
     }
 }

@@ -80,10 +80,10 @@ static MY_TYPE: RedisType = RedisType::new(
 
 // 3.0
 impl NativeType for MyType {
-    fn rdb_load(io: &mut RedisModuleIO, _encver: i32) -> Result<Self, Error> {
+    fn rdb_load(io: &mut RdbReader, _encver: i32) -> Result<Self, Error> {
         Ok(MyType { data: io.read_string()? })
     }
-    fn rdb_save(&self, io: &mut RedisModuleIO) {
+    fn rdb_save(&self, io: &mut RdbWriter) {
         io.write_string(&self.data);
     }
 }
@@ -94,6 +94,10 @@ static MY_TYPE: RedisType<MyType> =
 - `rdb_load` and `rdb_save` are required. Redis calls them without checking,
   so a type that left them out crashed the server on its first save. `free`
   is the value's `Drop`.
+- Load callbacks get an `io::RdbReader`, which only reads, and save callbacks
+  an `io::RdbWriter`, which only writes: during a `RESTORE` the IO writes into
+  the command's own argument, so a write from a load callback would corrupt
+  it.
 - Each optional callback is a trait with a `with_` method on `RedisType`:
   `MemUsage`, `CopyValue`, `FreeEffort`, `Unlink`, `DigestValue` (through
   `native_types::Digest`), `AofRewrite` (through `AofRewriter::emit`),
@@ -102,18 +106,21 @@ static MY_TYPE: RedisType<MyType> =
   nothing: without `CopyValue`, `COPY` replies that the type does not support
   it, and without `AofRewrite`, an AOF rewrite with `aof-use-rdb-preamble no`
   fails on Redis 8.10 and later and crashes its child process before that.
-- A panic in `rdb_load` fails that value's load, so `RESTORE` fails and an RDB
-  file does not load; in `copy` it fails the `COPY`, in `Drop` it leaks the
-  rest of the value, and in the others it falls back to a neutral result. A
-  panic in `rdb_save`, `aux_save` or `aof_rewrite` is logged and aborts the
-  process, because the partly written value cannot be reported to Redis; a
-  background save or rewrite runs in a child process, so only that save fails.
+- A panic in `rdb_load` fails that value's load: `RESTORE` fails, and Redis
+  exits when an RDB file or a replica's full sync does not load. In `copy` it
+  fails the `COPY`, in `Drop` it is contained after the unwind drops the rest
+  of the value, and in the others it falls back to a neutral result. A panic
+  in `rdb_save`, `aux_save` or `aof_rewrite` is logged and ends the process,
+  because the partly written value cannot be reported to Redis: a background
+  save or rewrite's child process exits, which fails only that save, and the
+  server itself aborts, as for `SAVE` or `DUMP`.
 - `get_value` and `set_value` take `&RedisType<T>` and return or take `T`, so
   the turbofish is no longer needed and reading a value as another type does
   not compile. `T` must be `Send + 'static`: Redis can free values on a
   background thread, as `UNLINK`, `FLUSHALL ASYNC` and, since Redis 7.4, a
-  plain `FLUSHALL` do. A value that holds a `RedisString` or an `Rc` needs a
-  wrapper whose `unsafe impl Send` states why that is sound, as
+  plain `FLUSHALL` do. Hold shared data in an `Arc` rather than an `Rc`. A
+  value that holds a `RedisString` needs a wrapper whose `unsafe impl Send`
+  states why that is sound, as
   [string_ownership.rs](../examples/string_ownership.rs) shows.
 - Both return an error for a `RedisType` that was never registered (not
   listed in `data_types`) instead of storing a value with a null type, which
@@ -121,7 +128,9 @@ static MY_TYPE: RedisType<MyType> =
   dropped instead of leaked.
 - `unsafe RedisType::from_raw_methods(name, version, methods)` keeps native
   callbacks for what the traits do not cover; they must treat each value as a
-  `Box<T>`.
+  `Box<T>`, and `T` need not implement `NativeType`.
+- Redis 6.0 ignores `free_effort`, `unlink`, `copy` and `defrag`, which Redis
+  6.2 added.
 - `RedisModuleIO` adds `read_redis_string` and `write_redis_string`, which are
   binary safe.
 

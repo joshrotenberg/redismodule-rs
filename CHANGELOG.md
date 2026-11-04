@@ -16,13 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version. Optional callbacks are traits enabled with `with_` methods
   (`MemUsage`, `CopyValue`, `FreeEffort`, `Unlink`, `DigestValue`,
   `AofRewrite`, `AuxData`, `Defrag`). Every callback runs inside a panic guard;
-  a panic in `rdb_save`, `aux_save` or `aof_rewrite` aborts after logging
-  rather than write an incomplete value. `get_value` and `set_value` are typed
+  a panic in `rdb_save`, `aux_save` or `aof_rewrite` ends the process after
+  logging rather than write an incomplete value (a background save's child
+  exits, failing only that save). `get_value` and `set_value` are typed
   by the `RedisType<T>`, require `T: Send + 'static` because Redis frees
   values on background threads, refuse a type that was never registered, and
-  drop a value Redis refuses. `unsafe RedisType::from_raw_methods` keeps
-  native callbacks, and `RedisModuleIO` adds binary-safe `read_redis_string`
-  and `write_redis_string`.
+  drop a value Redis refuses. Load callbacks get a read-only
+  `io::RdbReader` and save callbacks a write-only `io::RdbWriter`, since a
+  write while loading a `RESTORE` payload corrupts the command's argument.
+  `unsafe RedisType::from_raw_methods` keeps native callbacks, and
+  `RedisModuleIO` adds binary-safe `read_redis_string` and
+  `write_redis_string`.
 
 - The `module_config_get` and `module_config_set` commands that
   `redis_module!` registers require the same permissions as `CONFIG` (#160).

@@ -35,11 +35,11 @@ use crate::{AclCategory, EventContext, ModuleOptions, RedisError, Status, raw};
 ///
 /// ```compile_fail,E0308
 /// use redis_module::{Context, native_types::{NativeType, RedisType}};
-/// # use redis_module::{error::Error, io::RedisModuleIO};
+/// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}};
 /// # struct V;
 /// # impl NativeType for V {
-/// #     fn rdb_load(_: &mut RedisModuleIO, _: i32) -> Result<Self, Error> { Ok(V) }
-/// #     fn rdb_save(&self, _: &mut RedisModuleIO) {}
+/// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(V) }
+/// #     fn rdb_save(&self, _: &mut RdbWriter) {}
 /// # }
 /// fn register(ty: &RedisType<V>, ctx: &Context) { ty.create_data_type(ctx).unwrap(); }
 /// ```

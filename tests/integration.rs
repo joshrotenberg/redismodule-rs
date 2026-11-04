@@ -7308,12 +7308,17 @@ fn test_native_type_callbacks_and_panic_guards() -> Result<()> {
     assert_eq!(note(&mut con, "short")?.as_deref(), Some("hello"));
     assert_eq!(note(&mut con, "long")?.map(|text| text.len()), Some(4096));
 
-    // Deleting a note runs its unlink callback and drops it.
+    // Deleting a note runs its unlink callback and drops it; UNLINK also asks
+    // for its free effort, which keeps the free immediate.
     let before = counts(&mut con)?;
     redis::cmd("DEL").arg("restored").query::<()>(&mut con)?;
     let after = counts(&mut con)?;
     assert_eq!(after[0], before[0] + 1, "dropped once");
     assert_eq!(after[1], before[1] + 1, "unlinked once");
+    redis::cmd("UNLINK").arg("copy").query::<()>(&mut con)?;
+    let unlinked = counts(&mut con)?;
+    assert_eq!(unlinked[0], after[0] + 1, "dropped at once");
+    assert!(unlinked[3] > after[3], "free effort consulted");
 
     // Marker values make a callback panic; the operation fails and the server
     // keeps running.
@@ -7361,7 +7366,7 @@ fn test_native_type_callbacks_and_panic_guards() -> Result<()> {
         );
     }
 
-    // A type that was never registered stores nothing.
+    // A type that was never registered stores and reads nothing.
     let error = redis::cmd("note.set_unregistered")
         .arg(&["unregistered", "text"])
         .query::<()>(&mut con)
@@ -7373,6 +7378,26 @@ fn test_native_type_callbacks_and_panic_guards() -> Result<()> {
             .query::<i64>(&mut con)?,
         0
     );
+    let error = redis::cmd("note.get_unregistered")
+        .arg("short")
+        .query::<Value>(&mut con)
+        .expect_err("an unregistered type read a value");
+    assert!(error.to_string().contains("not registered"), "{error}");
+
+    // A panicking rdb_save ends a background save's child process: the save
+    // fails and the server keeps running.
+    redis::cmd("note.set")
+        .arg(&["panic-save", "panic-save"])
+        .query::<()>(&mut con)?;
+    redis::cmd("BGSAVE").query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(10), "the background save", || {
+        Ok(persistence(&mut con)?.contains("rdb_bgsave_in_progress:0"))
+    })?;
+    assert!(persistence(&mut con)?.contains("rdb_last_bgsave_status:err"));
+    assert!(con.server_log()?.contains(
+        "native type rdb_save panicked: rdb_save refused the marker value; exiting the child process"
+    ));
+    redis::cmd("DEL").arg("panic-save").query::<()>(&mut con)?;
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }

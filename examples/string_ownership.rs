@@ -1,7 +1,7 @@
 //! Exercises RedisString ownership across producers (hash, list, stream, scan,
 //! ServerInfo, RDB), command-thread retention, and AutoMemory on and off.
 use redis_module::error::Error;
-use redis_module::io::RedisModuleIO;
+use redis_module::io::{RdbReader, RdbWriter};
 use redis_module::native_types::{NativeType, RedisType};
 use redis_module::{
     Context, EventContext, KeysCursor, NextArg, RedisError, RedisResult, RedisString, RedisValue,
@@ -394,14 +394,14 @@ struct OwnedString(RedisString);
 unsafe impl Send for OwnedString {}
 
 impl NativeType for OwnedString {
-    fn rdb_load(io: &mut RedisModuleIO, encver: i32) -> Result<Self, Error> {
+    fn rdb_load(io: &mut RdbReader, encver: i32) -> Result<Self, Error> {
         if encver != 0 {
             return Err(Error::generic("unknown owner0001 encoding version"));
         }
         Ok(OwnedString(io.read_redis_string()?))
     }
 
-    fn rdb_save(&self, io: &mut RedisModuleIO) {
+    fn rdb_save(&self, io: &mut RdbWriter) {
         io.write_redis_string(&self.0);
     }
 }

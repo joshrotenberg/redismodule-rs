@@ -16,7 +16,7 @@ use raw::KeyType;
 use crate::RedisError;
 use crate::RedisResult;
 use crate::RedisString;
-use crate::native_types::{NativeType, RedisType};
+use crate::native_types::RedisType;
 use crate::raw;
 use crate::redismodule::REDIS_OK;
 pub use crate::redisraw::bindings::*;
@@ -153,7 +153,7 @@ impl<'ctx> RedisKey<'ctx> {
     /// Returns [`RedisError::WrongType`] if the key holds another type, and an
     /// error if `redis_type` is not registered or the running Redis does not
     /// provide `RedisModule_ModuleTypeGetValue`.
-    pub fn get_value<T: NativeType>(
+    pub fn get_value<T: Send + 'static>(
         &self,
         redis_type: &RedisType<T>,
     ) -> Result<Option<&T>, RedisError> {
@@ -639,11 +639,11 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// so do not use the reference after either.
     ///
     /// ```compile_fail,E0499
-    /// # use redis_module::{error::Error, io::RedisModuleIO, native_types::{NativeType, RedisType}, Context, RedisError, RedisString};
+    /// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, native_types::{NativeType, RedisType}, Context, RedisError, RedisString};
     /// # struct Count(u64);
     /// # impl NativeType for Count {
-    /// #     fn rdb_load(_: &mut RedisModuleIO, _: i32) -> Result<Self, Error> { Ok(Count(0)) }
-    /// #     fn rdb_save(&self, _: &mut RedisModuleIO) {}
+    /// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(Count(0)) }
+    /// #     fn rdb_save(&self, _: &mut RdbWriter) {}
     /// # }
     /// # fn two(ctx: &Context, name: &RedisString, kind: &RedisType<Count>) -> Result<(), RedisError> {
     /// let mut key = ctx.open_key_writable(name);
@@ -654,11 +654,11 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// ```
     ///
     /// ```compile_fail,E0597
-    /// # use redis_module::{error::Error, io::RedisModuleIO, native_types::{NativeType, RedisType}, Context, RedisError, RedisString};
+    /// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, native_types::{NativeType, RedisType}, Context, RedisError, RedisString};
     /// # struct Count(u64);
     /// # impl NativeType for Count {
-    /// #     fn rdb_load(_: &mut RedisModuleIO, _: i32) -> Result<Self, Error> { Ok(Count(0)) }
-    /// #     fn rdb_save(&self, _: &mut RedisModuleIO) {}
+    /// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(Count(0)) }
+    /// #     fn rdb_save(&self, _: &mut RdbWriter) {}
     /// # }
     /// # fn closed(ctx: &Context, name: &RedisString, kind: &RedisType<Count>) -> Result<(), RedisError> {
     /// let value = {
@@ -668,7 +668,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// value.map(|value| value.0 += 1);
     /// # Ok(()) }
     /// ```
-    pub fn get_value<T: NativeType>(
+    pub fn get_value<T: Send + 'static>(
         &mut self,
         redis_type: &RedisType<T>,
     ) -> Result<Option<&mut T>, RedisError> {
@@ -695,7 +695,7 @@ impl<'ctx> RedisKeyWritable<'ctx> {
     /// key is not open for writing, or an iterator is open on it), or the
     /// running Redis does not provide `RedisModule_ModuleTypeSetValue`. A
     /// refused value is dropped.
-    pub fn set_value<T: NativeType>(
+    pub fn set_value<T: Send + 'static>(
         &self,
         redis_type: &RedisType<T>,
         value: T,
@@ -974,7 +974,7 @@ fn to_raw_mode(mode: KeyMode) -> raw::KeyMode {
 /// another type, and an error if `redis_type` is not registered or the running
 /// Redis does not provide `RedisModule_KeyType` or
 /// `RedisModule_ModuleTypeGetType`.
-pub(crate) fn verify_type<T: NativeType>(
+pub(crate) fn verify_type<T: Send + 'static>(
     key_inner: *mut raw::RedisModuleKey,
     redis_type: &RedisType<T>,
 ) -> RedisResult {

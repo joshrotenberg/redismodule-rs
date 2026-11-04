@@ -3,10 +3,11 @@
 //! defrag. The SDK generates the native callbacks from the trait
 //! implementations and runs each inside a panic guard: a note whose text is
 //! `panic-load`, `panic-copy` or `panic-free` makes that callback panic, and
-//! the server keeps running.
+//! the server keeps running. `panic-save` makes `rdb_save` panic, which ends
+//! a background save's child process and fails that save.
 use redis_module::defrag::DefragContext;
 use redis_module::error::Error;
-use redis_module::io::RedisModuleIO;
+use redis_module::io::{RdbReader, RdbWriter};
 use redis_module::native_types::{
     AofRewrite, AofRewriter, AuxData, AuxTriggers, AuxWhen, CopyValue, Defrag, DefragStatus,
     Digest, DigestValue, FreeEffort, MemUsage, NativeType, RedisType, Unlink,
@@ -18,21 +19,27 @@ struct Note {
     text: String,
 }
 
-/// Notes dropped, unlink callbacks, and the aux value last loaded.
+/// Notes dropped, unlink and free-effort callbacks, and the aux value last
+/// loaded.
 static FREES: AtomicI64 = AtomicI64::new(0);
 static UNLINKS: AtomicI64 = AtomicI64::new(0);
+static FREE_EFFORTS: AtomicI64 = AtomicI64::new(0);
 static AUX_LOADED: AtomicI64 = AtomicI64::new(-1);
 /// The value the next RDB saves as the type's aux data.
 static AUX_TO_SAVE: AtomicU64 = AtomicU64::new(0);
 
 impl NativeType for Note {
-    fn rdb_load(io: &mut RedisModuleIO, _encver: i32) -> Result<Self, Error> {
+    fn rdb_load(io: &mut RdbReader, _encver: i32) -> Result<Self, Error> {
         let text = io.read_string()?;
         assert!(text != "panic-load", "rdb_load refused the marker value");
         Ok(Note { text })
     }
 
-    fn rdb_save(&self, io: &mut RedisModuleIO) {
+    fn rdb_save(&self, io: &mut RdbWriter) {
+        assert!(
+            self.text != "panic-save",
+            "rdb_save refused the marker value"
+        );
         io.write_string(&self.text);
     }
 }
@@ -61,6 +68,7 @@ impl CopyValue for Note {
 
 impl FreeEffort for Note {
     fn free_effort(&self, _key: &[u8]) -> usize {
+        FREE_EFFORTS.fetch_add(1, Ordering::Relaxed);
         1
     }
 }
@@ -88,11 +96,11 @@ impl AofRewrite for Note {
 impl AuxData for Note {
     const AUX_SAVE_TRIGGERS: AuxTriggers = AuxTriggers::AFTER_RDB;
 
-    fn aux_save(io: &mut RedisModuleIO, _when: AuxWhen) {
+    fn aux_save(io: &mut RdbWriter, _when: AuxWhen) {
         io.write_unsigned(AUX_TO_SAVE.load(Ordering::Relaxed));
     }
 
-    fn aux_load(io: &mut RedisModuleIO, _encver: i32, _when: AuxWhen) -> Result<(), Error> {
+    fn aux_load(io: &mut RdbReader, _encver: i32, _when: AuxWhen) -> Result<(), Error> {
         let value = io.read_unsigned()?;
         AUX_LOADED.store(value as i64, Ordering::Relaxed);
         Ok(())
@@ -152,6 +160,18 @@ fn set_unregistered(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::SimpleStringStatic("OK"))
 }
 
+/// `note.get_unregistered key`: reads through a type that was never
+/// registered, which fails.
+fn get_unregistered(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let key = args.next_arg()?;
+    args.done()?;
+    Ok(ctx
+        .open_key(&key)
+        .get_value(&UNREGISTERED_TYPE)?
+        .map_or(RedisValue::Null, |note| note.text.clone().into()))
+}
+
 /// `note.aux value`: the aux data the next RDB saves.
 fn aux(_: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);
@@ -161,13 +181,14 @@ fn aux(_: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::SimpleStringStatic("OK"))
 }
 
-/// `note.counts`: notes dropped, unlink callbacks, and the aux value last
-/// loaded (-1 before any).
+/// `note.counts`: notes dropped, unlink callbacks, the aux value last loaded
+/// (-1 before any) and free-effort callbacks.
 fn counts(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(vec![
         FREES.load(Ordering::Relaxed),
         UNLINKS.load(Ordering::Relaxed),
         AUX_LOADED.load(Ordering::Relaxed),
+        FREE_EFFORTS.load(Ordering::Relaxed),
     ]
     .into())
 }
@@ -181,6 +202,7 @@ redis_module! {
         ["note.set", set, "write deny-oom", 1, 1, 1, ""],
         ["note.get", get, "readonly", 1, 1, 1, ""],
         ["note.set_unregistered", set_unregistered, "write", 1, 1, 1, ""],
+        ["note.get_unregistered", get_unregistered, "readonly", 1, 1, 1, ""],
         ["note.aux", aux, "", 0, 0, 0, ""],
         ["note.counts", counts, "readonly", 0, 0, 0, ""],
     ],

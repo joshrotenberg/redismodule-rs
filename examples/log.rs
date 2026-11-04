@@ -1,7 +1,7 @@
 //! Logs a command argument through each logging entry point, so tests can
 //! check the exact text that reaches the server log.
 use redis_module::error::Error;
-use redis_module::io::RedisModuleIO;
+use redis_module::io::{RdbReader, RdbWriter};
 use redis_module::logging::{self, RedisLogLevel};
 use redis_module::native_types::{NativeType, RedisType};
 use redis_module::{Context, RedisError, RedisResult, RedisString, Status, raw, redis_module};
@@ -35,11 +35,11 @@ fn log_message(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 struct LogMessage(String);
 
 impl NativeType for LogMessage {
-    fn rdb_load(_io: &mut RedisModuleIO, _encver: i32) -> Result<Self, Error> {
+    fn rdb_load(_io: &mut RdbReader, _encver: i32) -> Result<Self, Error> {
         Err(Error::generic("log messages are never loaded"))
     }
 
-    fn rdb_save(&self, io: &mut RedisModuleIO) {
+    fn rdb_save(&self, io: &mut RdbWriter) {
         // SAFETY: io is the IO Redis passed to this rdb_save.
         unsafe {
             logging::log_io_error(

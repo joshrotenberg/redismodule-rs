@@ -9,16 +9,16 @@
 //!
 //! ```
 //! use redis_module::error::Error;
-//! use redis_module::io::RedisModuleIO;
+//! use redis_module::io::{RdbReader, RdbWriter};
 //! use redis_module::native_types::{NativeType, RedisType};
 //!
 //! struct Counter(u64);
 //!
 //! impl NativeType for Counter {
-//!     fn rdb_load(io: &mut RedisModuleIO, _encver: i32) -> Result<Self, Error> {
+//!     fn rdb_load(io: &mut RdbReader, _encver: i32) -> Result<Self, Error> {
 //!         Ok(Counter(io.read_unsigned()?))
 //!     }
-//!     fn rdb_save(&self, io: &mut RedisModuleIO) {
+//!     fn rdb_save(&self, io: &mut RdbWriter) {
 //!         io.write_unsigned(self.0);
 //!     }
 //! }
@@ -47,7 +47,7 @@ use bitflags::bitflags;
 
 use crate::defrag::DefragContext;
 use crate::error::Error;
-use crate::io::RedisModuleIO;
+use crate::io::{RdbReader, RdbWriter};
 use crate::logging::{RedisLogLevel, log_io_error};
 use crate::{RedisError, RedisString, raw};
 
@@ -58,25 +58,27 @@ use crate::{RedisError, RedisString, raw};
 pub trait NativeType: Sized + Send + 'static {
     /// Reads a value that [`rdb_save`](Self::rdb_save) wrote with encoding
     /// version `encver`. An error, or a panic, makes Redis treat the data as
-    /// corrupt: a `RESTORE` fails, and an RDB file does not load.
+    /// corrupt: a `RESTORE` fails (Redis 6.0 exits instead), and Redis exits
+    /// when an RDB file or a replica's full sync fails to load.
     ///
     /// # Errors
     ///
     /// Returns an error for data it cannot read.
-    fn rdb_load(io: &mut RedisModuleIO, encver: i32) -> Result<Self, Error>;
+    fn rdb_load(io: &mut RdbReader, encver: i32) -> Result<Self, Error>;
 
     /// Writes the value for [`rdb_load`](Self::rdb_load).
     ///
     /// It must not panic. Redis cannot be told that a save failed partway, so
-    /// a panic is logged and aborts the process rather than leave an
-    /// incomplete value in the RDB file, AOF preamble or `DUMP` payload. A
-    /// background save runs in a child process, which then exits and fails
-    /// the save while the server keeps running.
-    fn rdb_save(&self, io: &mut RedisModuleIO);
+    /// a panic is logged and ends the process rather than leave an incomplete
+    /// value in the RDB file, AOF preamble or `DUMP` payload. A background
+    /// save runs in a child process, which exits and fails the save while the
+    /// server keeps running and the previous file stays; in the server itself,
+    /// as for `SAVE` or `DUMP`, the panic aborts Redis.
+    fn rdb_save(&self, io: &mut RdbWriter);
 }
 
-/// The memory a value uses, for `MEMORY USAGE` and eviction estimates. Enable
-/// with [`RedisType::with_mem_usage`]; without it Redis counts 0.
+/// The memory a value uses, for `MEMORY USAGE`. Enable with
+/// [`RedisType::with_mem_usage`]; without it Redis counts 0.
 pub trait MemUsage: NativeType {
     /// The value's size in bytes. A panic reports 0.
     fn mem_usage(&self) -> usize;
@@ -119,8 +121,8 @@ pub trait DigestValue: NativeType {
 /// Without it, Redis 8.10 and later fail such a rewrite, and older releases
 /// crash the rewrite's child process.
 pub trait AofRewrite: NativeType {
-    /// Emits the commands that recreate the value under `key`. Like
-    /// [`NativeType::rdb_save`], a panic aborts the rewrite's process.
+    /// Emits the commands that recreate the value under `key`. A panic ends
+    /// the rewrite's child process, which fails the rewrite.
     fn aof_rewrite(&self, aof: &mut AofRewriter, key: &[u8]);
 }
 
@@ -132,8 +134,8 @@ pub trait AuxData: NativeType {
 
     /// Writes the type's data. Writing nothing saves nothing, on servers with
     /// `aux_save2` (Redis 7.2 and later), so the file still loads without the
-    /// module. Like [`NativeType::rdb_save`], a panic aborts the process.
-    fn aux_save(io: &mut RedisModuleIO, when: AuxWhen);
+    /// module. Like [`NativeType::rdb_save`], a panic ends the process.
+    fn aux_save(io: &mut RdbWriter, when: AuxWhen);
 
     /// Reads what [`aux_save`](Self::aux_save) wrote. An error, or a panic,
     /// fails the load.
@@ -141,7 +143,7 @@ pub trait AuxData: NativeType {
     /// # Errors
     ///
     /// Returns an error for data it cannot read.
-    fn aux_load(io: &mut RedisModuleIO, encver: i32, when: AuxWhen) -> Result<(), Error>;
+    fn aux_load(io: &mut RdbReader, encver: i32, when: AuxWhen) -> Result<(), Error>;
 }
 
 /// The outcome of [`Defrag::defrag`].
@@ -263,26 +265,30 @@ impl AofRewriter {
 /// A native data type that a module registers with Redis, storing values of
 /// type `T`.
 ///
+/// Redis 6.0 ignores the `free_effort`, `unlink`, `copy` and `defrag`
+/// callbacks, which Redis 6.2 added; the others work on every supported
+/// server.
+///
 /// The name must be 9 characters from `A-Z`, `a-z`, `0-9`, `-` and `_`, and
 /// the encoding version must be between 0 and 1023. [`RedisType::new`] checks
 /// both, so a `static` with a bad name or version fails to compile:
 ///
 /// ```compile_fail
-/// # use redis_module::{error::Error, io::RedisModuleIO, native_types::{NativeType, RedisType}};
+/// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, native_types::{NativeType, RedisType}};
 /// # struct V;
 /// # impl NativeType for V {
-/// #     fn rdb_load(_: &mut RedisModuleIO, _: i32) -> Result<Self, Error> { Ok(V) }
-/// #     fn rdb_save(&self, _: &mut RedisModuleIO) {}
+/// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(V) }
+/// #     fn rdb_save(&self, _: &mut RdbWriter) {}
 /// # }
 /// static TOO_LONG: RedisType<V> = RedisType::new("mytype-0001", 0);
 /// ```
 ///
 /// ```compile_fail
-/// # use redis_module::{error::Error, io::RedisModuleIO, native_types::{NativeType, RedisType}};
+/// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, native_types::{NativeType, RedisType}};
 /// # struct V;
 /// # impl NativeType for V {
-/// #     fn rdb_load(_: &mut RedisModuleIO, _: i32) -> Result<Self, Error> { Ok(V) }
-/// #     fn rdb_save(&self, _: &mut RedisModuleIO) {}
+/// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(V) }
+/// #     fn rdb_save(&self, _: &mut RdbWriter) {}
 /// # }
 /// static BAD_VERSION: RedisType<V> = RedisType::new("mytype-01", 1024);
 /// ```
@@ -290,11 +296,11 @@ impl AofRewriter {
 /// Redis also rejects `AAAAAAAAA` with version 0, whose type id is 0:
 ///
 /// ```compile_fail
-/// # use redis_module::{error::Error, io::RedisModuleIO, native_types::{NativeType, RedisType}};
+/// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, native_types::{NativeType, RedisType}};
 /// # struct V;
 /// # impl NativeType for V {
-/// #     fn rdb_load(_: &mut RedisModuleIO, _: i32) -> Result<Self, Error> { Ok(V) }
-/// #     fn rdb_save(&self, _: &mut RedisModuleIO) {}
+/// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(V) }
+/// #     fn rdb_save(&self, _: &mut RdbWriter) {}
 /// # }
 /// static ZERO_ID: RedisType<V> = RedisType::new("AAAAAAAAA", 0);
 /// ```
@@ -303,16 +309,16 @@ impl AofRewriter {
 /// another type does not compile:
 ///
 /// ```compile_fail,E0308
-/// # use redis_module::{error::Error, io::RedisModuleIO, key::RedisKey, native_types::{NativeType, RedisType}, RedisError};
+/// # use redis_module::{error::Error, io::{RdbReader, RdbWriter}, key::RedisKey, native_types::{NativeType, RedisType}, RedisError};
 /// # struct A(u64);
 /// # struct B(String);
 /// # impl NativeType for A {
-/// #     fn rdb_load(_: &mut RedisModuleIO, _: i32) -> Result<Self, Error> { Ok(A(0)) }
-/// #     fn rdb_save(&self, _: &mut RedisModuleIO) {}
+/// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(A(0)) }
+/// #     fn rdb_save(&self, _: &mut RdbWriter) {}
 /// # }
 /// # impl NativeType for B {
-/// #     fn rdb_load(_: &mut RedisModuleIO, _: i32) -> Result<Self, Error> { Ok(B(String::new())) }
-/// #     fn rdb_save(&self, _: &mut RedisModuleIO) {}
+/// #     fn rdb_load(_: &mut RdbReader, _: i32) -> Result<Self, Error> { Ok(B(String::new())) }
+/// #     fn rdb_save(&self, _: &mut RdbWriter) {}
 /// # }
 /// static A_TYPE: RedisType<A> = RedisType::new("a-type-01", 0);
 /// fn read(key: &RedisKey) -> Result<(), RedisError> {
@@ -320,17 +326,13 @@ impl AofRewriter {
 ///     Ok(())
 /// }
 /// ```
-pub struct RedisType<T: NativeType> {
+pub struct RedisType<T: Send + 'static> {
     name: &'static str,
     version: i32,
     type_methods: raw::RedisModuleTypeMethods,
     raw_type: AtomicPtr<raw::RedisModuleType>,
     value: PhantomData<fn() -> T>,
 }
-
-// SAFETY: the registered type is an atomic pointer, and the other fields are
-// read only. A static RedisType needs Sync.
-unsafe impl<T: NativeType> Sync for RedisType<T> {}
 
 /// Whether `byte` may appear in a native type name.
 const fn is_type_name_byte(byte: u8) -> bool {
@@ -411,38 +413,6 @@ impl<T: NativeType> RedisType<T> {
         type_methods.rdb_load = Some(rdb_load::<T>);
         type_methods.rdb_save = Some(rdb_save::<T>);
         type_methods.free = Some(free::<T>);
-        Self {
-            name,
-            version,
-            type_methods,
-            raw_type: AtomicPtr::new(ptr::null_mut()),
-            value: PhantomData,
-        }
-    }
-
-    /// A type with native callbacks the module writes itself, for what the
-    /// traits do not cover.
-    ///
-    /// # Safety
-    ///
-    /// The callbacks must treat each value as a `Box<T>`: values that
-    /// [`set_value`](crate::key::RedisKeyWritable::set_value) stores are
-    /// `Box::into_raw(Box::new(value))`, `rdb_load` and `copy` must return
-    /// such a pointer, `free` must drop it as a `Box<T>`, and none may unwind.
-    /// `rdb_load`, `rdb_save` and `free` must be set: Redis calls them without
-    /// checking.
-    ///
-    /// # Panics
-    ///
-    /// Panics, at compile time for a `static`, on a bad name or version, as
-    /// [`new`](Self::new) does.
-    #[must_use]
-    pub const unsafe fn from_raw_methods(
-        name: &'static str,
-        version: i32,
-        type_methods: raw::RedisModuleTypeMethods,
-    ) -> Self {
-        check_name_and_version(name, version);
         Self {
             name,
             version,
@@ -536,6 +506,47 @@ impl<T: NativeType> RedisType<T> {
         self.type_methods.defrag = Some(defrag::<T>);
         self
     }
+}
+
+impl<T: Send + 'static> RedisType<T> {
+    /// A type with native callbacks the module writes itself, for what the
+    /// traits do not cover. `T` need not implement [`NativeType`].
+    ///
+    /// # Safety
+    ///
+    /// The callbacks must treat each value as a `Box<T>`: values that
+    /// [`set_value`](crate::key::RedisKeyWritable::set_value) stores are
+    /// `Box::into_raw(Box::new(value))`; `rdb_load`, `copy` and `copy2` must
+    /// return such a pointer; `defrag` may replace the value only with another
+    /// `Box<T>` from the global allocator; `free` must drop it as a `Box<T>`
+    /// and may run on a Redis background thread; and none may unwind.
+    ///
+    /// # Panics
+    ///
+    /// Panics, at compile time for a `static`, on a bad name or version, as
+    /// [`new`](Self::new) does, or if `rdb_load`, `rdb_save` or `free` is
+    /// missing: Redis calls them without checking.
+    #[must_use]
+    pub const unsafe fn from_raw_methods(
+        name: &'static str,
+        version: i32,
+        type_methods: raw::RedisModuleTypeMethods,
+    ) -> Self {
+        check_name_and_version(name, version);
+        assert!(
+            type_methods.rdb_load.is_some()
+                && type_methods.rdb_save.is_some()
+                && type_methods.free.is_some(),
+            "a native type needs rdb_load, rdb_save and free callbacks"
+        );
+        Self {
+            name,
+            version,
+            type_methods,
+            raw_type: AtomicPtr::new(ptr::null_mut()),
+            value: PhantomData,
+        }
+    }
 
     /// The type Redis registered for this `RedisType`, or null before the
     /// module registers it.
@@ -606,15 +617,20 @@ fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
 
 /// Runs a callback that writes persisted data. A panic leaves the data
 /// incomplete, which Redis cannot be told, so it is logged and the process
-/// aborts; in a fork child, such as a background save, only the save fails.
+/// ends. A fork child, such as a background save, exits with a failure
+/// status, so only that save fails; it skips the abort, whose crash handler
+/// would print a bug report and could remove the server's pid file. The
+/// server itself aborts.
 fn run_writer(io: *mut raw::RedisModuleIO, callback: &str, f: impl FnOnce()) {
     if let Err(payload) = catch_unwind(AssertUnwindSafe(f)) {
         let message = panic_text(payload.as_ref());
+        // Dropping the payload could run its Drop outside this guard.
         std::mem::forget(payload);
-        let process = if LOAD_PROCESS.load(Ordering::Relaxed) == std::process::id() {
-            "the server"
+        let in_child = LOAD_PROCESS.load(Ordering::Relaxed) != std::process::id();
+        let ending = if in_child {
+            "exiting the child process"
         } else {
-            "the child process"
+            "aborting the server"
         };
         // SAFETY: io is the IO Redis passed to the running callback.
         unsafe {
@@ -622,9 +638,14 @@ fn run_writer(io: *mut raw::RedisModuleIO, callback: &str, f: impl FnOnce()) {
                 io,
                 RedisLogLevel::Warning,
                 &format!(
-                    "native type {callback} panicked: {message}; aborting {process} so no incomplete value is written"
+                    "native type {callback} panicked: {message}; {ending} so no incomplete value is written"
                 ),
             );
+        }
+        if in_child {
+            // SAFETY: _exit ends the process without running Redis's or Rust's
+            // exit handlers, as a fork child must.
+            unsafe { libc::_exit(1) };
         }
         std::process::abort();
     }
@@ -637,8 +658,8 @@ unsafe extern "C" fn rdb_load<T: NativeType>(
     crate::panic::run_callback(
         "native type rdb_load",
         || {
-            // SAFETY: Redis passes the IO for this callback.
-            let mut rdb = unsafe { RedisModuleIO::new(io) };
+            // SAFETY: Redis passes the IO for this load callback.
+            let mut rdb = unsafe { RdbReader::new(io) };
             match T::rdb_load(&mut rdb, encver) {
                 Ok(value) => Box::into_raw(Box::new(value)).cast(),
                 Err(error) => {
@@ -660,14 +681,16 @@ unsafe extern "C" fn rdb_load<T: NativeType>(
 
 unsafe extern "C" fn rdb_save<T: NativeType>(io: *mut raw::RedisModuleIO, value: *mut c_void) {
     run_writer(io, "rdb_save", || {
-        // SAFETY: Redis passes the IO and this type's own Box<T> value.
-        let mut rdb = unsafe { RedisModuleIO::new(io) };
+        // SAFETY: Redis passes the IO for this save callback and this type's
+        // own Box<T> value.
+        let mut rdb = unsafe { RdbWriter::new(io) };
         unsafe { &*value.cast::<T>() }.rdb_save(&mut rdb);
     });
 }
 
 unsafe extern "C" fn free<T: NativeType>(value: *mut c_void) {
-    // A panicking Drop leaks the rest of the value instead of aborting.
+    // A panicking Drop is contained; the unwind still drops the value's fields
+    // and frees the box. A second panic from one of those aborts.
     crate::panic::run_callback(
         "native type free",
         // SAFETY: Redis frees each value once, and every value is a Box<T>.
@@ -757,8 +780,8 @@ unsafe extern "C" fn aux_load<T: AuxData>(
     crate::panic::run_callback(
         "native type aux_load",
         || {
-            // SAFETY: Redis passes the IO for this callback.
-            let mut rdb = unsafe { RedisModuleIO::new(io) };
+            // SAFETY: Redis passes the IO for this load callback.
+            let mut rdb = unsafe { RdbReader::new(io) };
             match T::aux_load(&mut rdb, encver, AuxWhen::from_raw(when)) {
                 Ok(()) => raw::REDISMODULE_OK as c_int,
                 Err(error) => {
@@ -780,8 +803,8 @@ unsafe extern "C" fn aux_load<T: AuxData>(
 
 unsafe extern "C" fn aux_save<T: AuxData>(io: *mut raw::RedisModuleIO, when: c_int) {
     run_writer(io, "aux_save", || {
-        // SAFETY: Redis passes the IO for this callback.
-        let mut rdb = unsafe { RedisModuleIO::new(io) };
+        // SAFETY: Redis passes the IO for this save callback.
+        let mut rdb = unsafe { RdbWriter::new(io) };
         T::aux_save(&mut rdb, AuxWhen::from_raw(when));
     });
 }
@@ -795,7 +818,7 @@ unsafe extern "C" fn defrag<T: Defrag>(
         "native type defrag",
         || {
             // SAFETY: Redis passes a live defrag context, a key name and this
-            // type's own value, which it moved itself if it needed to.
+            // type's own value. The top-level box stays where it is.
             let defrag_ctx = unsafe { DefragContext::new(ctx) };
             let value = unsafe { &mut *(*value).cast::<T>() };
             match value.defrag(&defrag_ctx, unsafe { key_bytes(key) }) {
