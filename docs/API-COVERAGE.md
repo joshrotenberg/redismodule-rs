@@ -554,7 +554,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `SetCommandInfo` | 7.0 | 7.0 | api!, direct | safe | `CommandBuilder::register`, `commands::register_commands` |  |  |
 | `SetCommandACLCategories` | 7.2 | 7.2 | direct | safe | `CommandBuilder::register`, `commands::register_commands` |  |  |
 | `AddACLCategory` | 7.4 | 7.4 | direct | safe | `redis_module!` |  |  |
-| `WrongArity` | 6.0 | 6.0 | required | safe | `Context::reply`, `ThreadSafeContext::reply` |  |  |
+| `WrongArity` | 6.0 | 6.0 | required | safe | `Context::reply`, `KeyBlockingReply::value` and 1 more |  |  |
 | `IsKeysPositionRequest` | 6.0 | 6.0 | required | safe | `Context::is_keys_position_request` |  |  |
 | `KeyAtPos` | 6.0 | 6.0 | required | safe | `Context::key_at_pos` |  |  |
 | `KeyAtPosWithFlags` | 7.0 | 7.0 |  | none |  | command |  |
@@ -569,31 +569,31 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
-| `ReplyWithLongLong` | 6.0 | 6.0 | required | safe | `Context::reply`, `Context::reply_with_key` and 1 more |  |  |
+| `ReplyWithLongLong` | 6.0 | 6.0 | required | safe | `KeyBlockingReply::integer` |  |  |
 | `ReplyWithError` | 6.0 | 6.0 | required, available, direct | safe | `Context::block_client_on_keys` |  |  |
 | `ReplyWithErrorFormat` | 7.2 | 7.2 |  | none |  | command; format, then an error reply |  |
 | `ReplyWithSimpleString` | 6.0 | 6.0 | required | safe | `Context::reply_simple_string` |  |  |
-| `ReplyWithArray` | 6.0 | 6.0 | required | safe | `Context::reply`, `ThreadSafeContext::reply` |  |  |
-| `ReplyWithMap` | 7.0 | 7.0 | direct | safe | `Context::reply`, `ThreadSafeContext::reply` |  |  |
-| `ReplyWithSet` | 7.0 | 7.0 | direct | safe | `Context::reply`, `ThreadSafeContext::reply` |  |  |
+| `ReplyWithArray` | 6.0 | 6.0 | required | safe | `KeyBlockingReply::array`, `KeyBlockingReply::map` and 1 more |  |  |
+| `ReplyWithMap` | 7.0 | 7.0 | direct | safe | `KeyBlockingReply::map` |  |  |
+| `ReplyWithSet` | 7.0 | 7.0 | direct | safe | `KeyBlockingReply::set` |  |  |
 | `ReplyWithAttribute` | 7.0 | 7.0 |  | none |  | command |  |
-| `ReplyWithNullArray` | 6.0 | 6.0 | required | safe | `Context::reply`, `ThreadSafeContext::reply` |  |  |
+| `ReplyWithNullArray` | 6.0 | 6.0 | required | safe | `Context::reply`, `KeyBlockingReply::value` and 1 more |  |  |
 | `ReplyWithEmptyArray` | 6.0 | 6.0 |  | none |  | command; an empty `RedisValue::Array` |  |
 | `ReplySetArrayLength` | 6.0 | 6.0 |  | none |  | command | #55 |
 | `ReplySetMapLength` | 7.0 | 7.0 |  | none |  | command | #55 |
 | `ReplySetSetLength` | 7.0 | 7.0 |  | none |  | command | #55 |
 | `ReplySetAttributeLength` | 7.0 | 7.0 |  | none |  | command |  |
 | `ReplySetPushLength` | not in OSS | none |  | none |  | command |  |
-| `ReplyWithStringBuffer` | 6.0 | 6.0 | required | safe | `Context::reply`, `Context::reply_with_key` and 1 more |  |  |
+| `ReplyWithStringBuffer` | 6.0 | 6.0 | required | safe | `KeyBlockingReply::bulk` |  |  |
 | `ReplyWithCString` | 6.0 | 6.0 |  | none |  | command; string `RedisValue`s |  |
-| `ReplyWithString` | 6.0 | 6.0 | required | safe | `Context::reply`, `Context::reply_with_key` and 1 more |  |  |
+| `ReplyWithString` | 6.0 | 6.0 | required | safe | `KeyBlockingReply::string` |  |  |
 | `ReplyWithEmptyString` | 6.0 | 6.0 |  | none |  | command; string `RedisValue`s |  |
-| `ReplyWithVerbatimString` | 6.0 | 6.0 | required | safe | `Context::reply`, `ThreadSafeContext::reply` |  |  |
-| `ReplyWithVerbatimStringType` | 7.0 | 7.0 | direct | safe | `Context::reply`, `ThreadSafeContext::reply` |  |  |
-| `ReplyWithNull` | 6.0 | 6.0 | required | safe | `Context::reply`, `ThreadSafeContext::reply` |  |  |
-| `ReplyWithBool` | 7.0 | 7.0 | direct | safe | `Context::reply`, `Context::reply_with_key` and 1 more |  |  |
-| `ReplyWithDouble` | 6.0 | 6.0 | required | safe | `Context::reply`, `ThreadSafeContext::reply` |  |  |
-| `ReplyWithBigNumber` | 7.0 | 7.0 | direct | safe | `Context::reply`, `ThreadSafeContext::reply` |  |  |
+| `ReplyWithVerbatimString` | 6.0 | 6.0 | required | safe | `Context::reply`, `KeyBlockingReply::value` and 1 more |  |  |
+| `ReplyWithVerbatimStringType` | 7.0 | 7.0 | direct | safe | `Context::reply`, `KeyBlockingReply::value` and 1 more |  |  |
+| `ReplyWithNull` | 6.0 | 6.0 | required | safe | `Context::reply`, `KeyBlockingReply::value` and 1 more |  |  |
+| `ReplyWithBool` | 7.0 | 7.0 | direct | safe | `Context::reply`, `Context::reply_with_key` and 2 more |  |  |
+| `ReplyWithDouble` | 6.0 | 6.0 | required | safe | `Context::reply`, `KeyBlockingReply::value` and 1 more |  |  |
+| `ReplyWithBigNumber` | 7.0 | 7.0 | direct | safe | `Context::reply`, `KeyBlockingReply::value` and 1 more |  |  |
 | `ReplyWithCallReply` | 6.0 | 6.0 | available | safe | `Context::reply_with_call_reply` |  |  |
 
 #### Calls
@@ -796,7 +796,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 |---|---|---|---|---|---|---|---|
 | `GetClientId` | 6.0 | 6.0 | available, direct | internal (hand) | `Context::acl_add_log_entry`, `Context::get_current_user` and 1 more | command |  |
 | `GetClientUserNameById` | 6.2 | 6.2 | direct | safe | `Context::get_current_user` |  |  |
-| `GetClientInfoById` | 6.0 | 6.0 | available | internal (hand) | `Context::block_client_on_keys` | runtime |  |
+| `GetClientInfoById` | 6.0 | 6.0 | available, direct | internal (hand) | `Context::block_client_on_keys` | runtime |  |
 | `GetClientNameById` | 7.0 | 7.0 |  | none |  | runtime |  |
 | `SetClientNameById` | 7.0 | 7.0 |  | none |  | context-free |  |
 | `GetClientCertificate` | 6.0 | 6.0 |  | none |  | runtime |  |

@@ -73,9 +73,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has children, repeats another child's name ignoring case, has an empty name,
   or has an arity of 1, and a container or child name with a space, line
   break or any of `|@=,`, which Redis 7.2 and later refuse. See `examples/subcommands.rs`.
+- Key-blocking callbacks can write their reply directly (#207).
+  `Context::key_blocking_reply()` returns a `KeyBlockingReply` writer inside
+  the `on_ready` and `on_timeout` callbacks of `block_client_on_keys`, so a
+  large reply needs no `RedisValue` tree. `array`, `map` and `set` open an
+  aggregate; `bulk`, `string`, `integer` and `value` write one element. The
+  writer counts what the reply still owes, so the client still gets one
+  reply. The first write claims the reply, a write after a complete reply is
+  refused, and once anything is written the wait finishes and a returned value
+  is logged and dropped. If the callback returns or panics while an aggregate
+  still owes elements, the SDK writes each owed element as an error reply. A
+  callback that writes nothing keeps the old behavior. The error Redis itself
+  writes for `CLIENT UNBLOCK ... ERROR` of the client from inside its own
+  callback is not counted.
 
 ### Fixed
 
+- A key-blocking ready callback that unblocks its own client with a nested
+  `CLIENT UNBLOCK ... ERROR` no longer sends its value after Redis's error
+  reply and reports the client served, which made Redis free the native
+  waiter twice (#207). The SDK now checks that Redis still holds the client
+  blocked before serving it.
 - **Breaking:** callbacks that run while Redis is using a key's value can no
   longer change the keyspace (#205). In a `KeysCursor` callback, after which
   Redis closes the key it lent and reads its value, and in a callback Redis
