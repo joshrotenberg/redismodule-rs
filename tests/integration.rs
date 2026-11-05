@@ -8521,6 +8521,15 @@ fn test_native_type_callbacks_and_panic_guards() -> Result<()> {
         .arg(dump)
         .query::<()>(&mut con)?;
     assert_eq!(note(&mut con, "restored")?.as_deref(), Some("hello"));
+    // note.counts reports the loaded aux value as an integer.
+    let error = redis::cmd("note.aux")
+        .arg(i64::MAX as u64 + 1)
+        .query::<()>(&mut con)
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("aux value must be at most"),
+        "{error}"
+    );
     redis::cmd("note.aux").arg(42).query::<()>(&mut con)?;
     redis::cmd("DEBUG").arg("RELOAD").query::<()>(&mut con)?;
     assert_eq!(counts(&mut con)?[2], 42, "aux data loaded");

@@ -11,6 +11,18 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Unsigned integer arguments
+
+`RedisString::parse_unsigned_integer`, which `NextArg::next_u64` and
+`ArgCursor::next_u64` call, parsed with the signed parser and converted the
+result, so it refused 9223372036854775808 through 18446744073709551615 (#222).
+It now parses the string's bytes in Rust, with the grammar of Redis's signed
+`string2ll` and the whole `u64` range, on every compatibility floor. It does
+not use `RedisModule_StringToULongLong` (Redis 7.0+), which reads only up to
+the first NUL and, when the signed parser fails, falls back to `strtoull`,
+which accepts leading spaces and `+` and wraps some negative input. Negative
+integers keep their own error. Upstream has no issue or pull request for this.
+
 ## Incremental stream entries and native pointer borrows
 
 The existing stream iterator creates every field/value string in a

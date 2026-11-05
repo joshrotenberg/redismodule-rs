@@ -633,7 +633,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `FreeString` | 6.0 | 6.0 | required, available | safe | `RedisString::drop (Drop)`, `StrCallArgs::drop (Drop)` |  |  |
 | `StringPtrLen` | 6.0 | 6.0 | required | safe | `RedisString::as_cstr_ptr_and_len`, `RedisString::as_slice` and 2 more |  |  |
 | `StringToLongLong` | 6.0 | 6.0 | required | safe | `RedisString::parse_integer` |  |  |
-| `StringToULongLong` | 7.0 | 7.0 |  | none |  | context-free |  |
+| `StringToULongLong` | 7.0 | 7.0 |  | none |  | context-free; `RedisString::parse_unsigned_integer` parses in Rust instead |  |
 | `StringToDouble` | 6.0 | 6.0 | required | safe | `RedisString::parse_float` |  |  |
 | `StringAppendBuffer` | 6.0 | 6.0 | required | safe | `RedisString::append` |  |  |
 | `TrimStringAllocation` | 7.0 | 7.0 |  | none |  | context-free |  |
