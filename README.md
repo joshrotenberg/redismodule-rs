@@ -441,7 +441,7 @@ python3 .github/scripts/build-server.py redis-8.10.2 /tmp/sdk-server
 TEST_REDIS_SERVER_BIN=/tmp/sdk-server/redis-server cargo test
 ```
 
-CI keeps the fifteen server/floor matrix jobs and adds focused coverage:
+CI keeps the thirteen server/floor matrix jobs and adds focused coverage:
 
 - Redis 6.0.20 and 6.2.24 run the legacy transport, reply, blocking and timer
   subsets. The 6.2 leg uses the 6.2 API floor. `TEST_REDIS_SERVER_LEGACY_OPTIONS=1` omits startup options these older

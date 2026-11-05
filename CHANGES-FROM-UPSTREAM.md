@@ -566,9 +566,9 @@ Registration logs a warning only for defrag code the server cannot run: a
 `RedisModule_RegisterDefragCallbacks`. Upstream checks each API before it checks
 whether the module registered any such code, so every module logs "Skip register
 defrag function" on Redis 6.0 and "Skip register defrag callbacks" on Redis 6.2
-to 7.4, which have no `RedisModule_RegisterDefragCallbacks`. On Redis 6.0 it also returns after the
-first warning, so a module with start or end functions gets no warning about
-them. The #89 port of redis-event-stream-module, which has no defrag code,
+to 7.4, which have no `RedisModule_RegisterDefragCallbacks`. On Redis 6.0 it
+also returns after the first warning, so a module with start or end functions
+gets no warning about them. The #89 port of redis-event-stream-module, which has no defrag code,
 logged the callbacks warning on Redis 7.2.16 and Redis Stack 7.4.7. An
 integration test checks the server log for a module with no defrag code and one
 with all three kinds; before the change it failed on Redis 6.0.20 and 7.2.16. No

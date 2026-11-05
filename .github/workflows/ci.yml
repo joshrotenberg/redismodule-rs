@@ -76,7 +76,7 @@ jobs:
 
       - name: Check compile-fail error codes at each floor
         # One pinned-toolchain Linux Redis job for every API floor family.
-        if: matrix.os == 'ubuntu-latest' && matrix.server == 'redis' && (matrix.version == '7.2.16' || matrix.version == '7.4.11' || matrix.version == '8.10.2')
+        if: matrix.os == 'ubuntu-latest' && (matrix.version == '7.2.16' || matrix.version == '7.4.11' || matrix.version == '8.10.2')
         env:
           RUSTC_BOOTSTRAP: "1"
         run: cargo test --workspace --doc --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
@@ -90,7 +90,7 @@ jobs:
           cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},system-allocator-fallback --test system_allocator_fallback
 
       - name: Test the isolated parser example
-        if: matrix.floor == '6-0' && matrix.server == 'redis'
+        if: matrix.floor == '6-0'
         run: |
           cargo fmt --manifest-path examples/module-testing/Cargo.toml -- --check
           cargo fmt --manifest-path examples/module-testing/fuzz/Cargo.toml -- --check
@@ -98,7 +98,7 @@ jobs:
           cargo test --manifest-path examples/module-testing/Cargo.toml
 
       - name: Check multi-consumer compatibility floors
-        if: matrix.floor == '6-0' && matrix.server == 'redis'
+        if: matrix.floor == '6-0'
         run: |
           cargo fmt --manifest-path examples/compatibility-floors/Cargo.toml --all -- --check
           python3 examples/compatibility-floors/check.py

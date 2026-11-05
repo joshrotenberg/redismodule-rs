@@ -4472,8 +4472,9 @@ fn test_helper_version() -> Result<()> {
             .collect()
     };
     // The native API and INFO both report the server version.
-    assert_eq!(res2, parse("redis_version:")?);
-    assert_eq!(res, parse("redis_version:")?);
+    let expected = parse("redis_version:")?;
+    assert_eq!(res2, expected);
+    assert_eq!(res, expected);
 
     Ok(())
 }

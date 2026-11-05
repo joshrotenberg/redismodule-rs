@@ -16,7 +16,8 @@ fn ping(_: &Context, _: Vec<RedisString>) -> RedisResult {
 }
 
 // The regression fixture checks capability directly, by API presence rather
-// than by server version.
+// than by server version, as the SDK does when it registers ACL categories
+// (Redis 7.4+).
 fn custom_acl_supported(_: &Context, _: Vec<RedisString>) -> RedisResult {
     // SAFETY: Redis initialized this module's API table before invoking a command.
     let supported = unsafe { redis_module::raw::RedisModule_AddACLCategory }.is_some();

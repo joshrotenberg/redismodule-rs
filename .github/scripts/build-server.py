@@ -12,14 +12,11 @@ import sys
 import tempfile
 
 
-def verify(binary, kind, version, allocator):
+def verify(binary, version, allocator):
     output = subprocess.check_output([str(binary), "--version"], text=True).strip()
     print(output, flush=True)
-    if kind != "redis":
-        raise RuntimeError(f"Unsupported server {kind}")
-    product = "Redis"
-    if not re.search(rf"^{product} server v={re.escape(version)}(?:\s|$)", output):
-        raise RuntimeError(f"Expected {product} {version} from {binary}")
+    if not re.search(rf"^Redis server v={re.escape(version)}(?:\s|$)", output):
+        raise RuntimeError(f"Expected Redis {version} from {binary}")
     allocator_pattern = rf"(?:^|\s)malloc={re.escape(allocator)}(?:-\S+)?(?:\s|$)"
     if not re.search(allocator_pattern, output):
         raise RuntimeError(f"Expected {allocator} allocator from {binary}")
@@ -35,10 +32,12 @@ def main():
     manifest = json.loads((Path(__file__).resolve().parents[1] / "servers.json").read_text())
     release = manifest[server]
     kind, version = server.split("-", 1)
+    if kind != "redis":
+        raise RuntimeError(f"Unsupported server {server}")
     destination = Path(destination).resolve()
     binary = destination / f"{kind}-server"
     if binary.exists():
-        verify(binary, kind, version, allocator)
+        verify(binary, version, allocator)
         return
 
     destination.mkdir(parents=True, exist_ok=True)
@@ -64,9 +63,9 @@ def main():
                 print(log.read_text(), file=sys.stderr)
                 raise
         built = source / "src" / f"{kind}-server"
-        verify(built, kind, version, allocator)
+        verify(built, version, allocator)
         shutil.copy2(built, binary)
-    verify(binary, kind, version, allocator)
+    verify(binary, version, allocator)
 
 
 if __name__ == "__main__":
