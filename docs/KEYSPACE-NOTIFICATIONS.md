@@ -116,6 +116,11 @@ error, and the source write still succeeds and replicates without a stream
 entry. A job that only reads can open keys with `open_key`, which runs no
 command, or use data copied before it was queued.
 
+A client command ends the exemption too, so during a pause a job's `yield_now`
+processes events and serves no clients, whichever `YieldMode` it asks for:
+otherwise a replica's `REPLCONF ACK`, which Redis runs during a yield, would
+make Redis abort.
+
 ## Handle submission and write failures separately
 
 With a 7.2+ feature floor, `add_post_notification_job` returns `Status`. An older
@@ -176,9 +181,11 @@ cargo build --no-default-features --features min-redis-compatibility-version-7-2
 cargo test --no-default-features --features min-redis-compatibility-version-7-2 --test integration notification_
 ```
 
-The write pause tests, which attach a replica, check that a job's call after
-a transaction that pauses writes is refused and the server stays up, and that
-a job's calls run outside a pause:
+The write pause tests, which attach a replica, check that after a transaction
+that pauses writes a job's calls are refused, the example's append is counted
+as an error and the source write replicates, a job's yield serves no clients,
+and the server stays up; and that outside a pause a job's calls run and its
+yield serves clients:
 
 ```sh
 cargo test --no-default-features --features min-redis-compatibility-version-7-2 --test integration replication_pause::

@@ -482,44 +482,58 @@ fn test_replication_pause_refuses_write_commands_that_another_command_calls() ->
 #[cfg(feature = "redis-7-2-examples")]
 const JOB_PROBE_FAILED: &str = "job probe unload failed: ";
 
+#[cfg(feature = "redis-7-2-examples")]
+const JOB_CALL_REFUSED: &str =
+    "ERR post-notification jobs cannot call commands while Redis pauses replication";
+
 /// A post-notification job runs after `EXEC` and before Redis propagates the
 /// transaction. Any call from it, a read without the replicate flag too, ends
 /// the exemption that lets a transaction which paused writes itself replicate,
 /// and Redis then aborted when it propagated the transaction (#231). The SDK
-/// refuses every call from a job during a pause.
+/// refuses every call from a job during a pause, including the example's
+/// replicated `XADD`, which it counts as an error.
 #[test]
 #[cfg(feature = "redis-7-2-examples")]
 fn test_replication_pause_refuses_job_calls_after_the_transaction_that_pauses() -> Result<()> {
     let Some((mut primary, mut replica)) = primary_with_replica("keyspace_to_stream")? else {
         return Ok(());
     };
-    let ((), (), probe): ((), (), Vec<i64>) = redis::pipe()
+    let ((), (), (), probe): ((), (), (), Vec<i64>) = redis::pipe()
         .atomic()
         .cmd("CLIENT")
         .arg(&["PAUSE", "20000", "WRITE"])
         .cmd("SET")
         .arg(&["plain", "1"])
+        .cmd("SET")
+        .arg(&["watched:paused", "value"])
         .cmd("notify_stream.job_probe")
         .arg("unload")
         .query(&mut primary)?;
     assert_eq!(probe, [1, 0]);
     let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut primary)?;
     assert_eq!(counts, [1, 1], "the job ran once");
+    let stats: Vec<i64> = redis::cmd("notify_stream.stats").query(&mut primary)?;
+    assert_eq!(stats, [1, 0, 1, 0], "queued, written, errors, skipped");
     unpause(&mut primary)?;
     let log = primary.server_log()?;
-    assert!(
-        log.contains(&format!(
-            "{JOB_PROBE_FAILED}ERR post-notification jobs cannot call commands while Redis \
-             pauses replication"
-        )),
-        "server log: {log}"
-    );
+    for line in [
+        format!("{JOB_PROBE_FAILED}{JOB_CALL_REFUSED}"),
+        format!("notification stream append failed: {JOB_CALL_REFUSED}"),
+    ] {
+        assert!(log.contains(&line), "server log: {log}");
+    }
     // The refused call never reached the module's unload hook.
     assert!(
         !log.contains("pending or executing post-notification jobs"),
         "server log: {log}"
     );
     acknowledge(&mut primary, &replica)?;
+    for key in ["plain", "watched:paused"] {
+        assert!(
+            redis::cmd("EXISTS").arg(key).query::<bool>(&mut replica)?,
+            "{key}"
+        );
+    }
     assert_eq!(
         redis::cmd("GET")
             .arg("plain")
@@ -527,6 +541,12 @@ fn test_replication_pause_refuses_job_calls_after_the_transaction_that_pauses() 
             .as_deref(),
         Some("1")
     );
+    for con in [&mut primary, &mut replica] {
+        assert_eq!(
+            redis::cmd("XLEN").arg("watched:events").query::<i64>(con)?,
+            0
+        );
+    }
     Ok(())
 }
 
@@ -579,5 +599,111 @@ fn test_replication_pause_lets_jobs_call_outside_a_pause() -> Result<()> {
             .query::<i64>(&mut replica)?,
         1
     );
+    Ok(())
+}
+
+/// What a `PING` from another connection got while a job yielded.
+#[cfg(feature = "redis-7-2-examples")]
+#[derive(Debug, PartialEq)]
+enum PingDuringYield {
+    /// `-BUSY`: the yield served clients.
+    Busy,
+    /// `PONG` after waiting at least a second: the yield served no clients.
+    Waited,
+    /// Neither within the deadline.
+    Neither,
+}
+
+/// Runs `job`, which queues the probe's `yield` job, while another connection
+/// sends `PING` every 10 ms. The job yields with `YieldMode::Clients` for 2.5
+/// seconds, past `busy-reply-threshold`, which this sets to 100 ms.
+#[cfg(feature = "redis-7-2-examples")]
+fn ping_during_yield(
+    primary: &mut TestConnection,
+    job: impl FnOnce(&mut TestConnection) -> Result<()>,
+) -> Result<PingDuringYield> {
+    redis::cmd("CONFIG")
+        .arg(&["SET", "busy-reply-threshold", "100"])
+        .query::<()>(primary)?;
+    let mut pinger = primary.connection()?;
+    let pings = std::thread::spawn(move || -> Result<PingDuringYield> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            let sent = std::time::Instant::now();
+            match redis::cmd("PING").query::<String>(&mut pinger) {
+                Ok(_) if sent.elapsed() >= Duration::from_secs(1) => {
+                    return Ok(PingDuringYield::Waited);
+                }
+                Ok(_) => std::thread::sleep(Duration::from_millis(10)),
+                Err(error) if error.code() == Some("BUSY") => return Ok(PingDuringYield::Busy),
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(PingDuringYield::Neither)
+    });
+    job(primary)?;
+    pings.join().expect("the PING thread panicked")
+}
+
+/// A client command that Redis runs during a yield ends the exemption as a
+/// call does: a replica's `REPLCONF ACK`, which is `allow-busy`, made Redis
+/// abort when it propagated the transaction. During a pause the SDK yields a
+/// job with `YieldMode::Events`, which postpones client commands.
+#[test]
+#[cfg(feature = "redis-7-2-examples")]
+fn test_replication_pause_job_yields_serve_no_clients_after_the_transaction_that_pauses()
+-> Result<()> {
+    let Some((mut primary, mut replica)) = primary_with_replica("keyspace_to_stream")? else {
+        return Ok(());
+    };
+    let ping = ping_during_yield(&mut primary, |primary| {
+        let ((), (), probe): ((), (), Vec<i64>) = redis::pipe()
+            .atomic()
+            .cmd("CLIENT")
+            .arg(&["PAUSE", "20000", "WRITE"])
+            .cmd("SET")
+            .arg(&["plain", "1"])
+            .cmd("notify_stream.job_probe")
+            .arg("yield")
+            .query(primary)?;
+        assert_eq!(probe, [1, 0]);
+        Ok(())
+    })?;
+    assert_eq!(ping, PingDuringYield::Waited);
+    let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut primary)?;
+    assert_eq!(counts, [1, 1], "the job ran once");
+    unpause(&mut primary)?;
+    assert!(
+        !primary.server_log()?.contains("job probe yield failed"),
+        "the job yielded"
+    );
+    acknowledge(&mut primary, &replica)?;
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("plain")
+            .query::<Option<String>>(&mut replica)?
+            .as_deref(),
+        Some("1")
+    );
+    Ok(())
+}
+
+/// Outside a pause a job's yield serves clients as asked.
+#[test]
+#[cfg(feature = "redis-7-2-examples")]
+fn test_replication_pause_lets_job_yields_serve_clients_outside_a_pause() -> Result<()> {
+    let Some((mut primary, _replica)) = primary_with_replica("keyspace_to_stream")? else {
+        return Ok(());
+    };
+    let ping = ping_during_yield(&mut primary, |primary| {
+        let probe: Vec<i64> = redis::cmd("notify_stream.job_probe")
+            .arg("yield")
+            .query(primary)?;
+        assert_eq!(probe, [1, 0]);
+        Ok(())
+    })?;
+    assert_eq!(ping, PingDuringYield::Busy);
+    let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut primary)?;
+    assert_eq!(counts, [1, 1], "the job ran once");
     Ok(())
 }

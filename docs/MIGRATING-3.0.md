@@ -1090,6 +1090,9 @@ writes itself made Redis 7.2 and later abort when they propagated the
 transaction, and the SDK cannot tell that job from others. A job that read
 data through a call during a pause gets the error now; read keys with
 `open_key`, which runs no command, or copy the data before queuing the job.
+During a pause a job's `yield_now` processes events and serves no clients,
+even with `YieldMode::Clients`: a client command run during the yield, such
+as a replica's `REPLCONF ACK`, would make Redis abort the same way.
 
 ### Missing optional APIs on older Redis 6.0 servers
 

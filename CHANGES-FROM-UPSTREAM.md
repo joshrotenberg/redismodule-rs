@@ -68,8 +68,10 @@ Upstream's `call` and `call_ext` run the command. While
 `RedisModule_AvoidReplicaTraffic()` reports a pause, the SDK's calls from a
 post-notification job now return an error without running the command. The
 SDK cannot tell that transaction's jobs from others, so every job call is
-refused during a pause, reads included. Upstream has no issue or pull request
-for this.
+refused during a pause, reads included. A client command run during a yield
+ends the exemption too, such as a replica's `REPLCONF ACK`, so during a pause
+a job's `yield_now` processes events and serves no clients. Upstream has no
+issue or pull request for this.
 
 ## Unsigned integer arguments
 

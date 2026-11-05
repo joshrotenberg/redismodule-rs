@@ -1941,11 +1941,22 @@ impl EventContext {
     /// clients get under [`YieldMode::Clients`]. CR, LF and NUL in it are
     /// replaced with spaces.
     ///
+    /// While Redis pauses writes, a post-notification job's yield uses
+    /// [`YieldMode::Events`] whatever `mode` asks: it processes events and
+    /// serves no clients. A client command run during the yield, such as a
+    /// replica's `REPLCONF ACK`, would end the exemption that lets a
+    /// transaction which paused writes itself replicate, and Redis would
+    /// abort when it propagates the transaction; see
+    /// [`Self::add_post_notification_job`].
+    ///
     /// Replication the caller queued before the yield propagates only after
-    /// the caller returns. If a write pause starts during the yield, for
-    /// example for a cluster failover, the SDK can no longer refuse that
-    /// replication and Redis aborts when it propagates it. This is a known
-    /// limit; see [`RuntimeContext::avoid_replication_traffic`].
+    /// the caller returns. If a write pause starts during the yield, the SDK
+    /// can no longer refuse that replication and Redis aborts when it
+    /// propagates it: a manual cluster failover's `MFSTART` arrives on the
+    /// cluster bus, and `SHUTDOWN`, which pauses writes while it waits for
+    /// replicas, is `allow-busy` and runs during a [`YieldMode::Clients`]
+    /// yield. This is a known limit; see
+    /// [`RuntimeContext::avoid_replication_traffic`].
     ///
     /// ```
     /// use redis_module::{Context, EventContext, RedisError, YieldMode};
@@ -2005,6 +2016,15 @@ impl EventContext {
             ));
         }
         let yield_api = unsafe { crate::__available_api!(RedisModule_Yield) };
+        // A client command that runs during the yield, such as a replica's
+        // allow-busy REPLCONF ACK, ends the exemption of a transaction that
+        // paused writes itself, as a call does (#231). A job's yield serves
+        // no clients during a pause.
+        let mode = if post_notification::job_running() && self.avoid_replication_traffic() {
+            YieldMode::Events
+        } else {
+            mode
+        };
         let flags = match mode {
             YieldMode::Events => raw::REDISMODULE_YIELD_FLAG_NONE,
             YieldMode::Clients => raw::REDISMODULE_YIELD_FLAG_CLIENTS,
@@ -2026,7 +2046,9 @@ impl EventContext {
     /// the call's unblock handler is pending. Start blocking calls from
     /// commands or events after loading finishes. With a replicate flag it
     /// also fails, without running the command, while Redis pauses
-    /// replication, as [`RuntimeContext::call_ext`] does.
+    /// replication, as [`RuntimeContext::call_ext`] does. From a
+    /// post-notification job every call fails then, with or without the flag;
+    /// see [`Self::add_post_notification_job`].
     #[cfg(any(
         feature = "min-redis-compatibility-version-8-0",
         feature = "min-redis-compatibility-version-7-4",
@@ -2099,7 +2121,9 @@ impl EventContext {
     /// replicate them, so Redis would abort. The SDK cannot tell that job from
     /// others and refuses them all. Read keys with
     /// [`RuntimeContext::open_key`], which runs no command, or copy the data
-    /// before queuing the job.
+    /// before queuing the job. For the same reason a job's
+    /// [`Self::yield_now`] processes events and serves no clients during a
+    /// pause.
     ///
     /// See `docs/KEYSPACE-NOTIFICATIONS.md` in the dependency source revision
     /// pinned by `Cargo.lock` for replication, role/loading gates, database
@@ -2132,7 +2156,9 @@ impl EventContext {
     /// a replicate flag too: a command run from a job after a transaction that
     /// paused writes itself would make Redis abort when it propagates the
     /// transaction. Read keys with [`RuntimeContext::open_key`], which runs no
-    /// command, or copy the data before queuing the job.
+    /// command, or copy the data before queuing the job. For the same reason a
+    /// job's [`Self::yield_now`] processes events and serves no clients during
+    /// a pause.
     ///
     /// See `docs/KEYSPACE-NOTIFICATIONS.md` in the dependency source revision
     /// pinned by `Cargo.lock`; the source README links the matching guide.

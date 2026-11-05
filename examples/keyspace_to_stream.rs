@@ -2,9 +2,10 @@
 //! See docs/KEYSPACE-NOTIFICATIONS.md for the lifecycle and failure model.
 use redis_module::{
     CallOptionsBuilder, CallResult, Context, ContextFlags, EventContext, NotifyEvent, RedisError,
-    RedisResult, RedisString, RegistrationContext, Status, redis_command, redis_module,
+    RedisResult, RedisString, RegistrationContext, Status, YieldMode, redis_command, redis_module,
 };
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::time::{Duration, Instant};
 
 const PREFIX: &[u8] = b"watched:";
 const STREAM: &[u8] = b"watched:events";
@@ -161,6 +162,7 @@ fn submit_probe(ctx: &EventContext, mode: &str) -> Vec<i64> {
     let panic = mode == "panic";
     let cancel = mode == "cancel";
     let unload = mode == "unload";
+    let yield_clients = mode == "yield";
     let status = ctx.add_post_notification_job(move |ctx| {
         assert_eq!(probe.0, [42; 8]);
         if cancel {
@@ -182,6 +184,18 @@ fn submit_probe(ctx: &EventContext, mode: &str) -> Vec<i64> {
                 "job probe unload failed: {}",
                 String::from_utf8_lossy(error.as_bytes())
             ));
+        }
+        if yield_clients {
+            // Longer than the once-a-second replica acknowledgement. The SDK
+            // serves no clients here while Redis pauses writes.
+            let until = Instant::now() + Duration::from_millis(2500);
+            while Instant::now() < until {
+                if let Err(error) = ctx.yield_now(YieldMode::Clients, None) {
+                    ctx.log_warning(&format!("job probe yield failed: {error}"));
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
         drop(probe);
     });
