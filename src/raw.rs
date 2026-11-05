@@ -43,6 +43,26 @@ bitflags! {
 
 bitflags! {
     pub struct ModuleOptions: c_int {
+        /// Lets the module's native types handle read errors during an RDB
+        /// load. Set it in a module that registers native types.
+        ///
+        /// Without it, a read that runs out of data, as in a truncated RDB
+        /// file, aborts Redis inside the read, before
+        /// [`RdbReader`](crate::io::RdbReader) can return an error. The abort
+        /// message names the key, even with `hide-user-data-from-log yes`.
+        /// With it, the read returns, the `RdbReader` method returns an error,
+        /// and Redis fails the load instead: at startup it exits with status
+        /// 1. Redis also skips diskless load on a replica while a loaded
+        /// module registers a data type without this option.
+        ///
+        /// It covers every type the module registers, in `rdb_load` and
+        /// `aux_load`. `RdbReader` checks for the error after each read; a raw
+        /// read through [`RdbReader::as_ptr`](crate::io::RdbReader::as_ptr)
+        /// must call `RedisModule_IsIOError`, because with this option a
+        /// failed read returns 0 or NULL.
+        ///
+        /// See `docs/NATIVE-TYPES.md` in the dependency source revision pinned
+        /// by `Cargo.lock` for the reproduction.
         const HANDLE_IO_ERRORS = REDISMODULE_OPTIONS_HANDLE_IO_ERRORS as c_int;
         const NO_IMPLICIT_SIGNAL_MODIFIED = REDISMODULE_OPTION_NO_IMPLICIT_SIGNAL_MODIFIED as c_int;
         const HANDLE_REPL_ASYNC_LOAD = REDISMODULE_OPTIONS_HANDLE_REPL_ASYNC_LOAD as c_int;

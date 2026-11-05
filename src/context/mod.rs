@@ -1228,6 +1228,10 @@ impl RuntimeContext {
     /// 6.2 propagates `EXEC` once the transaction changed data. The SDK cannot
     /// tell that the called command writes, so this is a known limit; flag
     /// such a command `write` instead.
+    ///
+    /// In cluster mode on Redis 7.4 and later, during a command that declares
+    /// keys, the called command's keys must hash to the declared keys' slot;
+    /// see [`crate::cluster`].
     pub fn call<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> RedisResult {
         self.call_internal::<_, CallResult>(command, raw::FMT, args)
             .map_or_else(|e| Err(e.into()), |v| Ok((&v).into()))
@@ -1243,8 +1247,8 @@ impl RuntimeContext {
     /// the same transaction exception as [`Self::replicate`]; see
     /// [`Self::avoid_replication_traffic`]. From a post-notification job every
     /// call returns an error then, with or without the flag; see
-    /// [`EventContext::add_post_notification_job`]. The Redis 6.2 limit that
-    /// [`Self::call`] describes applies here too.
+    /// [`EventContext::add_post_notification_job`]. The Redis 6.2 limit and
+    /// the cluster slot rule that [`Self::call`] describes apply here too.
     ///
     /// The reply borrows this context. Redis 6.0 to 7.0 store the context in
     /// every reply; later releases store it in error replies created before
@@ -1318,6 +1322,10 @@ impl RuntimeContext {
 
     /// Opens a read-only key within this runtime context's scope.
     ///
+    /// In cluster mode on Redis 7.4 and later, during a command that declares
+    /// keys, the key must hash to the declared keys' slot; see
+    /// [`crate::cluster`].
+    ///
     /// Close it before leaving a callback or unlocking a worker. Copy any data
     /// needed later into Rust storage while the context is still locked:
     ///
@@ -1379,6 +1387,10 @@ impl RuntimeContext {
     }
 
     /// Opens a writable key, borrowing this context until the key is closed.
+    ///
+    /// In cluster mode on Redis 7.4 and later, during a command that declares
+    /// keys, the key must hash to the declared keys' slot; see
+    /// [`crate::cluster`].
     ///
     /// ```compile_fail,E0597
     /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext};
