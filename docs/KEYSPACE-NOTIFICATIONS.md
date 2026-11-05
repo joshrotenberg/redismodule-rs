@@ -119,7 +119,9 @@ command, or use data copied before it was queued.
 A client command ends the exemption too, so during a pause a job's `yield_now`
 processes events and serves no clients, whichever `YieldMode` it asks for:
 otherwise a replica's `REPLCONF ACK`, which Redis runs during a yield, would
-make Redis abort.
+make Redis abort. Other clients then wait for the job to return instead of
+getting `-BUSY`, and `allow-busy` commands, the module's own included, wait
+too, so such a job must not wait for client input to finish.
 
 ## Handle submission and write failures separately
 

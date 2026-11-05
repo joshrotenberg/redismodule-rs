@@ -1947,15 +1947,17 @@ impl EventContext {
     /// replica's `REPLCONF ACK`, would end the exemption that lets a
     /// transaction which paused writes itself replicate, and Redis would
     /// abort when it propagates the transaction; see
-    /// [`Self::add_post_notification_job`].
+    /// [`Self::add_post_notification_job`]. Other clients then wait for the
+    /// job to return instead of getting `-BUSY`, and `allow-busy` commands,
+    /// the module's own included, do not run until it does, so such a job
+    /// must not wait for client input to finish.
     ///
     /// Replication the caller queued before the yield propagates only after
     /// the caller returns. If a write pause starts during the yield, the SDK
     /// can no longer refuse that replication and Redis aborts when it
     /// propagates it: a manual cluster failover's `MFSTART` arrives on the
-    /// cluster bus, and `SHUTDOWN`, which pauses writes while it waits for
-    /// replicas, is `allow-busy` and runs during a [`YieldMode::Clients`]
-    /// yield. This is a known limit; see
+    /// cluster bus, and `SHUTDOWN NOSAVE`, which pauses writes while it waits
+    /// for lagging replicas, runs during a [`YieldMode::Clients`] yield. This is a known limit; see
     /// [`RuntimeContext::avoid_replication_traffic`].
     ///
     /// ```

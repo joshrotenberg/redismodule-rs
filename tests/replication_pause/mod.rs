@@ -626,6 +626,8 @@ fn ping_during_yield(
         .arg(&["SET", "busy-reply-threshold", "100"])
         .query::<()>(primary)?;
     let mut pinger = primary.connection()?;
+    // A PING postponed forever then fails the test instead of hanging it.
+    pinger.set_read_timeout(Some(Duration::from_secs(10)))?;
     let pings = std::thread::spawn(move || -> Result<PingDuringYield> {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
