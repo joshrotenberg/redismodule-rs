@@ -52,6 +52,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `replicate` example replicates from each of these paths, and the `lists`
   example reports a refused replication.
 
+- A call from a post-notification job no longer aborts the server after a
+  transaction that pauses writes itself (#231). Redis lets a transaction such
+  as `MULTI`, `CLIENT PAUSE ... WRITE`, `SET`, `EXEC` replicate its own
+  writes, and runs its jobs after `EXEC` and before it propagates the
+  transaction. Any command run outside `EXEC` ends that exemption, so a job's
+  `RedisModule_Call`, even a read without the replicate flag, made Redis 7.2
+  and later abort at the `propagateNow` assertion. While
+  `RedisModule_AvoidReplicaTraffic()` reports a pause, `call`, `call_ext`,
+  `call_blocking` and the SDK helpers built on them return
+  `ERR post-notification jobs cannot call commands while Redis pauses replication`
+  from a job, without running the command. The SDK cannot tell that
+  transaction's jobs from other jobs, so it refuses every job call during a
+  pause, reads included; a replicated call from a job, already refused for
+  #220, now gets this error. Jobs can still read keys with `open_key`. A
+  client command that Redis runs during a yield, such as a replica's
+  `allow-busy` `REPLCONF ACK`, ends the exemption too, so during a pause
+  `yield_now` from a job processes events and serves no clients, whichever
+  `YieldMode` it asks for. The `keyspace_to_stream` example's job probe logs
+  its call's error and has a mode that yields. The documentation of `call`
+  and `call_ext` notes that on Redis 6.2 a read-only command whose call writes
+  inside `MULTI` during an earlier write pause still aborts the server, and
+  that of `yield_now` that replication queued before a yield cannot be
+  refused once a pause starts during it.
+
 - `RedisString::parse_unsigned_integer`, and with it `NextArg::next_u64` and
   `ArgCursor::next_u64`, accept the whole `u64` range (#222). They parsed with
   the signed parser, so 9223372036854775808 through 18446744073709551615 got
