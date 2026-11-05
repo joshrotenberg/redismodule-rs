@@ -51,6 +51,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replicates from each of these paths, and the `lists` example reports a
   refused replication.
 
+- `RedisString::parse_unsigned_integer`, and with it `NextArg::next_u64` and
+  `ArgCursor::next_u64`, accept the whole `u64` range (#222). They parsed with
+  the signed parser, so 9223372036854775808 through 18446744073709551615 got
+  `ERR Couldn't parse as integer`. The SDK now parses the string's bytes in
+  Rust on every compatibility floor, with the signed parser's grammar: `0`, or
+  a non-zero digit followed by digits, with no sign, spaces, `+`, leading
+  zeros or NUL. Negative integers still get
+  `ERR Couldn't parse negative number as unsigned integer`, and other input
+  `ERR Couldn't parse as integer`. The `args` example replies the parsed values
+  as big numbers instead of casting them to `i64`, and the `native_type`
+  example's `note.aux` refuses values above `i64::MAX`, which `note.counts`
+  cannot report as an integer.
+
 ## [3.0.0-alpha.2](https://github.com/joshrotenberg/redismodule-rs/compare/v3.0.0-alpha.1...v3.0.0-alpha.2) - 2026-11-04
 
 ### Added
@@ -472,7 +485,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   twice as many array elements as it sent, so the client waited for elements
   that never came. It now announces as many as it sends.
 - Loading a module no longer logs "Skip register defrag function" on Redis
-  6.0, or "Skip register defrag callbacks" on Redis 6.2 to 7.4 and Valkey,
+  6.0, or "Skip register defrag callbacks" on Redis 6.2 to 7.4,
   when the module has no defrag code of that kind (#116). The warning now appears only
   for `#[defrag_function]`, `#[defrag_start_function]` or
   `#[defrag_end_function]` code the server cannot run. On Redis 6.0, a module
@@ -562,12 +575,10 @@ Entries marked **Breaking** need a change in modules;
   versions, with all 16,384 names pinned by a compatibility fixture. A prefix
   without `{` and any suffix preserve its slot.
 
-- CI covers pinned Redis 7.2, 7.4 and 8.0 through 8.10 releases, plus Valkey
-  8.1 and 9.1 at the default API floor. Checksum-verified server builds are
-  cached, selected explicitly by path, and validated on cache hits. Failed
-  matrix jobs retain server build and integration logs for seven days.
-  Version tests distinguish Valkey product versions from Redis compatibility
-  versions without weakening Redis API-availability checks.
+- CI covers pinned Redis 7.2, 7.4 and 8.0 through 8.10 releases.
+  Checksum-verified server builds are cached, selected explicitly by path, and
+  validated on cache hits. Failed matrix jobs retain server build and
+  integration logs for seven days.
 
 - A [notification-write guide](docs/KEYSPACE-NOTIFICATIONS.md) and
   `keyspace_to_stream` example covering owned callback data, deferred writes,

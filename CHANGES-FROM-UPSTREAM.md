@@ -56,6 +56,18 @@ Registration records which command callbacks carry those flags. Read-only
 commands and commands that another command calls are refused in a transaction
 too. Upstream has no issue or pull request for this.
 
+## Unsigned integer arguments
+
+`RedisString::parse_unsigned_integer`, which `NextArg::next_u64` and
+`ArgCursor::next_u64` call, parsed with the signed parser and converted the
+result, so it refused 9223372036854775808 through 18446744073709551615 (#222).
+It now parses the string's bytes in Rust, with the grammar of Redis's signed
+`string2ll` and the whole `u64` range, on every compatibility floor. It does
+not use `RedisModule_StringToULongLong` (Redis 7.0+), which reads only up to
+the first NUL and, when the signed parser fails, falls back to `strtoull`,
+which accepts leading spaces and `+` and wraps some negative input. Negative
+integers keep their own error. Upstream has no issue or pull request for this.
+
 ## Incremental stream entries and native pointer borrows
 
 The existing stream iterator creates every field/value string in a
@@ -611,10 +623,9 @@ Registration logs a warning only for defrag code the server cannot run: a
 `RedisModule_RegisterDefragCallbacks`. Upstream checks each API before it checks
 whether the module registered any such code, so every module logs "Skip register
 defrag function" on Redis 6.0 and "Skip register defrag callbacks" on Redis 6.2
-to 7.4 and on Valkey 8.1 and 9.1, which have no
-`RedisModule_RegisterDefragCallbacks`. On Redis 6.0 it also returns after the
-first warning, so a module with start or end functions gets no warning about
-them. The #89 port of redis-event-stream-module, which has no defrag code,
+to 7.4, which have no `RedisModule_RegisterDefragCallbacks`. On Redis 6.0 it
+also returns after the first warning, so a module with start or end functions
+gets no warning about them. The #89 port of redis-event-stream-module, which has no defrag code,
 logged the callbacks warning on Redis 7.2.16 and Redis Stack 7.4.7. An
 integration test checks the server log for a module with no defrag code and one
 with all three kinds; before the change it failed on Redis 6.0.20 and 7.2.16. No
@@ -1207,7 +1218,7 @@ These compile unchanged but behave differently:
   for its existing metadata grammar.
 
 - Edition 2024, with `rust-version = "1.87"` declared and tested in CI ([cfebad5], [2daa0ea]).
-- CI pins checksum-verified Redis 7.2, 7.4 and 8.0 through 8.10 releases and Valkey 8.1/9.1, caches server binaries per platform, concrete runner image and build inputs, validates the selected product/version, and uploads integration directories and server build logs on failure. Valkey uses the default API floor.
+- CI pins checksum-verified Redis 7.2, 7.4 and 8.0 through 8.10 releases, caches server binaries per platform, concrete runner image and build inputs, validates the selected version, and uploads integration directories and server build logs on failure.
 - CI runs on pushes to master and builds every API floor; the initial server matrix covered Redis 7.2, 7.4 and 8.0 ([e7d39ce], [2daa0ea]). The test matrix builds the default way, with the committed bindings, on the toolchain `rust-toolchain.toml` pins, and one job checks the committed bindings against bindgen ([848824a]). A job runs cargo-deny, with `Unicode-3.0` allowed ([1353e52]).
 - The Docker build, which ran the `Makefile` and `sbin/` that [upstream PR 389][p389] deleted, and the `deps/readies` submodule are removed ([9b0f605]). The release workflows run only in the upstream repository ([cb78fec]). Dependabot no longer ignores bindgen 0.56 and also updates the workflow actions ([686f84c]). The build and test scripts use `--workspace` ([9e5ff10]). The crates' `repository` field names this repository ([6d21760]).
 - The migration guide shows the `system-allocator-fallback` dev-dependency in the git form ([8ddccf1]), and the README says that README.upstream.md is upstream's README unchanged ([e4c5d1c]). Notes and tests corrected after a review ([ee02544]).
