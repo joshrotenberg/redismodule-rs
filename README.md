@@ -58,11 +58,11 @@ pre-release tag:
 crate-type = ["cdylib"]
 
 [dependencies]
-redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1" }
+redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.2" }
 # Only for the attribute and derive macros: #[command], the server event
 # handler, INFO and defrag attributes, and #[derive(RedisValue)] and
 # #[derive(InfoSection)].
-redis-module-macros = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1" }
+redis-module-macros = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.2" }
 ```
 
 The tag is a pre-release; the crates inside it are version `3.0.0`. To build
