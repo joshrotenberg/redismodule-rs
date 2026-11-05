@@ -25,6 +25,8 @@ execution and capture cleanup, even when a job is cancelled or panics. Drain
 that work before requesting unload; see
 [Writing from keyspace notifications](KEYSPACE-NOTIFICATIONS.md).
 Finish or cancel that work through the module's normal controls first.
+The SDK also refuses unload while an ACL rule names one of the module's
+commands; see [ACL rules and unload](#acl-rules-and-unload).
 An unload hook may also refuse by returning `Status::Err`.
 See [MODULE UNLOAD](https://redis.io/docs/latest/commands/module-unload/) and
 the [Redis 8.2 unload implementation](https://github.com/redis/redis/blob/8.2/src/module.c#L11843-L11910).
@@ -43,6 +45,17 @@ clear this blocker. Let pending jobs run while the module is active, then retry
 `MODULE UNLOAD`. New jobs are refused during module loading or unloading.
 This applies to the SDK submission path; raw submissions must provide their
 own callback/lifecycle guarantees.
+
+## ACL rules and unload
+
+Redis 7.2 and later stop the server when a module unloads while an ACL rule
+names one of its commands, and earlier versions stop it at the next
+`ACL LIST`. The generated unload hook therefore reads `ACL LIST` first and
+refuses while any user's rule, or a rule in one of the user's selectors, names
+a command or subcommand the module registered: `+cmd`, `-cmd`, `+cmd|sub` or
+`-cmd|sub`. The server log names the user and the rule. Remove those rules and
+retry the unload, then add them again after the replacement loads. Rules on
+ACL categories, including categories the module adds, do not block the unload.
 
 ## SDK timers and unload
 

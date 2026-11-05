@@ -11,6 +11,26 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Unload while ACL rules name module commands
+
+`MODULE UNLOAD` stopped the server when an ACL rule named one of the module's
+commands (#221). From Redis 7.2, `moduleUnload` removes the commands and then
+`ACLRecomputeCommandBitsFromCommandRulesAllUsers` reapplies each selector's
+stored rules, asserting that `ACLSetSelector` accepts each one; a `+cmd`,
+`-cmd`, `+cmd|sub`, `-cmd|sub` or `+cmd|arg` rule whose command is gone fails
+the lookup, at the root or in a selector. Before 7.2 the unload keeps the
+user's command bit, which no remaining command describes, and the next
+`ACL LIST` panics with "No bitmap match". The generated unload hook now runs
+`ACL LIST` before the other unload checks and refuses while a rule names a top
+level command the SDK registered in this load (subcommand rules name their
+container), matching names ASCII case-insensitively, and logs the user and
+rule. An unreadable `ACL LIST` also refuses. Category rules are not checked:
+categories a module adds stay registered after it unloads. Native regressions
+refuse the unload for each rule form on the `hello` and `subcommands`
+examples, keep the commands working, and unload and reload once the rules are
+deleted; a `+@acl` rule does not hold the `acl` example back. Upstream's unload
+hook has the same gap; no upstream issue or pull request reports it.
+
 ## Incremental stream entries and native pointer borrows
 
 The existing stream iterator creates every field/value string in a

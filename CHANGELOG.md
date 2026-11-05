@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `MODULE UNLOAD` no longer stops the server when an ACL rule names one of the
+  module's commands (#221). From Redis 7.2 the unload reapplies every user's
+  command rules, asserts that each one still applies, and aborts at
+  `acl.c` `'res == C_OK'` for a rule naming a removed command; before 7.2 the
+  unload succeeds and the next `ACL LIST` stops the server. The unload hook of
+  `redis_module!` now reads `ACL LIST` before anything else and refuses the
+  unload, logging the user and rule, while a rule names a command the SDK
+  registered for the module: `+cmd`, `-cmd`, `+cmd|sub` or `-cmd|sub`, in any
+  case, at the top level or in a selector. First-argument rules such as
+  `+cmd|arg` are refused too, although Redis before 7.2 does not fail on them.
+  Rules on ACL categories, including categories the module added, do not
+  block the unload. When `ACL LIST` cannot be read, for example because `ACL`
+  is renamed, the unload is refused. Commands registered with the native API
+  directly are not checked.
+
 ## [3.0.0-alpha.2](https://github.com/joshrotenberg/redismodule-rs/compare/v3.0.0-alpha.1...v3.0.0-alpha.2) - 2026-11-04
 
 ### Added

@@ -221,6 +221,18 @@ jobs:
             cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact
           done
 
+      - name: Test unload refusal for ACL rules
+        # Before 7.2 the unload goes ahead and the next ACL LIST stops the
+        # server; the unload hook reads the rules through RM_Call.
+        env:
+          TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
+        run: |
+          cargo build --example hello --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
+          test_name=unload_acl_rules::test_unload_is_refused_while_an_acl_rule_names_a_module_command
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-unload-acl-tests.txt"
+          grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-unload-acl-tests.txt"
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact
+
       - name: Upload failure logs
         if: failure()
         uses: actions/upload-artifact@v4
@@ -281,6 +293,15 @@ jobs:
           test_name=test_failed_load_leaves_no_event_subscriptions
           cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/failed-load-tests.txt"
           grep -Fx -- "$test_name: test" "$RUNNER_TEMP/failed-load-tests.txt"
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact
+
+      - name: Test unload refusal for ACL rules
+        # Redis 7.0 also leaves an unloaded command's ACL bits behind for the
+        # next ACL LIST, and has selectors.
+        run: |
+          test_name=unload_acl_rules::test_unload_is_refused_while_an_acl_rule_names_a_module_command
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/unload-acl-tests.txt"
+          grep -Fx -- "$test_name: test" "$RUNNER_TEMP/unload-acl-tests.txt"
           cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact
 
       - name: Test configuration behavior at the native API floor
