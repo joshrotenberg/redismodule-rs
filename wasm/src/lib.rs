@@ -120,6 +120,7 @@ fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             Loaded {
                 name,
                 replace,
+                blocked: false,
                 result,
             },
         );
@@ -135,6 +136,7 @@ fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         blocked.unblock(Loaded {
             name,
             replace,
+            blocked: true,
             result,
         });
     }) {
@@ -149,16 +151,44 @@ fn wasm_load(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 struct Loaded {
     name: String,
     replace: bool,
+    /// Whether the load finishes in a blocked client's reply callback.
+    blocked: bool,
     result: anyhow::Result<host::Compiled>,
+}
+
+/// Refuses to finish a load or restore from a blocked client while Redis pauses
+/// replication. The pause can start while the component compiles, and the SDK
+/// then refuses to replicate the finished change, which would stay local. The
+/// inline path runs as the command itself, where the SDK lets a write command
+/// replicate inside a transaction that started the pause.
+fn refuse_paused_finish(ctx: &Context, blocked: bool, command: &str) -> Result<(), RedisError> {
+    if blocked && ctx.avoid_replication_traffic() {
+        return Err(RedisError::String(format!(
+            "ERR {command} failed: Redis paused replication while the component compiled; retry after the pause"
+        )));
+    }
+    Ok(())
+}
+
+/// Replicates the running command verbatim. The SDK refuses while Redis pauses
+/// replication, except for a write command in a transaction that started the
+/// pause; a refused change stays on this server, and the log says so.
+fn replicate(ctx: &Context, command: &str) {
+    if ctx.replicate_verbatim() == Status::Err {
+        ctx.log_warning(&format!(
+            "{command} was applied here but not replicated: Redis paused replication"
+        ));
+    }
 }
 
 /// Adds a compiled library and replies with its functions, on the main thread.
 fn finish_load(ctx: &Context, loaded: Loaded) -> RedisResult {
     let compiled = loaded.result.map_err(|e| error("WASM.LOAD failed", &e))?;
+    refuse_paused_finish(ctx, loaded.blocked, "WASM.LOAD")?;
     let functions = with_host(|host| host.add(ctx, &loaded.name, compiled, loaded.replace))?
         .map_err(|e| error("WASM.LOAD failed", &e))?;
     // A blocked client keeps its arguments until it is unblocked, after this.
-    ctx.replicate_verbatim();
+    replicate(ctx, "WASM.LOAD");
     Ok(RedisValue::Array(
         functions
             .into_iter()
@@ -355,7 +385,7 @@ fn wasm_delete(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let name = args.next_str()?;
     args.done()?;
     if with_host(|host| host.remove(name))? {
-        ctx.replicate_verbatim();
+        replicate(ctx, "WASM.DELETE");
         Ok(RedisValue::SimpleStringStatic("OK"))
     } else {
         Err(RedisError::String(format!(
@@ -427,6 +457,7 @@ fn wasm_restore(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             ctx,
             Restoring {
                 policy,
+                blocked: false,
                 result: compile(),
             },
         );
@@ -434,6 +465,7 @@ fn wasm_restore(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     if let Err(error) = supervisor.spawn(move || {
         blocked.unblock(Restoring {
             policy,
+            blocked: true,
             result: compile(),
         });
     }) {
@@ -445,6 +477,8 @@ fn wasm_restore(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 /// A `WASM.RESTORE` whose components have compiled, or failed to.
 struct Restoring {
     policy: host::Policy,
+    /// Whether the restore finishes in a blocked client's reply callback.
+    blocked: bool,
     result: anyhow::Result<Vec<(String, host::Compiled)>>,
 }
 
@@ -454,6 +488,7 @@ fn finish_restore(ctx: &Context, restoring: Restoring) -> RedisResult {
     let compiled = restoring
         .result
         .map_err(|e| error("WASM.RESTORE failed", &e))?;
+    refuse_paused_finish(ctx, restoring.blocked, "WASM.RESTORE")?;
     with_host(|host| -> anyhow::Result<()> {
         let staged = compiled
             .into_iter()
@@ -465,7 +500,7 @@ fn finish_restore(ctx: &Context, restoring: Restoring) -> RedisResult {
         host.restore_all(staged, restoring.policy)
     })?
     .map_err(|e| error("WASM.RESTORE failed", &e))?;
-    ctx.replicate_verbatim();
+    replicate(ctx, "WASM.RESTORE");
     Ok(RedisValue::SimpleStringStatic("OK"))
 }
 
@@ -508,7 +543,7 @@ fn wasm_stats(_ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 fn wasm_flush(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ArgCursor::new(&args[1..]).done()?;
     with_host(Host::clear)?;
-    ctx.replicate_verbatim();
+    replicate(ctx, "WASM.FLUSH");
     Ok(RedisValue::SimpleStringStatic("OK"))
 }
 
