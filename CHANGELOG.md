@@ -61,6 +61,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Breaking:** callbacks that run while Redis is using a key's value can no
+  longer change the keyspace (#205). In a `KeysCursor` callback, after which
+  Redis closes the key it lent and reads its value, and in a callback Redis
+  raises during an SDK key write, such as a `new` keyspace subscriber running
+  before the native key holds the value it creates, calls, `yield_now` and
+  notifications return `ERR`, key writes return `ERR` or `Status::Err`, and
+  pops panic. A `KeysCursor` callback can still read the lent key's string
+  value. Keys opened while a keyspace scan runs, or while a key scan scans a
+  key opened with `ACCESS_EXPIRED`, open with `NOEXPIRE` (Redis 7.2+), so an
+  open does not delete an expired key Redis is using; they close when the scan
+  ends and re-open with their own flags.
+
 - Key handles stay valid when something else changes their key (#197). An
   open native key caches the value Redis looked up, and a call, `yield_now`,
   a keyspace notification or scan, or string DMA, a write, delete, pop or trim

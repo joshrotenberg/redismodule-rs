@@ -650,7 +650,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `KeyExists` | 7.0 | 7.0 |  | none |  | runtime |  |
 | `OpenKey` | 6.0 | 6.0 | required | safe | `RedisKey::as_ptr`, `RedisKey::hash_get` and 14 more |  |  |
 | `GetOpenKeyModesAll` | 7.2 | 7.2 |  | none |  | context-free |  |
-| `CloseKey` | 6.0 | 6.0 | required | safe | `EventContext::yield_now`, `KeysCursor::scan` and 5 more |  |  |
+| `CloseKey` | 6.0 | 6.0 | required | safe | `EventContext::yield_now`, `RuntimeContext::notify_keyspace_event_bytes` and 5 more |  |  |
 | `KeyType` | 6.0 | 6.0 | required, available | safe | `RedisKey::key_type`, `RedisKeyWritable::key_type` |  |  |
 | `ValueLength` | 6.0 | 6.0 |  | none |  | key |  |
 | `DeleteKey` | 6.0 | 6.0 | available | safe | `RedisKeyWritable::delete` |  |  |
@@ -663,7 +663,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `DbSize` | 6.0 | 6.0 | required | safe | `RuntimeContext::dbsize` |  |  |
 | `RandomKey` | 6.0 | 6.0 |  | none |  | runtime | upstream issue 445, upstream PR 446 |
 | `SignalModifiedKey` | 6.0 | 6.0 |  | none |  | runtime |  |
-| `GetKeyNameFromModuleKey` | 6.0 | 6.0 | required | safe | `EventContext::yield_now`, `KeysCursor::scan` and 1 more |  | upstream PR 469 |
+| `GetKeyNameFromModuleKey` | 6.0 | 6.0 | required | safe | `EventContext::yield_now`, `RuntimeContext::notify_keyspace_event_bytes` and 1 more |  | upstream PR 469 |
 | `GetDbIdFromModuleKey` | 7.0 | 7.0 |  | none |  | key |  |
 | `SetLRU` | 6.0 | 6.0 |  | none |  | key | upstream issue 443, upstream PR 444 |
 | `GetLRU` | 6.0 | 6.0 |  | none |  | key | upstream issue 443, upstream PR 444 |
