@@ -57,14 +57,11 @@ fn replicate_verbatim(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
 }
 
 /// `replicate.call command [arg ...]`: runs the command and replicates it, and
-/// passes its reply on.
+/// passes its reply on. Redis 6.2 has no `errors_as_replies` flag.
 fn replicate_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
     let args: Vec<&RedisString> = args.iter().collect();
-    let options = CallOptionsBuilder::new()
-        .replicate()
-        .errors_as_replies()
-        .build();
+    let options = CallOptionsBuilder::new().replicate().build();
     let result: CallResult = ctx.call_ext(command.try_as_str()?, &options, args.as_slice());
     ctx.reply_with_call_reply(&result)?;
     Ok(RedisValue::NoReply)
