@@ -485,6 +485,8 @@ macro_rules! redis_module {
             // Keep submission refused through failed-load captured destructors.
             let _post_notification_load = $crate::__private::PostNotificationLoadGuard::begin();
             $crate::server_events::__begin_load_subscriptions();
+            // A retained image keeps the names an earlier load registered.
+            $crate::__private::forget_registered_commands();
             // SAFETY: Init succeeded and this is the module's native OnLoad.
             let configuration_load = match unsafe { $crate::__private::ConfigurationLoad::begin(ctx) } {
                 Ok(load) => load,
@@ -723,6 +725,7 @@ macro_rules! redis_module {
                 // SAFETY: this is the OnLoad context of a load that failed.
                 unsafe { $crate::server_events::__release_failed_load_subscriptions(ctx) };
                 $crate::server_events::__clear_runtime_handlers();
+                $crate::__private::forget_registered_commands();
             }
             if detached_stored && status != raw::Status::Ok as c_int {
                 // Redis frees a module whose load fails without calling OnUnload.
@@ -744,6 +747,14 @@ macro_rules! redis_module {
                 || {
                     // SAFETY: Redis associates this SDK module callback with its module.
                     let context = unsafe { $crate::EventContext::new(ctx) };
+                    // From Redis 7.2 the unload stops the server when an ACL
+                    // rule names one of the module's commands; before 7.2 the
+                    // next ACL LIST of that user does. Check before anything
+                    // changes.
+                    if let Err(error) = $crate::__private::refuse_unload_for_acl_rules(&context) {
+                        context.log_warning(&format!("{error}"));
+                        return $crate::Status::Err as c_int;
+                    }
                     // Redis does not count these callbacks as blocked clients.
                     // Refuse before destructive user deinit or other teardown.
                     let _post_notification_unload = match $crate::__private::PostNotificationUnloadGuard::begin() {
@@ -803,6 +814,7 @@ macro_rules! redis_module {
                     timer_unload.commit();
                     event_loop_unload.commit();
                     $crate::server_events::__clear_runtime_handlers();
+                    $crate::__private::forget_registered_commands();
                     // A later load of a retained image needs a fresh context.
                     // SAFETY: OnUnload holds the Redis lock and the module still exists.
                     unsafe { $crate::MODULE_CONTEXT.__release() };

@@ -25,6 +25,8 @@ execution and capture cleanup, even when a job is cancelled or panics. Drain
 that work before requesting unload; see
 [Writing from keyspace notifications](KEYSPACE-NOTIFICATIONS.md).
 Finish or cancel that work through the module's normal controls first.
+The SDK also refuses unload while an ACL rule names one of the module's
+commands; see [ACL rules and unload](#acl-rules-and-unload).
 An unload hook may also refuse by returning `Status::Err`.
 See [MODULE UNLOAD](https://redis.io/docs/latest/commands/module-unload/) and
 the [Redis 8.2 unload implementation](https://github.com/redis/redis/blob/8.2/src/module.c#L11843-L11910).
@@ -43,6 +45,27 @@ clear this blocker. Let pending jobs run while the module is active, then retry
 `MODULE UNLOAD`. New jobs are refused during module loading or unloading.
 This applies to the SDK submission path; raw submissions must provide their
 own callback/lifecycle guarantees.
+
+## ACL rules and unload
+
+Redis 7.2 and later stop the server when a module unloads while an ACL rule
+names one of its commands. Earlier versions let the unload go ahead and stop
+the server the next time a command describes that user, such as `ACL LIST`,
+`ACL GETUSER` or `ACL SAVE`. The generated unload hook therefore reads
+`ACL LIST` first and refuses while any user's rule, or a rule in one of the
+user's selectors, names a command or subcommand the SDK registered for the
+module: `+cmd`, `-cmd`, `+cmd|sub` or `-cmd|sub`. First-argument rules such as
+`+cmd|arg` count too. The server log names the user and the rule, and says
+when the rule is in a selector. Remove those rules and retry the unload, then
+add them again after the replacement loads. A selector cannot be edited, so
+`clearselectors` removes all of the user's selectors and the others are then
+added again. Rules on ACL categories, including categories the module adds,
+do not block the unload.
+
+The check covers commands registered through the SDK, not ones a module
+registers with `RedisModule_CreateCommand` directly. When `ACL LIST` cannot be
+read, for example because `ACL` is renamed, the hook logs a warning and the
+unload goes ahead unchecked; check the rules yourself before unloading.
 
 ## SDK timers and unload
 

@@ -1,3 +1,4 @@
+pub(crate) mod acl_rules;
 mod builder;
 pub use builder::{CommandBuilder, CommandFlags, KeyRange};
 
