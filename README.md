@@ -16,6 +16,37 @@ unchanged, as [README.upstream.md](README.upstream.md).
 For branches, the review and merge workflow and validation, see
 [CONTRIBUTING.md](CONTRIBUTING.md). The open issues are the work list.
 
+## What 3.0 changes
+
+A module still declares itself with `redis_module!` and works through
+`Context`, as with 2.x. What changes is what safe code can get wrong:
+
+- **Open keys stay valid.** A call that deletes or rewrites a key, a pop that
+  empties a list, or a yield used to leave an open key pointing at freed
+  memory. The SDK closes the keys a change affects before it happens and
+  re-opens them on their next use.
+- **Key data borrows are scoped.** A string value, a string DMA view or a
+  native type value is lent to a closure, and the SDK refuses anything that
+  could change the key while the closure runs. Native types are declared as
+  `RedisType<T>`, so a value is read back as the type it was stored as.
+- **One reply per blocked client.** A dropped blocked-client handle replies
+  with an error instead of leaving its client waiting. A key-blocking callback
+  that returns no reply sends an error instead, and one that streams its
+  reply through `key_blocking_reply` is counted, so a reply it leaves
+  incomplete, or tries to send twice, cannot put the client out of sync.
+- **Panics stay in the module.** Commands, callbacks and native type methods
+  that the SDK registers run inside panic guards, so a panic becomes an error
+  reply or a log line instead of unwinding into Redis.
+- **Compatibility floors.** A module chooses the oldest Redis it supports, from
+  6.0 up, at compile time. An API the running server lacks is reported as an
+  error rather than crashing it.
+- **Command metadata.** `CommandBuilder` registers subcommands, key specs and
+  ACL categories, and fills in what `COMMAND DOCS` reports. It checks all of it
+  before registering anything.
+
+[CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) has the details of each,
+and [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) what a 2.x module changes.
+
 ## Using it
 
 3.0.0 is not published to crates.io. Depend on it from git, pinned to a
