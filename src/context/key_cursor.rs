@@ -142,6 +142,9 @@ impl<'ctx> ScanKeyCursor<'ctx> {
         };
         drop(frozen);
         drop(held);
+        // Keys the callback opened under the ACCESS_EXPIRED guard re-open
+        // with their own flags.
+        crate::key::close_guarded();
         crate::panic::resume_deferred_panic();
 
         res != 0
