@@ -161,7 +161,9 @@ struct Loaded {
 /// start while its client is blocked, and the SDK would then refuse to
 /// replicate the finished change, which would stay on this server. The inline
 /// path (inside `MULTI`, a script or an AOF load) cannot meet a pause that
-/// started mid-command. A replica applies what its primary sent regardless.
+/// started mid-command. A replica applies what its primary sent regardless; on
+/// a writable replica that also lets a client's own blocked load finish during
+/// a pause, and that change stays on the replica without a warning.
 fn refuse_paused_finish(ctx: &Context, blocked: bool, command: &str) -> Result<(), RedisError> {
     if blocked && ctx.avoid_replication_traffic() && !on_replica(ctx) {
         return Err(RedisError::String(format!(

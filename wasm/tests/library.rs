@@ -710,6 +710,8 @@ fn a_load_that_finishes_during_a_replication_pause_is_refused() {
         .query(&mut con)
         .unwrap();
     // A debug build compiles the component for longer than `wait_for` waits.
+    // The pause must outlast the compile: if it ended first, the load would
+    // succeed and the assertion below would fail.
     let paused_at = Instant::now();
     while !load.is_finished() {
         assert!(
