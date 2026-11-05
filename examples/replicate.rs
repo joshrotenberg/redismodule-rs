@@ -1,0 +1,133 @@
+//! Replication from code that keeps running while Redis pauses writes: a
+//! read-only command, a timer and a worker thread. `CLIENT PAUSE ... WRITE`,
+//! `FAILOVER` and `CLUSTER FAILOVER` pause replication, and Redis aborts if a
+//! module replicates during the pause. The SDK refuses instead: `replicate`
+//! and `replicate_verbatim` return `Status::Err`, and a call with a replicate
+//! flag returns an error without running the command. Check
+//! `avoid_replication_traffic` before changing data you would replicate.
+use redis_module::{
+    CallOptionsBuilder, CallResult, Context, EventContext, NextArg, RedisError, RedisResult,
+    RedisString, RedisValue, Status, ThreadSafeContext, redis_module,
+};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::thread;
+use std::time::Duration;
+
+/// A timer or worker that has not replicated yet.
+const PENDING: i64 = -1;
+
+static TIMER_RESULT: AtomicI64 = AtomicI64::new(PENDING);
+static WORKER_RESULT: AtomicI64 = AtomicI64::new(PENDING);
+
+/// 1 if Redis accepted the replication, 0 if it was refused.
+fn replicated(status: Status) -> i64 {
+    i64::from(status == Status::Ok)
+}
+
+/// The command name and arguments to replicate, copied for a timer or worker.
+fn owned_command(args: &[RedisString]) -> Result<(String, Vec<Vec<u8>>), RedisError> {
+    let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
+    Ok((
+        command.try_as_str()?.to_owned(),
+        args.iter().map(|arg| arg.as_slice().to_vec()).collect(),
+    ))
+}
+
+/// `replicate.command command [arg ...]`: replicates the command without
+/// running it here, and replies 1 if Redis accepted it or 0 if not.
+fn replicate_command(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
+    let args: Vec<&RedisString> = args.iter().collect();
+    Ok(replicated(ctx.replicate(command.try_as_str()?, args.as_slice())).into())
+}
+
+/// `replicate.verbatim [arg ...]`: replicates this command as the client sent
+/// it, and replies 1 if Redis accepted it or 0 if not.
+fn replicate_verbatim(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    ctx.replicate_verbatim();
+    Ok(1_i64.into())
+}
+
+/// `replicate.call command [arg ...]`: runs the command and replicates it, and
+/// passes its reply on.
+fn replicate_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let (command, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
+    let args: Vec<&RedisString> = args.iter().collect();
+    let options = CallOptionsBuilder::new()
+        .replicate()
+        .errors_as_replies()
+        .build();
+    let result: CallResult = ctx.call_ext(command.try_as_str()?, &options, args.as_slice());
+    ctx.reply_with_call_reply(&result)?;
+    Ok(RedisValue::NoReply)
+}
+
+/// `replicate.timer command [arg ...]`: replicates the command from a timer
+/// callback. `replicate.result timer` reports the outcome.
+fn replicate_timer(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let command = owned_command(&args)?;
+    TIMER_RESULT.store(PENDING, Ordering::SeqCst);
+    ctx.create_timer(
+        Duration::ZERO,
+        |ctx: &EventContext, (command, args): (String, Vec<Vec<u8>>)| {
+            let args: Vec<&[u8]> = args.iter().map(Vec::as_slice).collect();
+            let status = ctx.replicate(&command, args.as_slice());
+            TIMER_RESULT.store(replicated(status), Ordering::SeqCst);
+        },
+        command,
+    )?;
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
+/// `replicate.worker command [arg ...]`: replicates the command from a worker
+/// thread holding the Redis lock. `replicate.result worker` reports the outcome.
+fn replicate_worker(_: &Context, args: Vec<RedisString>) -> RedisResult {
+    let (command, args) = owned_command(&args)?;
+    WORKER_RESULT.store(PENDING, Ordering::SeqCst);
+    thread::spawn(move || {
+        let owner = ThreadSafeContext::new();
+        let ctx = owner.lock();
+        let args: Vec<&[u8]> = args.iter().map(Vec::as_slice).collect();
+        let status = ctx.replicate(&command, args.as_slice());
+        drop(ctx);
+        WORKER_RESULT.store(replicated(status), Ordering::SeqCst);
+    });
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
+/// `replicate.result timer|worker`: -1 while pending, then 1 if Redis accepted
+/// the replication or 0 if not.
+fn replicate_result(_: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let source = args.next_string()?;
+    args.done()?;
+    let result = match source.as_str() {
+        "timer" => &TIMER_RESULT,
+        "worker" => &WORKER_RESULT,
+        _ => return Err(RedisError::Str("ERR expected timer or worker")),
+    };
+    Ok(result.load(Ordering::SeqCst).into())
+}
+
+/// `replicate.paused`: 1 while Redis asks modules to avoid replication.
+fn replicate_paused(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(i64::from(ctx.avoid_replication_traffic()).into())
+}
+
+//////////////////////////////////////////////////////
+
+redis_module! {
+    name: "replicate",
+    version: 1,
+    allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+    data_types: [],
+    commands: [
+        ["replicate.command", replicate_command, "readonly", 0, 0, 0, ""],
+        ["replicate.verbatim", replicate_verbatim, "readonly", 0, 0, 0, ""],
+        ["replicate.call", replicate_call, "readonly", 0, 0, 0, ""],
+        ["replicate.timer", replicate_timer, "readonly", 0, 0, 0, ""],
+        ["replicate.worker", replicate_worker, "readonly", 0, 0, 0, ""],
+        ["replicate.result", replicate_result, "readonly", 0, 0, 0, ""],
+        ["replicate.paused", replicate_paused, "readonly", 0, 0, 0, ""],
+    ],
+}

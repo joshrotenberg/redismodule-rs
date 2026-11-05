@@ -11,6 +11,7 @@ use redis_module::RedisValue;
 
 mod configuration_ownership;
 mod correctness_gaps;
+mod replication_pause;
 mod stream_fields;
 mod utils;
 
