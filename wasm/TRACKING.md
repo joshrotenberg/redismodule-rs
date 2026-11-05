@@ -127,6 +127,26 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-05: merged SDK master `d84a510` into the branch as `dcd873e`. It
+  brings SDK PR 233 for #231 (`d84a510`): while Redis pauses writes, every
+  call from a post-notification job is refused, and `yield_now` from a job
+  processes events without serving clients.
+
+  The host needed no adaptation. `git grep` in `wasm/` finds no
+  post-notification job and no keyspace event subscription. Its one
+  `yield_now` call, in the epoch callback in `busy.rs`, runs while a guest
+  runs inside a host command. The host schedules no jobs, so the SDK's job
+  guard is never set in it, and its calls and yield mode are unchanged.
+
+  The full `wasm/ci/check.sh` passed on Rust 1.94.0 and Redis 8.10.2:
+  - 612 tests: the host's 33 unit, 5 compiler and 36 library tests, the SDK's
+    105 unit, 263 integration and 148 doc tests, and 22 others;
+  - the four lockfiles were unchanged.
+
+  The unrelated Redis on this machine still held port 6641, so
+  `admission_code_counts_full_images_and_preserves_old_state_until_commit`
+  ran on 6941 for the check only (#218).
+
 - 2026-11-05: merged SDK master `cd4af31` into the branch as `3bf964c`. It
   brings these SDK PRs:
   - PR 226 for #221 (`5a2b42e`): unloads are refused while an ACL rule names
