@@ -118,7 +118,7 @@ pub use crate::module_version::encode_module_version;
 
 pub use crate::args::ArgCursor;
 pub use crate::context::blocked::{
-    BlockedClient, KeyBlockingResult, KeyBlockingTimeout, ReplyingBlockedClient,
+    BlockedClient, KeyBlockingReply, KeyBlockingResult, KeyBlockingTimeout, ReplyingBlockedClient,
 };
 pub use crate::context::thread_safe::{
     ContextGuard, DetachedFromClient, RedisGILGuard, RedisLockIndicator, ThreadSafeContext,
