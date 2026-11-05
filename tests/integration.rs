@@ -4471,16 +4471,9 @@ fn test_helper_version() -> Result<()> {
             .map(|part| part.parse().map_err(Into::into))
             .collect()
     };
-    // Valkey's native API reports its product version, while redis_version in
-    // INFO advertises its Redis compatibility version. Check both paths
-    // against their respective fields rather than requiring them to agree.
+    // The native API and INFO both report the server version.
     assert_eq!(res2, parse("redis_version:")?);
-    let native_field = if info.lines().any(|line| line.starts_with("valkey_version:")) {
-        "valkey_version:"
-    } else {
-        "redis_version:"
-    };
-    assert_eq!(res, parse(native_field)?);
+    assert_eq!(res, parse("redis_version:")?);
 
     Ok(())
 }

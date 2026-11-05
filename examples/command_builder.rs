@@ -15,8 +15,8 @@ fn ping(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok("PONG".into())
 }
 
-// The regression fixture checks capability directly: Valkey's redis_version
-// field reports its Redis compatibility version, not its available module APIs.
+// The regression fixture checks capability directly, by API presence rather
+// than by server version.
 fn custom_acl_supported(_: &Context, _: Vec<RedisString>) -> RedisResult {
     // SAFETY: Redis initialized this module's API table before invoking a command.
     let supported = unsafe { redis_module::raw::RedisModule_AddACLCategory }.is_some();

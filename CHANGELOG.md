@@ -428,7 +428,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   twice as many array elements as it sent, so the client waited for elements
   that never came. It now announces as many as it sends.
 - Loading a module no longer logs "Skip register defrag function" on Redis
-  6.0, or "Skip register defrag callbacks" on Redis 6.2 to 7.4 and Valkey,
+  6.0, or "Skip register defrag callbacks" on Redis 6.2 to 7.4,
   when the module has no defrag code of that kind (#116). The warning now appears only
   for `#[defrag_function]`, `#[defrag_start_function]` or
   `#[defrag_end_function]` code the server cannot run. On Redis 6.0, a module
@@ -518,12 +518,10 @@ Entries marked **Breaking** need a change in modules;
   versions, with all 16,384 names pinned by a compatibility fixture. A prefix
   without `{` and any suffix preserve its slot.
 
-- CI covers pinned Redis 7.2, 7.4 and 8.0 through 8.10 releases, plus Valkey
-  8.1 and 9.1 at the default API floor. Checksum-verified server builds are
-  cached, selected explicitly by path, and validated on cache hits. Failed
-  matrix jobs retain server build and integration logs for seven days.
-  Version tests distinguish Valkey product versions from Redis compatibility
-  versions without weakening Redis API-availability checks.
+- CI covers pinned Redis 7.2, 7.4 and 8.0 through 8.10 releases.
+  Checksum-verified server builds are cached, selected explicitly by path, and
+  validated on cache hits. Failed matrix jobs retain server build and
+  integration logs for seven days.
 
 - A [notification-write guide](docs/KEYSPACE-NOTIFICATIONS.md) and
   `keyspace_to_stream` example covering owned callback data, deferred writes,

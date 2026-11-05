@@ -217,9 +217,9 @@ impl Context {
         if id == 0 || unsafe { client_info(ptr::null_mut(), id) } != raw::REDISMODULE_OK as c_int {
             return Ok(None);
         }
-        // Valkey 9.1's info lookup also finds its executing temporary client.
-        // Its username lookup still requires the actual client index. Do not
-        // ask for full info before this: fake clients have a null connection.
+        // The info lookup can also find an executing temporary client, while
+        // the username lookup requires the actual client index. Do not ask
+        // for full info before this: fake clients have a null connection.
         // Redis 6.0 lacks the username API and its info lookup is index-only.
         if let Some(user_name) = unsafe { raw::RedisModule_GetClientUserNameById } {
             let free = unsafe { crate::__available_api!(RedisModule_FreeString) };

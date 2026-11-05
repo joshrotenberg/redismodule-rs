@@ -15,7 +15,9 @@ import tempfile
 def verify(binary, kind, version, allocator):
     output = subprocess.check_output([str(binary), "--version"], text=True).strip()
     print(output, flush=True)
-    product = "Redis" if kind == "redis" else "Valkey"
+    if kind != "redis":
+        raise RuntimeError(f"Unsupported server {kind}")
+    product = "Redis"
     if not re.search(rf"^{product} server v={re.escape(version)}(?:\s|$)", output):
         raise RuntimeError(f"Expected {product} {version} from {binary}")
     allocator_pattern = rf"(?:^|\s)malloc={re.escape(allocator)}(?:-\S+)?(?:\s|$)"

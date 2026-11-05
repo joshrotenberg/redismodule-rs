@@ -36,8 +36,6 @@ jobs:
           - {os: ubuntu-latest, server: redis, version: "8.10.2", floor: "8-0"}
           - {os: macos-latest, server: redis, version: "7.2.16", floor: "6-0"}
           - {os: macos-latest, server: redis, version: "8.10.2", floor: "8-0"}
-          - {os: ubuntu-latest, server: valkey, version: "8.1.10", floor: "6-0"}
-          - {os: ubuntu-latest, server: valkey, version: "9.1.2", floor: "6-0"}
 
     steps:
       - name: Checkout sources
