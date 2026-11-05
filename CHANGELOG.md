@@ -42,6 +42,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   element's bytes unchanged, where it replaced invalid UTF-8, and refuses
   extra arguments.
 
+- `CommandBuilder` sets every field of the command info (#208):
+  `.complexity()`, `.since()`, `.history()`, `.tip()`, `.key_spec()` and
+  `.arg()` join `.summary()` and `.arity()` in the builder's one
+  `RedisModule_SetCommandInfo` call, which Redis accepts once per command.
+  Key specs take the `KeySpec`, `KeySpecFlags`, `BeginSearch` and `FindKeys`
+  types `#[command]` uses; their flags reach `COMMAND INFO` and
+  `COMMAND GETKEYSANDFLAGS` and decide what `%R~` and `%W~` ACL key patterns
+  allow, which a key range's spec cannot. Registration checks the info before
+  creating the command, refusing key specs Redis accepts but mishandles (a
+  key step of 0 overruns its key buffer; an index of 0, or a limit with a last
+  key other than -1, fails its assertions), NUL bytes, tips with spaces, and key
+  specs on a container. Redis copies every string, and the builder frees them
+  after the call, as `#[command]` now also does when the call fails. See
+  `examples/subcommands.rs`.
+
 - Command containers and native subcommands (#178).
   `CommandBuilder::container(name)` declares a command without a handler, and
   `.subcommand(redis_command!("child", handler))` registers each child as

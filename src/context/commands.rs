@@ -293,6 +293,90 @@ impl KeySpec {
     }
 }
 
+/// Refuses a string Redis cannot take as a C string.
+fn no_nul(what: &str, value: &str) -> Result<(), RedisError> {
+    if value.contains('\0') {
+        Err(RedisError::String(format!(
+            "ERR {what} contains a NUL byte"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+impl KeySpec {
+    /// Refuses a key spec Redis would accept but mishandle: Redis checks only
+    /// the flag groups and the search types, and a key step of 0 overruns the
+    /// key buffer when Redis extracts keys, while an index of 0 or a limit
+    /// with a fixed last key fails assertions.
+    pub(crate) fn validate(&self) -> Result<(), RedisError> {
+        if let Some(notes) = &self.notes {
+            no_nul("key spec notes", notes)?;
+        }
+        match &self.begin_search {
+            BeginSearch::Index(index) if index.index < 1 => {
+                return Err(RedisError::Str(
+                    "ERR a key spec's begin-search index must be 1 or more",
+                ));
+            }
+            BeginSearch::Keyword(keyword) => {
+                no_nul("a key spec keyword", &keyword.keyword)?;
+                if keyword.keyword.is_empty() || keyword.startfrom == 0 {
+                    return Err(RedisError::Str(
+                        "ERR a key spec's keyword must be non-empty and its start not 0",
+                    ));
+                }
+            }
+            BeginSearch::Index(_) => {}
+        }
+        match &self.find_keys {
+            FindKeys::Range(range) => {
+                // Redis asserts on a limit with any last key but -1.
+                if range.steps < 1
+                    || range.limit < 0
+                    || (range.limit != 0 && range.last_key < -1)
+                    || (range.limit > 1 && range.last_key != -1)
+                {
+                    return Err(RedisError::Str(
+                        "ERR a key spec's range needs a step of 1 or more and a limit of 0 or more, and a limit other than 0 or 1 only with last key -1 (with a last key below -1, only 0)",
+                    ));
+                }
+            }
+            FindKeys::Keynum(keynum) => {
+                if keynum.key_num_idx < 0 || keynum.first_key < 1 || keynum.key_step < 1 {
+                    return Err(RedisError::Str(
+                        "ERR a key spec's key count needs an index of 0 or more, a first key of 1 or more and a step of 1 or more",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl RedisModuleCommandArg {
+    /// Refuses strings, here or in a subargument, that Redis cannot take.
+    pub(crate) fn validate(&self) -> Result<(), RedisError> {
+        no_nul("an argument name", &self.name)?;
+        for value in [
+            &self.token,
+            &self.summary,
+            &self.since,
+            &self.deprecated_since,
+            &self.display_text,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            no_nul("an argument field", value)?;
+        }
+        self.subargs
+            .iter()
+            .flatten()
+            .try_for_each(RedisModuleCommandArg::validate)
+    }
+}
+
 impl From<&KeySpec> for raw::RedisModuleCommandKeySpec {
     fn from(value: &KeySpec) -> Self {
         let (begin_search_type, bs) = (&value.begin_search).into();
@@ -449,6 +533,24 @@ pub fn get_redis_key_spec(key_spec: Vec<KeySpec>) -> Vec<raw::RedisModuleCommand
     redis_key_spec
 }
 
+/// Frees the strings [`get_redis_key_spec`] leaked into `key_specs`, once Redis
+/// has copied them.
+pub(crate) fn free_redis_key_spec(key_specs: Vec<raw::RedisModuleCommandKeySpec>) {
+    for spec in key_specs {
+        if !spec.notes.is_null() {
+            drop(unsafe { CString::from_raw(spec.notes as *mut c_char) });
+        }
+        if spec.begin_search_type
+            == raw::RedisModuleKeySpecBeginSearchType_REDISMODULE_KSPEC_BS_KEYWORD
+        {
+            let keyword = unsafe { spec.bs.keyword.keyword };
+            if !keyword.is_null() {
+                drop(unsafe { CString::from_raw(keyword as *mut c_char) });
+            }
+        }
+    }
+}
+
 fn convert_command_arg_to_raw(arg: &RedisModuleCommandArg) -> raw::RedisModuleCommandArg {
     let name = CString::new(arg.name.as_str()).unwrap().into_raw();
     let token = arg
@@ -518,7 +620,7 @@ pub fn get_redis_command_args(
     Some(raw_args)
 }
 
-fn free_command_arg(arg: &raw::RedisModuleCommandArg) {
+pub(crate) fn free_command_arg(arg: &raw::RedisModuleCommandArg) {
     if !arg.name.is_null() {
         drop(unsafe { CString::from_raw(arg.name as *mut c_char) });
     }
@@ -635,25 +737,17 @@ api! {[
                 args: args.as_ref().map(Vec::as_ptr).unwrap_or(ptr::null_mut()) as *mut raw::RedisModuleCommandArg,
             };
 
-            if unsafe { RedisModule_SetCommandInfo(command, &mut redis_command_info as *mut raw::RedisModuleCommandInfo) } == raw::Status::Err as i32 {
+            let status = unsafe { RedisModule_SetCommandInfo(command, &mut redis_command_info as *mut raw::RedisModuleCommandInfo) };
+
+            // the only CString pointers which are not freed are those of the key_specs, lets free them here.
+            free_redis_key_spec(key_specs);
+            if status == raw::Status::Err as i32 {
+                args.unwrap_or_default().iter().for_each(free_command_arg);
                 return Err(RedisError::String(format!(
                     "ERR Failed setting info for command {}.",
                     command_info.name
                 )));
             }
-
-            // the only CString pointers which are not freed are those of the key_specs, lets free them here.
-            key_specs.into_iter().for_each(|v|{
-                if !v.notes.is_null() {
-                    drop(unsafe{CString::from_raw(v.notes as *mut c_char)});
-                }
-                if v.begin_search_type == raw::RedisModuleKeySpecBeginSearchType_REDISMODULE_KSPEC_BS_KEYWORD {
-                    let keyword = unsafe{v.bs.keyword.keyword};
-                    if !keyword.is_null() {
-                        drop(unsafe{CString::from_raw(v.bs.keyword.keyword as *mut c_char)});
-                    }
-                }
-            });
 
             args.unwrap_or_default().iter().for_each(free_command_arg);
 
