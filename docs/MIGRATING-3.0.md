@@ -1248,7 +1248,7 @@ text.
 - **Unsigned arguments.** `NextArg::next_u64`, `ArgCursor::next_u64` and
   `RedisString::parse_unsigned_integer` accept 9223372036854775808 through
   18446744073709551615 (#222), which 2.x refused with
-  `ERR Couldn't parse as integer`. Code that converts the result with `as i64`
+  `Couldn't parse as integer`. Code that converts the result with `as i64`
   now gets a negative number for them; use `i64::try_from`, or `next_i64` when
   the command takes a signed value. Other input gets the same errors as before.
 - **Logging.** Messages go to Redis through a fixed `%s` format, so `%` in
