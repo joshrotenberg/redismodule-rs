@@ -75,7 +75,11 @@ git remote add origin https://github.com/RedisLabsModules/redismodule-rs
    jobs in the [CI workflow](.github/workflows/ci.yml), or the wasm experiment
    check. The owner has authorized this for this workflow's SDK PRs to `master`
    and wasm PRs to `experiment/wasm-host`; it covers no other PRs, and
-   unfinished, missing or failed checks are never bypassed.
+   unfinished, missing or failed checks are never bypassed. Give the squash an
+   explicit message (`gh pr merge N --squash --match-head-commit <sha> --body
+   "..."`). The default message lists every commit, including step 3's
+   `[skip ci]` start commit, and a squash commit that carries `[skip ci]` gets
+   no push CI.
 
 Commit subjects and PR titles are conventional commits. Messages, PR bodies and
 docs are technical: what changed, why in code terms and which checks ran, with
