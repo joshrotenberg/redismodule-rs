@@ -127,6 +127,24 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-04: merged SDK master `1c9fa31` into the branch as `06f0842`, on top
+  of the branch's PR 206 (`19c9002`: the demo and the module-versus-core
+  tradeoffs). It brings SDK PRs for #179 (`ccd8e42`: incremental stream
+  entries and borrowing key `as_ptr` accessors), #197 (`e27155d`: open keys
+  closed before keyspace changes and re-opened on their next use), #205
+  (`3e85d13`: keyspace changes refused from callbacks Redis runs while it holds
+  a key's value) and #208 (`1c9fa31`: the rest of the command info from
+  `CommandBuilder`). The host uses none of the stream, key-pointer, key-scan or
+  command-builder APIs these change, and needed no adaptation. The full
+  `wasm/ci/check.sh` ran on Rust 1.94.0 and Redis 8.10.2. One test failed in
+  the tests stage, `admission_code_counts_full_images_and_preserves_old_state_until_commit`:
+  an unrelated Redis on this machine held its fixed port 6641, so it read that
+  server's INFO. It passed alone on a free port, and the stages after the
+  tests stage, which the failure had skipped, then passed. In all 574 tests
+  ran and only that one failed (the host's 33 unit, 5 compiler and 35 library
+  tests, the SDK's 91 unit, 246 integration and 147 doc tests, and 17 others),
+  and the four lockfiles were unchanged.
+
 - 2026-11-04: merged SDK master `1aef05d` into the branch as `a8d97aa`. It
   brings SDK PRs for #166 (`514dc47`: SDK error replies start with `ERR` or a
   specific code, `set_expire` refuses an overflowing deadline, call-reply
