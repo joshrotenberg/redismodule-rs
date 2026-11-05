@@ -796,7 +796,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 |---|---|---|---|---|---|---|---|
 | `GetClientId` | 6.0 | 6.0 | available, direct | internal (hand) | `Context::acl_add_log_entry`, `Context::get_current_user` and 1 more | command |  |
 | `GetClientUserNameById` | 6.2 | 6.2 | direct | safe | `Context::get_current_user` |  |  |
-| `GetClientInfoById` | 6.0 | 6.0 | available | internal (hand) | `Context::block_client_on_keys` | runtime |  |
+| `GetClientInfoById` | 6.0 | 6.0 | available, direct | internal (hand) | `Context::block_client_on_keys` | runtime |  |
 | `GetClientNameById` | 7.0 | 7.0 |  | none |  | runtime |  |
 | `SetClientNameById` | 7.0 | 7.0 |  | none |  | context-free |  |
 | `GetClientCertificate` | 6.0 | 6.0 |  | none |  | runtime |  |
