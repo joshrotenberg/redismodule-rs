@@ -12,6 +12,7 @@ use redis_module::RedisValue;
 mod configuration_ownership;
 mod correctness_gaps;
 mod stream_fields;
+mod unload_acl_rules;
 mod utils;
 
 #[test]
