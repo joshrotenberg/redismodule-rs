@@ -1081,6 +1081,16 @@ and later without AOF or replicas, the same replication used to return
 error. A command flagged `write` or `may-replicate` that its client queued in
 the transaction that starts the pause still replicates.
 
+A post-notification job's calls are refused during the pause too, with or
+without a replicate flag (#231): `call`, `call_ext` and `call_blocking` from a
+job return
+`ERR post-notification jobs cannot call commands while Redis pauses replication`
+without running the command. A job's call after a transaction that paused
+writes itself made Redis 7.2 and later abort when they propagated the
+transaction, and the SDK cannot tell that job from others. A job that read
+data through a call during a pause gets the error now; read keys with
+`open_key`, which runs no command, or copy the data before queuing the job.
+
 ### Missing optional APIs on older Redis 6.0 servers
 
 `ThreadSafeContext::try_lock` and `MODULE_CONTEXT.try_lock()` return `None`

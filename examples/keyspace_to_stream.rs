@@ -173,7 +173,15 @@ fn submit_probe(ctx: &EventContext, mode: &str) -> Vec<i64> {
             let options = CallOptionsBuilder::new().errors_as_replies().build();
             let reply: CallResult =
                 ctx.call_ext("MODULE", &options, &["UNLOAD", "keyspace_to_stream"]);
-            assert!(reply.is_err(), "executing job unloaded its module");
+            let Err(error) = reply else {
+                panic!("executing job unloaded its module");
+            };
+            // Redis refuses the unload, or the SDK the call itself while
+            // Redis pauses writes.
+            ctx.log_notice(&format!(
+                "job probe unload failed: {}",
+                String::from_utf8_lossy(error.as_bytes())
+            ));
         }
         drop(probe);
     });

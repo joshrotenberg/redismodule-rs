@@ -57,6 +57,20 @@ also registered for a command without them loses the exemption. Read-only
 commands, and commands that another command or a script calls, are refused in
 a transaction too. Upstream has no issue or pull request for this.
 
+## Calls from post-notification jobs during write pauses
+
+Redis runs post-notification jobs after a transaction's `EXEC` and before it
+propagates the transaction. A transaction that issues `CLIENT PAUSE ... WRITE`
+itself may replicate its own writes, but any command run outside `EXEC` ends
+that exemption, so a job's call, even a read without the replicate flag, makes
+Redis 7.2 and later abort when they propagate the transaction (#231).
+Upstream's `call` and `call_ext` run the command. While
+`RedisModule_AvoidReplicaTraffic()` reports a pause, the SDK's calls from a
+post-notification job now return an error without running the command. The
+SDK cannot tell that transaction's jobs from others, so every job call is
+refused during a pause, reads included. Upstream has no issue or pull request
+for this.
+
 ## Unsigned integer arguments
 
 `RedisString::parse_unsigned_integer`, which `NextArg::next_u64` and

@@ -1,7 +1,8 @@
 //! Replication while Redis pauses writes (#220). Redis aborts at an assertion
 //! when a module replicates during the pause; the SDK refuses instead, except
 //! for a `write` or `may-replicate` command in the transaction that starts the
-//! pause, which Redis replicates.
+//! pause, which Redis replicates. Calls from post-notification jobs are refused
+//! during a pause with or without the replicate flag (#231).
 //!
 //! Each test attaches a replica, so the primary has a replication backlog and
 //! Redis 7.0 and later propagate (6.2 propagates without one), then pauses
@@ -472,6 +473,111 @@ fn test_replication_pause_refuses_write_commands_that_another_command_calls() ->
             .arg("called-in-transaction")
             .query::<i64>(&mut replica)?,
         0
+    );
+    Ok(())
+}
+
+/// The `keyspace_to_stream` probe's job calls `MODULE UNLOAD` without the
+/// replicate flag and logs the error.
+#[cfg(feature = "redis-7-2-examples")]
+const JOB_PROBE_FAILED: &str = "job probe unload failed: ";
+
+/// A post-notification job runs after `EXEC` and before Redis propagates the
+/// transaction. Any call from it, a read without the replicate flag too, ends
+/// the exemption that lets a transaction which paused writes itself replicate,
+/// and Redis then aborted when it propagated the transaction (#231). The SDK
+/// refuses every call from a job during a pause.
+#[test]
+#[cfg(feature = "redis-7-2-examples")]
+fn test_replication_pause_refuses_job_calls_after_the_transaction_that_pauses() -> Result<()> {
+    let Some((mut primary, mut replica)) = primary_with_replica("keyspace_to_stream")? else {
+        return Ok(());
+    };
+    let ((), (), probe): ((), (), Vec<i64>) = redis::pipe()
+        .atomic()
+        .cmd("CLIENT")
+        .arg(&["PAUSE", "20000", "WRITE"])
+        .cmd("SET")
+        .arg(&["plain", "1"])
+        .cmd("notify_stream.job_probe")
+        .arg("unload")
+        .query(&mut primary)?;
+    assert_eq!(probe, [1, 0]);
+    let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut primary)?;
+    assert_eq!(counts, [1, 1], "the job ran once");
+    unpause(&mut primary)?;
+    let log = primary.server_log()?;
+    assert!(
+        log.contains(&format!(
+            "{JOB_PROBE_FAILED}ERR post-notification jobs cannot call commands while Redis \
+             pauses replication"
+        )),
+        "server log: {log}"
+    );
+    // The refused call never reached the module's unload hook.
+    assert!(
+        !log.contains("pending or executing post-notification jobs"),
+        "server log: {log}"
+    );
+    acknowledge(&mut primary, &replica)?;
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("plain")
+            .query::<Option<String>>(&mut replica)?
+            .as_deref(),
+        Some("1")
+    );
+    Ok(())
+}
+
+/// Outside a pause a job's calls run: the probe's `MODULE UNLOAD` reaches the
+/// module's unload hook, which refuses it while the job runs, and the
+/// example's job appends with a replicated `XADD` that reaches the replica.
+#[test]
+#[cfg(feature = "redis-7-2-examples")]
+fn test_replication_pause_lets_jobs_call_outside_a_pause() -> Result<()> {
+    let Some((mut primary, mut replica)) = primary_with_replica("keyspace_to_stream")? else {
+        return Ok(());
+    };
+    let ((), probe): ((), Vec<i64>) = redis::pipe()
+        .atomic()
+        .cmd("SET")
+        .arg(&["plain", "1"])
+        .cmd("notify_stream.job_probe")
+        .arg("unload")
+        .query(&mut primary)?;
+    assert_eq!(probe, [1, 0]);
+    let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut primary)?;
+    assert_eq!(counts, [1, 1], "the job ran once");
+    let log = primary.server_log()?;
+    assert!(
+        log.contains(&format!("{JOB_PROBE_FAILED}ERR Error unloading module")),
+        "server log: {log}"
+    );
+    assert!(
+        log.contains("pending or executing post-notification jobs"),
+        "server log: {log}"
+    );
+    assert!(!log.contains("pauses replication"), "server log: {log}");
+
+    redis::cmd("SET")
+        .arg(&["watched:key", "value"])
+        .query::<()>(&mut primary)?;
+    let stats: Vec<i64> = redis::cmd("notify_stream.stats").query(&mut primary)?;
+    assert_eq!(stats, [1, 1, 0, 0], "queued, written, errors, skipped");
+    acknowledge(&mut primary, &replica)?;
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("plain")
+            .query::<Option<String>>(&mut replica)?
+            .as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        redis::cmd("XLEN")
+            .arg("watched:events")
+            .query::<i64>(&mut replica)?,
+        1
     );
     Ok(())
 }

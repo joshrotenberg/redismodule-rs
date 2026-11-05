@@ -98,6 +98,24 @@ policy: cluster modules need a separate design for slots, local ownership and
 output keys. This example rejects cluster mode rather than applying its
 database layout there.
 
+## Calls during a write pause
+
+`CLIENT PAUSE ... WRITE`, `FAILOVER` and `CLUSTER FAILOVER` pause writes. A
+transaction that issues the pause itself still replicates its own writes, and
+Redis runs that transaction's jobs after `EXEC` and before it propagates the
+transaction. Any command a job runs, a read without the replicate flag too,
+ends that exemption, and Redis then aborts when it propagates the
+transaction. The SDK cannot tell that transaction's jobs from other jobs, so
+while `avoid_replication_traffic()` is true every call from a job, through
+`call`, `call_ext` or `call_blocking`, returns
+`ERR post-notification jobs cannot call commands while Redis pauses replication`
+without running the command.
+
+The example's `XADD` fails this way during a pause: the job logs and counts the
+error, and the source write still succeeds and replicates without a stream
+entry. A job that only reads can open keys with `open_key`, which runs no
+command, or use data copied before it was queued.
+
 ## Handle submission and write failures separately
 
 With a 7.2+ feature floor, `add_post_notification_job` returns `Status`. An older
@@ -156,4 +174,12 @@ errors, and captured-data cleanup when Redis rejects a job:
 ```sh
 cargo build --no-default-features --features min-redis-compatibility-version-7-2 --examples
 cargo test --no-default-features --features min-redis-compatibility-version-7-2 --test integration notification_
+```
+
+The write pause tests, which attach a replica, check that a job's call after
+a transaction that pauses writes is refused and the server stays up, and that
+a job's calls run outside a pause:
+
+```sh
+cargo test --no-default-features --features min-redis-compatibility-version-7-2 --test integration replication_pause::
 ```
