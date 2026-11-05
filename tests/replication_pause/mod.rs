@@ -71,7 +71,14 @@ fn unpause(primary: &mut TestConnection) -> Result<()> {
     Ok(())
 }
 
+/// Waits until the replica has everything the primary propagated so far.
+/// `WAIT` waits for this client's own replication offset, which a timer, event
+/// or worker does not advance, so the client first writes a marker of its own
+/// behind whatever they propagated.
 fn acknowledge(primary: &mut TestConnection, replica: &TestConnection) -> Result<()> {
+    redis::cmd("INCR")
+        .arg("replication-pause:ack")
+        .query::<i64>(primary)?;
     let acknowledged: i64 = redis::cmd("WAIT").arg(&[1, 5000]).query(primary)?;
     assert_eq!(acknowledged, 1, "replica log: {}", replica.server_log()?);
     Ok(())
@@ -432,7 +439,8 @@ fn test_replication_pause_refuses_write_commands_that_another_command_calls() ->
     assert_eq!(replicated, 0);
     let mut transaction = redis::pipe();
     transaction.atomic();
-    if server_version(&mut primary)? >= (7, 0) {
+    let with_local_write = server_version(&mut primary)? >= (7, 0);
+    if with_local_write {
         transaction.cmd("replicate.forward").arg(&[
             "replicate.write",
             "command",
@@ -447,10 +455,12 @@ fn test_replication_pause_refuses_write_commands_that_another_command_calls() ->
         "value",
     ]);
     let replicated: Vec<i64> = transaction.query(&mut primary)?;
-    assert!(
-        !replicated.is_empty() && replicated.iter().all(|&status| status == 0),
-        "{replicated:?}"
-    );
+    let expected = if with_local_write {
+        vec![0, 0]
+    } else {
+        vec![0]
+    };
+    assert_eq!(replicated, expected);
     unpause(&mut primary)?;
     let replicated: i64 = redis::cmd("replicate.write")
         .arg(&["command", "resumed", "value"])
