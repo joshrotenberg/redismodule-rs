@@ -49,13 +49,23 @@ own callback/lifecycle guarantees.
 ## ACL rules and unload
 
 Redis 7.2 and later stop the server when a module unloads while an ACL rule
-names one of its commands, and earlier versions stop it at the next
-`ACL LIST`. The generated unload hook therefore reads `ACL LIST` first and
-refuses while any user's rule, or a rule in one of the user's selectors, names
-a command or subcommand the module registered: `+cmd`, `-cmd`, `+cmd|sub` or
-`-cmd|sub`. The server log names the user and the rule. Remove those rules and
-retry the unload, then add them again after the replacement loads. Rules on
-ACL categories, including categories the module adds, do not block the unload.
+names one of its commands. Earlier versions let the unload go ahead and stop
+the server the next time a command describes that user, such as `ACL LIST`,
+`ACL GETUSER` or `ACL SAVE`. The generated unload hook therefore reads
+`ACL LIST` first and refuses while any user's rule, or a rule in one of the
+user's selectors, names a command or subcommand the SDK registered for the
+module: `+cmd`, `-cmd`, `+cmd|sub` or `-cmd|sub`. First-argument rules such as
+`+cmd|arg` count too. The server log names the user and the rule, and says
+when the rule is in a selector. Remove those rules and retry the unload, then
+add them again after the replacement loads. A selector cannot be edited, so
+`clearselectors` removes all of the user's selectors and the others are then
+added again. Rules on ACL categories, including categories the module adds,
+do not block the unload.
+
+The check covers commands registered through the SDK, not ones a module
+registers with `RedisModule_CreateCommand` directly. When `ACL LIST` cannot be
+read, for example because `ACL` is renamed, the hook logs a warning and the
+unload goes ahead unchecked; check the rules yourself before unloading.
 
 ## SDK timers and unload
 

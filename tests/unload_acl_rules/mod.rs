@@ -5,7 +5,8 @@
 //! the unload leaves the user's command bits behind, and the next `ACL LIST`
 //! stops the server instead. The SDK's OnUnload refuses the unload while such
 //! a rule exists. A server that checks the rules itself refuses before
-//! OnUnload runs.
+//! OnUnload runs. `test_acl_category_survives_module_reload` unloads with a
+//! rule on a category the module added, which does not block the unload.
 use crate::utils::{self, TestConnection};
 use anyhow::{Context, Result, ensure};
 use redis::Value;
@@ -30,7 +31,7 @@ fn module_loaded(con: &mut TestConnection, name: &str) -> Result<bool> {
 
 /// Sets `rules` on a fresh user, checks that the unload is refused and the
 /// module keeps working, then deletes the user. `listed` is the rule as
-/// `ACL LIST` shows it, which the refusal names.
+/// `ACL LIST` shows it, which the refusal names, and where it is.
 fn assert_unload_refused(
     con: &mut TestConnection,
     module: &str,
@@ -116,8 +117,8 @@ fn test_unload_is_refused_while_an_acl_rule_names_a_module_command() -> Result<(
     ];
     // Selectors start in Redis 7.0.
     if version >= (7, 0) {
-        cases.push((&["(~*", "+hello.mul)"], "+hello.mul"));
-        cases.push((&["~*", "(~* +@all -hello.mul)"], "-hello.mul"));
+        cases.push((&["(~*", "+hello.mul)"], "+hello.mul in a selector"));
+        cases.push((&["~*", "(~* +@all -hello.mul)"], "-hello.mul in a selector"));
     }
     for (rules, listed) in cases {
         assert_unload_refused(&mut con, "hello", rules, listed, &mut works)?;
@@ -154,7 +155,7 @@ fn test_unload_is_refused_while_an_acl_rule_names_a_module_subcommand() -> Resul
         (&["+@all", "-subcmd.kv|set"], "-subcmd.kv|set"),
         (&["+subcmd.kv"], "+subcmd.kv"),
         (&["+subcmd.documented"], "+subcmd.documented"),
-        (&["(~*", "+subcmd.kv|get)"], "+subcmd.kv|get"),
+        (&["(~*", "+subcmd.kv|get)"], "+subcmd.kv|get in a selector"),
     ];
     for (rules, listed) in cases {
         assert_unload_refused(&mut con, "subcommands", rules, listed, &mut works)?;
@@ -162,36 +163,5 @@ fn test_unload_is_refused_while_an_acl_rule_names_a_module_subcommand() -> Resul
 
     assert_unload_and_reload(&mut con, "subcommands")?;
     works(&mut con)?;
-    Ok(())
-}
-
-/// A category a module adds stays registered after the unload, so a rule
-/// that names it still applies and does not hold the unload back.
-#[test]
-fn test_unload_goes_ahead_with_a_rule_naming_a_module_acl_category() -> Result<()> {
-    let mut con = TestConnection::new("acl");
-    // Modules add ACL categories from Redis 7.4.
-    if server_version(&mut con)? < (7, 4) {
-        return Ok(());
-    }
-    redis::cmd("ACL")
-        .arg(&[
-            "SETUSER",
-            "category-holder",
-            "on",
-            "nopass",
-            "-@all",
-            "+@acl",
-        ])
-        .query::<()>(&mut con)?;
-    assert_unload_and_reload(&mut con, "acl")?;
-    let user: Vec<String> = redis::cmd("ACL").arg("LIST").query(&mut con)?;
-    assert!(
-        user.iter()
-            .any(|line| line.starts_with("user category-holder ") && line.contains("+@acl")),
-        "{user:?}"
-    );
-    let current: String = redis::cmd("get_current_user").query(&mut con)?;
-    assert_eq!(current, "default");
     Ok(())
 }

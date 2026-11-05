@@ -37,67 +37,108 @@ pub fn forget_registered_commands() {
 /// The rules come from `ACL LIST`. A rule names a command with `+` or `-`,
 /// and a subcommand or first argument with `+cmd|sub` or `-cmd|sub`, at the
 /// user's top level or inside a selector. Names match ASCII
-/// case-insensitively, as Redis looks commands up. When the rules cannot be
-/// read, the unload is refused too.
+/// case-insensitively, as Redis looks commands up.
+///
+/// When the rules cannot be read, for example because `ACL` is renamed, this
+/// logs a warning and lets the unload go ahead. Refusing would not help:
+/// Redis also unloads a module whose `MODULE LOADEX` configuration it
+/// rejected, asserts that the unload succeeds, and no rule can name commands
+/// that did not exist before that load.
 #[doc(hidden)]
 pub fn refuse_unload_for_acl_rules(ctx: &RuntimeContext) -> Result<(), RedisError> {
     if registered().is_empty() {
         return Ok(());
     }
-    let unreadable = |detail: String| {
-        RedisError::String(format!(
-            "ERR cannot read the ACL rules ({detail}), so the unload is refused: \
-             a rule that names a command of this module would stop the server"
-        ))
+    let unchecked = |detail: &str| {
+        ctx.log_warning(&format!(
+            "cannot read the ACL rules ({detail}); unloading without checking \
+             whether a rule names a command of this module"
+        ));
     };
     let users = match ctx.call("ACL", &["LIST"]) {
         Ok(RedisValue::Array(users)) => users,
-        Ok(other) => return Err(unreadable(format!("unexpected reply {other:?}"))),
-        Err(error) => return Err(unreadable(error.to_string())),
+        Ok(_) => {
+            unchecked("ACL LIST did not reply with an array");
+            return Ok(());
+        }
+        Err(error) => {
+            unchecked(&error.to_string());
+            return Ok(());
+        }
     };
     let names = registered();
-    for user in &users {
+    for (index, user) in users.iter().enumerate() {
         let line = match user {
-            RedisValue::BulkString(text) | RedisValue::SimpleString(text) => text.as_bytes(),
-            RedisValue::StringBuffer(bytes) => bytes.as_slice(),
-            other => return Err(unreadable(format!("unexpected user entry {other:?}"))),
+            RedisValue::BulkString(text) | RedisValue::SimpleString(text) => Some(text.as_bytes()),
+            RedisValue::StringBuffer(bytes) => Some(bytes.as_slice()),
+            _ => None,
         };
-        let found = rule_naming_a_command(line, &names)
-            .ok_or_else(|| unreadable(format!("unexpected user entry {user:?}")))?;
-        if let Some((user, rule)) = found {
+        // The entry holds password hashes, so the warning does not quote it.
+        let Some(found) = line.and_then(|line| rule_naming_a_command(line, &names)) else {
+            unchecked(&format!("ACL LIST entry {index} is not a user"));
+            continue;
+        };
+        if let Some(found) = found {
             return Err(RedisError::String(format!(
-                "ERR ACL user {} has the rule {}, which names a command of this module; \
+                "ERR ACL user {} has the rule {}{}, which names a command of this module; \
                  remove the rule before unloading the module",
-                String::from_utf8_lossy(user),
-                String::from_utf8_lossy(rule)
+                String::from_utf8_lossy(found.user),
+                String::from_utf8_lossy(found.rule),
+                if found.in_selector {
+                    " in a selector"
+                } else {
+                    ""
+                },
             )));
         }
     }
     Ok(())
 }
 
+#[derive(Debug, PartialEq)]
+struct Found<'a> {
+    user: &'a [u8],
+    rule: &'a [u8],
+    in_selector: bool,
+}
+
 /// The user and first rule in an `ACL LIST` entry that name one of `names`.
 /// `None` when the entry is not `user <name> <rules...>`.
-fn rule_naming_a_command<'a>(
-    line: &'a [u8],
-    names: &[Box<[u8]>],
-) -> Option<Option<(&'a [u8], &'a [u8])>> {
+fn rule_naming_a_command<'a>(line: &'a [u8], names: &[Box<[u8]>]) -> Option<Option<Found<'a>>> {
     let mut tokens = line.split(|byte| *byte == b' ').filter(|t| !t.is_empty());
     if tokens.next()? != b"user" {
         return None;
     }
     let user = tokens.next()?;
-    // A selector is `(rules...)` and its command rules come last; key and
-    // channel patterns, which can hold parentheses, start with ~, % or &.
-    Some(tokens.find_map(|token| {
-        let token = token.strip_prefix(b"(").unwrap_or(token);
-        token
-            .strip_suffix(b")")
+    // A selector is `(rules...)`: key and channel patterns, which can hold
+    // parentheses but start with ~, % or &, then the command rules.
+    let mut in_selector = false;
+    for token in tokens {
+        let token = match token.strip_prefix(b"(") {
+            Some(rest) => {
+                in_selector = true;
+                rest
+            }
+            None => token,
+        };
+        let inner = token.strip_suffix(b")");
+        if let Some(rule) = inner
             .into_iter()
             .chain([token])
             .find(|rule| names_a_command(rule, names))
-            .map(|rule| (user, rule))
-    }))
+        {
+            return Some(Some(Found {
+                user,
+                rule,
+                in_selector,
+            }));
+        }
+        // A selector's last token is a command rule.
+        if inner.is_some() && matches!(token.first(), Some(b'+' | b'-')) {
+            in_selector = false;
+        }
+    }
+    Some(None)
 }
 
 fn names_a_command(rule: &[u8], names: &[Box<[u8]>]) -> bool {
@@ -121,47 +162,67 @@ mod tests {
         vec![b"hello.mul".as_slice().into(), b"Sub.Kv".as_slice().into()]
     }
 
-    fn found(line: &str) -> Option<(String, String)> {
+    fn found(line: &str) -> Option<(String, String, bool)> {
         rule_naming_a_command(line.as_bytes(), &names())
             .expect("a user entry")
-            .map(|(user, rule)| {
+            .map(|found| {
                 (
-                    String::from_utf8_lossy(user).into_owned(),
-                    String::from_utf8_lossy(rule).into_owned(),
+                    String::from_utf8_lossy(found.user).into_owned(),
+                    String::from_utf8_lossy(found.rule).into_owned(),
+                    found.in_selector,
                 )
             })
     }
 
     #[test]
     fn rules_that_name_a_command_are_found() {
-        for (line, rule) in [
+        for (line, rule, in_selector) in [
             (
                 "user u on nopass resetchannels -@all +hello.mul",
                 "+hello.mul",
+                false,
             ),
             (
                 "user u on nopass resetchannels +@all -HELLO.MUL",
                 "-HELLO.MUL",
+                false,
             ),
-            ("user u on nopass -@all +hello.mul|2", "+hello.mul|2"),
-            ("user u on nopass -@all +sub.kv|get", "+sub.kv|get"),
-            ("user u on nopass +@all -sub.kv|set", "-sub.kv|set"),
-            ("user u on nopass -@all +sub.kv +get", "+sub.kv"),
+            ("user u on nopass -@all +hello.mul|2", "+hello.mul|2", false),
+            ("user u on nopass -@all +sub.kv|get", "+sub.kv|get", false),
+            ("user u on nopass +@all -sub.kv|set", "-sub.kv|set", false),
+            ("user u on nopass -@all +sub.kv +get", "+sub.kv", false),
             (
                 "user u on nopass resetchannels -@all (~* resetchannels -@all +hello.mul)",
                 "+hello.mul",
+                true,
             ),
             (
                 "user u on nopass -@all (~k resetchannels +@all -sub.kv|set +get)",
                 "-sub.kv|set",
+                true,
             ),
             (
                 "user u on nopass -@all (~* resetchannels +sub.kv|get)",
                 "+sub.kv|get",
+                true,
             ),
-            ("user u on nopass -@all (+hello.mul)", "+hello.mul"),
+            ("user u on nopass -@all (+hello.mul)", "+hello.mul", true),
+            (
+                "user u on nopass -@all (~a) resetchannels +hello.mul)",
+                "+hello.mul",
+                true,
+            ),
+            (
+                "user u on nopass -@all (~* resetchannels -@all +get) +sub.kv",
+                "+sub.kv",
+                false,
+            ),
         ] {
-            assert_eq!(found(line), Some(("u".into(), rule.into())), "{line}");
+            assert_eq!(
+                found(line),
+                Some(("u".into(), rule.into(), in_selector)),
+                "{line}"
+            );
         }
     }
 

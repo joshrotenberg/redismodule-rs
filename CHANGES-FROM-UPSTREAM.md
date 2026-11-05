@@ -20,16 +20,21 @@ stored rules, asserting that `ACLSetSelector` accepts each one; a `+cmd`,
 `-cmd`, `+cmd|sub`, `-cmd|sub` or `+cmd|arg` rule whose command is gone fails
 the lookup, at the root or in a selector. Before 7.2 the unload keeps the
 user's command bit, which no remaining command describes, and the next
-`ACL LIST` panics with "No bitmap match". The generated unload hook now runs
-`ACL LIST` before the other unload checks and refuses while a rule names a top
-level command the SDK registered in this load (subcommand rules name their
-container), matching names ASCII case-insensitively, and logs the user and
-rule. An unreadable `ACL LIST` also refuses. Category rules are not checked:
-categories a module adds stay registered after it unloads. Native regressions
-refuse the unload for each rule form on the `hello` and `subcommands`
-examples, keep the commands working, and unload and reload once the rules are
-deleted; a `+@acl` rule does not hold the `acl` example back. Upstream's unload
-hook has the same gap; no upstream issue or pull request reports it.
+description of the user, as `ACL LIST`, `ACL GETUSER` or `ACL SAVE` give,
+panics with "No bitmap match". The generated unload hook now runs `ACL LIST`
+before the other unload checks and refuses while a rule names a top level
+command the SDK registered in this load (subcommand rules name their
+container), matching names ASCII case-insensitively, and logs the user, the
+rule and whether it is in a selector. When `ACL LIST` cannot be read, the hook
+logs a warning and lets the unload go ahead: Redis asserts that the unload it
+makes after rejecting a `MODULE LOADEX` configuration succeeds, and no rule can
+name commands that did not exist before that load. Category rules are not
+checked: categories a module adds stay registered after it unloads. Native
+regressions refuse the unload for each rule form on the `hello` and
+`subcommands` examples, keep the commands working, and unload and reload once
+the rules are deleted; the hello regression also runs on Redis 6.0, 6.2 and
+7.0. Upstream's unload hook has the same gap; no upstream issue or pull request
+reports it.
 
 ## Incremental stream entries and native pointer borrows
 

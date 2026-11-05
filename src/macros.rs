@@ -749,7 +749,8 @@ macro_rules! redis_module {
                     let context = unsafe { $crate::EventContext::new(ctx) };
                     // From Redis 7.2 the unload stops the server when an ACL
                     // rule names one of the module's commands; before 7.2 the
-                    // next ACL LIST does. Check before anything changes.
+                    // next ACL LIST of that user does. Check before anything
+                    // changes.
                     if let Err(error) = $crate::__private::refuse_unload_for_acl_rules(&context) {
                         context.log_warning(&format!("{error}"));
                         return $crate::Status::Err as c_int;
