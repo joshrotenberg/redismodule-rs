@@ -27,7 +27,7 @@ default-members = ["legacy"]
 resolver = "3"
 
 [workspace.dependencies]
-redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1", default-features = false }
+redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.2", default-features = false }
 ```
 
 Both module manifests inherit that dependency and expose explicit floor choices:

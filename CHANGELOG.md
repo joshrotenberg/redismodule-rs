@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0-alpha.2](https://github.com/joshrotenberg/redismodule-rs/compare/v3.0.0-alpha.1...v3.0.0-alpha.2) - 2026-11-04
+
 ### Added
+
+- Incremental stream entries through `StreamIterator::next_entry` and
+  `StreamEntry::next_field`, `remaining_fields` and `skip_fields` (#179,
+  parts 1, 2 and 4). Skipping or dropping an entry uses native null outputs
+  without creating field/value strings. Pending fields remain tracked by the
+  iterator, so forgetting an entry and mixing incremental and legacy reads
+  still advances at entry boundaries. The existing `Iterator` returns complete
+  `StreamRecord`s. All public cursor advances honor scoped key-data loans;
+  an unexpected field failure ends the cursor instead of reusing its state.
+- Borrowing `RedisKey::as_ptr` and `RedisKeyWritable::as_ptr` accessors keep
+  the SDK owner and its cleanup responsibility in place (#179). Native calls
+  remain unsafe and subject to key lifetime, lock, mode and aliasing rules.
+- `RedisString::parse_stream_id` forwards to native `StringToStreamID`, with
+  an error if unavailable or refused (#179). The running server defines its
+  numeric/range-ID grammar; command markers such as XREADGROUP's `>` remain
+  separate. AutoMemory adoption is unchanged; part 3 of #179 remains open.
 
 - Complete the module-author rustdoc for key reads, hash fields, list writes,
   expiry, native call replies and server events (#169). Cursor examples now
@@ -26,6 +44,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   element's bytes unchanged, where it replaced invalid UTF-8, and refuses
   extra arguments.
 
+- `CommandBuilder` sets every field of the command info (#208):
+  `.complexity()`, `.since()`, `.history()`, `.tip()`, `.key_spec()` and
+  `.arg()` join `.summary()` and `.arity()` in the builder's one
+  `RedisModule_SetCommandInfo` call, which Redis accepts once per command.
+  Key specs take the `KeySpec`, `KeySpecFlags`, `BeginSearch` and `FindKeys`
+  types `#[command]` uses; their flags reach `COMMAND INFO` and
+  `COMMAND GETKEYSANDFLAGS` and decide what `%R~` and `%W~` ACL key patterns
+  allow, which a key range's spec cannot. Registration checks the info before
+  creating the command, refusing key specs Redis accepts but mishandles (a
+  key step of 0 overruns its key buffer; an index of 0, or a limit with a last
+  key other than -1, fails its assertions), NUL bytes, tips with spaces, and key
+  specs on a container. Redis copies every string, and the builder frees them
+  after the call, as `#[command]` now also does when the call fails. See
+  `examples/subcommands.rs`.
+
 - Command containers and native subcommands (#178).
   `CommandBuilder::container(name)` declares a command without a handler, and
   `.subcommand(redis_command!("child", handler))` registers each child as
@@ -42,8 +75,159 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has children, repeats another child's name ignoring case, has an empty name,
   or has an arity of 1, and a container or child name with a space, line
   break or any of `|@=,`, which Redis 7.2 and later refuse. See `examples/subcommands.rs`.
+- Key-blocking callbacks can write their reply directly (#207).
+  `Context::key_blocking_reply()` returns a `KeyBlockingReply` writer inside
+  the `on_ready` and `on_timeout` callbacks of `block_client_on_keys`, so a
+  large reply needs no `RedisValue` tree. `array`, `map` and `set` open an
+  aggregate; `bulk`, `string`, `integer` and `value` write one element. The
+  writer counts what the reply still owes, so the client still gets one
+  reply. The first write claims the reply, a write after a complete reply is
+  refused, and once anything is written the wait finishes and a returned value
+  is logged and dropped. If the callback returns or panics while an aggregate
+  still owes elements, the SDK writes each owed element as an error reply. A
+  callback that writes nothing keeps the old behavior. The error Redis itself
+  writes for `CLIENT UNBLOCK ... ERROR` of the client from inside its own
+  callback is not counted.
+
+- `Context::block_client_on_keys` transfers an owned, typed waiter to Redis
+  (#177). Only indexed network clients in an active SDK-bound module may
+  wait; scripts, transactions and all module calls return owned fallback data.
+  Loading, unloading and unbound custom loaders are refused. Blocking an
+  already-blocked network client is refused across the SDK blocking APIs.
+  Ready callbacks may keep waiting or return a reply; timeout and disconnect
+  cleanup release the data once. Callback/destructor panics are
+  guarded, a validated timeout avoids native overflow, and denied blocking
+  returns the data for a non-blocking fallback. Redis 7.2+ can wake on deletion;
+  older servers report their ordinary-readiness fallback. `signal_key_as_ready`
+  and `blocked_client_ready_key` expose signaling and an owned ready-key copy.
+
+- The SDK package declares `links = "redismodule"`, allowing Cargo to reject
+  another package declaring the same native library identity (#169).
+  Legacy SDKs without a `links` declaration still require a dependency audit.
+  The generated crate reference now introduces contexts, commands, keys,
+  replies and floors; module guides cover master/local dependency overrides,
+  post-notification unload guards and raw ownership transitions.
+
+- **Breaking:** `RedisValue::NullArray` replies as a null array in RESP2
+  (`*-1`) and null in RESP3 (`_`), including inside aggregates (#180).
+  `Null` still sends a RESP2 null bulk string; `None` and `()` conversions
+  keep using it. Exhaustive matches on `RedisValue` need a `NullArray` arm.
+
+- The vendored header and committed bindings add
+  `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`), matching upstream PR 491
+  (#150). It marks standard RDB saves restored one key at a time. Existing
+  payload layout, flags, API pointers and compatibility floors are unchanged.
+
+- `RuntimeContext::canonical_key_for_slot` returns an owned copy of Redis's
+  exact native slot name on supporting servers (Redis 7.4+) (#146). Invalid
+  slots return `None`; unavailable APIs, unexpected null names and invalid
+  UTF-8 return errors at every floor. There is no automatic fallback. The
+  separate `cluster::key_for_slot` keeps its existing stable names.
+
+- `RuntimeContext::fill_random_bytes` and `fill_random_hex` fill caller-owned
+  slices using Redis's generator under the Redis lock (#144). Hex output is
+  lowercase ASCII, supports odd lengths and has no trailing NUL. Empty slices
+  succeed after checking availability; missing bindings return errors without
+  changing the buffer. Signatures are uniform at every compatibility floor.
+  The `random_fill` example demonstrates per-load IDs and locked worker access.
+
+- `RuntimeContext::api_available` safely queries the running server for a short
+  native API name (#117). Every context view exposes it; unknown/missing names
+  return false and interior NUL returns an error. Presence does not grant a
+  context permission to call the API. The `api_availability` example demonstrates
+  lookup and missing-API handling; `keyspace_to_stream` uses it at load time.
+
+- `EventContext::subscribe_to_server_event` adds typed static function handlers
+  at load time or during commands/events (#114). It preserves attribute handlers,
+  deduplicates function addresses, contains each handler's panics and snapshots
+  each delivery before invoking user code. Failed loads and successful unloads
+  release runtime registrations; rejected unloads retain them. The
+  `runtime_server_events` example demonstrates conditional subscription.
+
+- **Breaking:** `ServerEventHandler` gains `Cron`, `FlushInfo`, `SwapDb` and
+  `ConfigChanged` variants, which breaks an exhaustive `match` on it (#114). It
+  is now `#[non_exhaustive]`, so a `match` needs a `_` arm and later variants
+  are not breaking.
+
+- `ThreadSafeContext::try_lock` and `DetachedContext::try_lock` return their
+  existing borrowed guards on success and `None` when the Redis lock cannot
+  be acquired immediately (#113). Workers can check a stop flag between
+  attempts so module unload can join them while holding the Redis lock.
+  Both methods support every compatibility floor; `examples/try_lock.rs`
+  demonstrates acquisition, contention and worker teardown.
+- The vendored header and committed bindings include upstream's
+  `RedisModulePersistenceInfoV1`, its `RedisModulePersistenceInfo` alias,
+  `REDISMODULE_PERSISTENCEINFO_VERSION` and
+  `REDISMODULE_PERSISTENCE_FLAG_SYNCER` (#110). These persistence-event
+  declarations are absent from Redis OSS 8.10.2's header; no API pointers,
+  safe wrappers or compatibility floors change.
+- `src/include/redismodule.h` and the committed bindings declare the module API
+  that Redis OSS 8.10.2's header has and upstream's lacks (#106):
+  `RedisModule_SubscribeToKeyspaceEventsWithSubkeys`,
+  `RedisModule_UnsubscribeFromKeyspaceEventsWithSubkeys` and
+  `RedisModule_NotifyKeyspaceEventWithSubkeys` (Redis 8.8),
+  `RedisModule_AddPostNotificationJobForKey` and
+  `RedisModule_GetClusterNodeSlotRanges` (Redis 8.10), with their callback
+  types; `REDISMODULE_KEYTYPE_ARRAY` and the subkey delivery flags (Redis 8.8);
+  the array and subkey notification flags; and the cluster topology change event
+  with its data and flags, and the slot migration `MIGRATE_MODULE_PROPAGATE_END`
+  sub-event (Redis 8.10). A server without one of the APIs leaves its `raw`
+  pointer `None`, so no compatibility floor changes; the SDK adds no wrappers.
+  The Redis Enterprise declarations stay. `REDISMODULE_NOTIFY_ALL` keeps
+  upstream's value, without `REDISMODULE_NOTIFY_ARRAY`, so `NotifyEvent::ALL` is
+  unchanged. [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) lists how the
+  header differs from upstream's and from Redis OSS 8.10.2's.
+
+- Documentation: [docs/PORTING-EXAMPLE.md](docs/PORTING-EXAMPLE.md) walks
+  through porting a module from upstream 2.1.3 to 3.0 (#63), and the migration
+  guide has the corrections that port turned up (#89). CHANGES-FROM-UPSTREAM.md
+  assesses the remaining upstream pull requests and the upstream persistence
+  flag update (#101, #148).
 
 ### Fixed
+
+- A key-blocking ready callback that unblocks its own client with a nested
+  `CLIENT UNBLOCK ... ERROR` no longer sends its value after Redis's error
+  reply and reports the client served, which made Redis free the native
+  waiter twice (#207). The SDK now checks that Redis still holds the client
+  blocked before serving it.
+- **Breaking:** callbacks that run while Redis is using a key's value can no
+  longer change the keyspace (#205). In a `KeysCursor` callback, after which
+  Redis closes the key it lent and reads its value, and in a callback Redis
+  raises during an SDK key write, such as a `new` keyspace subscriber running
+  before the native key holds the value it creates, calls, `yield_now` and
+  notifications return `ERR`, key writes return `ERR` or `Status::Err`, and
+  pops panic. A `KeysCursor` callback can still read the lent key's string
+  value. Keys opened while a keyspace scan runs, or while a key scan scans a
+  key opened with `ACCESS_EXPIRED`, open with `NOEXPIRE` (Redis 7.2+), so an
+  open does not delete an expired key Redis is using; they close when the scan
+  ends and re-open with their own flags.
+
+- Key handles stay valid when something else changes their key (#197). An
+  open native key caches the value Redis looked up, and a call, `yield_now`,
+  a keyspace notification or scan, or string DMA, a write, delete, pop or trim
+  through another handle could free that value: the handle then read and wrote
+  freed memory, and from Redis 6.2 closing it did too. The SDK now registers
+  every key it opens on its thread and closes them before such an operation,
+  while the values are still valid: all of them for a call, `yield_now`, a
+  notification or a scan, and the other handles to the same key for a change
+  through one handle. A closed handle re-opens on its next use, with the same
+  name, mode, flags and database, sees the key as a fresh open would, and has
+  an open's effects, such as `keymiss` notifications. Each open costs one
+  small allocation for its registry entry. `as_ptr` returns the current native
+  key, valid until the next keyspace change.
+  **Breaking:**
+  - A `StreamIterator` panics on its next step, or its entry's next field,
+    after a keyspace change, since it cannot re-open; start a new one.
+  - A `ScanKeyCursor` callback cannot change the keyspace, because Redis keeps
+    scanning the key after it: calls, `yield_now` and notifications return
+    `ERR a key scan callback is running`, key writes return that error or
+    `Status::Err`, and pops and keyspace scans panic.
+  - Handles built with `RedisKey::from_raw_parts`, and the handles scan
+    callbacks receive, panic when used after a keyspace change; one on a
+    missing key does not.
+  - `RedisKey` and `RedisKeyWritable` are no longer `UnwindSafe` or
+    `RefUnwindSafe`.
 
 - SDK-generated error replies consistently start with `ERR` or a specific
   Redis error code (#166), including argument parsing, key operations,
@@ -60,7 +244,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#166). Module-argument enum names now ignore ASCII case, as Redis does.
 - The SDK's crash-info dispatcher no longer captures or symbolizes a Rust
   backtrace (#166). Module INFO callbacks still run with the original
-  crash-report flag; their own crash-path restrictions continue to apply.
+  crash-report flag; their own crash-path restrictions continue to apply. A
+  follow-up migration note for #166 removes the obsolete SDK-backtrace recipe.
 
 - **Breaking:** safe code can no longer change a key while holding data
   borrowed from it (#162). `RedisKey::read` returns an owned `Vec<u8>`;
@@ -72,8 +257,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thread, so a context reached another way, such as from a thread local,
   cannot change the key either. The borrowing forms, `read_borrowed`,
   `get_value` and `as_string_dma`, are `unsafe`. A handle opened before the
-  same key was deleted or replaced through another handle or a call can still
-  point at a freed value; #197 tracks that.
+  same key was deleted or replaced through another handle or a call re-opens
+  its key since #197.
 
 - Unusual input no longer panics or silently changes stored data (#165).
   Calls and replication reject NUL command names before creating native
@@ -218,94 +403,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   execution and captured-data cleanup, including cancellation and panics.
   Submissions during module load/unload return `Status::Err` and release
   captures immediately, preventing callbacks from surviving a failed load.
-
-### Added
-
-- `Context::block_client_on_keys` transfers an owned, typed waiter to Redis
-  (#177). Only indexed network clients in an active SDK-bound module may
-  wait; scripts, transactions and all module calls return owned fallback data.
-  Loading, unloading and unbound custom loaders are refused. Blocking an
-  already-blocked network client is refused across the SDK blocking APIs.
-  Ready callbacks may keep waiting or return a reply; timeout and disconnect
-  cleanup release the data once. Callback/destructor panics are
-  guarded, a validated timeout avoids native overflow, and denied blocking
-  returns the data for a non-blocking fallback. Redis 7.2+ can wake on deletion;
-  older servers report their ordinary-readiness fallback. `signal_key_as_ready`
-  and `blocked_client_ready_key` expose signaling and an owned ready-key copy.
-
-- The SDK package declares `links = "redismodule"`, allowing Cargo to reject
-  another package declaring the same native library identity (#169).
-  Legacy SDKs without a `links` declaration still require a dependency audit.
-  The generated crate reference now introduces contexts, commands, keys,
-  replies and floors; module guides cover master/local dependency overrides,
-  post-notification unload guards and raw ownership transitions.
-
-- **Breaking:** `RedisValue::NullArray` replies as a null array in RESP2
-  (`*-1`) and null in RESP3 (`_`), including inside aggregates (#180).
-  `Null` still sends a RESP2 null bulk string; `None` and `()` conversions
-  keep using it. Exhaustive matches on `RedisValue` need a `NullArray` arm.
-
-- The vendored header and committed bindings add
-  `REDISMODULE_PERSISTENCE_FLAG_STDRDB` (`1<<1`), matching upstream PR 491
-  (#150). It marks standard RDB saves restored one key at a time. Existing
-  payload layout, flags, API pointers and compatibility floors are unchanged.
-
-- `RuntimeContext::canonical_key_for_slot` returns an owned copy of Redis's
-  exact native slot name on supporting servers (Redis 7.4+) (#146). Invalid
-  slots return `None`; unavailable APIs, unexpected null names and invalid
-  UTF-8 return errors at every floor. There is no automatic fallback. The
-  separate `cluster::key_for_slot` keeps its existing stable names.
-
-- `RuntimeContext::fill_random_bytes` and `fill_random_hex` fill caller-owned
-  slices using Redis's generator under the Redis lock (#144). Hex output is
-  lowercase ASCII, supports odd lengths and has no trailing NUL. Empty slices
-  succeed after checking availability; missing bindings return errors without
-  changing the buffer. Signatures are uniform at every compatibility floor.
-  The `random_fill` example demonstrates per-load IDs and locked worker access.
-
-- `RuntimeContext::api_available` safely queries the running server for a short
-  native API name (#117). Every context view exposes it; unknown/missing names
-  return false and interior NUL returns an error. Presence does not grant a
-  context permission to call the API. The `api_availability` example demonstrates
-  lookup and missing-API handling; `keyspace_to_stream` uses it at load time.
-
-- `EventContext::subscribe_to_server_event` adds typed static function handlers
-  at load time or during commands/events (#114). It preserves attribute handlers,
-  deduplicates function addresses, contains each handler's panics and snapshots
-  each delivery before invoking user code. Failed loads and successful unloads
-  release runtime registrations; rejected unloads retain them. The
-  `runtime_server_events` example demonstrates conditional subscription.
-
-- `ThreadSafeContext::try_lock` and `DetachedContext::try_lock` return their
-  existing borrowed guards on success and `None` when the Redis lock cannot
-  be acquired immediately (#113). Workers can check a stop flag between
-  attempts so module unload can join them while holding the Redis lock.
-  Both methods support every compatibility floor; `examples/try_lock.rs`
-  demonstrates acquisition, contention and worker teardown.
-- The vendored header and committed bindings include upstream's
-  `RedisModulePersistenceInfoV1`, its `RedisModulePersistenceInfo` alias,
-  `REDISMODULE_PERSISTENCEINFO_VERSION` and
-  `REDISMODULE_PERSISTENCE_FLAG_SYNCER` (#110). These persistence-event
-  declarations are absent from Redis OSS 8.10.2's header; no API pointers,
-  safe wrappers or compatibility floors change.
-- `src/include/redismodule.h` and the committed bindings declare the module API
-  that Redis OSS 8.10.2's header has and upstream's lacks (#106):
-  `RedisModule_SubscribeToKeyspaceEventsWithSubkeys`,
-  `RedisModule_UnsubscribeFromKeyspaceEventsWithSubkeys` and
-  `RedisModule_NotifyKeyspaceEventWithSubkeys` (Redis 8.8),
-  `RedisModule_AddPostNotificationJobForKey` and
-  `RedisModule_GetClusterNodeSlotRanges` (Redis 8.10), with their callback
-  types; `REDISMODULE_KEYTYPE_ARRAY` and the subkey delivery flags (Redis 8.8);
-  the array and subkey notification flags; and the cluster topology change event
-  with its data and flags, and the slot migration `MIGRATE_MODULE_PROPAGATE_END`
-  sub-event (Redis 8.10). A server without one of the APIs leaves its `raw`
-  pointer `None`, so no compatibility floor changes; the SDK adds no wrappers.
-  The Redis Enterprise declarations stay. `REDISMODULE_NOTIFY_ALL` keeps
-  upstream's value, without `REDISMODULE_NOTIFY_ARRAY`, so `NotifyEvent::ALL` is
-  unchanged. [CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) lists how the
-  header differs from upstream's and from Redis OSS 8.10.2's.
-
-### Fixed
 
 - On servers without `AddACLCategory`, `redis_module!` reports that limitation
   once per load and omits its declared custom names from optional command ACL

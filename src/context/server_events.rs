@@ -96,7 +96,11 @@ pub enum ModuleChangeSubevent {
 ///
 /// Register with [`EventContext::subscribe_to_server_event`]. Payloads and
 /// contexts are borrowed only for the invocation; copy any data to retain it.
+///
+/// The enum is `#[non_exhaustive]`: Redis adds server events, and a variant
+/// for a new one is not a breaking change. A `match` on it needs a `_` arm.
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub enum ServerEventHandler {
     /// Replication role changes. The historical variant name is preserved.
     RuleChanged(fn(&EventContext, ServerRole)),

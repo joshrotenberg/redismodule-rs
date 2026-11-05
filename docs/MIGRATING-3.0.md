@@ -316,7 +316,10 @@ handle is returned. Supply owned `Send + 'static` data, a `KeyBlockingTimeout`,
 a ready callback returning `Result<Option<RedisValue>, RedisError>` and a
 timeout callback returning `RedisResult`. `Ok(None)` means keep waiting;
 `Ok(Some(value))` or an error replies and unblocks. Callback `NoReply` becomes
-an error because a completed wait must send one reply.
+an error because a completed wait must send one reply. To write a large reply
+without building a value tree, a callback writes it through
+`ctx.key_blocking_reply()` and returns `NoReply`. The writer counts the reply,
+so the client still gets exactly one.
 
 Return `RedisValue::NoReply` only for `KeyBlockingResult::Blocked`.
 `KeyBlockingResult::Denied(data)` preserves the data for a non-blocking reply
@@ -859,17 +862,16 @@ Two patterns still need native bindings rather than a method equivalent:
   Prefer a complete `RedisValue` tree where practical; `InsertionOrderedMap`,
   `BulkRedisString` and `NullArray` cover repeated binary keys, native string
   replies and stream-style absent arrays without these raw calls.
-- For an unwrapped read-only key API, open with `ctx.open_key(&name)`, then consume the
-  handle with `to_raw_parts()`. Rebuild exactly one `RedisKey` using
-  `unsafe { RedisKey::from_raw_parts(opening_ctx, key_ptr) }` in your wrapper's
-  cleanup so the SDK closes it, or call the native close once yourself. Keep
-  the opening context and its Redis lock valid until then; do not retain the
-  raw key beyond that scope. A null read-only key needs no native close.
-  Native write operations require a key opened with write access: use
-  `RedisModule_OpenKey` with `REDISMODULE_READ | REDISMODULE_WRITE` and close
-  the returned handle exactly once with `RedisModule_CloseKey` while the
-  opening context and Redis lock remain valid. `RedisKeyWritable` has no
-  ownership-extraction method; a native wrapper must own this cleanup itself.
+- For an unwrapped key API, open with `ctx.open_key(&name)` or
+  `ctx.open_key_writable(&name)` and borrow `key.as_ptr()`. Keep that SDK
+  owner alive for every native call; its Drop still closes the handle. Native
+  calls remain unsafe and must respect the open mode, the opening context and
+  Redis lock, scoped key-data loans and native aliasing rules. Do not close the
+  borrowed pointer, rebuild a second owner or keep it beyond that scope. A
+  read-only open of a missing key can return a null pointer. `to_raw_parts`
+  is only for intentionally transferring a read-key handle's ownership;
+  after that transfer the caller must close it exactly once or reconstruct
+  exactly one owner with `from_raw_parts`.
 
 When adopting an owned string returned by a native API, a null producer context
 is correct only when the string has no AutoMemory registration, such as a
@@ -1246,9 +1248,10 @@ text.
 - **Logging.** Messages go to Redis through a fixed `%s` format, so `%` in
   logged text is printed as is; an embedded NUL is written as `\0`.
 - **Cron events.** Cron event handlers receive the server's `hz`; 2.x passed 1.
-- **Crash reports.** The `backtrace` field of the crash report's `trace`
-  section is `std::backtrace::Backtrace` output (one line, no column numbers)
-  instead of the `backtrace` crate's numbered frames.
+- **Crash reports.** Redis retains its native crash diagnostics, and module
+  INFO callbacks still receive the crash-report flag. The SDK no longer
+  captures or symbolizes a Rust backtrace (#166); this does not make arbitrary
+  module INFO callbacks async-signal-safe.
 
 ## Testing a module with `cargo test`
 
@@ -1268,7 +1271,7 @@ lets them use the system allocator. Enable it for tests only, from the same
 
 ```toml
 [dev-dependencies]
-redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1", features = ["system-allocator-fallback"] }
+redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.2", features = ["system-allocator-fallback"] }
 ```
 
 `redis_module!` fails the module load if a module built with the feature has
@@ -1277,7 +1280,8 @@ already allocated from the system allocator when Redis loads it.
 ## Runtime server-event handlers
 
 `server_events::ServerEventHandler` adds `Cron`, `FlushInfo`, `SwapDb` and
-`ConfigChanged` variants for `EventContext::subscribe_to_server_event`. Update
-exhaustive matches on this enum. Existing variants, including the historical
+`ConfigChanged` variants for `EventContext::subscribe_to_server_event`, and is
+now `#[non_exhaustive]`: a `match` on it needs a `_` arm, so later variants do
+not break it. Existing variants, including the historical
 `RuleChanged` spelling, remain available. Existing attribute handlers need no
 changes and stay active alongside runtime subscriptions.

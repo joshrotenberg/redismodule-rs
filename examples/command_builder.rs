@@ -96,6 +96,45 @@ fn init(ctx: &redis_module::RegistrationContext<'_>, args: &[RedisString]) -> St
             "subcommand-arity-one" => CommandBuilder::container("builder.container")
                 .subcommand(redis_command!("child", ping).arity(1)),
             "container-empty" => CommandBuilder::container("builder.container"),
+            "tip-space" => command.tip("two tips"),
+            "key-spec-step-zero" => command.key_spec(redis_module::commands::KeySpec::new(
+                None,
+                redis_module::commands::KeySpecFlags::READ_ONLY,
+                redis_module::commands::BeginSearch::new_index(1),
+                redis_module::commands::FindKeys::new_range(0, 0, 0),
+            )),
+            "key-spec-limit-fixed-last" => command.key_spec(redis_module::commands::KeySpec::new(
+                None,
+                redis_module::commands::KeySpecFlags::READ_ONLY,
+                redis_module::commands::BeginSearch::new_index(1),
+                redis_module::commands::FindKeys::new_range(-2, 1, 1),
+            )),
+            "key-spec-index-zero" => command.key_spec(redis_module::commands::KeySpec::new(
+                None,
+                redis_module::commands::KeySpecFlags::READ_ONLY,
+                redis_module::commands::BeginSearch::new_index(0),
+                redis_module::commands::FindKeys::new_range(0, 1, 0),
+            )),
+            "key-spec-nul" => command.key_spec(redis_module::commands::KeySpec::new(
+                Some("notes\0".to_owned()),
+                redis_module::commands::KeySpecFlags::READ_ONLY,
+                redis_module::commands::BeginSearch::new_index(1),
+                redis_module::commands::FindKeys::new_range(0, 1, 0),
+            )),
+            "container-key-spec" => CommandBuilder::container("builder.container")
+                .key_spec(redis_module::commands::KeySpec::new(
+                    None,
+                    redis_module::commands::KeySpecFlags::READ_ONLY,
+                    redis_module::commands::BeginSearch::new_index(1),
+                    redis_module::commands::FindKeys::new_range(0, 1, 0),
+                ))
+                .subcommand(redis_command!("child", ping)),
+            "key-spec-invalid" => command.key_spec(redis_module::commands::KeySpec::new(
+                None,
+                redis_module::commands::KeySpecFlags::empty(),
+                redis_module::commands::BeginSearch::new_index(1),
+                redis_module::commands::FindKeys::new_range(0, 1, 0),
+            )),
             "container-name" => CommandBuilder::container("builder|container")
                 .subcommand(redis_command!("child", ping)),
             "subcommand-name" => CommandBuilder::container("builder.container")

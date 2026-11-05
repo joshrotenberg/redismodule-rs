@@ -16,6 +16,38 @@ unchanged, as [README.upstream.md](README.upstream.md).
 For branches, the review and merge workflow and validation, see
 [CONTRIBUTING.md](CONTRIBUTING.md). The open issues are the work list.
 
+## What 3.0 changes
+
+A module still declares itself with `redis_module!` and works through
+`Context`, as with 2.x. What changes is what safe code can get wrong:
+
+- **Open keys survive the SDK's keyspace changes.** A call that deletes or
+  rewrites a key, a pop that empties a list, or a yield used to leave an open
+  key pointing at freed memory. The SDK closes the keys a change made through
+  it affects before the change happens, and re-opens them on their next use.
+- **Key data borrows are scoped.** A string value, a string DMA view or a
+  native type value is lent to a closure, and while it runs the SDK refuses
+  calls, other key operations and yields on that thread. Native types are
+  declared as `RedisType<T>`, so a value is read back as the type it was
+  stored as.
+- **One reply per blocked client.** A blocked-client handle dropped without a
+  reply sends an error, so its client is not left waiting. A key-blocking
+  callback that returns no reply sends an error instead, and a reply it
+  streams through `key_blocking_reply` is counted: an incomplete reply is
+  finished and a second one refused, which keeps the client in sync.
+- **Panics stay in the module.** Commands, callbacks and native type methods
+  that the SDK registers run inside panic guards, so a panic becomes an error
+  reply or a log line instead of unwinding into Redis.
+- **Compatibility floors.** A module chooses the oldest Redis it supports, from
+  6.0 up, at compile time. An API added after that floor returns an error when
+  the running server lacks it.
+- **Command metadata.** `CommandBuilder` registers subcommands, key specs and
+  ACL categories, and fills in what `COMMAND DOCS` reports. It checks all of it
+  before registering anything.
+
+[CHANGES-FROM-UPSTREAM.md](CHANGES-FROM-UPSTREAM.md) has the details of each,
+and [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md) what a 2.x module changes.
+
 ## Using it
 
 3.0.0 is not published to crates.io. Depend on it from git, pinned to a
@@ -26,11 +58,11 @@ pre-release tag:
 crate-type = ["cdylib"]
 
 [dependencies]
-redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1" }
+redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.2" }
 # Only for the attribute and derive macros: #[command], the server event
 # handler, INFO and defrag attributes, and #[derive(RedisValue)] and
 # #[derive(InfoSection)].
-redis-module-macros = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1" }
+redis-module-macros = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.2" }
 ```
 
 The tag is a pre-release; the crates inside it are version `3.0.0`. To build

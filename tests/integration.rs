@@ -11,6 +11,7 @@ use redis_module::RedisValue;
 
 mod configuration_ownership;
 mod correctness_gaps;
+mod stream_fields;
 mod utils;
 
 #[test]
@@ -1818,6 +1819,28 @@ fn test_command_builder_invalid_definitions_fail_the_load() {
         ("subcommand-key-range", "invalid command key range"),
         ("subcommand-arity-one", "cannot be 1"),
         ("container-empty", "needs at least one subcommand"),
+        (
+            "tip-space",
+            "command tip must be non-empty and contain no space",
+        ),
+        (
+            "key-spec-invalid",
+            "Redis refused the command info of builder.invalid",
+        ),
+        (
+            "key-spec-step-zero",
+            "a key spec's range needs a step of 1 or more",
+        ),
+        (
+            "key-spec-index-zero",
+            "begin-search index must be 1 or more",
+        ),
+        (
+            "key-spec-limit-fixed-last",
+            "a key spec's range needs a step of 1 or more",
+        ),
+        ("key-spec-nul", "key spec notes contains a NUL byte"),
+        ("container-key-spec", "container cannot have keys"),
         ("container-acl", "container cannot have ACL categories"),
         (
             "container-optional-acl",
@@ -3705,6 +3728,99 @@ fn test_subcommands_command_metadata() -> Result<()> {
     Ok(())
 }
 
+/// Every field of the command info a builder sets reaches Redis in its one
+/// `SetCommandInfo` call: `COMMAND DOCS` reports the summary, complexity,
+/// since, history and arguments, and `COMMAND INFO` the tips and key specs.
+#[test]
+fn test_command_builder_sets_every_command_info_field() -> Result<()> {
+    let mut con = TestConnection::new("subcommands");
+    let docs: Value = redis::cmd("COMMAND")
+        .arg(&["DOCS", "subcmd.documented"])
+        .query(&mut con)?;
+    let mut strings = Vec::new();
+    reply_strings(&docs, &mut strings);
+    for expected in [
+        "Reads a key",
+        "O(1)",
+        "0.9.0",
+        "1.1.0",
+        "Reads the value as a copy",
+        "1.2.0",
+        "Refuses extra arguments",
+        "source",
+        "The key to read",
+    ] {
+        assert!(
+            strings.iter().any(|s| s == expected),
+            "{expected}: {strings:?}"
+        );
+    }
+    let info = command_info(&mut con, "subcmd.documented")?;
+    let mut strings = Vec::new();
+    reply_strings(&Value::Array(info), &mut strings);
+    for expected in [
+        "nondeterministic_output",
+        "request_policy:all_shards",
+        "the key it reads",
+        "RO",
+        "access",
+    ] {
+        assert!(
+            strings.iter().any(|s| s == expected),
+            "{expected}: {strings:?}"
+        );
+    }
+    Ok(())
+}
+
+/// Key specs carry the flags a key range cannot: `COMMAND GETKEYSANDFLAGS`
+/// reports each subcommand's own, and a user limited to reading keys
+/// (`%R~*`) can run the read-only subcommand but not the overwriting one.
+#[test]
+fn test_command_builder_key_spec_flags_decide_acl_key_access() -> Result<()> {
+    let mut con = TestConnection::new("subcommands");
+    let flags = |con: &mut TestConnection, args: &[&str]| -> Result<Vec<String>> {
+        let reply: Value = redis::cmd("COMMAND")
+            .arg("GETKEYSANDFLAGS")
+            .arg(args)
+            .query(con)?;
+        let mut strings = Vec::new();
+        reply_strings(&reply, &mut strings);
+        Ok(strings)
+    };
+    assert_eq!(
+        flags(&mut con, &["subcmd.kv", "set", "k", "v"])?,
+        ["k", "OW", "update"]
+    );
+    assert_eq!(
+        flags(&mut con, &["subcmd.kv", "get", "k"])?,
+        ["k", "RO", "access"]
+    );
+
+    redis::cmd("SET").arg(&["k", "v"]).query::<()>(&mut con)?;
+    redis::cmd("ACL")
+        .arg(&["SETUSER", "reader", "on", "nopass", "%R~*", "+@all"])
+        .query::<()>(&mut con)?;
+    let mut reader = con.connection()?;
+    redis::cmd("AUTH")
+        .arg(&["reader", "unused"])
+        .query::<()>(&mut reader)?;
+    let value: String = redis::cmd("subcmd.kv")
+        .arg(&["get", "k"])
+        .query(&mut reader)?;
+    assert_eq!(value, "v");
+    let value: String = redis::cmd("subcmd.documented")
+        .arg("k")
+        .query(&mut reader)?;
+    assert_eq!(value, "v");
+    let error = redis::cmd("subcmd.kv")
+        .arg(&["set", "k", "w"])
+        .query::<Value>(&mut reader)
+        .expect_err("a read-only key user overwrote a key");
+    assert_eq!(error.code(), Some("NOPERM"), "{error}");
+    Ok(())
+}
+
 /// A subcommand's ACL categories decide who can run it: a user granted only
 /// `@read` can run `get` but not `set`, or `panic`, which has no categories.
 #[test]
@@ -3950,6 +4066,335 @@ fn test_shared_api_is_called_across_modules() -> Result<()> {
         "{missing}"
     );
     assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+/// Key handles across keyspace changes (#197): string DMA through one handle
+/// replaces the int- or embstr-encoded value another handle opened, and both
+/// read the value.
+#[test]
+fn test_key_handles_survive_a_second_handle_reading_through_dma() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    for value in ["12345", "short"] {
+        redis::cmd("SET").arg(&["k", value]).query::<()>(&mut con)?;
+        let reads: Vec<Option<String>> = redis::cmd("stale.two_reads").arg("k").query(&mut con)?;
+        assert_eq!(
+            reads,
+            [Some(value.to_owned()), Some(value.to_owned())],
+            "{value}"
+        );
+    }
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// A handle sees what a call did to its key: changed, deleted, renamed away,
+/// flushed, or created.
+#[test]
+fn test_key_handles_see_changes_made_through_calls() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let run = |con: &mut TestConnection, setup: &[&[&str]], args: &[&str]| -> Result<Value> {
+        for command in setup {
+            redis::cmd(command[0]).arg(&command[1..]).query::<()>(con)?;
+        }
+        Ok(redis::cmd("stale.call_then_read").arg(args).query(con)?)
+    };
+    let reply = |before: &str, after: &str, value: Option<&str>| {
+        Value::Array(vec![
+            Value::BulkString(before.into()),
+            Value::BulkString(after.into()),
+            value.map_or(Value::Nil, |value| Value::BulkString(value.into())),
+        ])
+    };
+    let set: &[&str] = &["SET", "k", "12345"];
+    assert_eq!(
+        run(&mut con, &[set], &["k", "APPEND", "k", "x"])?,
+        reply("string", "string", Some("12345x"))
+    );
+    assert_eq!(
+        run(&mut con, &[set], &["k", "DEL", "k"])?,
+        reply("string", "none", None)
+    );
+    assert_eq!(
+        run(&mut con, &[set], &["k", "RENAME", "k", "k2"])?,
+        reply("string", "none", None)
+    );
+    assert_eq!(
+        redis::cmd("GET").arg("k2").query::<String>(&mut con)?,
+        "12345"
+    );
+    assert_eq!(
+        run(&mut con, &[set], &["k", "FLUSHDB"])?,
+        reply("string", "none", None)
+    );
+    assert_eq!(
+        run(&mut con, &[&["DEL", "k"]], &["k", "SET", "k", "created"])?,
+        reply("none", "string", Some("created"))
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// A writable handle whose key a call deleted writes it again, as a fresh
+/// open would.
+#[test]
+fn test_writable_handle_writes_after_its_key_is_deleted() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("SET").arg(&["k", "old"]).query::<()>(&mut con)?;
+    let types: Vec<String> = redis::cmd("stale.del_then_write")
+        .arg(&["k", "new"])
+        .query(&mut con)?;
+    assert_eq!(types, ["none", "string"]);
+    assert_eq!(redis::cmd("GET").arg("k").query::<String>(&mut con)?, "new");
+    Ok(())
+}
+
+/// Popping a list's last element through one handle deletes the key, and
+/// another handle to it sees the key gone.
+#[test]
+fn test_key_handle_sees_a_pop_that_deleted_its_key() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("RPUSH")
+        .arg(&["l", "only"])
+        .query::<()>(&mut con)?;
+    let reply: (String, String, String) = redis::cmd("stale.pop_other").arg("l").query(&mut con)?;
+    assert_eq!(reply, ("list".into(), "only".into(), "none".into()));
+    assert_eq!(redis::cmd("EXISTS").arg("l").query::<i64>(&mut con)?, 0);
+    Ok(())
+}
+
+/// A re-opened handle opens its key in the database it was opened in, and
+/// leaves the module's selected database as it found it.
+#[test]
+fn test_reopened_key_handle_keeps_its_database() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("SET").arg(&["k", "db0"]).query::<()>(&mut con)?;
+    let reply: (String, i64) = redis::cmd("stale.other_db")
+        .arg(&["k", "db1"])
+        .query(&mut con)?;
+    assert_eq!(reply, ("db0".into(), 1));
+    redis::cmd("SELECT").arg(1).query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("GET").arg("k").query::<String>(&mut con)?, "db1");
+    redis::cmd("SELECT").arg(0).query::<()>(&mut con)?;
+    assert_eq!(redis::cmd("GET").arg("k").query::<String>(&mut con)?, "db0");
+    Ok(())
+}
+
+/// A stream iterator cannot re-open its key, so a call in the loop body makes
+/// its next step panic, which the command's guard reports.
+#[test]
+fn test_stream_iterator_stops_after_a_keyspace_change() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    for value in ["1", "2"] {
+        redis::cmd("XADD")
+            .arg(&["s", "*", "f", value])
+            .query::<String>(&mut con)?;
+    }
+    let error = redis::cmd("stale.stream_call")
+        .arg("s")
+        .query::<Value>(&mut con)
+        .expect_err("a stream iterator continued after a keyspace change");
+    assert!(
+        error.to_string().contains(
+            "command panicked: the stream's key was closed by a keyspace change while iterating it"
+        ),
+        "{error}"
+    );
+    assert_eq!(redis::cmd("XLEN").arg("s").query::<i64>(&mut con)?, 2);
+
+    // The field-at-a-time form panics on the next entry too, instead of
+    // ending the iteration as if the stream were exhausted.
+    let error = redis::cmd("stale.entry_call")
+        .arg("s")
+        .query::<Value>(&mut con)
+        .expect_err("next_entry continued after a keyspace change");
+    assert!(
+        error.to_string().contains(
+            "command panicked: the stream's key was closed by a keyspace change while iterating it"
+        ),
+        "{error}"
+    );
+    Ok(())
+}
+
+/// Redis keeps scanning a key after each callback, so the SDK refuses
+/// keyspace changes from a key scan callback.
+#[test]
+fn test_key_scan_callback_refuses_keyspace_changes() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("HSET")
+        .arg(&["h", "a", "1", "b", "2", "c", "3"])
+        .query::<()>(&mut con)?;
+    let (fields, refusal): (i64, String) = redis::cmd("stale.scan_del").arg("h").query(&mut con)?;
+    assert_eq!(fields, 3);
+    assert_eq!(
+        refusal,
+        "ERR a key scan callback is running; the keyspace cannot change until it returns"
+    );
+    assert_eq!(redis::cmd("HLEN").arg("h").query::<i64>(&mut con)?, 3);
+    Ok(())
+}
+
+/// `to_raw_parts` re-opens a closed handle before handing the key over, and a
+/// handle re-opens after `yield_now`.
+#[test]
+fn test_key_handles_reopen_for_raw_parts_and_after_yield() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("SET").arg(&["k", "old"]).query::<()>(&mut con)?;
+    let read: String = redis::cmd("stale.raw_parts_after_call")
+        .arg(&["k", "new"])
+        .query(&mut con)?;
+    assert_eq!(read, "new");
+    let read: String = redis::cmd("stale.yield_then_read")
+        .arg("k")
+        .query(&mut con)?;
+    assert_eq!(read, "new");
+    Ok(())
+}
+
+/// A `new` keyspace subscriber that calls while a handle's write is still
+/// creating the key is refused: a change then would leave Redis writing a
+/// freed value.
+#[test]
+fn test_subscriber_cannot_change_the_keyspace_mid_write() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    // The subscriber's call is refused while the write is in progress.
+    let reply: (i64, String, String) = redis::cmd("stale.create_with_subscriber")
+        .arg(&["created:k", "value"])
+        .query(&mut con)?;
+    assert_eq!(reply, (1, "string".into(), "string".into()));
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("created:k")
+            .query::<String>(&mut con)?,
+        "value"
+    );
+    // A subscriber raised by a client's write can call.
+    let (calls_before, _): (i64, i64) = redis::cmd("stale.new_calls").query(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["created:client", "v"])
+        .query::<()>(&mut con)?;
+    let (calls_after, _): (i64, i64) = redis::cmd("stale.new_calls").query(&mut con)?;
+    assert_eq!(calls_after, calls_before + 1);
+    assert!(!con.server_log()?.contains("panicked"));
+    Ok(())
+}
+
+/// Opening a key closes keys opened with `ACCESS_EXPIRED`, which may hold an
+/// expired value the open deletes, but not one Redis is scanning: a scan
+/// callback that opens another key leaves the scanned key open. Redis 8.0+.
+#[test]
+fn test_key_scan_of_an_expired_key_survives_opens_in_the_callback() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version = redis_module::Context::version_from_info(RedisValue::BulkString(info))?;
+    if version.major < 8 {
+        return Ok(());
+    }
+    redis::cmd("DEBUG")
+        .arg(&["SET-ACTIVE-EXPIRE", "0"])
+        .query::<()>(&mut con)?;
+    redis::cmd("HSET")
+        .arg(&["h", "a", "1", "b", "2"])
+        .query::<()>(&mut con)?;
+    redis::cmd("PEXPIRE")
+        .arg(&["h", "1"])
+        .query::<()>(&mut con)?;
+    thread::sleep(Duration::from_millis(20));
+    let fields: i64 = redis::cmd("stale.scan_expired_open")
+        .arg(&["h", "other"])
+        .query(&mut con)?;
+    assert_eq!(fields, 2);
+    // The plain open of h inside the callback did not delete it under the scan.
+    assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut con)?, 1);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// Redis closes each key a keyspace scan lends its callback after the callback,
+/// reading the key's value, so the SDK refuses keyspace changes from it. The
+/// lent key's string value can still be read, and the keys can be changed
+/// once the scan returns.
+#[test]
+fn test_keyspace_scan_callback_refuses_keyspace_changes() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    for key in ["a", "b"] {
+        redis::cmd("SET").arg(&[key, "1"]).query::<()>(&mut con)?;
+    }
+    let (keys, read, refusal, deleted): (i64, i64, String, i64) =
+        redis::cmd("stale.keys_scan_del").query(&mut con)?;
+    assert_eq!((keys, read), (2, 2));
+    assert_eq!(
+        refusal,
+        "ERR a key scan callback is running; the keyspace cannot change until it returns"
+    );
+    assert_eq!(deleted, 2, "the keys change once the scan returns");
+    assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut con)?, 0);
+    Ok(())
+}
+
+/// A keyspace scan nested in another's callback lends the same keys again, so
+/// a string read through the inner lent key is refused: it would replace the
+/// value the outer lent key still holds. The outer callback can still read
+/// its own lent key. The values are embstr strings, which a read through
+/// string DMA replaces.
+#[test]
+fn test_nested_keyspace_scan_refuses_reads_through_its_lent_keys() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    for key in ["a", "b"] {
+        redis::cmd("SET")
+            .arg(&[key, "hello"])
+            .query::<()>(&mut con)?;
+    }
+    let (refusal, read): (String, i64) = redis::cmd("stale.keys_scan_nested").query(&mut con)?;
+    assert_eq!(
+        refusal,
+        "ERR a key scan callback is running; the keyspace cannot change until it returns"
+    );
+    assert_eq!(read, 2);
+    assert_eq!(
+        redis::cmd("GET").arg("a").query::<String>(&mut con)?,
+        "hello"
+    );
+    Ok(())
+}
+
+/// A keyspace scan lends keys that expired but are not yet deleted. Opening
+/// one from the callback does not delete it under the scan, and a writable
+/// handle opened there and kept past the scan re-opens normally for its
+/// write. Redis 7.2+, which honors `NOEXPIRE`.
+#[test]
+fn test_keyspace_scan_opens_leave_expired_keys_in_place() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version = redis_module::Context::version_from_info(RedisValue::BulkString(info))?;
+    if (version.major, version.minor) < (7, 2) {
+        return Ok(());
+    }
+    redis::cmd("DEBUG")
+        .arg(&["SET-ACTIVE-EXPIRE", "0"])
+        .query::<()>(&mut con)?;
+    for key in ["e1", "e2"] {
+        redis::cmd("SET")
+            .arg(&[key, "v", "PX", "1"])
+            .query::<()>(&mut con)?;
+    }
+    thread::sleep(Duration::from_millis(20));
+    let opened: i64 = redis::cmd("stale.keys_scan_open").query(&mut con)?;
+    assert_eq!(opened, 2);
+    assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut con)?, 2);
+
+    let key_type: String = redis::cmd("stale.keys_scan_keep")
+        .arg(&["e1", "new"])
+        .query(&mut con)?;
+    assert_eq!(key_type, "hash");
+    assert_eq!(
+        redis::cmd("HGET")
+            .arg(&["e1", "f"])
+            .query::<String>(&mut con)?,
+        "new"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())
 }
 
@@ -8488,6 +8933,11 @@ impl KeyBlockingWire {
         Ok(self.parser.parse_value(&mut self.stream)?.extract_error()?)
     }
 
+    /// Reads one reply, keeping error elements inside aggregates as values.
+    fn read_value(&mut self) -> Result<Value> {
+        Ok(self.parser.parse_value(&mut self.stream)?)
+    }
+
     fn ping(&mut self) -> Result<()> {
         self.send(&redis::cmd("PING"))?;
         assert_eq!(self.read()?, Value::SimpleString("PONG".to_owned()));
@@ -8670,6 +9120,263 @@ fn test_key_blocking_panics_no_reply_and_timeouts_finish_once() -> Result<()> {
             "{error}"
         );
     }
+    key_blocking_live(&mut con, 0, drops)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// The message of an error element, such as `ERR something`.
+fn error_element(value: &Value) -> Option<String> {
+    match value {
+        Value::ServerError(error) => Some(format!(
+            "{} {}",
+            error.code(),
+            error.details().unwrap_or_default()
+        )),
+        _ => None,
+    }
+}
+
+#[test]
+fn test_key_blocking_reply_writer_streams_ready_and_timeout_replies() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let key: &[u8] = b"keyblock:writer\0\xff";
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((0, 2, "writer")).arg(key))?;
+    key_blocking_live(&mut con, 1, 0)?;
+    // One entry is not enough: the callback keeps waiting without writing.
+    redis::cmd("RPUSH")
+        .arg(key)
+        .arg("one")
+        .query::<usize>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "first readiness attempt", || {
+        let stats = key_blocking_stats(&mut con)?;
+        Ok(stats[0] == 1 && stats[2] >= 1)
+    })?;
+    redis::cmd("RPUSH")
+        .arg(key)
+        .arg("two")
+        .query::<usize>(&mut con)?;
+    redis::cmd("keyblock.signal")
+        .arg(key)
+        .query::<String>(&mut con)?;
+    assert_eq!(
+        client.read()?,
+        Value::Array(vec![
+            Value::BulkString(key.to_vec()),
+            Value::Array(vec![
+                Value::BulkString(b"one".to_vec()),
+                Value::BulkString(b"two".to_vec())
+            ]),
+        ])
+    );
+    client.ping()?;
+    key_blocking_live(&mut con, 0, 1)?;
+
+    // The timeout writes a map: a flat array for RESP2, a map for RESP3.
+    let mut drops = 1;
+    for resp3 in [false, true] {
+        let mut client = KeyBlockingWire::connect(&con)?;
+        if resp3 {
+            client.send(redis::cmd("HELLO").arg(3))?;
+            client.read()?;
+        }
+        client.send(redis::cmd("keyblock.wait").arg((
+            10,
+            1,
+            "writer",
+            "keyblock:writer-timeout",
+        )))?;
+        let timeouts = match client.read()? {
+            Value::Array(pairs) if !resp3 => match pairs.as_slice() {
+                [Value::BulkString(name), Value::Int(timeouts)] if name == b"timeouts" => *timeouts,
+                reply => anyhow::bail!("unexpected RESP2 timeout reply {reply:?}"),
+            },
+            Value::Map(pairs) if resp3 => match pairs.as_slice() {
+                [(Value::BulkString(name), Value::Int(timeouts))] if name == b"timeouts" => {
+                    *timeouts
+                }
+                reply => anyhow::bail!("unexpected RESP3 timeout reply {reply:?}"),
+            },
+            reply => anyhow::bail!("unexpected timeout reply {reply:?}"),
+        };
+        assert!(timeouts >= 1);
+        client.ping()?;
+        drops += 1;
+        key_blocking_live(&mut con, 0, drops)?;
+    }
+    let error = redis::cmd("keyblock.writer_outside")
+        .query::<Value>(&mut con)
+        .expect_err("a writer outside a key blocking callback was allowed");
+    assert!(
+        error
+            .to_string()
+            .contains("can only be written in a key blocking callback"),
+        "{error}"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_reply_writer_keeps_one_reply_when_misused() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let one = || Value::BulkString(b"one".to_vec());
+    let incomplete = "ERR key blocking callback left its reply incomplete";
+    let mut drops = 0;
+    for (mode, shape) in [
+        ("writer-incomplete", vec![Some(one()), None, None]),
+        ("writer-error", vec![Some(one()), None, None]),
+        ("writer-panic", vec![Some(one()), None]),
+    ] {
+        let expected = match mode {
+            "writer-error" => "ERR the reader stopped early",
+            "writer-panic" => "ERR key blocking callback panicked",
+            _ => incomplete,
+        };
+        let key = format!("keyblock:{mode}");
+        let mut client = KeyBlockingWire::connect(&con)?;
+        client.send(redis::cmd("keyblock.wait").arg((0, 1, mode, &key)))?;
+        key_blocking_live(&mut con, 1, drops)?;
+        redis::cmd("RPUSH")
+            .arg((&key, "one"))
+            .query::<usize>(&mut con)?;
+        let Value::Array(elements) = client.read_value()? else {
+            anyhow::bail!("{mode} did not reply with an array");
+        };
+        assert_eq!(elements.len(), shape.len(), "{mode}: {elements:?}");
+        for (element, want) in elements.iter().zip(&shape) {
+            match want {
+                Some(value) => assert_eq!(element, value, "{mode}"),
+                None => assert_eq!(error_element(element).as_deref(), Some(expected), "{mode}"),
+            }
+        }
+        client.ping()?;
+        drops += 1;
+        key_blocking_live(&mut con, 0, drops)?;
+    }
+
+    // [[one, owed, owed], owed]: a set inside an array.
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((0, 1, "writer-nested", "keyblock:nested")))?;
+    key_blocking_live(&mut con, 1, drops)?;
+    redis::cmd("RPUSH")
+        .arg(("keyblock:nested", "one"))
+        .query::<usize>(&mut con)?;
+    let Value::Array(outer) = client.read_value()? else {
+        anyhow::bail!("the nested reply is not an array");
+    };
+    let [Value::Array(inner), owed] = outer.as_slice() else {
+        anyhow::bail!("unexpected nested reply {outer:?}");
+    };
+    assert_eq!(error_element(owed).as_deref(), Some(incomplete));
+    assert_eq!(inner.len(), 3, "{inner:?}");
+    assert_eq!(inner[0], one());
+    for owed in &inner[1..] {
+        assert_eq!(error_element(owed).as_deref(), Some(incomplete));
+    }
+    client.ping()?;
+    drops += 1;
+    key_blocking_live(&mut con, 0, drops)?;
+
+    // A complete reply refuses a second write, and the returned value is
+    // dropped rather than sent.
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((0, 1, "writer-twice", "keyblock:twice")))?;
+    key_blocking_live(&mut con, 1, drops)?;
+    redis::cmd("RPUSH")
+        .arg(("keyblock:twice", "one"))
+        .query::<usize>(&mut con)?;
+    assert_eq!(client.read()?, Value::Int(1));
+    client.ping()?;
+    drops += 1;
+    key_blocking_live(&mut con, 0, drops)?;
+    assert_eq!(
+        key_blocking_stats(&mut con)?[6],
+        1,
+        "the second write was not refused"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_reply_writer_survives_nested_unblocks_and_late_results() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let mut drops = 0;
+    // Each mode is woken by a push, and must reply once and release its
+    // waiter once. A double release crashes Redis.
+    for mode in [
+        "writer-keep-waiting",
+        "writer-error-after",
+        "writer-unblock-after",
+        "writer-unblock-before",
+        "unblock-error",
+    ] {
+        let key = format!("keyblock:{mode}");
+        let mut client = KeyBlockingWire::connect(&con)?;
+        client.send(redis::cmd("keyblock.wait").arg((0, 1, mode, &key)))?;
+        key_blocking_live(&mut con, 1, drops)?;
+        redis::cmd("RPUSH")
+            .arg((&key, "one"))
+            .query::<usize>(&mut con)?;
+        let reply = client.read_value()?;
+        match mode {
+            // The written reply stands; the callback's result is dropped.
+            "writer-keep-waiting" | "writer-error-after" => {
+                assert_eq!(reply, Value::Int(5), "{mode}");
+            }
+            // The nested timeout found the reply claimed and sent nothing.
+            "writer-unblock-after" => assert_eq!(
+                reply,
+                Value::Array(vec![
+                    Value::BulkString(b"one".to_vec()),
+                    Value::BulkString(b"two".to_vec())
+                ]),
+                "{mode}"
+            ),
+            // The nested timeout replied first; the writer was refused.
+            "writer-unblock-before" => {
+                let error = error_element(&reply).unwrap_or_default();
+                assert!(error.contains("callback is already running"), "{reply:?}");
+                assert_eq!(
+                    key_blocking_stats(&mut con)?[6],
+                    1,
+                    "the write was not refused"
+                );
+            }
+            // Redis replied for CLIENT UNBLOCK ... ERROR; the callback's
+            // value is not sent after it.
+            _ => {
+                let error = error_element(&reply).unwrap_or_default();
+                assert!(error.starts_with("UNBLOCKED"), "{reply:?}");
+            }
+        }
+        client.ping()?;
+        drops += 1;
+        key_blocking_live(&mut con, 0, drops)?;
+    }
+
+    // A timeout callback that stops early after writing.
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((
+        10,
+        1,
+        "writer-timeout-error",
+        "keyblock:timeout-error",
+    )))?;
+    let Value::Array(elements) = client.read_value()? else {
+        anyhow::bail!("the timeout reply is not an array");
+    };
+    let [one, owed] = elements.as_slice() else {
+        anyhow::bail!("unexpected timeout reply {elements:?}");
+    };
+    assert_eq!(one, &Value::BulkString(b"one".to_vec()));
+    assert_eq!(
+        error_element(owed).as_deref(),
+        Some("ERR the reader stopped early")
+    );
+    client.ping()?;
+    drops += 1;
     key_blocking_live(&mut con, 0, drops)?;
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())

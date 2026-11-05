@@ -3,7 +3,6 @@ use crate::key::RedisKey;
 use crate::raw;
 use crate::redismodule::RedisString;
 use std::ffi::c_void;
-use std::mem::ManuallyDrop;
 use std::ptr::NonNull;
 
 pub struct KeysCursor {
@@ -25,9 +24,7 @@ extern "C" fn scan_callback<C: FnMut(&RuntimeContext, &RedisString, Option<&Redi
     } else {
         // Safety: The returned `RedisKey` does not outlive this callbacks and so by necessity
         // the pointers passed in as parameters are valid for its entire lifetime.
-        Some(ManuallyDrop::new(unsafe {
-            RedisKey::from_raw_parts(ctx, key)
-        }))
+        Some(unsafe { RedisKey::borrowed(ctx, key) })
     };
     let callback = unsafe { &mut *(private_data.cast::<C>()) };
     crate::panic::defer_panic(|| callback(&context, &key_name, redis_key.as_deref()));
@@ -42,13 +39,27 @@ impl KeysCursor {
         Self { inner_cursor }
     }
 
+    /// Scans the next batch of keys, calling `callback` with each one's name
+    /// and the read-only key Redis lends it. Returns whether keys remain.
+    ///
+    /// The callback cannot change the keyspace: Redis closes the key it lent
+    /// after the callback returns, reading the key's value, so calls,
+    /// `yield_now`, notifications and key writes are refused there, and pops
+    /// panic. Reading the lent key's string value is allowed. Keys the
+    /// callback opens open with `NOEXPIRE` (Redis 7.2+), since Redis can lend
+    /// keys that expired but are not yet deleted, and an open would delete
+    /// one; before 7.2, opening the lent key can still delete it. Collect what
+    /// to change and change it after `scan` returns.
     pub fn scan<F: FnMut(&RuntimeContext, &RedisString, Option<&RedisKey>)>(
         &self,
         ctx: &RuntimeContext,
         callback: &mut F,
     ) -> bool {
-        // A scan can expire keys, the lent one included.
         crate::key::panic_while_lent();
+        // Redis closes each key it lends the callback after the callback
+        // returns, which reads the key's value, so a callback may not change
+        // the keyspace, and the keys it opens do not expire the lent one.
+        let scan = crate::key::KeyspaceScan::begin();
         let res = unsafe {
             crate::__required_api!(RedisModule_Scan)(
                 ctx.ctx,
@@ -57,6 +68,7 @@ impl KeysCursor {
                 callback as *mut F as *mut c_void,
             )
         };
+        drop(scan);
         crate::panic::resume_deferred_panic();
         res != 0
     }
