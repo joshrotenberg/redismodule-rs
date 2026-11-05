@@ -316,7 +316,10 @@ handle is returned. Supply owned `Send + 'static` data, a `KeyBlockingTimeout`,
 a ready callback returning `Result<Option<RedisValue>, RedisError>` and a
 timeout callback returning `RedisResult`. `Ok(None)` means keep waiting;
 `Ok(Some(value))` or an error replies and unblocks. Callback `NoReply` becomes
-an error because a completed wait must send one reply.
+an error because a completed wait must send one reply. To write a large reply
+without building a value tree, a callback writes it through
+`ctx.key_blocking_reply()` and returns `NoReply`. The writer counts the reply,
+so the client still gets exactly one.
 
 Return `RedisValue::NoReply` only for `KeyBlockingResult::Blocked`.
 `KeyBlockingResult::Denied(data)` preserves the data for a non-blocking reply

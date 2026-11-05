@@ -199,6 +199,13 @@ readiness behavior. Signaling and an independent owned copy of the callback's re
 context methods. Redis's blocked-client count prevents unload while a key
 waiter remains. Upstream has no equivalent safe wrapper.
 
+A callback can also write its reply directly through
+`Context::key_blocking_reply` (#207), which counts the aggregates it opens.
+The first write claims the reply, a second reply is refused or dropped, and a
+reply the callback leaves incomplete, by returning early or panicking, is
+finished with an error reply for each owed element, so the client stays in
+sync.
+
 ## Checked key positions
 
 `Context::key_at_pos` was a safe function, but `RedisModule_KeyAtPos` checks

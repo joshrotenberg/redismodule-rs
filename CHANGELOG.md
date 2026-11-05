@@ -73,6 +73,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has children, repeats another child's name ignoring case, has an empty name,
   or has an arity of 1, and a container or child name with a space, line
   break or any of `|@=,`, which Redis 7.2 and later refuse. See `examples/subcommands.rs`.
+- Key-blocking callbacks can write their reply directly (#207).
+  `Context::key_blocking_reply()` returns a `KeyBlockingReply` writer inside
+  the `on_ready` and `on_timeout` callbacks of `block_client_on_keys`, so a
+  large reply needs no `RedisValue` tree. `array`, `map` and `set` open an
+  aggregate; `bulk`, `string`, `integer` and `value` write one element. The
+  writer counts what the reply still owes, so the client still gets exactly
+  one reply. The first write claims the reply, a write after a complete reply
+  is refused, and once anything is written the wait finishes and a returned
+  value is logged and dropped. If the callback returns or panics while an
+  aggregate still owes elements, the SDK writes each owed element as an error
+  reply. A callback that writes nothing keeps the old behavior.
 
 ### Fixed
 

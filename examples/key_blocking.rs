@@ -2,7 +2,9 @@
 //!
 //! `keyblock.wait timeout_ms minimum mode key [key ...]` waits for a list to
 //! contain `minimum` entries. Zero timeout means no deadline. `mode` is normally
-//! `normal`; the other modes exercise callback and destructor refusal paths.
+//! `normal`; `writer` replies through the reply writer instead of returning a
+//! value, and the other modes exercise callback, writer and destructor refusal
+//! paths.
 
 use redis_module::{
     CommandFlags, Context, EventContext, KeyBlockingResult, KeyBlockingTimeout, KeyRange, NextArg,
@@ -20,6 +22,7 @@ static LOAD_TEST: AtomicBool = AtomicBool::new(false);
 static UNLOAD_TEST: AtomicBool = AtomicBool::new(false);
 static LOAD_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SECOND_REJECTED: AtomicBool = AtomicBool::new(false);
+static WRITE_REFUSED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy)]
 enum Mode {
@@ -30,6 +33,12 @@ enum Mode {
     PanicDrop,
     NoReplyReady,
     NoReplyTimeout,
+    Writer,
+    WriterIncomplete,
+    WriterError,
+    WriterNested,
+    WriterTwice,
+    WriterPanic,
 }
 
 struct Waiter {
@@ -90,19 +99,99 @@ fn on_ready(ctx: &Context, waiter: &mut Waiter) -> Result<Option<RedisValue>, Re
     match waiter.mode {
         Mode::PanicReady => std::panic::panic_any(BadPanicPayload),
         Mode::NoReplyReady => return Ok(Some(RedisValue::NoReply)),
+        Mode::WriterIncomplete
+        | Mode::WriterError
+        | Mode::WriterNested
+        | Mode::WriterTwice
+        | Mode::WriterPanic => return write_broken(ctx, waiter.mode),
         _ => {}
     }
     if matches!(ctx.call("EXISTS", &[&ready_key])?, RedisValue::Integer(0)) {
         return Err(RedisError::Str("ERR the blocked key was deleted"));
     }
+    if matches!(waiter.mode, Mode::Writer) {
+        return write_ready(ctx, waiter);
+    }
     read_ready(ctx, waiter)
 }
 
-fn on_timeout(_: &Context, waiter: &mut Waiter) -> RedisResult {
+/// Writes the reply `read_ready` would return through the reply writer, one
+/// element at a time, or keeps waiting if no list is long enough yet.
+fn write_ready(ctx: &Context, waiter: &Waiter) -> Result<Option<RedisValue>, RedisError> {
+    let Some(RedisValue::Array(mut parts)) = read_ready(ctx, waiter)? else {
+        return Ok(None);
+    };
+    let (Some(RedisValue::Array(items)), Some(RedisValue::StringBuffer(key))) =
+        (parts.pop(), parts.pop())
+    else {
+        return Err(RedisError::Str("ERR unexpected ready reply"));
+    };
+    let mut reply = ctx.key_blocking_reply()?;
+    reply.array(2)?;
+    reply.string(&ctx.create_string(key))?;
+    reply.array(items.len())?;
+    for item in items {
+        reply.value(item)?;
+    }
+    Ok(Some(RedisValue::NoReply))
+}
+
+/// Misuses the reply writer, as a module with a bug would.
+fn write_broken(ctx: &Context, mode: Mode) -> Result<Option<RedisValue>, RedisError> {
+    let mut reply = ctx.key_blocking_reply()?;
+    match mode {
+        // [one, then two owed elements]
+        Mode::WriterIncomplete => {
+            reply.array(3)?;
+            reply.bulk(b"one")?;
+            Ok(Some(RedisValue::NoReply))
+        }
+        Mode::WriterError => {
+            reply.array(3)?;
+            reply.bulk(b"one")?;
+            Err(RedisError::Str("ERR the reader stopped early"))
+        }
+        // [[one, then two owed members], then one owed element]
+        Mode::WriterNested => {
+            reply.array(2)?;
+            reply.set(3)?;
+            reply.bulk(b"one")?;
+            Ok(Some(RedisValue::NoReply))
+        }
+        Mode::WriterTwice => {
+            reply.integer(1)?;
+            WRITE_REFUSED.store(
+                reply
+                    .integer(2)
+                    .is_err_and(|error| error.to_string().contains("reply is already complete"))
+                    && reply.is_complete(),
+                Ordering::SeqCst,
+            );
+            // A second reply: the SDK logs and drops it.
+            Ok(Some(RedisValue::Integer(3)))
+        }
+        Mode::WriterPanic => {
+            reply.array(2)?;
+            reply.bulk(b"one")?;
+            std::panic::panic_any(BadPanicPayload)
+        }
+        _ => unreachable!("not a broken writer mode"),
+    }
+}
+
+fn on_timeout(ctx: &Context, waiter: &mut Waiter) -> RedisResult {
     TIMEOUTS.fetch_add(1, Ordering::SeqCst);
     match waiter.mode {
         Mode::PanicTimeout => std::panic::panic_any(BadPanicPayload),
         Mode::NoReplyTimeout => Ok(RedisValue::NoReply),
+        Mode::Writer => {
+            // A RESP2 client gets the map as a flat array.
+            let mut reply = ctx.key_blocking_reply()?;
+            reply.map(1)?;
+            reply.bulk(b"timeouts")?;
+            reply.integer(TIMEOUTS.load(Ordering::SeqCst))?;
+            Ok(RedisValue::NoReply)
+        }
         _ => Ok(RedisValue::NullArray),
     }
 }
@@ -122,6 +211,12 @@ fn wait(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         "panic-drop" => Mode::PanicDrop,
         "no-reply-ready" => Mode::NoReplyReady,
         "no-reply-timeout" => Mode::NoReplyTimeout,
+        "writer" => Mode::Writer,
+        "writer-incomplete" => Mode::WriterIncomplete,
+        "writer-error" => Mode::WriterError,
+        "writer-nested" => Mode::WriterNested,
+        "writer-twice" => Mode::WriterTwice,
+        "writer-panic" => Mode::WriterPanic,
         _ => return Err(RedisError::Str("ERR unknown waiter mode")),
     };
     let keys: Vec<_> = args.collect();
@@ -348,6 +443,11 @@ fn ready_outside(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Bool(ctx.blocked_client_ready_key()?.is_some()))
 }
 
+fn writer_outside(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    ctx.key_blocking_reply()?;
+    Ok(RedisValue::SimpleStringStatic("OK"))
+}
+
 fn stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(vec![
         LIVE.load(Ordering::SeqCst),
@@ -356,6 +456,7 @@ fn stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
         TIMEOUTS.load(Ordering::SeqCst),
         i64::from(DELETE_FLAG.load(Ordering::SeqCst)),
         i64::from(SECOND_REJECTED.load(Ordering::SeqCst)),
+        i64::from(WRITE_REFUSED.load(Ordering::SeqCst)),
     ]
     .into())
 }
@@ -388,6 +489,7 @@ redis_module! {
         ["keyblock.call_wait", call_wait, "readonly", 1, 1, 1, ""],
         ["keyblock.call_wait_k", call_wait_k, "readonly", 1, 1, 1, ""],
         ["keyblock.ready_outside", ready_outside, "readonly", 0, 0, 0, ""],
+        ["keyblock.writer_outside", writer_outside, "readonly", 0, 0, 0, ""],
         ["keyblock.stats", stats, "readonly", 0, 0, 0, ""],
     ],
 }
