@@ -737,6 +737,7 @@ pub(super) fn register_base_command(
             name.to_string_lossy()
         )));
     }
+    super::acl_rules::record_registered_command(name.as_bytes());
     Ok(name)
 }
 

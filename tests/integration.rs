@@ -13,6 +13,7 @@ mod configuration_ownership;
 mod correctness_gaps;
 mod replication_pause;
 mod stream_fields;
+mod unload_acl_rules;
 mod utils;
 
 #[test]
