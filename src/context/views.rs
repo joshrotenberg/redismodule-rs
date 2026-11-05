@@ -218,7 +218,10 @@ impl WorkerContext {
 
     /// Makes a blocking call from a module-owned detached worker. An ordinary
     /// thread-safe context has no module association and returns an error before
-    /// calling Redis. The unblock handler receives an [`EventContext`].
+    /// calling Redis. The unblock handler receives an [`EventContext`]. With a
+    /// replicate flag the call also returns an error, without running the
+    /// command, while Redis pauses replication, as
+    /// [`RuntimeContext::call_ext`] does.
     #[cfg(any(
         feature = "min-redis-compatibility-version-8-0",
         feature = "min-redis-compatibility-version-7-4",

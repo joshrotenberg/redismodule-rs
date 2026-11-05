@@ -68,10 +68,16 @@ change because `serde_syn` is no longer involved.
 ### Replication returns a status
 
 `RuntimeContext::replicate` now returns `Status`: check `Status::Err` for a
-refused command name or native replication failure. Calls used as statements
-with a semicolon still compile. Code that required a `()` return, such as a
-function pointer or a unit-returning tail expression, must check or explicitly
-discard the status.
+refused command name or native replication failure. `Context::replicate_verbatim`
+returns `Status` too (#220). Both return `Status::Err` without replicating
+while Redis pauses writes, as `avoid_replication_traffic` reports, where Redis
+would abort. Both are `#[must_use]`: a call used as a statement still compiles
+but warns, and fails a build with `-D warnings`. Check the status, or discard
+it with `let _ =`. Code that required a `()` return, such as a function
+pointer or a unit-returning tail expression, must check or explicitly discard
+the status. Flag commands that replicate `write` or `may-replicate`: during a
+write pause Redis postpones them, and in the transaction that starts a pause
+the SDK lets them replicate.
 
 ### Native data types implement `NativeType`
 
@@ -1064,6 +1070,17 @@ value for an aggregate containing a key or member outside `RedisValueKey`'s
 supported scalar variants, instead of panicking. Forward the native call
 reply directly when its full representation is required.
 
+### Replication during a write pause
+
+`replicate`, `replicate_verbatim` and calls with a replicate flag now refuse
+while `avoid_replication_traffic` is true (#220). Redis 6.2 aborts on such
+replication, and 7.0 and later abort only when they propagate the command,
+with the AOF on or a replica or replication backlog. On Redis 6.0, and on 7.0
+and later without AOF or replicas, the same replication used to return
+`Status::Ok`, or run the called command, and now returns `Status::Err` or an
+error. A command flagged `write` or `may-replicate` that its client queued in
+the transaction that starts the pause still replicates.
+
 ### Missing optional APIs on older Redis 6.0 servers
 
 `ThreadSafeContext::try_lock` and `MODULE_CONTEXT.try_lock()` return `None`
@@ -1245,6 +1262,12 @@ text.
 - **Strings.** `RedisString::create` and `Context::create_string` keep NUL
   bytes instead of panicking. Simple string and error replies replace CR, LF
   and NUL with spaces byte by byte, so non-ASCII text arrives intact.
+- **Unsigned arguments.** `NextArg::next_u64`, `ArgCursor::next_u64` and
+  `RedisString::parse_unsigned_integer` accept 9223372036854775808 through
+  18446744073709551615 (#222), which 2.x refused with
+  `Couldn't parse as integer`. Code that converts the result with `as i64`
+  now gets a negative number for them; use `i64::try_from`, or `next_i64` when
+  the command takes a signed value. Other input gets the same errors as before.
 - **Logging.** Messages go to Redis through a fixed `%s` format, so `%` in
   logged text is printed as is; an embedded NUL is written as `\0`.
 - **Cron events.** Cron event handlers receive the server's `hz`; 2.x passed 1.

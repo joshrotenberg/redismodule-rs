@@ -11,7 +11,9 @@ use redis_module::RedisValue;
 
 mod configuration_ownership;
 mod correctness_gaps;
+mod replication_pause;
 mod stream_fields;
+mod unload_acl_rules;
 mod utils;
 
 #[test]
@@ -3162,8 +3164,8 @@ fn test_borrowed_arguments() -> Result<()> {
     assert_eq!(tail, [5, 0, 0]);
 
     for signed in [i64::MIN, 0, i64::MAX] {
-        for unsigned in [0, i64::MAX] {
-            let reply: (i64, i64, f64) = redis::cmd("args.numbers")
+        for unsigned in [0, i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
+            let reply: (i64, u64, f64) = redis::cmd("args.numbers")
                 .arg(signed)
                 .arg(unsigned)
                 .arg("-1.25")
@@ -3174,7 +3176,7 @@ fn test_borrowed_arguments() -> Result<()> {
     for (signed, unsigned, float, message) in [
         ("9223372036854775808", "0", "1", "parse as integer"),
         ("0", "-1", "1", "parse negative number"),
-        ("0", "18446744073709551615", "1", "parse as integer"),
+        ("0", "18446744073709551616", "1", "parse as integer"),
         ("0", "0", "word", "parse as float"),
     ] {
         let error = redis::cmd("args.numbers")
@@ -3235,6 +3237,80 @@ fn test_borrowed_arguments() -> Result<()> {
         .query(&mut con)?;
     assert_eq!(reply, [10, 2, 0, 0]);
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// `ArgCursor::next_u64` (`args.numbers`, `args.borrowed`) and
+/// `NextArg::next_u64` (`args.owned`) take the whole `u64` range with the
+/// signed parser's grammar (#222). Negative integers get their own error.
+#[test]
+fn test_unsigned_arguments() -> Result<()> {
+    let mut con = TestConnection::new("args");
+    let commands = |value: &[u8]| -> [(&'static str, Vec<Vec<u8>>); 3] {
+        [
+            (
+                "args.numbers",
+                vec![b"0".to_vec(), value.to_vec(), b"1".to_vec()],
+            ),
+            (
+                "args.borrowed",
+                vec![b"x".to_vec(), b"COUNT".to_vec(), value.to_vec()],
+            ),
+            (
+                "args.owned",
+                vec![b"x".to_vec(), b"COUNT".to_vec(), value.to_vec()],
+            ),
+        ]
+    };
+    for value in [0, 1, i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
+        let [numbers, borrowed, owned] = commands(value.to_string().as_bytes());
+        let reply: (i64, u64, f64) = redis::cmd(numbers.0).arg(numbers.1).query(&mut con)?;
+        assert_eq!(reply, (0, value, 1.0));
+        for (command, args) in [borrowed, owned] {
+            let reply: (i64, u64, i64, i64) = redis::cmd(command).arg(args).query(&mut con)?;
+            assert_eq!((reply.0, reply.1), (1, value), "{command}");
+        }
+    }
+
+    let negative = "Couldn't parse negative number as unsigned integer";
+    let invalid = "Couldn't parse as integer";
+    for (value, expected) in [
+        (b"-1".as_slice(), negative),
+        (b"-9223372036854775808", negative),
+        // Outside the signed parser's range, so not a negative integer to it.
+        (b"-9223372036854775809", invalid),
+        (b"18446744073709551616", invalid),
+        (b"99999999999999999999", invalid),
+        (b"184467440737095516150", invalid),
+        (b"-0", invalid),
+        (b"-", invalid),
+        (b"+1", invalid),
+        (b" 1", invalid),
+        (b"1 ", invalid),
+        (b"01", invalid),
+        (b"00", invalid),
+        (b"", invalid),
+        (b"1\0", invalid),
+        (b"\x001", invalid),
+        (b"1\x002", invalid),
+        (b"abc", invalid),
+        (b"1e3", invalid),
+        (b"0x1", invalid),
+        (b"\xff", invalid),
+    ] {
+        for (command, args) in commands(value) {
+            let error = redis::cmd(command)
+                .arg(args)
+                .query::<Value>(&mut con)
+                .unwrap_err();
+            assert_eq!(
+                (error.code(), error.detail()),
+                (Some("ERR"), Some(expected)),
+                "{command} {value:?}: {error}"
+            );
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        }
+    }
     Ok(())
 }
 
@@ -4471,16 +4547,10 @@ fn test_helper_version() -> Result<()> {
             .map(|part| part.parse().map_err(Into::into))
             .collect()
     };
-    // Valkey's native API reports its product version, while redis_version in
-    // INFO advertises its Redis compatibility version. Check both paths
-    // against their respective fields rather than requiring them to agree.
-    assert_eq!(res2, parse("redis_version:")?);
-    let native_field = if info.lines().any(|line| line.starts_with("valkey_version:")) {
-        "valkey_version:"
-    } else {
-        "redis_version:"
-    };
-    assert_eq!(res, parse(native_field)?);
+    // The native API and INFO both report the server version.
+    let expected = parse("redis_version:")?;
+    assert_eq!(res2, expected);
+    assert_eq!(res, expected);
 
     Ok(())
 }
@@ -4599,20 +4669,40 @@ fn test_info_handler_multiple_sections() -> Result<()> {
     })
 }
 
-#[allow(unused_must_use)]
+/// `test_helper.err` replies with its message as an error, once (#223).
 #[test]
 fn test_test_helper_err() -> Result<()> {
-    let mut con = TestConnection::new("hello");
+    let mut con = TestConnection::new("test_helper");
+    let mut check = |args: &[&[u8]], code: &str, detail: &str| -> Result<()> {
+        let error = redis::cmd("test_helper.err")
+            .arg(args)
+            .query::<Value>(&mut con)
+            .unwrap_err();
+        assert_eq!(
+            (error.code(), error.detail()),
+            (Some(code), Some(detail)),
+            "{args:?}: {error}"
+        );
+        // A second reply would be read here as the reply to PING.
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        Ok(())
+    };
 
-    // Make sure embedded nulls do not cause a crash
-    redis::cmd("test_helper.err")
-        .arg(&["\x00\x00"])
-        .query::<()>(&mut con);
-
-    redis::cmd("test_helper.err")
-        .arg(&["no crash\x00"])
-        .query::<()>(&mut con);
-
+    check(&[b"ERR custom failure"], "ERR", "custom failure")?;
+    check(
+        &[b"CUSTOM the message chooses its code"],
+        "CUSTOM",
+        "the message chooses its code",
+    )?;
+    let arity = "wrong number of arguments for 'test_helper.err' command";
+    check(&[], "ERR", arity)?;
+    check(&[b"ERR one", b"two"], "ERR", arity)?;
+    // An error reply cannot carry NUL, CR or LF; each becomes a space.
+    check(&[b"ERR embedded\0NUL"], "ERR", "embedded NUL")?;
+    check(&[b"ERR \0\0"], "ERR", "  ")?;
+    check(&[b"ERR line\r\nbreak"], "ERR", "line  break")?;
+    // Bytes that are not UTF-8 are replaced with U+FFFD.
+    check(&[b"ERR bad \xff byte"], "ERR", "bad \u{fffd} byte")?;
     Ok(())
 }
 
@@ -8447,6 +8537,20 @@ fn test_native_type_callbacks_and_panic_guards() -> Result<()> {
         .arg(dump)
         .query::<()>(&mut con)?;
     assert_eq!(note(&mut con, "restored")?.as_deref(), Some("hello"));
+    // note.counts reports the loaded aux value as an integer.
+    let error = redis::cmd("note.aux")
+        .arg(i64::MAX as u64 + 1)
+        .query::<()>(&mut con)
+        .unwrap_err();
+    assert_eq!(
+        (error.code(), error.detail()),
+        (
+            Some("ERR"),
+            Some("the aux value must be at most 9223372036854775807")
+        ),
+        "{error}"
+    );
+    redis::cmd("note.aux").arg(i64::MAX).query::<()>(&mut con)?;
     redis::cmd("note.aux").arg(42).query::<()>(&mut con)?;
     redis::cmd("DEBUG").arg("RELOAD").query::<()>(&mut con)?;
     assert_eq!(counts(&mut con)?[2], 42, "aux data loaded");

@@ -42,13 +42,5 @@
   "redis-8.10.2": {
     "url": "https://download.redis.io/releases/redis-8.10.2.tar.gz",
     "sha256": "b9ffee226b5eecdba98a679260dad764b2a4ebd90dce4ad5ac9e9f3eef9c02b3"
-  },
-  "valkey-8.1.10": {
-    "url": "https://github.com/valkey-io/valkey/archive/refs/tags/8.1.10.tar.gz",
-    "sha256": "c74e50cd83f6d398a3dc570e04ac2fe538249585d021f76ee2449bbf9ebd04ed"
-  },
-  "valkey-9.1.2": {
-    "url": "https://github.com/valkey-io/valkey/archive/refs/tags/9.1.2.tar.gz",
-    "sha256": "19c23908e7d57e8d91ef85b41f5646307582f10f4f0fb999bbf89ed24ec9c983"
   }
 }

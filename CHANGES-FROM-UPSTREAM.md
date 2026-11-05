@@ -11,6 +11,64 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Unload while ACL rules name module commands
+
+`MODULE UNLOAD` stopped the server when an ACL rule named one of the module's
+commands (#221). From Redis 7.2, `moduleUnload` removes the commands and then
+`ACLRecomputeCommandBitsFromCommandRulesAllUsers` reapplies each selector's
+stored rules, asserting that `ACLSetSelector` accepts each one; a `+cmd`,
+`-cmd`, `+cmd|sub`, `-cmd|sub` or `+cmd|arg` rule whose command is gone fails
+the lookup, at the root or in a selector. Before 7.2 the unload keeps the
+user's command bit, which no remaining command describes, and the next
+description of the user, as `ACL LIST`, `ACL GETUSER` or `ACL SAVE` give,
+panics with "No bitmap match". The generated unload hook now runs `ACL LIST`
+before the other unload checks and refuses while a rule names a top level
+command the SDK registered in this load (subcommand rules name their
+container), matching names ASCII case-insensitively, and logs the user, the
+rule and whether it is in a selector. When `ACL LIST` cannot be read, the hook
+logs a warning and lets the unload go ahead: Redis asserts that the unload it
+makes after rejecting a `MODULE LOADEX` configuration succeeds, and no rule can
+name commands that did not exist before that load. Category rules are not
+checked: categories a module adds stay registered after it unloads. Native
+regressions refuse the unload for each rule form on the `hello` and
+`subcommands` examples, keep the commands working, and unload and reload once
+the rules are deleted; the hello regression also runs on Redis 6.0, 6.2 and
+7.0. Upstream's unload hook has the same gap; no upstream issue or pull request
+reports it.
+
+## Replication during write pauses
+
+`CLIENT PAUSE ... WRITE`, `FAILOVER` and `CLUSTER FAILOVER` pause replication.
+A paused write command waits, but read-only commands, timers, server events and
+workers keep running, and Redis 6.2 and later abort at an assertion when one of
+them replicates: upstream's `replicate`, `replicate_verbatim` and calls with
+the replicate flag queue the command without checking for the pause (#220).
+The wrappers now refuse while `RedisModule_AvoidReplicaTraffic()` reports the
+pause: `replicate` and `replicate_verbatim`, which now returns a `Status`,
+return `Status::Err`, and both are `#[must_use]`; `call_ext` and
+`call_blocking` with a replicate flag return an error without running the
+command. Redis 6.0 does not abort, but its pause serves the same failovers and
+the wrappers refuse there too. Redis replicates the rest of a transaction that
+starts the pause, and postpones a transaction that queued a `write` or
+`may-replicate` command during an earlier pause, so the wrappers let such a
+command replicate when its client queued it in the running transaction.
+Registration records which command callbacks carry those flags; a handler
+also registered for a command without them loses the exemption. Read-only
+commands, and commands that another command or a script calls, are refused in
+a transaction too. Upstream has no issue or pull request for this.
+
+## Unsigned integer arguments
+
+`RedisString::parse_unsigned_integer`, which `NextArg::next_u64` and
+`ArgCursor::next_u64` call, parsed with the signed parser and converted the
+result, so it refused 9223372036854775808 through 18446744073709551615 (#222).
+It now parses the string's bytes in Rust, with the grammar of Redis's signed
+`string2ll` and the whole `u64` range, on every compatibility floor. It does
+not use `RedisModule_StringToULongLong` (Redis 7.0+), which reads only up to
+the first NUL and, when the signed parser fails, falls back to `strtoull`,
+which accepts leading spaces and `+` and wraps some negative input. Negative
+integers keep their own error. Upstream has no issue or pull request for this.
+
 ## Incremental stream entries and native pointer borrows
 
 The existing stream iterator creates every field/value string in a
@@ -566,10 +624,9 @@ Registration logs a warning only for defrag code the server cannot run: a
 `RedisModule_RegisterDefragCallbacks`. Upstream checks each API before it checks
 whether the module registered any such code, so every module logs "Skip register
 defrag function" on Redis 6.0 and "Skip register defrag callbacks" on Redis 6.2
-to 7.4 and on Valkey 8.1 and 9.1, which have no
-`RedisModule_RegisterDefragCallbacks`. On Redis 6.0 it also returns after the
-first warning, so a module with start or end functions gets no warning about
-them. The #89 port of redis-event-stream-module, which has no defrag code,
+to 7.4, which have no `RedisModule_RegisterDefragCallbacks`. On Redis 6.0 it
+also returns after the first warning, so a module with start or end functions
+gets no warning about them. The #89 port of redis-event-stream-module, which has no defrag code,
 logged the callbacks warning on Redis 7.2.16 and Redis Stack 7.4.7. An
 integration test checks the server log for a module with no defrag code and one
 with all three kinds; before the change it failed on Redis 6.0.20 and 7.2.16. No
@@ -1162,7 +1219,7 @@ These compile unchanged but behave differently:
   for its existing metadata grammar.
 
 - Edition 2024, with `rust-version = "1.87"` declared and tested in CI ([cfebad5], [2daa0ea]).
-- CI pins checksum-verified Redis 7.2, 7.4 and 8.0 through 8.10 releases and Valkey 8.1/9.1, caches server binaries per platform, concrete runner image and build inputs, validates the selected product/version, and uploads integration directories and server build logs on failure. Valkey uses the default API floor.
+- CI pins checksum-verified Redis 7.2, 7.4 and 8.0 through 8.10 releases, caches server binaries per platform, concrete runner image and build inputs, validates the selected version, and uploads integration directories and server build logs on failure.
 - CI runs on pushes to master and builds every API floor; the initial server matrix covered Redis 7.2, 7.4 and 8.0 ([e7d39ce], [2daa0ea]). The test matrix builds the default way, with the committed bindings, on the toolchain `rust-toolchain.toml` pins, and one job checks the committed bindings against bindgen ([848824a]). A job runs cargo-deny, with `Unicode-3.0` allowed ([1353e52]).
 - The Docker build, which ran the `Makefile` and `sbin/` that [upstream PR 389][p389] deleted, and the `deps/readies` submodule are removed ([9b0f605]). The release workflows run only in the upstream repository ([cb78fec]). Dependabot no longer ignores bindgen 0.56 and also updates the workflow actions ([686f84c]). The build and test scripts use `--workspace` ([9e5ff10]). The crates' `repository` field names this repository ([6d21760]).
 - The migration guide shows the `system-allocator-fallback` dev-dependency in the git form ([8ddccf1]), and the README says that README.upstream.md is upstream's README unchanged ([e4c5d1c]). Notes and tests corrected after a review ([ee02544]).

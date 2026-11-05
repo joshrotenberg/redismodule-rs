@@ -106,7 +106,7 @@ what to change. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version.
   features generate them instead, for any target, and need libclang.
 - Redis 6.0 or later, depending on the feature floor below. CI builds every
   floor and runs the tests against pinned Redis 7.2, 7.4 and 8.0 through
-  8.10 releases, plus Valkey 8.1 and 9.1 at the default API floor.
+  8.10 releases.
 
 ## A first module
 
@@ -441,7 +441,7 @@ python3 .github/scripts/build-server.py redis-8.10.2 /tmp/sdk-server
 TEST_REDIS_SERVER_BIN=/tmp/sdk-server/redis-server cargo test
 ```
 
-CI keeps the fifteen server/floor matrix jobs and adds focused coverage:
+CI keeps the thirteen server/floor matrix jobs and adds focused coverage:
 
 - Redis 6.0.20 and 6.2.24 run the legacy transport, reply, blocking and timer
   subsets. The 6.2 leg uses the 6.2 API floor. `TEST_REDIS_SERVER_LEGACY_OPTIONS=1` omits startup options these older
@@ -468,9 +468,8 @@ TEST_REDIS_SERVER_BIN=/tmp/sdk-defrag/redis-server TEST_REDIS_REQUIRE_DEFRAG=1 \
 ```
 
 Use a separate destination for each server version. When updating a release,
-copy its SHA-256 from [redis/redis-hashes](https://github.com/redis/redis-hashes)
-or [valkey-io/valkey-hashes](https://github.com/valkey-io/valkey-hashes), update the
-matrix, and run the helper. Binary caches include the runner platform,
+copy its SHA-256 from [redis/redis-hashes](https://github.com/redis/redis-hashes),
+update the matrix, and run the helper. Binary caches include the runner platform,
 architecture, concrete image version, release, allocator, manifest and build helper. Failed matrix jobs upload
 server build output and the integration instance directories for seven days;
 these contain the local test servers' logs and persistence files.

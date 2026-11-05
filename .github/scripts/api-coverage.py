@@ -207,6 +207,7 @@ EQUIVALENTS = {
     "CreateStringFromDouble": "format, then `RedisString::create`",
     "CreateStringPrintf": "format, then `RedisString::create`",
     "CreateStringFromCallReply": "reply bytes, then `RedisString::create`",
+    "StringToULongLong": "`RedisString::parse_unsigned_integer` parses in Rust instead",
     "ReplyWithCString": "string `RedisValue`s",
     "ReplyWithEmptyString": "string `RedisValue`s",
     "ReplyWithEmptyArray": "an empty `RedisValue::Array`",
