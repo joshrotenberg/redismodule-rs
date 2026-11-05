@@ -8933,6 +8933,11 @@ impl KeyBlockingWire {
         Ok(self.parser.parse_value(&mut self.stream)?.extract_error()?)
     }
 
+    /// Reads one reply, keeping error elements inside aggregates as values.
+    fn read_value(&mut self) -> Result<Value> {
+        Ok(self.parser.parse_value(&mut self.stream)?)
+    }
+
     fn ping(&mut self) -> Result<()> {
         self.send(&redis::cmd("PING"))?;
         assert_eq!(self.read()?, Value::SimpleString("PONG".to_owned()));
@@ -9115,6 +9120,263 @@ fn test_key_blocking_panics_no_reply_and_timeouts_finish_once() -> Result<()> {
             "{error}"
         );
     }
+    key_blocking_live(&mut con, 0, drops)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// The message of an error element, such as `ERR something`.
+fn error_element(value: &Value) -> Option<String> {
+    match value {
+        Value::ServerError(error) => Some(format!(
+            "{} {}",
+            error.code(),
+            error.details().unwrap_or_default()
+        )),
+        _ => None,
+    }
+}
+
+#[test]
+fn test_key_blocking_reply_writer_streams_ready_and_timeout_replies() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let key: &[u8] = b"keyblock:writer\0\xff";
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((0, 2, "writer")).arg(key))?;
+    key_blocking_live(&mut con, 1, 0)?;
+    // One entry is not enough: the callback keeps waiting without writing.
+    redis::cmd("RPUSH")
+        .arg(key)
+        .arg("one")
+        .query::<usize>(&mut con)?;
+    utils::wait_until(Duration::from_secs(5), "first readiness attempt", || {
+        let stats = key_blocking_stats(&mut con)?;
+        Ok(stats[0] == 1 && stats[2] >= 1)
+    })?;
+    redis::cmd("RPUSH")
+        .arg(key)
+        .arg("two")
+        .query::<usize>(&mut con)?;
+    redis::cmd("keyblock.signal")
+        .arg(key)
+        .query::<String>(&mut con)?;
+    assert_eq!(
+        client.read()?,
+        Value::Array(vec![
+            Value::BulkString(key.to_vec()),
+            Value::Array(vec![
+                Value::BulkString(b"one".to_vec()),
+                Value::BulkString(b"two".to_vec())
+            ]),
+        ])
+    );
+    client.ping()?;
+    key_blocking_live(&mut con, 0, 1)?;
+
+    // The timeout writes a map: a flat array for RESP2, a map for RESP3.
+    let mut drops = 1;
+    for resp3 in [false, true] {
+        let mut client = KeyBlockingWire::connect(&con)?;
+        if resp3 {
+            client.send(redis::cmd("HELLO").arg(3))?;
+            client.read()?;
+        }
+        client.send(redis::cmd("keyblock.wait").arg((
+            10,
+            1,
+            "writer",
+            "keyblock:writer-timeout",
+        )))?;
+        let timeouts = match client.read()? {
+            Value::Array(pairs) if !resp3 => match pairs.as_slice() {
+                [Value::BulkString(name), Value::Int(timeouts)] if name == b"timeouts" => *timeouts,
+                reply => anyhow::bail!("unexpected RESP2 timeout reply {reply:?}"),
+            },
+            Value::Map(pairs) if resp3 => match pairs.as_slice() {
+                [(Value::BulkString(name), Value::Int(timeouts))] if name == b"timeouts" => {
+                    *timeouts
+                }
+                reply => anyhow::bail!("unexpected RESP3 timeout reply {reply:?}"),
+            },
+            reply => anyhow::bail!("unexpected timeout reply {reply:?}"),
+        };
+        assert!(timeouts >= 1);
+        client.ping()?;
+        drops += 1;
+        key_blocking_live(&mut con, 0, drops)?;
+    }
+    let error = redis::cmd("keyblock.writer_outside")
+        .query::<Value>(&mut con)
+        .expect_err("a writer outside a key blocking callback was allowed");
+    assert!(
+        error
+            .to_string()
+            .contains("can only be written in a key blocking callback"),
+        "{error}"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_reply_writer_keeps_one_reply_when_misused() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let one = || Value::BulkString(b"one".to_vec());
+    let incomplete = "ERR key blocking callback left its reply incomplete";
+    let mut drops = 0;
+    for (mode, shape) in [
+        ("writer-incomplete", vec![Some(one()), None, None]),
+        ("writer-error", vec![Some(one()), None, None]),
+        ("writer-panic", vec![Some(one()), None]),
+    ] {
+        let expected = match mode {
+            "writer-error" => "ERR the reader stopped early",
+            "writer-panic" => "ERR key blocking callback panicked",
+            _ => incomplete,
+        };
+        let key = format!("keyblock:{mode}");
+        let mut client = KeyBlockingWire::connect(&con)?;
+        client.send(redis::cmd("keyblock.wait").arg((0, 1, mode, &key)))?;
+        key_blocking_live(&mut con, 1, drops)?;
+        redis::cmd("RPUSH")
+            .arg((&key, "one"))
+            .query::<usize>(&mut con)?;
+        let Value::Array(elements) = client.read_value()? else {
+            anyhow::bail!("{mode} did not reply with an array");
+        };
+        assert_eq!(elements.len(), shape.len(), "{mode}: {elements:?}");
+        for (element, want) in elements.iter().zip(&shape) {
+            match want {
+                Some(value) => assert_eq!(element, value, "{mode}"),
+                None => assert_eq!(error_element(element).as_deref(), Some(expected), "{mode}"),
+            }
+        }
+        client.ping()?;
+        drops += 1;
+        key_blocking_live(&mut con, 0, drops)?;
+    }
+
+    // [[one, owed, owed], owed]: a set inside an array.
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((0, 1, "writer-nested", "keyblock:nested")))?;
+    key_blocking_live(&mut con, 1, drops)?;
+    redis::cmd("RPUSH")
+        .arg(("keyblock:nested", "one"))
+        .query::<usize>(&mut con)?;
+    let Value::Array(outer) = client.read_value()? else {
+        anyhow::bail!("the nested reply is not an array");
+    };
+    let [Value::Array(inner), owed] = outer.as_slice() else {
+        anyhow::bail!("unexpected nested reply {outer:?}");
+    };
+    assert_eq!(error_element(owed).as_deref(), Some(incomplete));
+    assert_eq!(inner.len(), 3, "{inner:?}");
+    assert_eq!(inner[0], one());
+    for owed in &inner[1..] {
+        assert_eq!(error_element(owed).as_deref(), Some(incomplete));
+    }
+    client.ping()?;
+    drops += 1;
+    key_blocking_live(&mut con, 0, drops)?;
+
+    // A complete reply refuses a second write, and the returned value is
+    // dropped rather than sent.
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((0, 1, "writer-twice", "keyblock:twice")))?;
+    key_blocking_live(&mut con, 1, drops)?;
+    redis::cmd("RPUSH")
+        .arg(("keyblock:twice", "one"))
+        .query::<usize>(&mut con)?;
+    assert_eq!(client.read()?, Value::Int(1));
+    client.ping()?;
+    drops += 1;
+    key_blocking_live(&mut con, 0, drops)?;
+    assert_eq!(
+        key_blocking_stats(&mut con)?[6],
+        1,
+        "the second write was not refused"
+    );
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_reply_writer_survives_nested_unblocks_and_late_results() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let mut drops = 0;
+    // Each mode is woken by a push, and must reply once and release its
+    // waiter once. A double release crashes Redis.
+    for mode in [
+        "writer-keep-waiting",
+        "writer-error-after",
+        "writer-unblock-after",
+        "writer-unblock-before",
+        "unblock-error",
+    ] {
+        let key = format!("keyblock:{mode}");
+        let mut client = KeyBlockingWire::connect(&con)?;
+        client.send(redis::cmd("keyblock.wait").arg((0, 1, mode, &key)))?;
+        key_blocking_live(&mut con, 1, drops)?;
+        redis::cmd("RPUSH")
+            .arg((&key, "one"))
+            .query::<usize>(&mut con)?;
+        let reply = client.read_value()?;
+        match mode {
+            // The written reply stands; the callback's result is dropped.
+            "writer-keep-waiting" | "writer-error-after" => {
+                assert_eq!(reply, Value::Int(5), "{mode}");
+            }
+            // The nested timeout found the reply claimed and sent nothing.
+            "writer-unblock-after" => assert_eq!(
+                reply,
+                Value::Array(vec![
+                    Value::BulkString(b"one".to_vec()),
+                    Value::BulkString(b"two".to_vec())
+                ]),
+                "{mode}"
+            ),
+            // The nested timeout replied first; the writer was refused.
+            "writer-unblock-before" => {
+                let error = error_element(&reply).unwrap_or_default();
+                assert!(error.contains("callback is already running"), "{reply:?}");
+                assert_eq!(
+                    key_blocking_stats(&mut con)?[6],
+                    1,
+                    "the write was not refused"
+                );
+            }
+            // Redis replied for CLIENT UNBLOCK ... ERROR; the callback's
+            // value is not sent after it.
+            _ => {
+                let error = error_element(&reply).unwrap_or_default();
+                assert!(error.starts_with("UNBLOCKED"), "{reply:?}");
+            }
+        }
+        client.ping()?;
+        drops += 1;
+        key_blocking_live(&mut con, 0, drops)?;
+    }
+
+    // A timeout callback that stops early after writing.
+    let mut client = KeyBlockingWire::connect(&con)?;
+    client.send(redis::cmd("keyblock.wait").arg((
+        10,
+        1,
+        "writer-timeout-error",
+        "keyblock:timeout-error",
+    )))?;
+    let Value::Array(elements) = client.read_value()? else {
+        anyhow::bail!("the timeout reply is not an array");
+    };
+    let [one, owed] = elements.as_slice() else {
+        anyhow::bail!("unexpected timeout reply {elements:?}");
+    };
+    assert_eq!(one, &Value::BulkString(b"one".to_vec()));
+    assert_eq!(
+        error_element(owed).as_deref(),
+        Some("ERR the reader stopped early")
+    );
+    client.ping()?;
+    drops += 1;
     key_blocking_live(&mut con, 0, drops)?;
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
     Ok(())

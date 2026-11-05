@@ -316,7 +316,10 @@ handle is returned. Supply owned `Send + 'static` data, a `KeyBlockingTimeout`,
 a ready callback returning `Result<Option<RedisValue>, RedisError>` and a
 timeout callback returning `RedisResult`. `Ok(None)` means keep waiting;
 `Ok(Some(value))` or an error replies and unblocks. Callback `NoReply` becomes
-an error because a completed wait must send one reply.
+an error because a completed wait must send one reply. To write a large reply
+without building a value tree, a callback writes it through
+`ctx.key_blocking_reply()` and returns `NoReply`. The writer counts the reply,
+so the client still gets exactly one.
 
 Return `RedisValue::NoReply` only for `KeyBlockingResult::Blocked`.
 `KeyBlockingResult::Denied(data)` preserves the data for a non-blocking reply
@@ -1268,7 +1271,7 @@ lets them use the system allocator. Enable it for tests only, from the same
 
 ```toml
 [dev-dependencies]
-redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.1", features = ["system-allocator-fallback"] }
+redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", tag = "v3.0.0-alpha.2", features = ["system-allocator-fallback"] }
 ```
 
 `redis_module!` fails the module load if a module built with the feature has
@@ -1277,7 +1280,8 @@ already allocated from the system allocator when Redis loads it.
 ## Runtime server-event handlers
 
 `server_events::ServerEventHandler` adds `Cron`, `FlushInfo`, `SwapDb` and
-`ConfigChanged` variants for `EventContext::subscribe_to_server_event`. Update
-exhaustive matches on this enum. Existing variants, including the historical
+`ConfigChanged` variants for `EventContext::subscribe_to_server_event`, and is
+now `#[non_exhaustive]`: a `match` on it needs a `_` arm, so later variants do
+not break it. Existing variants, including the historical
 `RuleChanged` spelling, remain available. Existing attribute handlers need no
 changes and stay active alongside runtime subscriptions.
