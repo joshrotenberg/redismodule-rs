@@ -68,10 +68,12 @@ change because `serde_syn` is no longer involved.
 ### Replication returns a status
 
 `RuntimeContext::replicate` now returns `Status`: check `Status::Err` for a
-refused command name or native replication failure. Calls used as statements
-with a semicolon still compile. Code that required a `()` return, such as a
-function pointer or a unit-returning tail expression, must check or explicitly
-discard the status.
+refused command name or native replication failure. `Context::replicate_verbatim`
+returns `Status` too (#220). Both return `Status::Err` without replicating
+while Redis pauses writes, as `avoid_replication_traffic` reports, where Redis
+would abort. Calls used as statements with a semicolon still compile. Code that
+required a `()` return, such as a function pointer or a unit-returning tail
+expression, must check or explicitly discard the status.
 
 ### Native data types implement `NativeType`
 

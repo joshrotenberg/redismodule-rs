@@ -58,6 +58,11 @@ impl Default for CallOptionsBuilder {
     }
 }
 
+/// The error a call with a replicate flag returns while Redis pauses
+/// replication.
+const REPLICATION_PAUSED_ERROR: &str =
+    "ERR replicated calls cannot run while Redis pauses replication";
+
 #[derive(Clone)]
 pub struct CallOptions {
     options: CString,
@@ -206,13 +211,19 @@ impl CallOptionsBuilder {
     }
 
     /// Enable this option will cause the command to be replicaed to the replica and AOF
+    ///
+    /// While Redis pauses replication, a call with this flag or a variant of
+    /// it returns an error without running the command, because Redis would
+    /// abort on the replicated command; see
+    /// [`RuntimeContext::avoid_replication_traffic`].
     pub fn replicate(mut self) -> CallOptionsBuilder {
         self.add_flag("!");
         self
     }
 
     /// Replicate the command to replicas but not to the AOF. Includes
-    /// [`Self::replicate`], and replaces [`Self::replicate_to_aof_only`].
+    /// [`Self::replicate`], and replaces [`Self::replicate_to_aof_only`]. Like
+    /// it, the call returns an error while Redis pauses replication.
     pub fn replicate_to_replicas_only(mut self) -> CallOptionsBuilder {
         self.options = self.options.replace('R', "");
         self.add_flag("!A");
@@ -221,6 +232,7 @@ impl CallOptionsBuilder {
 
     /// Replicate the command to the AOF but not to replicas. Includes
     /// [`Self::replicate`], and replaces [`Self::replicate_to_replicas_only`].
+    /// Like it, the call returns an error while Redis pauses replication.
     pub fn replicate_to_aof_only(mut self) -> CallOptionsBuilder {
         self.options = self.options.replace('A', "");
         self.add_flag("!R");
@@ -760,8 +772,19 @@ impl Context {
         .expect("NUL bytes were replaced")
     }
 
-    pub fn replicate_verbatim(&self) {
-        raw::replicate_verbatim(self.ctx);
+    /// Replicates the running command to the replicas and AOF as the client
+    /// sent it.
+    ///
+    /// Returns [`Status::Err`](raw::Status::Err) and replicates nothing while
+    /// Redis pauses replication, because Redis would abort on the replicated
+    /// command; see [`RuntimeContext::avoid_replication_traffic`]. A read-only
+    /// command still runs during a write pause, and so does a command later in
+    /// a transaction that starts the pause.
+    pub fn replicate_verbatim(&self) -> Status {
+        if self.avoid_replication_traffic() {
+            return Status::Err;
+        }
+        raw::replicate_verbatim(self.ctx)
     }
 
     /// Replies to the client with `result` exactly as Redis sent it to the
@@ -1110,6 +1133,14 @@ impl RuntimeContext {
                 error.to_string(),
             ))));
         }
+        // SAFETY: every caller passes a NUL-terminated format, raw::FMT or the
+        // options of a CallOptions or BlockingCallOptions it borrows.
+        let replicated = unsafe { CStr::from_ptr(fmt) }.to_bytes().contains(&b'!');
+        if replicated && self.avoid_replication_traffic() {
+            return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                REPLICATION_PAUSED_ERROR.into(),
+            ))));
+        }
         let cmd = match CString::new(command) {
             Ok(command) => command,
             Err(_) => {
@@ -1158,6 +1189,11 @@ impl RuntimeContext {
     /// Invoke a command on Redis and return the result
     /// Unlike 'call' this API also allow to pass a CallOption to control different aspects
     /// of the command invocation.
+    ///
+    /// With a replicate flag ([`CallOptionsBuilder::replicate`] or a variant),
+    /// it returns an error without running the command while Redis pauses
+    /// replication, because Redis would abort on the replicated command; see
+    /// [`Self::avoid_replication_traffic`].
     ///
     /// The reply borrows this context. Redis 6.0 to 7.0 store the context in
     /// every reply; later releases store it in error replies created before
@@ -1342,7 +1378,15 @@ impl RuntimeContext {
     ///
     /// Returns [`Status::Err`](raw::Status::Err) if the command name contains
     /// NUL or Redis refuses the replication. Arguments remain binary-safe.
+    ///
+    /// While Redis pauses replication, it returns `Status::Err` and
+    /// replicates nothing, from commands, timers, server events and workers
+    /// alike, because Redis would abort on the replicated command; see
+    /// [`Self::avoid_replication_traffic`].
     pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> raw::Status {
+        if self.avoid_replication_traffic() {
+            return raw::Status::Err;
+        }
         raw::replicate(self.ctx, command, args)
     }
 
@@ -1725,6 +1769,22 @@ impl RuntimeContext {
         /// returns true. This is mostly useful for modules that have background
         /// garbage collection tasks, or that do writes and replicate such writes
         /// periodically in timer callbacks or other periodic callbacks.
+        ///
+        /// It returns true while Redis pauses writes: during `CLIENT PAUSE`
+        /// (`WRITE` or `ALL`), `FAILOVER`, a manual `CLUSTER FAILOVER`, and in
+        /// newer releases a shutdown waiting for replicas or a slot handoff.
+        /// The SDK refuses to replicate then:
+        /// [`Self::replicate`] and [`Context::replicate_verbatim`] return
+        /// [`Status::Err`], and [`Self::call_ext`] and `call_blocking` with a
+        /// replicate flag return an error without running the command. Redis
+        /// 6.2 and later abort if a module replicates during the pause; 6.0
+        /// does not, but pauses for the same failovers. Read-only commands,
+        /// timers, server events and workers keep running during a write
+        /// pause, so check this before changing data you would replicate: a
+        /// refused change never reaches the replicas or the AOF. Redis lets the
+        /// rest of a transaction that starts the pause replicate, but aborts in
+        /// a transaction that runs during an earlier pause; the module API
+        /// cannot tell the two apart, so the SDK refuses in both.
         pub fn avoid_replication_traffic(&self) -> bool {
             unsafe { RedisModule_AvoidReplicaTraffic() == 1 }
         }
@@ -1854,7 +1914,9 @@ impl EventContext {
     /// Under `redis_module!` it fails while the module loads or unloads: Redis
     /// can free a load that fails, or force an unload that must succeed, while
     /// the call's unblock handler is pending. Start blocking calls from
-    /// commands or events after loading finishes.
+    /// commands or events after loading finishes. With a replicate flag it
+    /// also fails, without running the command, while Redis pauses
+    /// replication, as [`RuntimeContext::call_ext`] does.
     #[cfg(any(
         feature = "min-redis-compatibility-version-8-0",
         feature = "min-redis-compatibility-version-7-4",

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `Context::replicate_verbatim` returns a `Status` instead of `()`, and
+  `Status::Err` when it refuses to replicate during a write pause (#220).
+
+### Fixed
+
+- Replicating while Redis pauses writes no longer aborts the server (#220).
+  `CLIENT PAUSE ... WRITE`, `FAILOVER` and `CLUSTER FAILOVER` pause
+  replication, and Redis 6.2 and later abort at an assertion when a module
+  replicates from code that still runs then: a read-only command, a timer, a
+  server event or a worker. While `RedisModule_AvoidReplicaTraffic()` reports
+  the pause, `RuntimeContext::replicate` and `Context::replicate_verbatim`
+  return `Status::Err` without replicating, and `call_ext` and
+  `call_blocking` with a replicate flag return an error without running the
+  command. The refusal also covers the rest of a transaction that starts the
+  pause, which Redis would replicate, because the module API cannot tell that
+  pause from an earlier one. The new `replicate` example replicates from each
+  of these paths.
+
 ## [3.0.0-alpha.2](https://github.com/joshrotenberg/redismodule-rs/compare/v3.0.0-alpha.1...v3.0.0-alpha.2) - 2026-11-04
 
 ### Added

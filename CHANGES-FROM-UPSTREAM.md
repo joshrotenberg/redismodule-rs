@@ -11,6 +11,22 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Replication during write pauses
+
+`CLIENT PAUSE ... WRITE`, `FAILOVER` and `CLUSTER FAILOVER` pause replication.
+A paused write command waits, but read-only commands, timers, server events and
+workers keep running, and Redis 6.2 and later abort at an assertion when one of
+them replicates: upstream's `replicate`, `replicate_verbatim` and calls with
+the replicate flag queue the command without checking for the pause (#220).
+The wrappers now refuse while `RedisModule_AvoidReplicaTraffic()` reports the
+pause: `replicate` and `replicate_verbatim`, which now returns a `Status`,
+return `Status::Err`, and `call_ext` and `call_blocking` with a replicate flag
+return an error without running the command. Redis 6.0 does not abort, but its
+pause serves the same failovers and the wrappers refuse there too. Redis lets
+the rest of a transaction that starts the pause replicate; the module API
+cannot tell that pause from an earlier one, so the wrappers refuse there as
+well. Upstream has no issue or pull request for this.
+
 ## Incremental stream entries and native pointer borrows
 
 The existing stream iterator creates every field/value string in a

@@ -182,6 +182,23 @@ fn test_replication_pause_refuses_replicate_from_a_timer() -> Result<()> {
 }
 
 #[test]
+fn test_replication_pause_refuses_replicate_from_a_server_event() -> Result<()> {
+    let Some((mut primary, mut replica)) = paused_primary()? else {
+        return Ok(());
+    };
+    redis::cmd("replicate.event")
+        .arg(&["SET", "refused", "value"])
+        .query::<()>(&mut primary)?;
+    assert_eq!(background_result(&mut primary, "event")?, 0);
+    unpause(&mut primary)?;
+    redis::cmd("replicate.event")
+        .arg(&["SET", "resumed", "value"])
+        .query::<()>(&mut primary)?;
+    assert_eq!(background_result(&mut primary, "event")?, 1);
+    assert_replica_keys(&mut primary, &mut replica, "refused", "resumed")
+}
+
+#[test]
 fn test_replication_pause_refuses_replicate_from_a_worker() -> Result<()> {
     let Some((mut primary, mut replica)) = paused_primary()? else {
         return Ok(());
