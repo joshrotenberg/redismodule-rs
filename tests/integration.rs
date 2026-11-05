@@ -1835,6 +1835,10 @@ fn test_command_builder_invalid_definitions_fail_the_load() {
             "key-spec-index-zero",
             "begin-search index must be 1 or more",
         ),
+        (
+            "key-spec-limit-fixed-last",
+            "a key spec's range needs a step of 1 or more",
+        ),
         ("key-spec-nul", "key spec notes contains a NUL byte"),
         ("container-key-spec", "container cannot have keys"),
         ("container-acl", "container cannot have ACL categories"),
