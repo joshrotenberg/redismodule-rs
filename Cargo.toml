@@ -161,6 +161,10 @@ name = "lists"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "stale_keys"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "shared_api"
 crate-type = ["cdylib"]
 

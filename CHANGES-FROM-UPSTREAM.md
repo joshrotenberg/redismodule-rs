@@ -11,6 +11,29 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Incremental stream entries and native pointer borrows
+
+The existing stream iterator creates every field/value string in a
+`StreamRecord`, even when a predicate can reject an entry after one field.
+`next_entry` instead lends a `StreamEntry` with a copied ID and individual
+owned field reads (#179 parts 1, 2 and 4). Its explicit skip and Drop use
+`StreamIteratorNextField` with two null outputs, which advances without
+creating returned strings. The iterator tracks remaining fields independently
+of the handle, so forgetting one cannot make the next native ID read start in
+field data. The legacy Iterator shares that state and still collects all
+fields. An unexpected field failure stops further cursor advancement.
+
+Key pointer access no longer needs an ownership round trip through
+`to_raw_parts` and `from_raw_parts`: borrowing `as_ptr` accessors preserve the
+key owner. They do not grant native access, transfer ownership or permit
+mutation while iterating or while scoped key data is lent. The pointer is valid
+until the next keyspace change, after which the SDK re-opens the key (#197).
+`RedisString::parse_stream_id` uses native `StringToStreamID` where available,
+without imposing a Rust text/grammar parser. Numeric IDs and range endpoints
+follow Redis, while command-specific markers are separate. No AutoMemory
+optimization is included; the producer-aware string-adoption path is retained,
+and part 3 of #179 remains open.
+
 ## Module-author reference and macro packages
 
 The remaining readiness documentation work (#169) adds rustdoc for key reads,
@@ -41,7 +64,9 @@ configuration whose setter rejects combined values; enum module arguments
 ignore ASCII case. The SDK crash-info dispatcher omits backtrace capture and
 symbolization while preserving module callbacks and their crash-report flag.
 This does not make arbitrary INFO callbacks async-signal-safe. These changes
-correct the inherited implementations in this fork.
+correct the inherited implementations in this fork. A follow-up migration note
+for #166 replaces the obsolete SDK-backtrace description with the retained
+Redis crash diagnostics and module INFO callback contract.
 
 ## Scoped key data borrows
 
@@ -60,8 +85,32 @@ a thread local, so while the closure runs the SDK also refuses calls, key
 opening and scans, other key operations, `yield_now` and keyspace
 notifications on that thread. The borrowing forms are `unsafe` with their
 rules stated. A handle opened before another handle or a call deleted or
-replaced the same key's value still points at the freed value (#197).
+replaced the same key's value re-opens its key since #197.
 Upstream has no issue or pull request for this.
+
+## Key handles across keyspace changes
+
+An open native key caches the value Redis looked up when it opened. Upstream's
+`RedisKey` and `RedisKeyWritable` keep that pointer for their whole life, so a
+call that deletes or rewrites the key, string DMA through a second handle
+(which replaces an int- or embstr-encoded value), a pop that empties a list,
+or `yield_now` left a handle pointing at freed memory, and dropping it closed
+the native key, which from Redis 6.2 reads `key->value->type` (#197). The fork
+registers the keys it opens on each thread and closes them before any such
+operation, while their values are still valid (all of them for a call, the
+same key's other handles for a change through one handle), and re-opens a
+closed key on its next use. A
+stream iterator panics after a change instead of continuing on a freed
+iterator, a key scan callback cannot change the keyspace, and handles built
+from raw parts panic when used after a change. Redis itself holds a key's value
+in three more places, which closing the SDK's handles cannot fix (#205): a
+keyspace scan closes the key it lent each callback, reading its value; a write
+that creates a key raises the `new` event before storing the value; and a plain
+open of an expired key a scan is using deletes its value. The fork refuses
+keyspace changes from those callbacks and opens keys with `NOEXPIRE` during
+such scans (Redis 7.2+). A client's write that creates a key raises the same
+`new` event, and a subscriber that changes the key there still leaves Redis
+on a freed value; only the SDK's own writes are guarded.
 
 ## The lists example
 
@@ -82,8 +131,10 @@ macros always supply a handler, so a container such as `XGROUP` needed raw
 bindings and a hand-written dispatcher without the SDK's panic guard (#178).
 `CommandBuilder::container` declares a container, `.subcommand` registers
 children with the same metadata and callback handling as top-level commands,
-and `.summary` and `.arity` set the command info `COMMAND DOCS` and
-`COMMAND INFO` report. Redis keeps a container's handler NULL and would call
+and `.summary`, `.arity`, `.complexity`, `.since`, `.history`, `.tip`,
+`.key_spec` and `.arg` set the command info `COMMAND DOCS` and `COMMAND INFO`
+report in one `SetCommandInfo` call (#208), refusing key specs that Redis
+accepts but mishandles. Redis keeps a container's handler NULL and would call
 it for any call to a container without subcommands, and for a call its arity
 accepts without a subcommand, so registration refuses an empty container and a
 container arity of 1 or -1, and refuses containers before Redis 7.0. Redis

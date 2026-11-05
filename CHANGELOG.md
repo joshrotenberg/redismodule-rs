@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Incremental stream entries through `StreamIterator::next_entry` and
+  `StreamEntry::next_field`, `remaining_fields` and `skip_fields` (#179,
+  parts 1, 2 and 4). Skipping or dropping an entry uses native null outputs
+  without creating field/value strings. Pending fields remain tracked by the
+  iterator, so forgetting an entry and mixing incremental and legacy reads
+  still advances at entry boundaries. The existing `Iterator` returns complete
+  `StreamRecord`s. All public cursor advances honor scoped key-data loans;
+  an unexpected field failure ends the cursor instead of reusing its state.
+- Borrowing `RedisKey::as_ptr` and `RedisKeyWritable::as_ptr` accessors keep
+  the SDK owner and its cleanup responsibility in place (#179). Native calls
+  remain unsafe and subject to key lifetime, lock, mode and aliasing rules.
+- `RedisString::parse_stream_id` forwards to native `StringToStreamID`, with
+  an error if unavailable or refused (#179). The running server defines its
+  numeric/range-ID grammar; command markers such as XREADGROUP's `>` remain
+  separate. AutoMemory adoption is unchanged; part 3 of #179 remains open.
+
 - Complete the module-author rustdoc for key reads, hash fields, list writes,
   expiry, native call replies and server events (#169). Cursor examples now
   compile against the current API, macro input syntax uses the current callback
@@ -25,6 +41,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through one key handle instead of two. `LPOPRPUSH` also replies with the
   element's bytes unchanged, where it replaced invalid UTF-8, and refuses
   extra arguments.
+
+- `CommandBuilder` sets every field of the command info (#208):
+  `.complexity()`, `.since()`, `.history()`, `.tip()`, `.key_spec()` and
+  `.arg()` join `.summary()` and `.arity()` in the builder's one
+  `RedisModule_SetCommandInfo` call, which Redis accepts once per command.
+  Key specs take the `KeySpec`, `KeySpecFlags`, `BeginSearch` and `FindKeys`
+  types `#[command]` uses; their flags reach `COMMAND INFO` and
+  `COMMAND GETKEYSANDFLAGS` and decide what `%R~` and `%W~` ACL key patterns
+  allow, which a key range's spec cannot. Registration checks the info before
+  creating the command, refusing key specs Redis accepts but mishandles (a
+  key step of 0 overruns its key buffer; an index of 0, or a limit with a last
+  key other than -1, fails its assertions), NUL bytes, tips with spaces, and key
+  specs on a container. Redis copies every string, and the builder frees them
+  after the call, as `#[command]` now also does when the call fails. See
+  `examples/subcommands.rs`.
 
 - Command containers and native subcommands (#178).
   `CommandBuilder::container(name)` declares a command without a handler, and
@@ -45,6 +76,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Breaking:** callbacks that run while Redis is using a key's value can no
+  longer change the keyspace (#205). In a `KeysCursor` callback, after which
+  Redis closes the key it lent and reads its value, and in a callback Redis
+  raises during an SDK key write, such as a `new` keyspace subscriber running
+  before the native key holds the value it creates, calls, `yield_now` and
+  notifications return `ERR`, key writes return `ERR` or `Status::Err`, and
+  pops panic. A `KeysCursor` callback can still read the lent key's string
+  value. Keys opened while a keyspace scan runs, or while a key scan scans a
+  key opened with `ACCESS_EXPIRED`, open with `NOEXPIRE` (Redis 7.2+), so an
+  open does not delete an expired key Redis is using; they close when the scan
+  ends and re-open with their own flags.
+
+- Key handles stay valid when something else changes their key (#197). An
+  open native key caches the value Redis looked up, and a call, `yield_now`,
+  a keyspace notification or scan, or string DMA, a write, delete, pop or trim
+  through another handle could free that value: the handle then read and wrote
+  freed memory, and from Redis 6.2 closing it did too. The SDK now registers
+  every key it opens on its thread and closes them before such an operation,
+  while the values are still valid: all of them for a call, `yield_now`, a
+  notification or a scan, and the other handles to the same key for a change
+  through one handle. A closed handle re-opens on its next use, with the same
+  name, mode, flags and database, sees the key as a fresh open would, and has
+  an open's effects, such as `keymiss` notifications. Each open costs one
+  small allocation for its registry entry. `as_ptr` returns the current native
+  key, valid until the next keyspace change.
+  **Breaking:**
+  - A `StreamIterator` panics on its next step, or its entry's next field,
+    after a keyspace change, since it cannot re-open; start a new one.
+  - A `ScanKeyCursor` callback cannot change the keyspace, because Redis keeps
+    scanning the key after it: calls, `yield_now` and notifications return
+    `ERR a key scan callback is running`, key writes return that error or
+    `Status::Err`, and pops and keyspace scans panic.
+  - Handles built with `RedisKey::from_raw_parts`, and the handles scan
+    callbacks receive, panic when used after a keyspace change; one on a
+    missing key does not.
+  - `RedisKey` and `RedisKeyWritable` are no longer `UnwindSafe` or
+    `RefUnwindSafe`.
+
 - SDK-generated error replies consistently start with `ERR` or a specific
   Redis error code (#166), including argument parsing, key operations,
   configuration, registration and API-availability errors. Forwarded server
@@ -60,7 +129,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#166). Module-argument enum names now ignore ASCII case, as Redis does.
 - The SDK's crash-info dispatcher no longer captures or symbolizes a Rust
   backtrace (#166). Module INFO callbacks still run with the original
-  crash-report flag; their own crash-path restrictions continue to apply.
+  crash-report flag; their own crash-path restrictions continue to apply. A
+  follow-up migration note for #166 removes the obsolete SDK-backtrace recipe.
 
 - **Breaking:** safe code can no longer change a key while holding data
   borrowed from it (#162). `RedisKey::read` returns an owned `Vec<u8>`;
@@ -72,8 +142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thread, so a context reached another way, such as from a thread local,
   cannot change the key either. The borrowing forms, `read_borrowed`,
   `get_value` and `as_string_dma`, are `unsafe`. A handle opened before the
-  same key was deleted or replaced through another handle or a call can still
-  point at a freed value; #197 tracks that.
+  same key was deleted or replaced through another handle or a call re-opens
+  its key since #197.
 
 - Unusual input no longer panics or silently changes stored data (#165).
   Calls and replication reject NUL command names before creating native

@@ -366,18 +366,6 @@ pub(crate) fn close_key(kp: *mut RedisModuleKey) {
 }
 
 #[inline]
-pub(crate) fn open_key(
-    ctx: *mut RedisModuleCtx,
-    keyname: *mut RedisModuleString,
-    mode: KeyMode,
-) -> *mut RedisModuleKey {
-    unsafe {
-        crate::__required_api!(RedisModule_OpenKey)(ctx, keyname, mode.bits())
-            .cast::<RedisModuleKey>()
-    }
-}
-
-#[inline]
 pub(crate) fn open_key_with_flags(
     ctx: *mut RedisModuleCtx,
     keyname: *mut RedisModuleString,
