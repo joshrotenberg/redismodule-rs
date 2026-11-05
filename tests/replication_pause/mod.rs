@@ -417,6 +417,10 @@ fn test_replication_pause_lets_write_commands_replicate_each_way_in_the_transact
 /// replication during a pause, in a transaction too. Redis would drop it
 /// anyway, since the call has no replicate flag; called with the flag from
 /// code the SDK does not check, it would abort.
+///
+/// In the transaction the called command only makes a replicated call, which
+/// the SDK refuses before it runs. A local write there would abort Redis 6.2
+/// whatever the SDK does: 6.2 propagates an `EXEC` that changed data.
 #[test]
 fn test_replication_pause_refuses_write_commands_that_another_command_calls() -> Result<()> {
     let Some((mut primary, mut replica)) = paused_primary()? else {
@@ -429,16 +433,9 @@ fn test_replication_pause_refuses_write_commands_that_another_command_calls() ->
     let replicated: Vec<i64> = redis::pipe()
         .atomic()
         .cmd("replicate.forward")
-        .arg(&[
-            "replicate.write",
-            "command",
-            "called-in-transaction",
-            "value",
-        ])
-        .cmd("replicate.forward")
         .arg(&["replicate.write", "call", "called-in-transaction", "value"])
         .query(&mut primary)?;
-    assert_eq!(replicated, [0, 0]);
+    assert_eq!(replicated, [0]);
     unpause(&mut primary)?;
     let replicated: i64 = redis::cmd("replicate.write")
         .arg(&["command", "resumed", "value"])
