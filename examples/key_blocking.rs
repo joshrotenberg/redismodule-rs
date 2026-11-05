@@ -39,6 +39,12 @@ enum Mode {
     WriterNested,
     WriterTwice,
     WriterPanic,
+    WriterKeepWaiting,
+    WriterErrorAfter,
+    WriterTimeoutError,
+    WriterUnblockAfter,
+    WriterUnblockBefore,
+    UnblockError,
 }
 
 struct Waiter {
@@ -103,7 +109,12 @@ fn on_ready(ctx: &Context, waiter: &mut Waiter) -> Result<Option<RedisValue>, Re
         | Mode::WriterError
         | Mode::WriterNested
         | Mode::WriterTwice
-        | Mode::WriterPanic => return write_broken(ctx, waiter.mode),
+        | Mode::WriterPanic
+        | Mode::WriterKeepWaiting
+        | Mode::WriterErrorAfter
+        | Mode::WriterUnblockAfter
+        | Mode::WriterUnblockBefore
+        | Mode::UnblockError => return write_broken(ctx, waiter.mode),
         _ => {}
     }
     if matches!(ctx.call("EXISTS", &[&ready_key])?, RedisValue::Integer(0)) {
@@ -175,7 +186,53 @@ fn write_broken(ctx: &Context, mode: Mode) -> Result<Option<RedisValue>, RedisEr
             reply.bulk(b"one")?;
             std::panic::panic_any(BadPanicPayload)
         }
+        // A written reply finishes the wait, whatever the callback returns.
+        Mode::WriterKeepWaiting => {
+            reply.integer(5)?;
+            Ok(None)
+        }
+        Mode::WriterErrorAfter => {
+            reply.integer(5)?;
+            Err(RedisError::Str("ERR a second reply"))
+        }
+        // The nested timeout finds the reply claimed and sends nothing.
+        Mode::WriterUnblockAfter => {
+            reply.array(2)?;
+            reply.bulk(b"one")?;
+            unblock_self(ctx, "TIMEOUT")?;
+            reply.bulk(b"two")?;
+            Ok(Some(RedisValue::NoReply))
+        }
+        // The nested timeout replies first, so the writer is refused.
+        Mode::WriterUnblockBefore => {
+            unblock_self(ctx, "TIMEOUT")?;
+            WRITE_REFUSED.store(
+                reply
+                    .integer(1)
+                    .is_err_and(|error| error.to_string().contains("already has its reply")),
+                Ordering::SeqCst,
+            );
+            Ok(Some(RedisValue::Integer(2)))
+        }
+        // Redis replies -UNBLOCKED itself, without the timeout callback.
+        Mode::UnblockError => {
+            unblock_self(ctx, "ERROR")?;
+            Ok(Some(RedisValue::Integer(2)))
+        }
         _ => unreachable!("not a broken writer mode"),
+    }
+}
+
+/// Unblocks this callback's own client through a nested `CLIENT UNBLOCK`.
+fn unblock_self(ctx: &Context, how: &str) -> Result<(), RedisError> {
+    let get_id =
+        unsafe { raw::RedisModule_GetClientId }.ok_or(RedisError::Str("ERR no client id API"))?;
+    let id = unsafe { get_id(ctx.get_raw()) }.to_string();
+    match ctx.call("CLIENT", &["UNBLOCK", id.as_str(), how])? {
+        RedisValue::Integer(1) => Ok(()),
+        reply => Err(RedisError::String(format!(
+            "ERR CLIENT UNBLOCK replied {reply:?}"
+        ))),
     }
 }
 
@@ -184,6 +241,12 @@ fn on_timeout(ctx: &Context, waiter: &mut Waiter) -> RedisResult {
     match waiter.mode {
         Mode::PanicTimeout => std::panic::panic_any(BadPanicPayload),
         Mode::NoReplyTimeout => Ok(RedisValue::NoReply),
+        Mode::WriterTimeoutError => {
+            let mut reply = ctx.key_blocking_reply()?;
+            reply.array(2)?;
+            reply.bulk(b"one")?;
+            Err(RedisError::Str("ERR the reader stopped early"))
+        }
         Mode::Writer => {
             // A RESP2 client gets the map as a flat array.
             let mut reply = ctx.key_blocking_reply()?;
@@ -217,6 +280,12 @@ fn wait(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         "writer-nested" => Mode::WriterNested,
         "writer-twice" => Mode::WriterTwice,
         "writer-panic" => Mode::WriterPanic,
+        "writer-keep-waiting" => Mode::WriterKeepWaiting,
+        "writer-error-after" => Mode::WriterErrorAfter,
+        "writer-timeout-error" => Mode::WriterTimeoutError,
+        "writer-unblock-after" => Mode::WriterUnblockAfter,
+        "writer-unblock-before" => Mode::WriterUnblockBefore,
+        "unblock-error" => Mode::UnblockError,
         _ => return Err(RedisError::Str("ERR unknown waiter mode")),
     };
     let keys: Vec<_> = args.collect();

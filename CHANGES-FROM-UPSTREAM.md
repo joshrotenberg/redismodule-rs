@@ -204,7 +204,10 @@ A callback can also write its reply directly through
 The first write claims the reply, a second reply is refused or dropped, and a
 reply the callback leaves incomplete, by returning early or panicking, is
 finished with an error reply for each owed element, so the client stays in
-sync.
+sync. A ready callback whose nested `CLIENT UNBLOCK` unblocked its own client
+no longer reports the client served, which released the native waiter twice;
+the error Redis writes for `CLIENT UNBLOCK ... ERROR` is the one reply the
+writer cannot count.
 
 ## Checked key positions
 

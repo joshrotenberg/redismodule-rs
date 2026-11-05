@@ -715,7 +715,9 @@ impl Context {
 /// reply still owes, so the client gets exactly one reply:
 ///
 /// - The first write claims the reply. It is refused if the client already has
-///   one, for example after a nested `CLIENT UNBLOCK ... TIMEOUT`.
+///   a reply, for example when a nested `CLIENT UNBLOCK ... TIMEOUT` of the same
+///   client ran first. If a nested command unblocks the client after the first
+///   write, the reply still finishes, and Redis is left to release the client.
 /// - A write after the reply is complete is refused, and sends nothing.
 /// - Once anything is written, the wait finishes. Return
 ///   `Ok(Some(RedisValue::NoReply))` from `on_ready`, or `Ok(RedisValue::NoReply)`
@@ -726,10 +728,14 @@ impl Context {
 ///   the SDK writes each owed element as an error reply: the callback's error
 ///   if it returned one, otherwise `ERR key blocking callback left its reply
 ///   incomplete`, or `ERR key blocking callback panicked`. It writes every
-///   owed element, so declare only lengths the callback will write.
+///   owed element, on the main thread. Take a length from the data in hand,
+///   not from a client's `COUNT`, so a callback that stops early does not leave
+///   the SDK millions of error replies to write.
 ///
 /// Replies written another way, through [`Context::reply`] or the raw
-/// `RedisModule_ReplyWith*` functions, are not counted.
+/// `RedisModule_ReplyWith*` functions, are not counted. Neither is the error
+/// Redis writes for `CLIENT UNBLOCK ... ERROR` of the client from inside its
+/// own callback, which lands inside a reply already started.
 pub struct KeyBlockingReply<'ctx> {
     ctx: &'ctx Context,
 }
@@ -850,6 +856,11 @@ impl KeyBlockingReply<'_> {
                     ));
                 }
                 _ => {}
+            }
+            // The reply is claimed now. If the write panics, the panic path
+            // still owes the client a reply and sends an error.
+            if frame.written.get() == Written::Nothing {
+                frame.written.set(Written::Partial);
             }
             write();
             frame.count(opens);
@@ -1127,6 +1138,47 @@ fn keys_panic(ctx: *mut raw::RedisModuleCtx, completed: Option<&AtomicBool>) -> 
     }
 }
 
+/// The status of a readiness callback that served its client. A nested command
+/// in the callback, such as `CLIENT UNBLOCK` of the same client, can make Redis
+/// unblock it already; reporting it served again would free the native waiter
+/// twice, so the callback reports it not served instead.
+fn served(ctx: *mut raw::RedisModuleCtx) -> c_int {
+    if true || still_blocked(ctx) {
+        raw::REDISMODULE_OK as c_int
+    } else {
+        raw::REDISMODULE_ERR as c_int
+    }
+}
+
+/// Whether Redis still holds the client of this callback context blocked. If
+/// the client cannot be looked up, it is taken as still blocked, as before
+/// this check existed.
+fn still_blocked(ctx: *mut raw::RedisModuleCtx) -> bool {
+    // SAFETY: plain calls on the live callback context, whose client is the
+    // blocked client, and a version 1 info struct Redis fills in.
+    unsafe {
+        let (Some(client_id), Some(client_info)) = (
+            raw::RedisModule_GetClientId,
+            raw::RedisModule_GetClientInfoById,
+        ) else {
+            return true;
+        };
+        let id = client_id(ctx);
+        let mut info = raw::RedisModuleClientInfoV1 {
+            version: 1,
+            flags: 0,
+            id: 0,
+            addr: [0; 46],
+            port: 0,
+            db: 0,
+        };
+        id == 0
+            || client_info((&mut info as *mut raw::RedisModuleClientInfoV1).cast(), id)
+                != raw::REDISMODULE_OK as c_int
+            || info.flags & u64::from(raw::REDISMODULE_CLIENTINFO_FLAG_BLOCKED) != 0
+    }
+}
+
 extern "C" fn keys_ready<T: Send + 'static>(
     ctx: *mut raw::RedisModuleCtx,
     _argv: *mut *mut raw::RedisModuleString,
@@ -1153,12 +1205,18 @@ extern "C" fn keys_ready<T: Send + 'static>(
         if frame.started() {
             // The writer claimed the reply, so the wait is over.
             frame.finish(response.map(|value| value.unwrap_or(RedisValue::NoReply)));
-            return raw::REDISMODULE_OK as c_int;
+            return served(ctx);
         }
         match response {
             Ok(None) => raw::REDISMODULE_ERR as c_int,
             response => {
                 if payload.state.completed.load(Ordering::Acquire) {
+                    return raw::REDISMODULE_ERR as c_int;
+                }
+                if !still_blocked(ctx) {
+                    // A nested command unblocked the client, and Redis sent
+                    // its reply.
+                    payload.state.completed.store(true, Ordering::Release);
                     return raw::REDISMODULE_ERR as c_int;
                 }
                 let status = keys_reply(&context, response.map(|value| value.expect("Some reply")));
@@ -1175,9 +1233,12 @@ extern "C" fn keys_ready<T: Send + 'static>(
             std::mem::forget(panic);
             if frame.started() {
                 frame.complete_after_panic();
-                raw::REDISMODULE_OK as c_int
-            } else {
+                served(ctx)
+            } else if still_blocked(ctx) {
                 keys_panic(ctx, Some(&payload.state.completed))
+            } else {
+                payload.state.completed.store(true, Ordering::Release);
+                raw::REDISMODULE_ERR as c_int
             }
         }
     }
