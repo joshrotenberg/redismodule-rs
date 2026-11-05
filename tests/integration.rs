@@ -4600,20 +4600,40 @@ fn test_info_handler_multiple_sections() -> Result<()> {
     })
 }
 
-#[allow(unused_must_use)]
+/// `test_helper.err` replies with its message as an error, once (#223).
 #[test]
 fn test_test_helper_err() -> Result<()> {
-    let mut con = TestConnection::new("hello");
+    let mut con = TestConnection::new("test_helper");
+    let mut check = |args: &[&[u8]], code: &str, detail: &str| -> Result<()> {
+        let error = redis::cmd("test_helper.err")
+            .arg(args)
+            .query::<Value>(&mut con)
+            .unwrap_err();
+        assert_eq!(
+            (error.code(), error.detail()),
+            (Some(code), Some(detail)),
+            "{args:?}: {error}"
+        );
+        // A second reply would be read here as the reply to PING.
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        Ok(())
+    };
 
-    // Make sure embedded nulls do not cause a crash
-    redis::cmd("test_helper.err")
-        .arg(&["\x00\x00"])
-        .query::<()>(&mut con);
-
-    redis::cmd("test_helper.err")
-        .arg(&["no crash\x00"])
-        .query::<()>(&mut con);
-
+    check(&[b"ERR custom failure"], "ERR", "custom failure")?;
+    check(
+        &[b"CUSTOM the message chooses its code"],
+        "CUSTOM",
+        "the message chooses its code",
+    )?;
+    let arity = "wrong number of arguments for 'test_helper.err' command";
+    check(&[], "ERR", arity)?;
+    check(&[b"ERR one", b"two"], "ERR", arity)?;
+    // An error reply cannot carry NUL, CR or LF; each becomes a space.
+    check(&[b"ERR embedded\0NUL"], "ERR", "embedded NUL")?;
+    check(&[b"ERR \0\0"], "ERR", "  ")?;
+    check(&[b"ERR line\r\nbreak"], "ERR", "line  break")?;
+    // Bytes that are not UTF-8 are replaced with U+FFFD.
+    check(&[b"ERR bad \xff byte"], "ERR", "bad \u{fffd} byte")?;
     Ok(())
 }
 
