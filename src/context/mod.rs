@@ -63,6 +63,11 @@ impl Default for CallOptionsBuilder {
 const REPLICATION_PAUSED_ERROR: &str =
     "ERR replicated calls cannot run while Redis pauses replication";
 
+/// The error any call from a post-notification job returns while Redis pauses
+/// replication.
+const JOB_CALL_PAUSED_ERROR: &str =
+    "ERR post-notification jobs cannot call commands while Redis pauses replication";
+
 #[derive(Clone)]
 pub struct CallOptions {
     options: CString,
@@ -1145,8 +1150,20 @@ impl RuntimeContext {
                 crate::key::LENT_ERROR.into(),
             ))));
         }
-        // Refused before anything else changes: Redis would abort on the
-        // replicated command.
+        // Both pause refusals come before anything else changes.
+        //
+        // A job runs after a transaction's EXEC and before Redis propagates
+        // the transaction. Any command Redis runs outside EXEC, a read too,
+        // ends the exemption that lets a transaction which paused writes
+        // itself replicate, and Redis would then abort when it propagates the
+        // transaction (#231). The SDK cannot tell that transaction's jobs from
+        // others, so every job call is refused during a pause.
+        if post_notification::job_running() && self.avoid_replication_traffic() {
+            return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                JOB_CALL_PAUSED_ERROR.into(),
+            ))));
+        }
+        // Redis would abort on the replicated command.
         // SAFETY: every caller passes a NUL-terminated format, raw::FMT or the
         // options of a CallOptions or BlockingCallOptions it borrows.
         let replicated = unsafe { CStr::from_ptr(fmt) }.to_bytes().contains(&b'!');
@@ -1201,6 +1218,16 @@ impl RuntimeContext {
     /// reply is bulk text for valid UTF-8, or a byte buffer otherwise. Use
     /// `call_ext` for typed reply access and borrow bytes from that reply's
     /// owner, and [`Context::reply_with_call_reply`] to pass a reply on as it is.
+    ///
+    /// From a post-notification job it returns an error without running the
+    /// command while Redis pauses replication; see
+    /// [`EventContext::add_post_notification_job`].
+    ///
+    /// On Redis 6.2, a command registered read-only whose call runs a write
+    /// command inside `MULTI` during an earlier write pause aborts Redis:
+    /// 6.2 propagates `EXEC` once the transaction changed data. The SDK cannot
+    /// tell that the called command writes, so this is a known limit; flag
+    /// such a command `write` instead.
     pub fn call<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> RedisResult {
         self.call_internal::<_, CallResult>(command, raw::FMT, args)
             .map_or_else(|e| Err(e.into()), |v| Ok((&v).into()))
@@ -1214,7 +1241,10 @@ impl RuntimeContext {
     /// it returns an error without running the command while Redis pauses
     /// replication, because Redis would abort on the replicated command, with
     /// the same transaction exception as [`Self::replicate`]; see
-    /// [`Self::avoid_replication_traffic`].
+    /// [`Self::avoid_replication_traffic`]. From a post-notification job every
+    /// call returns an error then, with or without the flag; see
+    /// [`EventContext::add_post_notification_job`]. The Redis 6.2 limit that
+    /// [`Self::call`] describes applies here too.
     ///
     /// The reply borrows this context. Redis 6.0 to 7.0 store the context in
     /// every reply; later releases store it in error replies created before
@@ -1855,7 +1885,10 @@ impl RuntimeContext {
         /// and is always refused, as are timers, server events,
         /// post-notification jobs and workers, which keep running.
         /// Check this before changing data you would replicate from them: a
-        /// refused change never reaches the replicas or the AOF.
+        /// refused change never reaches the replicas or the AOF. A
+        /// post-notification job's calls are refused during the pause even
+        /// without a replicate flag; see
+        /// [`EventContext::add_post_notification_job`].
         pub fn avoid_replication_traffic(&self) -> bool {
             unsafe { RedisModule_AvoidReplicaTraffic() == 1 }
         }
@@ -1907,6 +1940,25 @@ impl EventContext {
     /// `busy_reply` replaces the text after `-BUSY` in the replies that other
     /// clients get under [`YieldMode::Clients`]. CR, LF and NUL in it are
     /// replaced with spaces.
+    ///
+    /// While Redis pauses writes, a post-notification job's yield uses
+    /// [`YieldMode::Events`] whatever `mode` asks: it processes events and
+    /// serves no clients. A client command run during the yield, such as a
+    /// replica's `REPLCONF ACK`, would end the exemption that lets a
+    /// transaction which paused writes itself replicate, and Redis would
+    /// abort when it propagates the transaction; see
+    /// [`Self::add_post_notification_job`]. Other clients then wait for the
+    /// job to return instead of getting `-BUSY`, and `allow-busy` commands,
+    /// the module's own included, do not run until it does, so such a job
+    /// must not wait for client input to finish.
+    ///
+    /// Replication the caller queued before the yield propagates only after
+    /// the caller returns. If a write pause starts during the yield, the SDK
+    /// can no longer refuse that replication and Redis aborts when it
+    /// propagates it: a manual cluster failover's `MFSTART` arrives on the
+    /// cluster bus, and `SHUTDOWN NOSAVE`, which pauses writes while it waits
+    /// for lagging replicas, runs during a [`YieldMode::Clients`] yield. This is a known limit; see
+    /// [`RuntimeContext::avoid_replication_traffic`].
     ///
     /// ```
     /// use redis_module::{Context, EventContext, RedisError, YieldMode};
@@ -1966,6 +2018,15 @@ impl EventContext {
             ));
         }
         let yield_api = unsafe { crate::__available_api!(RedisModule_Yield) };
+        // A client command that runs during the yield, such as a replica's
+        // allow-busy REPLCONF ACK, ends the exemption of a transaction that
+        // paused writes itself, as a call does (#231). A job's yield serves
+        // no clients during a pause.
+        let mode = if post_notification::job_running() && self.avoid_replication_traffic() {
+            YieldMode::Events
+        } else {
+            mode
+        };
         let flags = match mode {
             YieldMode::Events => raw::REDISMODULE_YIELD_FLAG_NONE,
             YieldMode::Clients => raw::REDISMODULE_YIELD_FLAG_CLIENTS,
@@ -1987,7 +2048,9 @@ impl EventContext {
     /// the call's unblock handler is pending. Start blocking calls from
     /// commands or events after loading finishes. With a replicate flag it
     /// also fails, without running the command, while Redis pauses
-    /// replication, as [`RuntimeContext::call_ext`] does.
+    /// replication, as [`RuntimeContext::call_ext`] does. From a
+    /// post-notification job every call fails then, with or without the flag;
+    /// see [`Self::add_post_notification_job`].
     #[cfg(any(
         feature = "min-redis-compatibility-version-8-0",
         feature = "min-redis-compatibility-version-7-4",
@@ -2050,6 +2113,20 @@ impl EventContext {
     /// At a 7.2+ floor, a missing API returns `Status::Err` instead of
     /// panicking. Captures are released on either missing-API path.
     /// Scheduling successfully does not promise the later write succeeds.
+    ///
+    /// While Redis pauses writes, as
+    /// [`RuntimeContext::avoid_replication_traffic`] reports, every call the
+    /// job makes returns an error without running the command, a read without
+    /// a replicate flag too. A job runs after a transaction's `EXEC` and
+    /// before Redis propagates the transaction, and any command run from it
+    /// ends the exemption that lets a transaction which paused writes itself
+    /// replicate them, so Redis would abort. The SDK cannot tell that job from
+    /// others and refuses them all. Read keys with
+    /// [`RuntimeContext::open_key`], which runs no command, or copy the data
+    /// before queuing the job. For the same reason a job's
+    /// [`Self::yield_now`] processes events and serves no clients during a
+    /// pause.
+    ///
     /// See `docs/KEYSPACE-NOTIFICATIONS.md` in the dependency source revision
     /// pinned by `Cargo.lock` for replication, role/loading gates, database
     /// scopes and teardown; the source README links the matching guide.
@@ -2074,6 +2151,17 @@ impl EventContext {
     /// Generated module load/unload refuses new jobs; unload refuses until all
     /// accepted jobs have been cleaned up, including empty/cancelled work.
     /// Scheduling successfully does not promise the later write succeeds.
+    ///
+    /// While Redis pauses writes, as
+    /// [`RuntimeContext::avoid_replication_traffic`] reports, every call the
+    /// job makes returns an error without running the command, a read without
+    /// a replicate flag too: a command run from a job after a transaction that
+    /// paused writes itself would make Redis abort when it propagates the
+    /// transaction. Read keys with [`RuntimeContext::open_key`], which runs no
+    /// command, or copy the data before queuing the job. For the same reason a
+    /// job's [`Self::yield_now`] processes events and serves no clients during
+    /// a pause.
+    ///
     /// See `docs/KEYSPACE-NOTIFICATIONS.md` in the dependency source revision
     /// pinned by `Cargo.lock`; the source README links the matching guide.
     #[cfg(any(
@@ -2314,6 +2402,8 @@ extern "C" fn post_notification_job<F: FnOnce(&EventContext)>(
 ) {
     let job = unsafe { &mut *(pd as *mut post_notification::Job<F>) };
     let ctx = unsafe { EventContext::new(ctx) };
+    // Calls check this during a replication pause.
+    let _running = post_notification::RunningJob::begin();
     job.callback.take().map_or_else(
         || {
             ctx.log(

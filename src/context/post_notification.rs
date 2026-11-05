@@ -1,4 +1,5 @@
 //! Keep native job callbacks and their destructors inside the module lifetime.
+use std::cell::Cell;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 use crate::RedisError;
@@ -8,6 +9,39 @@ const LOADING: u8 = 1;
 const UNLOADING: u8 = 2;
 static PHASE: AtomicU8 = AtomicU8::new(RUNNING);
 static PENDING: AtomicUsize = AtomicUsize::new(0);
+
+thread_local! {
+    /// True while this thread runs an SDK post-notification job, for the
+    /// replication pause check in calls. A `Cell<bool>` has no destructor,
+    /// which would keep glibc from unloading the module.
+    static JOB_RUNNING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// True while this thread runs an SDK post-notification job.
+pub(super) fn job_running() -> bool {
+    JOB_RUNNING.get()
+}
+
+/// Marks this thread as running an SDK post-notification job until dropped,
+/// restoring the previous mark.
+pub(super) struct RunningJob {
+    previous: bool,
+}
+
+impl RunningJob {
+    #[must_use]
+    pub(super) fn begin() -> Self {
+        Self {
+            previous: JOB_RUNNING.replace(true),
+        }
+    }
+}
+
+impl Drop for RunningJob {
+    fn drop(&mut self) {
+        JOB_RUNNING.set(self.previous);
+    }
+}
 
 struct PendingJob;
 
@@ -77,5 +111,27 @@ impl PostNotificationUnloadGuard {
 impl Drop for PostNotificationUnloadGuard {
     fn drop(&mut self) {
         PHASE.store(RUNNING, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RunningJob, job_running};
+
+    #[test]
+    fn running_job_marks_only_this_thread_until_dropped() {
+        assert!(!job_running());
+        {
+            let _job = RunningJob::begin();
+            assert!(job_running());
+            {
+                let _nested = RunningJob::begin();
+                assert!(job_running());
+            }
+            assert!(job_running(), "a nested mark restores the outer one");
+            let other = std::thread::spawn(job_running).join().unwrap();
+            assert!(!other, "another thread runs no job");
+        }
+        assert!(!job_running());
     }
 }
