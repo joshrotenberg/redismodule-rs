@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `Context::replicate_verbatim` returns a `Status` instead of
+  `()`, and `Status::Err` when it refuses to replicate during a write pause
+  (#220). It and `RuntimeContext::replicate` are `#[must_use]`, so a call
+  that ignores the status warns.
+
 ### Fixed
 
 - `MODULE UNLOAD` no longer stops the server when an ACL rule names one of the
@@ -26,6 +33,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning and the unload goes ahead unchecked: Redis asserts that the unload
   after a rejected `MODULE LOADEX` configuration succeeds. Commands registered
   with the native API directly are not checked.
+
+- Replicating while Redis pauses writes no longer aborts the server (#220).
+  `CLIENT PAUSE ... WRITE`, `FAILOVER` and `CLUSTER FAILOVER` pause
+  replication, and Redis 6.2 and later abort at an assertion when a module
+  replicates from code that still runs then: a read-only command, a timer, a
+  server event or a worker. While `RedisModule_AvoidReplicaTraffic()` reports
+  the pause, `RuntimeContext::replicate` and `Context::replicate_verbatim`
+  return `Status::Err` without replicating, and `call_ext` and
+  `call_blocking` with a replicate flag return an error without running the
+  command, before they change anything. A command registered `write` or
+  `may-replicate` that a client queued in the transaction that starts the
+  pause still replicates, as Redis allows: Redis postpones a transaction that
+  queued one during an earlier pause. Command registration records which
+  callbacks are flagged that way. A command another command or a script
+  called is refused, as is a read-only command in any transaction and a
+  handler that is also registered for a command without either flag. The new
+  `replicate` example replicates from each of these paths, and the `lists`
+  example reports a refused replication.
 
 - `RedisString::parse_unsigned_integer`, and with it `NextArg::next_u64` and
   `ArgCursor::next_u64`, accept the whole `u64` range (#222). They parsed with

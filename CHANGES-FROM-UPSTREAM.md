@@ -36,6 +36,27 @@ the rules are deleted; the hello regression also runs on Redis 6.0, 6.2 and
 7.0. Upstream's unload hook has the same gap; no upstream issue or pull request
 reports it.
 
+## Replication during write pauses
+
+`CLIENT PAUSE ... WRITE`, `FAILOVER` and `CLUSTER FAILOVER` pause replication.
+A paused write command waits, but read-only commands, timers, server events and
+workers keep running, and Redis 6.2 and later abort at an assertion when one of
+them replicates: upstream's `replicate`, `replicate_verbatim` and calls with
+the replicate flag queue the command without checking for the pause (#220).
+The wrappers now refuse while `RedisModule_AvoidReplicaTraffic()` reports the
+pause: `replicate` and `replicate_verbatim`, which now returns a `Status`,
+return `Status::Err`, and both are `#[must_use]`; `call_ext` and
+`call_blocking` with a replicate flag return an error without running the
+command. Redis 6.0 does not abort, but its pause serves the same failovers and
+the wrappers refuse there too. Redis replicates the rest of a transaction that
+starts the pause, and postpones a transaction that queued a `write` or
+`may-replicate` command during an earlier pause, so the wrappers let such a
+command replicate when its client queued it in the running transaction.
+Registration records which command callbacks carry those flags; a handler
+also registered for a command without them loses the exemption. Read-only
+commands, and commands that another command or a script calls, are refused in
+a transaction too. Upstream has no issue or pull request for this.
+
 ## Unsigned integer arguments
 
 `RedisString::parse_unsigned_integer`, which `NextArg::next_u64` and

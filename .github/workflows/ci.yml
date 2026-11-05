@@ -231,6 +231,32 @@ jobs:
           grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-unload-acl-tests.txt"
           cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact
 
+      - name: Test replication refusal during a write pause
+        # Redis 6.2 aborts when a module replicates during any client pause,
+        # with or without AOF and replicas. 6.0 has no write pause, and the
+        # tests skip there.
+        env:
+          TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
+        run: |
+          cargo build --example replicate --example lists --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration replication_pause:: -- --list | tee "$RUNNER_TEMP/legacy-replication-tests.txt"
+          for test_name in \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_read_only_command \
+            replication_pause::test_replication_pause_refuses_replicate_verbatim \
+            replication_pause::test_replication_pause_refuses_replicated_calls_without_running_them \
+            replication_pause::test_replication_pause_refuses_calls_replicated_to_replicas_or_the_aof_only \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_timer \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_server_event \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_worker \
+            replication_pause::test_replication_pause_refuses_replicate_in_transactions \
+            replication_pause::test_replication_pause_refuses_write_commands_that_another_command_calls \
+            replication_pause::test_replication_pause_lets_write_commands_replicate_in_the_transaction_that_pauses \
+            replication_pause::test_replication_pause_lets_write_commands_replicate_each_way_in_the_transaction_that_pauses
+          do
+            grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-replication-tests.txt"
+          done
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration replication_pause::
+
       - name: Upload failure logs
         if: failure()
         uses: actions/upload-artifact@v4
@@ -329,6 +355,29 @@ jobs:
             grep -Fx -- "$test_name: test" "$RUNNER_TEMP/configuration-floor-tests.txt"
             cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact
           done
+
+      - name: Test replication refusal during a write pause
+        # Redis 7.0 aborts when a module replicates during any client pause
+        # once commands propagate, before the pause actions of 7.2.
+        run: |
+          cargo build --example replicate --example lists --no-default-features --features min-redis-compatibility-version-7-0
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration replication_pause:: -- --list | tee "$RUNNER_TEMP/replication-pause-tests.txt"
+          for test_name in \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_read_only_command \
+            replication_pause::test_replication_pause_refuses_replicate_verbatim \
+            replication_pause::test_replication_pause_refuses_replicated_calls_without_running_them \
+            replication_pause::test_replication_pause_refuses_calls_replicated_to_replicas_or_the_aof_only \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_timer \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_server_event \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_worker \
+            replication_pause::test_replication_pause_refuses_replicate_in_transactions \
+            replication_pause::test_replication_pause_refuses_write_commands_that_another_command_calls \
+            replication_pause::test_replication_pause_lets_write_commands_replicate_in_the_transaction_that_pauses \
+            replication_pause::test_replication_pause_lets_write_commands_replicate_each_way_in_the_transaction_that_pauses
+          do
+            grep -Fx -- "$test_name: test" "$RUNNER_TEMP/replication-pause-tests.txt"
+          done
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration replication_pause::
 
       - name: Upload failure logs
         if: failure()
