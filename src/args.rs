@@ -92,8 +92,10 @@ impl<'a> ArgCursor<'a> {
         self.next_arg()?.parse_integer()
     }
 
-    /// Preserve the existing SDK's unsigned range: zero through `i64::MAX`.
-    /// Negative values and integers above `i64::MAX` are rejected.
+    /// Parse with [`RedisString::parse_unsigned_integer`], as
+    /// [`crate::NextArg::next_u64`] does: `0` through `u64::MAX`, with the
+    /// signed parser's grammar. Negative integers and other input get
+    /// distinct errors.
     pub fn next_u64(&mut self) -> Result<u64, RedisError> {
         self.next_arg()?.parse_unsigned_integer()
     }

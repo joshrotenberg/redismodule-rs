@@ -36,8 +36,6 @@ jobs:
           - {os: ubuntu-latest, server: redis, version: "8.10.2", floor: "8-0"}
           - {os: macos-latest, server: redis, version: "7.2.16", floor: "6-0"}
           - {os: macos-latest, server: redis, version: "8.10.2", floor: "8-0"}
-          - {os: ubuntu-latest, server: valkey, version: "8.1.10", floor: "6-0"}
-          - {os: ubuntu-latest, server: valkey, version: "9.1.2", floor: "6-0"}
 
     steps:
       - name: Checkout sources
@@ -84,7 +82,7 @@ jobs:
 
       - name: Check compile-fail error codes at each floor
         # One pinned-toolchain Linux Redis job for every API floor family.
-        if: matrix.os == 'ubuntu-latest' && matrix.server == 'redis' && (matrix.version == '7.2.16' || matrix.version == '7.4.11' || matrix.version == '8.10.2')
+        if: matrix.os == 'ubuntu-latest' && (matrix.version == '7.2.16' || matrix.version == '7.4.11' || matrix.version == '8.10.2')
         env:
           RUSTC_BOOTSTRAP: "1"
         run: cargo test --workspace --doc --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
@@ -98,7 +96,7 @@ jobs:
           cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},system-allocator-fallback --test system_allocator_fallback
 
       - name: Test the isolated parser example
-        if: matrix.floor == '6-0' && matrix.server == 'redis'
+        if: matrix.floor == '6-0'
         run: |
           cargo fmt --manifest-path examples/module-testing/Cargo.toml -- --check
           cargo fmt --manifest-path examples/module-testing/fuzz/Cargo.toml -- --check
@@ -106,7 +104,7 @@ jobs:
           cargo test --manifest-path examples/module-testing/Cargo.toml
 
       - name: Check multi-consumer compatibility floors
-        if: matrix.floor == '6-0' && matrix.server == 'redis'
+        if: matrix.floor == '6-0'
         run: |
           cargo fmt --manifest-path examples/compatibility-floors/Cargo.toml --all -- --check
           python3 examples/compatibility-floors/check.py
@@ -228,6 +226,44 @@ jobs:
             cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact
           done
 
+      - name: Test unload refusal for ACL rules
+        # Before 7.2 the unload goes ahead and the next ACL LIST stops the
+        # server; the unload hook reads the rules through RM_Call.
+        env:
+          TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
+        run: |
+          cargo build --example hello --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
+          test_name=unload_acl_rules::test_unload_is_refused_while_an_acl_rule_names_a_module_command
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-unload-acl-tests.txt"
+          grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-unload-acl-tests.txt"
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact
+
+      - name: Test replication refusal during a write pause
+        # Redis 6.2 aborts when a module replicates during any client pause,
+        # with or without AOF and replicas. 6.0 has no write pause, and the
+        # tests skip there.
+        env:
+          TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
+        run: |
+          cargo build --example replicate --example lists --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration replication_pause:: -- --list | tee "$RUNNER_TEMP/legacy-replication-tests.txt"
+          for test_name in \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_read_only_command \
+            replication_pause::test_replication_pause_refuses_replicate_verbatim \
+            replication_pause::test_replication_pause_refuses_replicated_calls_without_running_them \
+            replication_pause::test_replication_pause_refuses_calls_replicated_to_replicas_or_the_aof_only \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_timer \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_server_event \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_worker \
+            replication_pause::test_replication_pause_refuses_replicate_in_transactions \
+            replication_pause::test_replication_pause_refuses_write_commands_that_another_command_calls \
+            replication_pause::test_replication_pause_lets_write_commands_replicate_in_the_transaction_that_pauses \
+            replication_pause::test_replication_pause_lets_write_commands_replicate_each_way_in_the_transaction_that_pauses
+          do
+            grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-replication-tests.txt"
+          done
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration replication_pause::
+
       - name: Upload failure logs
         if: failure()
         uses: actions/upload-artifact@v4
@@ -290,6 +326,15 @@ jobs:
           grep -Fx -- "$test_name: test" "$RUNNER_TEMP/failed-load-tests.txt"
           cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact
 
+      - name: Test unload refusal for ACL rules
+        # Redis 7.0 also leaves an unloaded command's ACL bits behind for the
+        # next ACL LIST, and has selectors.
+        run: |
+          test_name=unload_acl_rules::test_unload_is_refused_while_an_acl_rule_names_a_module_command
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/unload-acl-tests.txt"
+          grep -Fx -- "$test_name: test" "$RUNNER_TEMP/unload-acl-tests.txt"
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact
+
       - name: Test configuration behavior at the native API floor
         # Worker success/reload coverage needs the newer completion API. The
         # ownership tests above check fail-closed worker unload on this server.
@@ -317,6 +362,29 @@ jobs:
             grep -Fx -- "$test_name: test" "$RUNNER_TEMP/configuration-floor-tests.txt"
             cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration "$test_name" -- --exact
           done
+
+      - name: Test replication refusal during a write pause
+        # Redis 7.0 aborts when a module replicates during any client pause
+        # once commands propagate, before the pause actions of 7.2.
+        run: |
+          cargo build --example replicate --example lists --no-default-features --features min-redis-compatibility-version-7-0
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration replication_pause:: -- --list | tee "$RUNNER_TEMP/replication-pause-tests.txt"
+          for test_name in \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_read_only_command \
+            replication_pause::test_replication_pause_refuses_replicate_verbatim \
+            replication_pause::test_replication_pause_refuses_replicated_calls_without_running_them \
+            replication_pause::test_replication_pause_refuses_calls_replicated_to_replicas_or_the_aof_only \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_timer \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_server_event \
+            replication_pause::test_replication_pause_refuses_replicate_from_a_worker \
+            replication_pause::test_replication_pause_refuses_replicate_in_transactions \
+            replication_pause::test_replication_pause_refuses_write_commands_that_another_command_calls \
+            replication_pause::test_replication_pause_lets_write_commands_replicate_in_the_transaction_that_pauses \
+            replication_pause::test_replication_pause_lets_write_commands_replicate_each_way_in_the_transaction_that_pauses
+          do
+            grep -Fx -- "$test_name: test" "$RUNNER_TEMP/replication-pause-tests.txt"
+          done
+          cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration replication_pause::
 
       - name: Upload failure logs
         if: failure()

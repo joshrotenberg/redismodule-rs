@@ -19,15 +19,17 @@ fn test_helper_command_name(ctx: &Context, _args: Vec<RedisString>) -> RedisResu
     Ok(ctx.current_command_name()?.into())
 }
 
+/// `test_helper.err message`: replies with `message` as an error, written
+/// directly with `reply_error_string`. The message is the whole error, so it
+/// starts with its code, such as `ERR`. Bytes that are not UTF-8 become
+/// U+FFFD, and CR, LF and NUL become spaces.
 fn test_helper_err(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
-    if args.is_empty() {
+    let [_, message] = args.as_slice() else {
         return Err(RedisError::WrongArity);
-    }
-
-    let msg = args.get(1).unwrap();
-
-    ctx.reply_error_string(msg.try_as_str().unwrap());
-    Ok(().into())
+    };
+    ctx.reply_error_string(&message.to_string_lossy());
+    // The error is the reply; any other value would be a second one.
+    Ok(RedisValue::NoReply)
 }
 
 fn test_helper_dbsize(ctx: &Context, _args: Vec<RedisString>) -> RedisResult {

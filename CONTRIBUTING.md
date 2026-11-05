@@ -77,6 +77,17 @@ git remote add origin https://github.com/RedisLabsModules/redismodule-rs
    and wasm PRs to `experiment/wasm-host`; it covers no other PRs, and
    unfinished, missing or failed checks are never bypassed.
 
+   Give the squash an explicit subject and body:
+
+   ```bash
+   gh pr merge N --squash --match-head-commit <sha> \
+     --subject "<PR title>" --body "<what changed and which checks ran>"
+   ```
+
+   The default body lists every commit, including step 3's `[skip ci]` start
+   commit, and a squash commit that carries `[skip ci]` gets no push CI. The
+   body follows the message rules below and doesn't copy the commit list.
+
 Commit subjects and PR titles are conventional commits. Messages, PR bodies and
 docs are technical: what changed, why in code terms and which checks ran, with
 no em dashes and no attribution lines or trailers. Squash messages carry no PR

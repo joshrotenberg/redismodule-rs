@@ -64,7 +64,7 @@ platform-specific signal, thread, ownership and reentrancy analysis.
 ## Native source audit
 
 The following tagged Redis sources were inspected. These are source
-observations, not a new API contract for all Redis derivatives or later tags.
+observations, not a new API contract for later tags.
 Each row covers normal INFO dispatch, module callback dispatch and crash
 collection; the version set spans all six SDK API floors and the Redis release
 lines in SDK CI.

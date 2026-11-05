@@ -208,7 +208,7 @@ impl Context {
     // Get metadata only after an actual network client has been established.
     // None means an internal/module client or a client whose identity is not
     // available. The caller holds the Redis lock throughout the proof/read.
-    fn indexed_network_client_info(
+    pub(super) fn indexed_network_client_info(
         &self,
     ) -> Result<Option<raw::RedisModuleClientInfoV1>, RedisError> {
         let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
@@ -217,10 +217,12 @@ impl Context {
         if id == 0 || unsafe { client_info(ptr::null_mut(), id) } != raw::REDISMODULE_OK as c_int {
             return Ok(None);
         }
-        // Valkey 9.1's info lookup also finds its executing temporary client.
-        // Its username lookup still requires the actual client index. Do not
-        // ask for full info before this: fake clients have a null connection.
-        // Redis 6.0 lacks the username API and its info lookup is index-only.
+        // Both lookups search the client index, so a module-call client fails
+        // the check above. The username lookup also returns null for an
+        // indexed client without an ACL user, such as a replica's link to its
+        // master; that is not treated as a network client either. Ask for full
+        // info only after these checks: fake clients have a null connection.
+        // Redis 6.0 lacks the username API.
         if let Some(user_name) = unsafe { raw::RedisModule_GetClientUserNameById } {
             let free = unsafe { crate::__available_api!(RedisModule_FreeString) };
             // This API requires a live producer context for auto-memory.
@@ -560,8 +562,8 @@ impl Context {
             return Ok(KeyBlockingResult::Denied(data.take()));
         }
         // A module-call client may carry K but it is not a real network client.
-        // Prove identity before reading metadata; compatible servers can return
-        // an executing fake client from their ID-only lookup.
+        // It is not in the client index, so the lookup below returns None and
+        // the call is denied.
         let Some(info) = self.indexed_network_client_info()? else {
             return Ok(KeyBlockingResult::Denied(data.take()));
         };

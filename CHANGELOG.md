@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `Context::replicate_verbatim` returns a `Status` instead of
+  `()`, and `Status::Err` when it refuses to replicate during a write pause
+  (#220). It and `RuntimeContext::replicate` are `#[must_use]`, so a call
+  that ignores the status warns.
+
+### Fixed
+
+- `MODULE UNLOAD` no longer stops the server when an ACL rule names one of the
+  module's commands (#221). From Redis 7.2 the unload reapplies every user's
+  command rules, asserts that each one still applies, and aborts at `acl.c`
+  `'res == C_OK'` for a rule naming a removed command; before 7.2 the unload
+  succeeds and the next command that describes the user, such as `ACL LIST`,
+  `ACL GETUSER` or `ACL SAVE`, stops the server. The unload hook of
+  `redis_module!` now reads `ACL LIST` before anything else and refuses the
+  unload, logging the user and the rule and whether it is in a selector, while
+  a rule names a command the SDK registered for the module: `+cmd`, `-cmd`,
+  `+cmd|sub` or `-cmd|sub`, in any case, at the top level or in a selector.
+  First-argument rules such as `+cmd|arg` are refused too, although Redis
+  before 7.2 does not fail on them. Rules on ACL categories, including
+  categories the module added, do not block the unload. When `ACL LIST`
+  cannot be read, for example because `ACL` is renamed, the hook logs a
+  warning and the unload goes ahead unchecked: Redis asserts that the unload
+  after a rejected `MODULE LOADEX` configuration succeeds. Commands registered
+  with the native API directly are not checked.
+
+- Replicating while Redis pauses writes no longer aborts the server (#220).
+  `CLIENT PAUSE ... WRITE`, `FAILOVER` and `CLUSTER FAILOVER` pause
+  replication, and Redis 6.2 and later abort at an assertion when a module
+  replicates from code that still runs then: a read-only command, a timer, a
+  server event or a worker. While `RedisModule_AvoidReplicaTraffic()` reports
+  the pause, `RuntimeContext::replicate` and `Context::replicate_verbatim`
+  return `Status::Err` without replicating, and `call_ext` and
+  `call_blocking` with a replicate flag return an error without running the
+  command, before they change anything. A command registered `write` or
+  `may-replicate` that a client queued in the transaction that starts the
+  pause still replicates, as Redis allows: Redis postpones a transaction that
+  queued one during an earlier pause. Command registration records which
+  callbacks are flagged that way. A command another command or a script
+  called is refused, as is a read-only command in any transaction and a
+  handler that is also registered for a command without either flag. The new
+  `replicate` example replicates from each of these paths, and the `lists`
+  example reports a refused replication.
+
+- `RedisString::parse_unsigned_integer`, and with it `NextArg::next_u64` and
+  `ArgCursor::next_u64`, accept the whole `u64` range (#222). They parsed with
+  the signed parser, so 9223372036854775808 through 18446744073709551615 got
+  `ERR Couldn't parse as integer`. The SDK now parses the string's bytes in
+  Rust on every compatibility floor, with the signed parser's grammar: `0`, or
+  a non-zero digit followed by digits, with no sign, spaces, `+`, leading
+  zeros or NUL. Negative integers still get
+  `ERR Couldn't parse negative number as unsigned integer`, and other input
+  `ERR Couldn't parse as integer`. The `args` example replies the parsed values
+  as big numbers instead of casting them to `i64`, and the `native_type`
+  example's `note.aux` refuses values above `i64::MAX`, which `note.counts`
+  cannot report as an integer.
+
 ## [3.0.0-alpha.2](https://github.com/joshrotenberg/redismodule-rs/compare/v3.0.0-alpha.1...v3.0.0-alpha.2) - 2026-11-04
 
 ### Added
@@ -428,7 +486,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   twice as many array elements as it sent, so the client waited for elements
   that never came. It now announces as many as it sends.
 - Loading a module no longer logs "Skip register defrag function" on Redis
-  6.0, or "Skip register defrag callbacks" on Redis 6.2 to 7.4 and Valkey,
+  6.0, or "Skip register defrag callbacks" on Redis 6.2 to 7.4,
   when the module has no defrag code of that kind (#116). The warning now appears only
   for `#[defrag_function]`, `#[defrag_start_function]` or
   `#[defrag_end_function]` code the server cannot run. On Redis 6.0, a module
@@ -518,12 +576,10 @@ Entries marked **Breaking** need a change in modules;
   versions, with all 16,384 names pinned by a compatibility fixture. A prefix
   without `{` and any suffix preserve its slot.
 
-- CI covers pinned Redis 7.2, 7.4 and 8.0 through 8.10 releases, plus Valkey
-  8.1 and 9.1 at the default API floor. Checksum-verified server builds are
-  cached, selected explicitly by path, and validated on cache hits. Failed
-  matrix jobs retain server build and integration logs for seven days.
-  Version tests distinguish Valkey product versions from Redis compatibility
-  versions without weakening Redis API-availability checks.
+- CI covers pinned Redis 7.2, 7.4 and 8.0 through 8.10 releases.
+  Checksum-verified server builds are cached, selected explicitly by path, and
+  validated on cache hits. Failed matrix jobs retain server build and
+  integration logs for seven days.
 
 - A [notification-write guide](docs/KEYSPACE-NOTIFICATIONS.md) and
   `keyspace_to_stream` example covering owned callback data, deferred writes,

@@ -147,6 +147,10 @@ name = "registration"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "replicate"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "command_builder"
 crate-type = ["cdylib"]
 
