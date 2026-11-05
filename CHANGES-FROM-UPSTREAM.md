@@ -45,12 +45,16 @@ them replicates: upstream's `replicate`, `replicate_verbatim` and calls with
 the replicate flag queue the command without checking for the pause (#220).
 The wrappers now refuse while `RedisModule_AvoidReplicaTraffic()` reports the
 pause: `replicate` and `replicate_verbatim`, which now returns a `Status`,
-return `Status::Err`, and `call_ext` and `call_blocking` with a replicate flag
-return an error without running the command. Redis 6.0 does not abort, but its
-pause serves the same failovers and the wrappers refuse there too. Redis lets
-the rest of a transaction that starts the pause replicate; the module API
-cannot tell that pause from an earlier one, so the wrappers refuse there as
-well. Upstream has no issue or pull request for this.
+return `Status::Err`, and both are `#[must_use]`; `call_ext` and
+`call_blocking` with a replicate flag return an error without running the
+command. Redis 6.0 does not abort, but its pause serves the same failovers and
+the wrappers refuse there too. Redis replicates the rest of a transaction that
+starts the pause, and postpones a transaction that queued a `write` or
+`may-replicate` command during an earlier pause, so the wrappers let such a
+command replicate when its client queued it in the running transaction.
+Registration records which command callbacks carry those flags. Read-only
+commands and commands that another command calls are refused in a transaction
+too. Upstream has no issue or pull request for this.
 
 ## Incremental stream entries and native pointer borrows
 

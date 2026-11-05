@@ -593,21 +593,33 @@ impl<'a> StrCallArgs<'a> {
     }
 }
 
-/// The context and argument count of the SDK command callback running on this
-/// thread, or a null context outside one.
-type CommandArgs = (*mut raw::RedisModuleCtx, c_int);
+/// The context, argument count and callback address of the SDK command
+/// callback running on this thread, or a null context outside one.
+type CommandArgs = (*mut raw::RedisModuleCtx, c_int, usize);
+
+/// The signature of an SDK command callback.
+type CommandCallbackFn =
+    extern "C" fn(*mut raw::RedisModuleCtx, *mut *mut raw::RedisModuleString, c_int) -> c_int;
 
 thread_local! {
-    /// The running SDK command callback's context and argument count, for
-    /// [`Context::key_at_pos`]. A `Cell` of a `Copy` pair has no destructor,
-    /// which would keep glibc from unloading the module.
+    /// The running SDK command callback's context, argument count and address,
+    /// for [`Context::key_at_pos`] and the replication pause check. A `Cell`
+    /// of a `Copy` tuple has no destructor, which would keep glibc from
+    /// unloading the module.
     static COMMAND_ARGS: std::cell::Cell<CommandArgs> =
-        const { std::cell::Cell::new((ptr::null_mut(), 0)) };
+        const { std::cell::Cell::new((ptr::null_mut(), 0, 0)) };
 }
 
-/// Records the running SDK command callback's context and argument count until
-/// dropped, restoring the previous ones for a command that another command
-/// called. Used by the SDK's command callbacks.
+/// The address of the SDK command callback that Redis is running with `ctx`,
+/// if this thread runs one.
+fn running_command_callback(ctx: *mut raw::RedisModuleCtx) -> Option<usize> {
+    let (running, _, callback) = COMMAND_ARGS.get();
+    (!ctx.is_null() && running == ctx).then_some(callback)
+}
+
+/// Records the running SDK command callback's context, argument count and
+/// address until dropped, restoring the previous ones for a command that
+/// another command called. Used by the SDK's command callbacks.
 #[doc(hidden)]
 pub struct CommandArgcScope {
     previous: CommandArgs,
@@ -617,11 +629,16 @@ impl CommandArgcScope {
     /// # Safety
     ///
     /// `ctx` and `argc` must be the context and argument count Redis passed to
-    /// the running command callback, and the scope must end before it returns.
+    /// the running command callback, `callback` must be that callback, and the
+    /// scope must end before it returns.
     #[must_use]
-    pub unsafe fn begin(ctx: *mut raw::RedisModuleCtx, argc: c_int) -> Self {
+    pub unsafe fn begin(
+        ctx: *mut raw::RedisModuleCtx,
+        argc: c_int,
+        callback: CommandCallbackFn,
+    ) -> Self {
         Self {
-            previous: COMMAND_ARGS.replace((ctx, argc)),
+            previous: COMMAND_ARGS.replace((ctx, argc, commands::replicating::address(callback))),
         }
     }
 }
@@ -719,7 +736,7 @@ impl Context {
         if !self.is_keys_position_request() {
             return Ok(());
         }
-        let (ctx, argc) = COMMAND_ARGS.get();
+        let (ctx, argc, _) = COMMAND_ARGS.get();
         if ctx != self.ctx {
             return Err(RedisError::Str(
                 "ERR key positions can only be checked in an SDK command callback",
@@ -777,11 +794,12 @@ impl Context {
     ///
     /// Returns [`Status::Err`](raw::Status::Err) and replicates nothing while
     /// Redis pauses replication, because Redis would abort on the replicated
-    /// command; see [`RuntimeContext::avoid_replication_traffic`]. A read-only
-    /// command still runs during a write pause, and so does a command later in
-    /// a transaction that starts the pause.
+    /// command. A command flagged `write` or `may-replicate` that a client
+    /// queued in the transaction that starts the pause still replicates, as
+    /// Redis allows; see [`RuntimeContext::avoid_replication_traffic`].
+    #[must_use = "a refused replication leaves replicas and the AOF without the change"]
     pub fn replicate_verbatim(&self) -> Status {
-        if self.avoid_replication_traffic() {
+        if self.replication_refused() {
             return Status::Err;
         }
         raw::replicate_verbatim(self.ctx)
@@ -1127,18 +1145,20 @@ impl RuntimeContext {
                 crate::key::LENT_ERROR.into(),
             ))));
         }
+        // Refused before anything else changes: Redis would abort on the
+        // replicated command.
+        // SAFETY: every caller passes a NUL-terminated format, raw::FMT or the
+        // options of a CallOptions or BlockingCallOptions it borrows.
+        let replicated = unsafe { CStr::from_ptr(fmt) }.to_bytes().contains(&b'!');
+        if replicated && self.replication_refused() {
+            return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                REPLICATION_PAUSED_ERROR.into(),
+            ))));
+        }
         // The command can delete, replace or move any key's value.
         if let Err(error) = crate::key::keyspace_will_change(None) {
             return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
                 error.to_string(),
-            ))));
-        }
-        // SAFETY: every caller passes a NUL-terminated format, raw::FMT or the
-        // options of a CallOptions or BlockingCallOptions it borrows.
-        let replicated = unsafe { CStr::from_ptr(fmt) }.to_bytes().contains(&b'!');
-        if replicated && self.avoid_replication_traffic() {
-            return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
-                REPLICATION_PAUSED_ERROR.into(),
             ))));
         }
         let cmd = match CString::new(command) {
@@ -1192,7 +1212,8 @@ impl RuntimeContext {
     ///
     /// With a replicate flag ([`CallOptionsBuilder::replicate`] or a variant),
     /// it returns an error without running the command while Redis pauses
-    /// replication, because Redis would abort on the replicated command; see
+    /// replication, because Redis would abort on the replicated command, with
+    /// the same transaction exception as [`Self::replicate`]; see
     /// [`Self::avoid_replication_traffic`].
     ///
     /// The reply borrows this context. Redis 6.0 to 7.0 store the context in
@@ -1381,13 +1402,51 @@ impl RuntimeContext {
     ///
     /// While Redis pauses replication, it returns `Status::Err` and
     /// replicates nothing, from commands, timers, server events and workers
-    /// alike, because Redis would abort on the replicated command; see
-    /// [`Self::avoid_replication_traffic`].
+    /// alike, because Redis would abort on the replicated command. A command
+    /// flagged `write` or `may-replicate` that a client queued in the
+    /// transaction that starts the pause still replicates, as Redis allows;
+    /// see [`Self::avoid_replication_traffic`].
+    #[must_use = "a refused replication leaves replicas and the AOF without the change"]
     pub fn replicate<'a, T: Into<StrCallArgs<'a>>>(&self, command: &str, args: T) -> raw::Status {
-        if self.avoid_replication_traffic() {
+        if self.replication_refused() {
             return raw::Status::Err;
         }
         raw::replicate(self.ctx, command, args)
+    }
+
+    /// True while the SDK refuses to replicate through this context (#220):
+    /// Redis pauses replication and would abort on a replicated command. See
+    /// [`Self::avoid_replication_traffic`].
+    fn replication_refused(&self) -> bool {
+        self.avoid_replication_traffic() && !self.in_pausing_transaction()
+    }
+
+    /// True if this context runs an SDK command registered `write` or
+    /// `may-replicate` that a client queued in the transaction now running.
+    /// During a write pause Redis postpones such a transaction, so a pause
+    /// seen here started inside it, and Redis replicates the rest of the
+    /// transaction (`client_pause_in_transaction`). A command another command
+    /// called runs on a temporary client that is not in the transaction:
+    /// Redis did not postpone the transaction for it.
+    fn in_pausing_transaction(&self) -> bool {
+        let Some(callback) = running_command_callback(self.ctx) else {
+            return false;
+        };
+        if !commands::replicating::replicates(callback) {
+            return false;
+        }
+        // Redis sets MULTI while it runs a transaction's commands.
+        if !self.get_flags().contains(ContextFlags::MULTI) {
+            return false;
+        }
+        // SAFETY: self.ctx is the context Redis passed to the SDK command
+        // callback running on this thread, under the Redis lock.
+        let command = unsafe { Context::new(self.ctx) };
+        command.indexed_network_client_info().is_ok_and(|info| {
+            info.is_some_and(|info| {
+                info.flags & u64::from(raw::REDISMODULE_CLIENTINFO_FLAG_MULTI) != 0
+            })
+        })
     }
 
     /// How much memory Redis uses relative to its `maxmemory` setting, through
@@ -1773,18 +1832,27 @@ impl RuntimeContext {
         /// It returns true while Redis pauses writes: during `CLIENT PAUSE`
         /// (`WRITE` or `ALL`), `FAILOVER`, a manual `CLUSTER FAILOVER`, and in
         /// newer releases a shutdown waiting for replicas or a slot handoff.
-        /// The SDK refuses to replicate then:
-        /// [`Self::replicate`] and [`Context::replicate_verbatim`] return
-        /// [`Status::Err`], and [`Self::call_ext`] and `call_blocking` with a
-        /// replicate flag return an error without running the command. Redis
-        /// 6.2 and later abort if a module replicates during the pause; 6.0
-        /// does not, but pauses for the same failovers. Read-only commands,
-        /// timers, server events and workers keep running during a write
-        /// pause, so check this before changing data you would replicate: a
-        /// refused change never reaches the replicas or the AOF. Redis lets the
-        /// rest of a transaction that starts the pause replicate, but aborts in
-        /// a transaction that runs during an earlier pause; the module API
-        /// cannot tell the two apart, so the SDK refuses in both.
+        /// The SDK refuses to replicate then: [`Self::replicate`] and
+        /// [`Context::replicate_verbatim`] return [`Status::Err`], and
+        /// [`Self::call_ext`] and `call_blocking` with a replicate flag return
+        /// an error without running the command. Redis 6.2 aborts if a module
+        /// replicates during the pause; 7.0 and later abort when they
+        /// propagate the command, with the AOF on or a replica or replication
+        /// backlog. Redis 6.0 does not abort, but pauses for the same
+        /// failovers, so the SDK refuses on every version, with or without AOF
+        /// and replicas.
+        ///
+        /// Flag a command that replicates `write` or `may-replicate`. Redis
+        /// postpones such a command during a write pause, and postpones a
+        /// transaction that queued one, so a command flagged this way that runs
+        /// in a transaction during a pause runs in the transaction that started
+        /// the pause. Redis replicates the rest of that transaction, and so
+        /// does the SDK, for the command the client queued; a command it calls
+        /// is still refused. A read-only command runs during a write pause, in
+        /// a transaction too, and is always refused, as are timers, server
+        /// events, post-notification jobs and workers, which keep running.
+        /// Check this before changing data you would replicate from them: a
+        /// refused change never reaches the replicas or the AOF.
         pub fn avoid_replication_traffic(&self) -> bool {
             unsafe { RedisModule_AvoidReplicaTraffic() == 1 }
         }
@@ -3032,8 +3100,26 @@ mod big_number_tests {
 
 #[cfg(test)]
 mod command_args_tests {
-    use super::{COMMAND_ARGS, CommandArgcScope};
+    use super::{COMMAND_ARGS, CommandArgcScope, running_command_callback};
+    use crate::context::commands::replicating::address;
+    use crate::raw;
     use std::ptr;
+
+    extern "C" fn outer_command(
+        _: *mut raw::RedisModuleCtx,
+        _: *mut *mut raw::RedisModuleString,
+        _: i32,
+    ) -> i32 {
+        0
+    }
+
+    extern "C" fn inner_command(
+        _: *mut raw::RedisModuleCtx,
+        _: *mut *mut raw::RedisModuleString,
+        _: i32,
+    ) -> i32 {
+        1
+    }
 
     #[test]
     fn scopes_nest_and_restore_after_a_panic() {
@@ -3041,18 +3127,24 @@ mod command_args_tests {
         let outer_ctx = ptr::dangling_mut();
         let inner_ctx = ptr::dangling_mut::<u64>().cast();
         // SAFETY: test only; no Redis call reads these values.
-        let outer = unsafe { CommandArgcScope::begin(outer_ctx, 6) };
+        let outer = unsafe { CommandArgcScope::begin(outer_ctx, 6, outer_command) };
+        let (outer_address, inner_address) = (address(outer_command), address(inner_command));
+        assert_eq!(running_command_callback(outer_ctx), Some(outer_address));
+        assert_eq!(running_command_callback(inner_ctx), None);
         {
-            let _inner = unsafe { CommandArgcScope::begin(inner_ctx, 2) };
-            assert_eq!(COMMAND_ARGS.get(), (inner_ctx, 2));
+            let _inner = unsafe { CommandArgcScope::begin(inner_ctx, 2, inner_command) };
+            assert_eq!(COMMAND_ARGS.get(), (inner_ctx, 2, inner_address));
+            assert_eq!(running_command_callback(outer_ctx), None);
+            assert_eq!(running_command_callback(inner_ctx), Some(inner_address));
         }
-        assert_eq!(COMMAND_ARGS.get(), (outer_ctx, 6));
+        assert_eq!(COMMAND_ARGS.get(), (outer_ctx, 6, outer_address));
         let _ = std::panic::catch_unwind(|| {
-            let _inner = unsafe { CommandArgcScope::begin(inner_ctx, 2) };
+            let _inner = unsafe { CommandArgcScope::begin(inner_ctx, 2, inner_command) };
             panic!("command failed");
         });
-        assert_eq!(COMMAND_ARGS.get(), (outer_ctx, 6));
+        assert_eq!(COMMAND_ARGS.get(), (outer_ctx, 6, outer_address));
         drop(outer);
-        assert_eq!(COMMAND_ARGS.get(), (ptr::null_mut(), 0));
+        assert_eq!(COMMAND_ARGS.get(), (ptr::null_mut(), 0, 0));
+        assert_eq!(running_command_callback(ptr::null_mut()), None);
     }
 }

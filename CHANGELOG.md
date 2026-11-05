@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `Context::replicate_verbatim` returns a `Status` instead of `()`, and
-  `Status::Err` when it refuses to replicate during a write pause (#220).
+- **Breaking:** `Context::replicate_verbatim` returns a `Status` instead of
+  `()`, and `Status::Err` when it refuses to replicate during a write pause
+  (#220). It and `RuntimeContext::replicate` are `#[must_use]`, so a call
+  that ignores the status warns.
 
 ### Fixed
 
@@ -40,10 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the pause, `RuntimeContext::replicate` and `Context::replicate_verbatim`
   return `Status::Err` without replicating, and `call_ext` and
   `call_blocking` with a replicate flag return an error without running the
-  command. The refusal also covers the rest of a transaction that starts the
-  pause, which Redis would replicate, because the module API cannot tell that
-  pause from an earlier one. The new `replicate` example replicates from each
-  of these paths.
+  command, before they change anything. A command registered `write` or
+  `may-replicate` that a client queued in the transaction that starts the
+  pause still replicates, as Redis allows: Redis postpones a transaction that
+  queued one during an earlier pause. Command registration records which
+  callbacks are flagged that way. A command another command called is refused,
+  as is a read-only command in any transaction. The new `replicate` example
+  replicates from each of these paths, and the `lists` example reports a
+  refused replication.
 
 ## [3.0.0-alpha.2](https://github.com/joshrotenberg/redismodule-rs/compare/v3.0.0-alpha.1...v3.0.0-alpha.2) - 2026-11-04
 

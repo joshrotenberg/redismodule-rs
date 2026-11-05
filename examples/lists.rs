@@ -23,6 +23,18 @@ fn pushed(status: Status) -> Result<(), RedisError> {
     }
 }
 
+/// Replicates the command that changed the list. Redis postpones these `write`
+/// commands during a write pause, so the SDK refuses only when another command
+/// called this one during the pause; the change then stays on this server.
+fn replicated(ctx: &Context) -> Result<(), RedisError> {
+    match ctx.replicate_verbatim() {
+        Status::Ok => Ok(()),
+        Status::Err => Err(RedisError::Str(
+            "ERR the list changed but was not replicated: Redis pauses replication",
+        )),
+    }
+}
+
 // LPOPRPUSH source destination
 // Pops and returns the first element (head) of the list stored at 'source'
 // and pushes the element to the last position (tail) of the list stored at
@@ -45,7 +57,7 @@ fn lpoprpush(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             Some(value) => {
                 let reply = value.clone();
                 pushed(key.list_push_tail(value))?;
-                ctx.replicate_verbatim();
+                replicated(ctx)?;
                 Ok(RedisValue::BulkRedisString(reply))
             }
         };
@@ -60,7 +72,7 @@ fn lpoprpush(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         Some(value) => {
             let reply = value.clone();
             pushed(dst_key.list_push_tail(value))?;
-            ctx.replicate_verbatim();
+            replicated(ctx)?;
             Ok(RedisValue::BulkRedisString(reply))
         }
     }
@@ -82,7 +94,7 @@ fn push_head(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     for element in elements {
         pushed(key.list_push_head(element))?;
     }
-    ctx.replicate_verbatim();
+    replicated(ctx)?;
     Ok(RedisValue::Integer(count as i64))
 }
 

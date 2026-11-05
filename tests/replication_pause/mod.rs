@@ -1,5 +1,7 @@
 //! Replication while Redis pauses writes (#220). Redis aborts at an assertion
-//! when a module replicates during the pause; the SDK refuses instead.
+//! when a module replicates during the pause; the SDK refuses instead, except
+//! for a `write` or `may-replicate` command in the transaction that starts the
+//! pause, which Redis replicates.
 //!
 //! Each test attaches a replica, so the primary has a replication backlog and
 //! Redis 7.0 and later propagate (6.2 propagates without one), then pauses
@@ -25,20 +27,33 @@ fn server_version(con: &mut TestConnection) -> Result<(u32, u32)> {
     Ok((major, minor))
 }
 
-/// A primary that propagates to a replica, with writes paused on the primary.
-/// `None` on a server without `CLIENT PAUSE WRITE`.
-fn paused_primary() -> Result<Option<(TestConnection, TestConnection)>> {
-    let mut primary = TestConnection::new("replicate");
+/// A primary running `module` that propagates to a replica. `None` on a
+/// server without `CLIENT PAUSE WRITE`.
+fn primary_with_replica(module: &str) -> Result<Option<(TestConnection, TestConnection)>> {
+    let mut primary = TestConnection::new(module);
     let version = server_version(&mut primary)?;
     if version < (6, 2) {
         eprintln!("skipped: Redis {version:?} has no CLIENT PAUSE WRITE");
         return Ok(None);
     }
     let replica = primary.replica()?;
-    assert_eq!(paused(&mut primary)?, 0);
-    redis::cmd("CLIENT")
+    Ok(Some((primary, replica)))
+}
+
+fn pause(primary: &mut TestConnection) -> Result<()> {
+    Ok(redis::cmd("CLIENT")
         .arg(&["PAUSE", "20000", "WRITE"])
-        .query::<()>(&mut primary)?;
+        .query::<()>(primary)?)
+}
+
+/// A primary running the `replicate` example with a replica, with writes
+/// paused on the primary.
+fn paused_primary() -> Result<Option<(TestConnection, TestConnection)>> {
+    let Some((mut primary, replica)) = primary_with_replica("replicate")? else {
+        return Ok(None);
+    };
+    assert_eq!(paused(&mut primary)?, 0);
+    pause(&mut primary)?;
     assert_eq!(paused(&mut primary)?, 1);
     Ok(Some((primary, replica)))
 }
@@ -53,7 +68,21 @@ fn unpause(primary: &mut TestConnection) -> Result<()> {
     let log = primary.server_log()?;
     ensure!(!log.contains("ASSERTION FAILED"), "server log: {log}");
     redis::cmd("CLIENT").arg("UNPAUSE").query::<()>(primary)?;
-    assert_eq!(paused(primary)?, 0);
+    Ok(())
+}
+
+fn acknowledge(primary: &mut TestConnection, replica: &TestConnection) -> Result<()> {
+    let acknowledged: i64 = redis::cmd("WAIT").arg(&[1, 5000]).query(primary)?;
+    assert_eq!(acknowledged, 1, "replica log: {}", replica.server_log()?);
+    Ok(())
+}
+
+fn assert_refused_call(primary: &mut TestConnection, call: &mut redis::Cmd) -> Result<()> {
+    let error = call
+        .query::<Value>(primary)
+        .expect_err("a replicated call ran during the pause");
+    assert_eq!(error.code(), Some("ERR"), "{error}");
+    assert!(error.to_string().contains("pauses replication"), "{error}");
     Ok(())
 }
 
@@ -65,8 +94,7 @@ fn assert_replica_keys(
     refused: &str,
     resumed: &str,
 ) -> Result<()> {
-    let acknowledged: i64 = redis::cmd("WAIT").arg(&[1, 5000]).query(primary)?;
-    assert_eq!(acknowledged, 1, "replica log: {}", replica.server_log()?);
+    acknowledge(primary, replica)?;
     assert_eq!(
         redis::cmd("GET")
             .arg(resumed)
@@ -133,8 +161,7 @@ fn test_replication_pause_refuses_replicate_verbatim() -> Result<()> {
         .arg("resumed")
         .query(&mut primary)?;
     assert_eq!(replicated, 1);
-    let acknowledged: i64 = redis::cmd("WAIT").arg(&[1, 5000]).query(&mut primary)?;
-    assert_eq!(acknowledged, 1, "replica log: {}", replica.server_log()?);
+    acknowledge(&mut primary, &replica)?;
     // The replica ran only the command replicated after the pause.
     assert_eq!(command_calls(&mut replica, "replicate.verbatim")?, 1);
     Ok(())
@@ -145,12 +172,10 @@ fn test_replication_pause_refuses_replicated_calls_without_running_them() -> Res
     let Some((mut primary, mut replica)) = paused_primary()? else {
         return Ok(());
     };
-    let error = redis::cmd("replicate.call")
-        .arg(&["SET", "refused", "value"])
-        .query::<Value>(&mut primary)
-        .expect_err("a replicated call ran during the pause");
-    assert_eq!(error.code(), Some("ERR"), "{error}");
-    assert!(error.to_string().contains("pauses replication"), "{error}");
+    assert_refused_call(
+        &mut primary,
+        redis::cmd("replicate.call").arg(&["SET", "refused", "value"]),
+    )?;
     assert_eq!(
         redis::cmd("EXISTS")
             .arg("refused")
@@ -252,6 +277,177 @@ fn test_replication_pause_refuses_replicate_in_transactions() -> Result<()> {
     assert_eq!(
         redis::cmd("EXISTS")
             .arg("refused-in-transaction")
+            .query::<i64>(&mut replica)?,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn test_replication_pause_refuses_calls_replicated_to_replicas_or_the_aof_only() -> Result<()> {
+    let Some((mut primary, mut replica)) = paused_primary()? else {
+        return Ok(());
+    };
+    for target in ["replicas", "aof"] {
+        let key = format!("refused-{target}");
+        assert_refused_call(
+            &mut primary,
+            redis::cmd("replicate.call_to").arg(&[target, "SET", &key, "value"]),
+        )?;
+        assert_eq!(
+            redis::cmd("EXISTS").arg(&key).query::<i64>(&mut primary)?,
+            0
+        );
+    }
+    unpause(&mut primary)?;
+    redis::cmd("replicate.call_to")
+        .arg(&["replicas", "SET", "resumed", "value"])
+        .query::<()>(&mut primary)?;
+    redis::cmd("replicate.call_to")
+        .arg(&["aof", "SET", "aof-only", "value"])
+        .query::<()>(&mut primary)?;
+    assert_replica_keys(&mut primary, &mut replica, "refused-replicas", "resumed")?;
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("aof-only")
+            .query::<Option<String>>(&mut primary)?
+            .as_deref(),
+        Some("value")
+    );
+    for key in ["aof-only", "refused-aof"] {
+        assert_eq!(redis::cmd("EXISTS").arg(key).query::<i64>(&mut replica)?, 0);
+    }
+    Ok(())
+}
+
+#[test]
+#[cfg(any(
+    feature = "min-redis-compatibility-version-8-0",
+    feature = "min-redis-compatibility-version-7-4",
+    feature = "min-redis-compatibility-version-7-2"
+))]
+fn test_replication_pause_refuses_replicated_blocking_calls() -> Result<()> {
+    let Some((mut primary, mut replica)) = primary_with_replica("call")? else {
+        return Ok(());
+    };
+    pause(&mut primary)?;
+    assert_refused_call(
+        &mut primary,
+        redis::cmd("call.blocking_replicate").arg(&["SET", "refused", "value"]),
+    )?;
+    assert_eq!(
+        redis::cmd("EXISTS")
+            .arg("refused")
+            .query::<i64>(&mut primary)?,
+        0
+    );
+    unpause(&mut primary)?;
+    redis::cmd("call.blocking_replicate")
+        .arg(&["SET", "resumed", "value"])
+        .query::<()>(&mut primary)?;
+    assert_replica_keys(&mut primary, &mut replica, "refused", "resumed")
+}
+
+/// Redis postpones a transaction that queued a `write` command during an
+/// earlier write pause, so a write command that runs in a transaction during a
+/// pause is in the transaction that started it, and Redis replicates it. The
+/// `lists` example's `write` command replicates verbatim.
+#[test]
+fn test_replication_pause_lets_write_commands_replicate_in_the_transaction_that_pauses()
+-> Result<()> {
+    let Some((mut primary, mut replica)) = primary_with_replica("lists")? else {
+        return Ok(());
+    };
+    let ((), pushed): ((), i64) = redis::pipe()
+        .atomic()
+        .cmd("CLIENT")
+        .arg(&["PAUSE", "20000", "WRITE"])
+        .cmd("LISTS.PUSHHEAD")
+        .arg(&["list", "element"])
+        .query(&mut primary)?;
+    assert_eq!(pushed, 1);
+    unpause(&mut primary)?;
+    acknowledge(&mut primary, &replica)?;
+    assert_eq!(
+        redis::cmd("LLEN").arg("list").query::<i64>(&mut primary)?,
+        1
+    );
+    assert_eq!(
+        redis::cmd("LLEN").arg("list").query::<i64>(&mut replica)?,
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn test_replication_pause_lets_write_commands_replicate_each_way_in_the_transaction_that_pauses()
+-> Result<()> {
+    let Some((mut primary, mut replica)) = primary_with_replica("replicate")? else {
+        return Ok(());
+    };
+    let ((), verbatim, command, call): ((), i64, i64, i64) = redis::pipe()
+        .atomic()
+        .cmd("CLIENT")
+        .arg(&["PAUSE", "20000", "WRITE"])
+        .cmd("replicate.write")
+        .arg(&["verbatim", "by-verbatim", "value"])
+        .cmd("replicate.write")
+        .arg(&["command", "by-command", "value"])
+        .cmd("replicate.write")
+        .arg(&["call", "by-call", "value"])
+        .query(&mut primary)?;
+    assert_eq!((verbatim, command, call), (1, 1, 1));
+    unpause(&mut primary)?;
+    acknowledge(&mut primary, &replica)?;
+    for key in ["by-verbatim", "by-command", "by-call"] {
+        assert_eq!(
+            redis::cmd("GET")
+                .arg(key)
+                .query::<Option<String>>(&mut replica)?
+                .as_deref(),
+            Some("value"),
+            "{key}"
+        );
+    }
+    Ok(())
+}
+
+/// A `write` command that a read-only command calls runs on a temporary
+/// client, not in a transaction Redis postponed for it, so the SDK refuses its
+/// replication during a pause, in a transaction too. Redis would drop it
+/// anyway, since the call has no replicate flag; called with the flag from
+/// code the SDK does not check, it would abort.
+#[test]
+fn test_replication_pause_refuses_write_commands_that_another_command_calls() -> Result<()> {
+    let Some((mut primary, mut replica)) = paused_primary()? else {
+        return Ok(());
+    };
+    let replicated: i64 = redis::cmd("replicate.forward")
+        .arg(&["replicate.write", "command", "called", "value"])
+        .query(&mut primary)?;
+    assert_eq!(replicated, 0);
+    let replicated: Vec<i64> = redis::pipe()
+        .atomic()
+        .cmd("replicate.forward")
+        .arg(&[
+            "replicate.write",
+            "command",
+            "called-in-transaction",
+            "value",
+        ])
+        .cmd("replicate.forward")
+        .arg(&["replicate.write", "call", "called-in-transaction", "value"])
+        .query(&mut primary)?;
+    assert_eq!(replicated, [0, 0]);
+    unpause(&mut primary)?;
+    let replicated: i64 = redis::cmd("replicate.write")
+        .arg(&["command", "resumed", "value"])
+        .query(&mut primary)?;
+    assert_eq!(replicated, 1);
+    assert_replica_keys(&mut primary, &mut replica, "called", "resumed")?;
+    assert_eq!(
+        redis::cmd("EXISTS")
+            .arg("called-in-transaction")
             .query::<i64>(&mut replica)?,
         0
     );

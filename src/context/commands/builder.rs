@@ -503,6 +503,9 @@ impl CommandBuilder {
                     short_name.to_string_lossy()
                 )));
             }
+            if let Some(callback) = child.callback {
+                super::replicating::record(callback, &prepared.flags);
+            }
             let full_name = CString::new([name.as_bytes(), b"|", short_name.as_bytes()].concat())?;
             registered.push((child, full_name, prepared));
         }
@@ -716,7 +719,7 @@ pub(super) fn register_base_command(
     let (first, last, step) = keys.map_or((0, 0, 0), |keys| (keys.first, keys.last, keys.step));
     let create = unsafe { crate::__available_api!(RedisModule_CreateCommand) };
     // A container passes no handler.
-    let callback: raw::RedisModuleCmdFunc = match callback {
+    let handler: raw::RedisModuleCmdFunc = match callback {
         Some(callback) => Some(callback),
         None => None,
     };
@@ -724,7 +727,7 @@ pub(super) fn register_base_command(
         create(
             ctx.get_raw(),
             name.as_ptr(),
-            callback,
+            handler,
             flags.as_ptr(),
             first,
             last,
@@ -738,6 +741,9 @@ pub(super) fn register_base_command(
         )));
     }
     super::acl_rules::record_registered_command(name.as_bytes());
+    if let Some(callback) = callback {
+        super::replicating::record(callback, flags.to_str().unwrap_or_default());
+    }
     Ok(name)
 }
 

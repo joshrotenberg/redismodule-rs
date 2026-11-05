@@ -208,7 +208,7 @@ impl Context {
     // Get metadata only after an actual network client has been established.
     // None means an internal/module client or a client whose identity is not
     // available. The caller holds the Redis lock throughout the proof/read.
-    fn indexed_network_client_info(
+    pub(super) fn indexed_network_client_info(
         &self,
     ) -> Result<Option<raw::RedisModuleClientInfoV1>, RedisError> {
         let client_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };

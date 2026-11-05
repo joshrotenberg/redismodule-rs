@@ -1,5 +1,6 @@
 pub(crate) mod acl_rules;
 mod builder;
+pub(crate) mod replicating;
 pub use builder::{CommandBuilder, CommandFlags, KeyRange};
 
 use crate::RedisError;

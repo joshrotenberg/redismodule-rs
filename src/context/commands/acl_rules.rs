@@ -24,11 +24,13 @@ pub(super) fn record_registered_command(name: &[u8]) {
     registered().push(name.into());
 }
 
-/// Internal binding for `redis_module!`: forgets the registered command names
-/// when a load starts or fails, and when an unload goes ahead.
+/// Internal binding for `redis_module!`: forgets the registered command names,
+/// and which callbacks can replicate, when a load starts or fails, and when an
+/// unload goes ahead.
 #[doc(hidden)]
 pub fn forget_registered_commands() {
     *registered() = Vec::new();
+    super::replicating::forget();
 }
 
 /// Internal binding for `redis_module!`: refuses the unload while an ACL rule
