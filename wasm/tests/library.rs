@@ -683,6 +683,57 @@ fn a_slow_load_does_not_block_other_clients() {
 }
 
 #[test]
+fn a_load_that_finishes_during_a_replication_pause_is_refused() {
+    let Some(component) = js_component() else {
+        return;
+    };
+    let server = Server::start(6651, &[]);
+    let mut con = server.connection();
+    let mut loader = server.connection();
+    let load = std::thread::spawn(move || -> RedisResult<Vec<String>> {
+        redis::cmd("WASM.LOAD")
+            .arg("js")
+            .arg(component)
+            .query(&mut loader)
+    });
+
+    // The 11 MB component compiles for seconds while its client is blocked; a
+    // write pause that starts meanwhile is still on when the load finishes.
+    wait_for("the load to block its client", || {
+        let info: String = redis::cmd("INFO").arg("clients").query(&mut con).ok()?;
+        info.lines()
+            .any(|line| line.trim() == "blocked_clients:1")
+            .then_some(())
+    });
+    let _: () = redis::cmd("CLIENT")
+        .arg(&["PAUSE", "60000", "WRITE"])
+        .query(&mut con)
+        .unwrap();
+    // A debug build compiles the component for longer than `wait_for` waits.
+    let paused_at = Instant::now();
+    while !load.is_finished() {
+        assert!(
+            paused_at.elapsed() < Duration::from_secs(120),
+            "the load did not finish"
+        );
+        sleep(Duration::from_millis(50));
+    }
+    let _: () = redis::cmd("CLIENT").arg("UNPAUSE").query(&mut con).unwrap();
+    let refused = error_text(load.join().unwrap().map(|_| Value::Nil));
+    assert!(refused.contains("paused replication"), "{refused}");
+
+    // Nothing was added, and the same load succeeds once the pause is over.
+    let libraries: Vec<Value> = redis::cmd("WASM.LIST").query(&mut con).unwrap();
+    assert!(libraries.is_empty(), "{libraries:?}");
+    let functions: Vec<String> = redis::cmd("WASM.LOAD")
+        .arg("js")
+        .arg(component)
+        .query(&mut con)
+        .unwrap();
+    assert_eq!(functions[0], "hello");
+}
+
+#[test]
 fn a_load_inside_multi_compiles_inline() {
     let server = Server::start(6617, &[]);
     let mut con = server.connection();

@@ -30,8 +30,8 @@ use anyhow::Context as _;
 
 use redis_module::configuration::ConfigurationFlags;
 use redis_module::{
-    ArgCursor, Context, EventContext, ModuleOptions, RedisError, RedisResult, RedisString,
-    RedisValue, RegistrationContext, Status, redis_module,
+    ArgCursor, Context, ContextFlags, EventContext, ModuleOptions, RedisError, RedisResult,
+    RedisString, RedisValue, RegistrationContext, Status, redis_module,
 };
 use redis_module_macros::command;
 
@@ -157,24 +157,33 @@ struct Loaded {
 }
 
 /// Refuses to finish a load or restore from a blocked client while Redis pauses
-/// replication. The pause can start while the component compiles, and the SDK
-/// then refuses to replicate the finished change, which would stay local. The
-/// inline path runs as the command itself, where the SDK lets a write command
-/// replicate inside a transaction that started the pause.
+/// replication. A write command cannot start during a pause, but a pause can
+/// start while its client is blocked, and the SDK would then refuse to
+/// replicate the finished change, which would stay on this server. The inline
+/// path (inside `MULTI`, a script or an AOF load) cannot meet a pause that
+/// started mid-command. A replica applies what its primary sent regardless.
 fn refuse_paused_finish(ctx: &Context, blocked: bool, command: &str) -> Result<(), RedisError> {
-    if blocked && ctx.avoid_replication_traffic() {
+    if blocked && ctx.avoid_replication_traffic() && !on_replica(ctx) {
         return Err(RedisError::String(format!(
-            "ERR {command} failed: Redis paused replication while the component compiled; retry after the pause"
+            "ERR {command} failed: Redis paused replication while the client was blocked; retry after the pause"
         )));
     }
     Ok(())
 }
 
+/// Whether this server is a replica, or the command came from its primary.
+fn on_replica(ctx: &Context) -> bool {
+    ctx.get_flags()
+        .intersects(ContextFlags::SLAVE | ContextFlags::REPLICATED)
+}
+
 /// Replicates the running command verbatim. The SDK refuses while Redis pauses
 /// replication, except for a write command in a transaction that started the
-/// pause; a refused change stays on this server, and the log says so.
+/// pause; a refused change stays on this server, and the log says so. A
+/// replica passes its primary's stream on to its own replicas itself, so it
+/// does not warn.
 fn replicate(ctx: &Context, command: &str) {
-    if ctx.replicate_verbatim() == Status::Err {
+    if ctx.replicate_verbatim() == Status::Err && !on_replica(ctx) {
         ctx.log_warning(&format!(
             "{command} was applied here but not replicated: Redis paused replication"
         ));
