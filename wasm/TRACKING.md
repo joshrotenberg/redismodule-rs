@@ -127,6 +127,21 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-04: merged SDK master `5f78df9`, the `v3.0.0-alpha.2` tag, into the
+  branch as `24fc100`. It brings SDK PR 211 for #207 (`648d1b6`: key-blocking
+  callbacks can stream their reply through `key_blocking_reply`), PR 212
+  (`f4223d5`: the README's "What 3.0 changes" summary) and PR 219 for #170
+  (`5f78df9`: the alpha.2 release, which makes `ServerEventHandler`
+  `#[non_exhaustive]`). The host neither blocks clients on keys nor matches on
+  `ServerEventHandler`, and needed no adaptation. The full `wasm/ci/check.sh`
+  passed on Rust 1.94.0 and Redis 8.10.2: 588 tests (the host's 33 unit, 5
+  compiler and 35 library tests, the SDK's 96 unit, 249 integration and 148 doc
+  tests, and 22 others), and the four lockfiles were unchanged. The unrelated
+  Redis that holds port 6641 on this machine was still running, so
+  `admission_code_counts_full_images_and_preserves_old_state_until_commit` ran
+  on free port 6941 for this check only; the committed test still uses 6641
+  (#218 tracks the fixed ports).
+
 - 2026-11-04: merged SDK master `1c9fa31` into the branch as `06f0842`, on top
   of the branch's PR 206 (`19c9002`: the demo and the module-versus-core
   tradeoffs). It brings SDK PRs for #179 (`ccd8e42`: incremental stream
