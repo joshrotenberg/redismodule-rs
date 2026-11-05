@@ -1143,7 +1143,7 @@ fn keys_panic(ctx: *mut raw::RedisModuleCtx, completed: Option<&AtomicBool>) -> 
 /// unblock it already; reporting it served again would free the native waiter
 /// twice, so the callback reports it not served instead.
 fn served(ctx: *mut raw::RedisModuleCtx) -> c_int {
-    if true || still_blocked(ctx) {
+    if still_blocked(ctx) {
         raw::REDISMODULE_OK as c_int
     } else {
         raw::REDISMODULE_ERR as c_int
