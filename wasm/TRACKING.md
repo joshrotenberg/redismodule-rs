@@ -127,6 +127,42 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-05: merged SDK master `cd4af31` into the branch as `3bf964c`. It
+  brings these SDK PRs:
+  - PR 226 for #221 (`5a2b42e`): unloads are refused while an ACL rule names
+    one of the module's commands.
+  - PR 229 for #223 (`d780fda`): the test_helper example replies once.
+  - PR 230 (`13160fd`): the CI matrix and docs cover Redis only.
+  - PR 227 for #222 (`c1a1d4b`): `next_u64` accepts the full `u64` range.
+  - PR 232 (`3ce425f`): squash merges get an explicit message.
+  - PR 228 for #220 (`cd4af31`): replication is refused while Redis pauses
+    it, and `replicate_verbatim` returns a `#[must_use]` `Status`.
+
+  PR 228 needed adaptation (`e95a40e`, then `9102160` and `a82126f` after
+  review):
+  - WASM.LOAD, WASM.RESTORE, WASM.DELETE and WASM.FLUSH replicate through a
+    helper that logs a warning when the SDK refuses.
+  - A load or restore that finishes in a blocked client's reply callback
+    refuses, before changing anything, if Redis paused replication while the
+    client was blocked. Otherwise the change would stay on the primary
+    without reaching the replicas. The inline path and replicas skip that
+    check; a replica applies its primary's stream regardless.
+  - New test: `a_load_that_finishes_during_a_replication_pause_is_refused`.
+
+  The host's one `next_u64` caller already converts with `usize::try_from`.
+
+  The full `wasm/ci/check.sh` passed on Rust 1.94.0 and Redis 8.10.2:
+  - 611 tests: the host's 33 unit, 5 compiler and 36 library tests, the SDK's
+    104 unit, 263 integration and 148 doc tests, and 22 others;
+  - the four lockfiles were unchanged.
+
+  The unrelated Redis on this machine still held port 6641, so
+  `admission_code_counts_full_images_and_preserves_old_state_until_commit`
+  ran on 6941 for the check only (#218).
+
+  Not covered yet: a test that pauses a replica while its primary loads, to
+  exercise the replica path.
+
 - 2026-11-04: merged SDK master `5f78df9`, the `v3.0.0-alpha.2` tag, into the
   branch as `24fc100`. It brings SDK PR 211 for #207 (`648d1b6`: key-blocking
   callbacks can stream their reply through `key_blocking_reply`), PR 212
