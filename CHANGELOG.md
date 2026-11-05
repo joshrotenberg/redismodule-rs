@@ -143,10 +143,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each delivery before invoking user code. Failed loads and successful unloads
   release runtime registrations; rejected unloads retain them. The
   `runtime_server_events` example demonstrates conditional subscription.
-  **Breaking:** `ServerEventHandler` gains `Cron`, `FlushInfo`, `SwapDb` and
-  `ConfigChanged` variants, which breaks an exhaustive `match` on it. It is now
-  `#[non_exhaustive]`, so a `match` needs a `_` arm and later variants are not
-  breaking.
+
+- **Breaking:** `ServerEventHandler` gains `Cron`, `FlushInfo`, `SwapDb` and
+  `ConfigChanged` variants, which breaks an exhaustive `match` on it (#114). It
+  is now `#[non_exhaustive]`, so a `match` needs a `_` arm and later variants
+  are not breaking.
 
 - `ThreadSafeContext::try_lock` and `DetachedContext::try_lock` return their
   existing borrowed guards on success and `None` when the Redis lock cannot
