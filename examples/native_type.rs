@@ -12,7 +12,9 @@ use redis_module::native_types::{
     AofRewrite, AofRewriter, AuxData, AuxTriggers, AuxWhen, CopyValue, Defrag, DefragStatus,
     Digest, DigestValue, FreeEffort, MemUsage, NativeType, RedisType, Unlink,
 };
-use redis_module::{Context, NextArg, RedisResult, RedisString, RedisValue, redis_module};
+use redis_module::{
+    Context, NextArg, RedisError, RedisResult, RedisString, RedisValue, redis_module,
+};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 struct Note {
@@ -172,11 +174,17 @@ fn get_unregistered(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         .map_or(RedisValue::Null, RedisValue::from))
 }
 
-/// `note.aux value`: the aux data the next RDB saves.
+/// `note.aux value`: the aux data the next RDB saves. `note.counts` reports
+/// the loaded value as an integer, so it is at most `i64::MAX`.
 fn aux(_: &Context, args: Vec<RedisString>) -> RedisResult {
     let mut args = args.into_iter().skip(1);
     let value = args.next_u64()?;
     args.done()?;
+    if i64::try_from(value).is_err() {
+        return Err(RedisError::Str(
+            "ERR the aux value must be at most 9223372036854775807",
+        ));
+    }
     AUX_TO_SAVE.store(value, Ordering::Relaxed);
     Ok(RedisValue::SimpleStringStatic("OK"))
 }

@@ -1,5 +1,4 @@
 use std::borrow::Borrow;
-use std::convert::TryFrom;
 use std::fmt::Display;
 use std::ops::Deref;
 use std::os::raw::{c_char, c_int, c_void};
@@ -63,6 +62,8 @@ pub trait NextArg {
     fn next_arg(&mut self) -> Result<RedisString, RedisError>;
     fn next_string(&mut self) -> Result<String, RedisError>;
     fn next_i64(&mut self) -> Result<i64, RedisError>;
+    /// Parse with [`RedisString::parse_unsigned_integer`]: `0` through
+    /// `u64::MAX`, with distinct errors for negative and other input.
     fn next_u64(&mut self) -> Result<u64, RedisError>;
     fn next_f64(&mut self) -> Result<f64, RedisError>;
     fn done(&mut self) -> Result<(), RedisError>;
@@ -493,17 +494,27 @@ impl RedisString {
         }
     }
 
+    /// Parses the whole string as a decimal `u64`: `0`, or a non-zero digit
+    /// followed by digits, up to `u64::MAX`. This is the grammar of
+    /// [`Self::parse_integer`] without its sign, so `+`, spaces, leading zeros
+    /// and an embedded NUL are refused. The SDK parses it in Rust on every
+    /// compatibility floor rather than with `RedisModule_StringToULongLong`,
+    /// which stops at the first NUL and falls back to `strtoull`.
+    ///
+    /// # Errors
+    /// Input that [`Self::parse_integer`] accepts as a negative integer returns
+    /// `ERR Couldn't parse negative number as unsigned integer`. Anything else
+    /// that is not in the grammar or is above `u64::MAX` returns
+    /// `ERR Couldn't parse as integer`, the error of [`Self::parse_integer`].
     pub fn parse_unsigned_integer(&self) -> Result<u64, RedisError> {
-        let val = self.parse_integer()?;
-        u64::try_from(val)
-            .map_err(|_| RedisError::Str("ERR Couldn't parse negative number as unsigned integer"))
+        parse_unsigned(self.as_slice())
     }
 
     pub fn parse_integer(&self) -> Result<i64, RedisError> {
         let mut val: i64 = 0;
         match raw::string_to_longlong(self.as_ptr(), &mut val) {
             raw::Status::Ok => Ok(val),
-            raw::Status::Err => Err(RedisError::Str("ERR Couldn't parse as integer")),
+            raw::Status::Err => Err(RedisError::Str(NOT_AN_INTEGER)),
         }
     }
 
@@ -520,6 +531,40 @@ impl RedisString {
     // Implement these to allow non-utf8 bytes to be consumed:
     // pub fn into_bytes(self) -> Vec<u8> {}
     // pub fn as_bytes(&self) -> &[u8] {}
+}
+
+const NOT_AN_INTEGER: &str = "ERR Couldn't parse as integer";
+const NEGATIVE_UNSIGNED: &str = "ERR Couldn't parse negative number as unsigned integer";
+
+/// `0`, or a non-zero digit followed by digits, up to `u64::MAX`: the digits
+/// Redis's signed `string2ll` accepts after an optional `-`.
+fn parse_digits(bytes: &[u8]) -> Option<u64> {
+    match bytes {
+        [b'0'] => Some(0),
+        [b'1'..=b'9', ..] => bytes.iter().try_fold(0u64, |value, &byte| {
+            if !byte.is_ascii_digit() {
+                return None;
+            }
+            value.checked_mul(10)?.checked_add(u64::from(byte - b'0'))
+        }),
+        _ => None,
+    }
+}
+
+/// See [`RedisString::parse_unsigned_integer`].
+fn parse_unsigned(bytes: &[u8]) -> Result<u64, RedisError> {
+    parse_digits(bytes).ok_or_else(|| {
+        // What the signed parser accepts below zero: -1 through i64::MIN.
+        let negative = bytes
+            .strip_prefix(b"-")
+            .and_then(parse_digits)
+            .is_some_and(|magnitude| (1..=i64::MIN.unsigned_abs()).contains(&magnitude));
+        RedisError::Str(if negative {
+            NEGATIVE_UNSIGNED
+        } else {
+            NOT_AN_INTEGER
+        })
+    })
 }
 
 impl Drop for RedisString {
@@ -716,5 +761,67 @@ mod ownership_contracts {
             std::mem::size_of::<Option<RedisString>>(),
             std::mem::size_of::<RedisString>()
         );
+    }
+}
+
+#[cfg(test)]
+mod unsigned_integer_parsing {
+    use super::*;
+
+    fn error(bytes: &[u8]) -> &'static str {
+        match parse_unsigned(bytes) {
+            Err(RedisError::Str(message)) => message,
+            other => panic!("{bytes:?} parsed as {other:?}"),
+        }
+    }
+
+    #[test]
+    fn accepts_zero_through_u64_max() {
+        for value in [0, 1, 9, 10, i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
+            assert_eq!(
+                parse_unsigned(value.to_string().as_bytes()).ok(),
+                Some(value)
+            );
+        }
+    }
+
+    #[test]
+    fn refuses_input_outside_the_grammar_or_the_range() {
+        for bytes in [
+            b"18446744073709551616".as_slice(),
+            b"99999999999999999999",
+            b"184467440737095516150",
+            b"-0",
+            b"-",
+            b"--1",
+            b"+1",
+            b" 1",
+            b"1 ",
+            b"01",
+            b"00",
+            b"",
+            b"1\0",
+            b"\x001",
+            b"1\x002",
+            b"abc",
+            b"1a",
+            b"1e3",
+            b"0x1",
+            b"1.0",
+            b"\xff",
+            // Below the signed parser's range, so it is not a negative integer there.
+            b"-9223372036854775809",
+            b"-01",
+        ] {
+            assert_eq!(error(bytes), NOT_AN_INTEGER, "{bytes:?}");
+        }
+    }
+
+    #[test]
+    fn negative_integers_get_their_own_error() {
+        assert_ne!(NEGATIVE_UNSIGNED, NOT_AN_INTEGER);
+        for bytes in [b"-1".as_slice(), b"-10", b"-9223372036854775808"] {
+            assert_eq!(error(bytes), NEGATIVE_UNSIGNED, "{bytes:?}");
+        }
     }
 }

@@ -36,15 +36,20 @@ fn snapshot() -> (usize, usize) {
     )
 }
 
+/// An integer reply is signed, so a parsed `u64` goes back as a big number
+/// (a bulk string to a RESP2 client).
+fn unsigned_reply(value: u64) -> RedisValue {
+    RedisValue::BigNumber(value.to_string())
+}
+
 fn reply(before: (usize, usize), parsed: (usize, u64)) -> RedisResult {
     let after = snapshot();
-    Ok(vec![
-        parsed.0 as i64,
-        parsed.1 as i64,
-        (after.0 - before.0) as i64,
-        (after.1 - before.1) as i64,
-    ]
-    .into())
+    Ok(RedisValue::Array(vec![
+        (parsed.0 as i64).into(),
+        unsigned_reply(parsed.1),
+        ((after.0 - before.0) as i64).into(),
+        ((after.1 - before.1) as i64).into(),
+    ]))
 }
 
 fn borrowed(_: &Context, argv: Vec<RedisString>) -> RedisResult {
@@ -102,7 +107,7 @@ fn numbers(_: &Context, argv: Vec<RedisString>) -> RedisResult {
     args.done()?;
     Ok(RedisValue::Array(vec![
         signed.into(),
-        (unsigned as i64).into(),
+        unsigned_reply(unsigned),
         float.into(),
     ]))
 }

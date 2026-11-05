@@ -3163,8 +3163,8 @@ fn test_borrowed_arguments() -> Result<()> {
     assert_eq!(tail, [5, 0, 0]);
 
     for signed in [i64::MIN, 0, i64::MAX] {
-        for unsigned in [0, i64::MAX] {
-            let reply: (i64, i64, f64) = redis::cmd("args.numbers")
+        for unsigned in [0, i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
+            let reply: (i64, u64, f64) = redis::cmd("args.numbers")
                 .arg(signed)
                 .arg(unsigned)
                 .arg("-1.25")
@@ -3175,7 +3175,7 @@ fn test_borrowed_arguments() -> Result<()> {
     for (signed, unsigned, float, message) in [
         ("9223372036854775808", "0", "1", "parse as integer"),
         ("0", "-1", "1", "parse negative number"),
-        ("0", "18446744073709551615", "1", "parse as integer"),
+        ("0", "18446744073709551616", "1", "parse as integer"),
         ("0", "0", "word", "parse as float"),
     ] {
         let error = redis::cmd("args.numbers")
@@ -3236,6 +3236,80 @@ fn test_borrowed_arguments() -> Result<()> {
         .query(&mut con)?;
     assert_eq!(reply, [10, 2, 0, 0]);
     assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+/// `ArgCursor::next_u64` (`args.numbers`, `args.borrowed`) and
+/// `NextArg::next_u64` (`args.owned`) take the whole `u64` range with the
+/// signed parser's grammar (#222). Negative integers get their own error.
+#[test]
+fn test_unsigned_arguments() -> Result<()> {
+    let mut con = TestConnection::new("args");
+    let commands = |value: &[u8]| -> [(&'static str, Vec<Vec<u8>>); 3] {
+        [
+            (
+                "args.numbers",
+                vec![b"0".to_vec(), value.to_vec(), b"1".to_vec()],
+            ),
+            (
+                "args.borrowed",
+                vec![b"x".to_vec(), b"COUNT".to_vec(), value.to_vec()],
+            ),
+            (
+                "args.owned",
+                vec![b"x".to_vec(), b"COUNT".to_vec(), value.to_vec()],
+            ),
+        ]
+    };
+    for value in [0, 1, i64::MAX as u64, i64::MAX as u64 + 1, u64::MAX] {
+        let [numbers, borrowed, owned] = commands(value.to_string().as_bytes());
+        let reply: (i64, u64, f64) = redis::cmd(numbers.0).arg(numbers.1).query(&mut con)?;
+        assert_eq!(reply, (0, value, 1.0));
+        for (command, args) in [borrowed, owned] {
+            let reply: (i64, u64, i64, i64) = redis::cmd(command).arg(args).query(&mut con)?;
+            assert_eq!((reply.0, reply.1), (1, value), "{command}");
+        }
+    }
+
+    let negative = "Couldn't parse negative number as unsigned integer";
+    let invalid = "Couldn't parse as integer";
+    for (value, expected) in [
+        (b"-1".as_slice(), negative),
+        (b"-9223372036854775808", negative),
+        // Outside the signed parser's range, so not a negative integer to it.
+        (b"-9223372036854775809", invalid),
+        (b"18446744073709551616", invalid),
+        (b"99999999999999999999", invalid),
+        (b"184467440737095516150", invalid),
+        (b"-0", invalid),
+        (b"-", invalid),
+        (b"+1", invalid),
+        (b" 1", invalid),
+        (b"1 ", invalid),
+        (b"01", invalid),
+        (b"00", invalid),
+        (b"", invalid),
+        (b"1\0", invalid),
+        (b"\x001", invalid),
+        (b"1\x002", invalid),
+        (b"abc", invalid),
+        (b"1e3", invalid),
+        (b"0x1", invalid),
+        (b"\xff", invalid),
+    ] {
+        for (command, args) in commands(value) {
+            let error = redis::cmd(command)
+                .arg(args)
+                .query::<Value>(&mut con)
+                .unwrap_err();
+            assert_eq!(
+                (error.code(), error.detail()),
+                (Some("ERR"), Some(expected)),
+                "{command} {value:?}: {error}"
+            );
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        }
+    }
     Ok(())
 }
 
@@ -8462,6 +8536,20 @@ fn test_native_type_callbacks_and_panic_guards() -> Result<()> {
         .arg(dump)
         .query::<()>(&mut con)?;
     assert_eq!(note(&mut con, "restored")?.as_deref(), Some("hello"));
+    // note.counts reports the loaded aux value as an integer.
+    let error = redis::cmd("note.aux")
+        .arg(i64::MAX as u64 + 1)
+        .query::<()>(&mut con)
+        .unwrap_err();
+    assert_eq!(
+        (error.code(), error.detail()),
+        (
+            Some("ERR"),
+            Some("the aux value must be at most 9223372036854775807")
+        ),
+        "{error}"
+    );
+    redis::cmd("note.aux").arg(i64::MAX).query::<()>(&mut con)?;
     redis::cmd("note.aux").arg(42).query::<()>(&mut con)?;
     redis::cmd("DEBUG").arg("RELOAD").query::<()>(&mut con)?;
     assert_eq!(counts(&mut con)?[2], 42, "aux data loaded");
