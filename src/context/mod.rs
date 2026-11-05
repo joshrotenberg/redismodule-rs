@@ -1426,8 +1426,9 @@ impl RuntimeContext {
     /// During a write pause Redis postpones such a transaction, so a pause
     /// seen here started inside it, and Redis replicates the rest of the
     /// transaction (`client_pause_in_transaction`). A command another command
-    /// called runs on a temporary client that is not in the transaction:
-    /// Redis did not postpone the transaction for it.
+    /// or a script called runs on a client that is not in the client index:
+    /// Redis did not postpone the transaction for it. A callback also
+    /// registered for a command without either flag does not count.
     fn in_pausing_transaction(&self) -> bool {
         let Some(callback) = running_command_callback(self.ctx) else {
             return false;
@@ -1847,10 +1848,12 @@ impl RuntimeContext {
         /// transaction that queued one, so a command flagged this way that runs
         /// in a transaction during a pause runs in the transaction that started
         /// the pause. Redis replicates the rest of that transaction, and so
-        /// does the SDK, for the command the client queued; a command it calls
-        /// is still refused. A read-only command runs during a write pause, in
-        /// a transaction too, and is always refused, as are timers, server
-        /// events, post-notification jobs and workers, which keep running.
+        /// does the SDK, for the command the client queued; a command that
+        /// another command or a script calls is still refused, and so is a
+        /// handler that is also registered for a command without either flag. A
+        /// read-only command runs during a write pause, in a transaction too,
+        /// and is always refused, as are timers, server events,
+        /// post-notification jobs and workers, which keep running.
         /// Check this before changing data you would replicate from them: a
         /// refused change never reaches the replicas or the AOF.
         pub fn avoid_replication_traffic(&self) -> bool {

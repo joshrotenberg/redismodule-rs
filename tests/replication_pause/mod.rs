@@ -418,9 +418,9 @@ fn test_replication_pause_lets_write_commands_replicate_each_way_in_the_transact
 /// anyway, since the call has no replicate flag; called with the flag from
 /// code the SDK does not check, it would abort.
 ///
-/// In the transaction the called command only makes a replicated call, which
-/// the SDK refuses before it runs. A local write there would abort Redis 6.2
-/// whatever the SDK does: 6.2 propagates an `EXEC` that changed data.
+/// Below Redis 7.0 the transaction holds only the replicated call, which the
+/// SDK refuses before it runs: Redis 6.2 propagates an `EXEC` that changed
+/// data, so the other case's local write would abort it whatever the SDK does.
 #[test]
 fn test_replication_pause_refuses_write_commands_that_another_command_calls() -> Result<()> {
     let Some((mut primary, mut replica)) = paused_primary()? else {
@@ -430,12 +430,27 @@ fn test_replication_pause_refuses_write_commands_that_another_command_calls() ->
         .arg(&["replicate.write", "command", "called", "value"])
         .query(&mut primary)?;
     assert_eq!(replicated, 0);
-    let replicated: Vec<i64> = redis::pipe()
-        .atomic()
-        .cmd("replicate.forward")
-        .arg(&["replicate.write", "call", "called-in-transaction", "value"])
-        .query(&mut primary)?;
-    assert_eq!(replicated, [0]);
+    let mut transaction = redis::pipe();
+    transaction.atomic();
+    if server_version(&mut primary)? >= (7, 0) {
+        transaction.cmd("replicate.forward").arg(&[
+            "replicate.write",
+            "command",
+            "called-in-transaction",
+            "value",
+        ]);
+    }
+    transaction.cmd("replicate.forward").arg(&[
+        "replicate.write",
+        "call",
+        "called-in-transaction",
+        "value",
+    ]);
+    let replicated: Vec<i64> = transaction.query(&mut primary)?;
+    assert!(
+        !replicated.is_empty() && replicated.iter().all(|&status| status == 0),
+        "{replicated:?}"
+    );
     unpause(&mut primary)?;
     let replicated: i64 = redis::cmd("replicate.write")
         .arg(&["command", "resumed", "value"])

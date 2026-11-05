@@ -25,7 +25,8 @@ fn pushed(status: Status) -> Result<(), RedisError> {
 
 /// Replicates the command that changed the list. Redis postpones these `write`
 /// commands during a write pause, so the SDK refuses only when another command
-/// called this one during the pause; the change then stays on this server.
+/// or a script called this one during the pause; the change then stays on
+/// this server.
 fn replicated(ctx: &Context) -> Result<(), RedisError> {
     match ctx.replicate_verbatim() {
         Status::Ok => Ok(()),

@@ -46,8 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `may-replicate` that a client queued in the transaction that starts the
   pause still replicates, as Redis allows: Redis postpones a transaction that
   queued one during an earlier pause. Command registration records which
-  callbacks are flagged that way. A command another command called is refused,
-  as is a read-only command in any transaction. The new `replicate` example
+  callbacks are flagged that way. A command another command or a script
+  called is refused, as is a read-only command in any transaction and a
+  handler that is also registered for a command without either flag. The new `replicate` example
   replicates from each of these paths, and the `lists` example reports a
   refused replication.
 

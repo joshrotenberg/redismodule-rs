@@ -52,9 +52,10 @@ the wrappers refuse there too. Redis replicates the rest of a transaction that
 starts the pause, and postpones a transaction that queued a `write` or
 `may-replicate` command during an earlier pause, so the wrappers let such a
 command replicate when its client queued it in the running transaction.
-Registration records which command callbacks carry those flags. Read-only
-commands and commands that another command calls are refused in a transaction
-too. Upstream has no issue or pull request for this.
+Registration records which command callbacks carry those flags; a handler
+also registered for a command without them loses the exemption. Read-only
+commands, and commands that another command or a script calls, are refused in
+a transaction too. Upstream has no issue or pull request for this.
 
 ## Unsigned integer arguments
 
