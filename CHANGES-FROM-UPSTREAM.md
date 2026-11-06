@@ -13,7 +13,7 @@ For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
 ## Server behaviors documented for modules
 
-Three server behaviors that safe SDK code can trip are documented, with
+Three server behaviors that the SDK cannot guard against are documented, with
 reproductions (#225). In cluster mode, Redis 7.4 and later look up each key in
 the slot of the running command's declared keys (`getKeySlot`), so keys a
 module reaches through `open_key` or `call`, from the command or a
@@ -24,10 +24,10 @@ a short read during an RDB load, and the message names the key even with
 `rdbSaveSingleModuleAux` returns without freeing a context that `aux_save`
 got through `RedisModule_GetContextFromIO` when it wrote nothing; the context
 keeps the execution nesting level raised, and after a `SAVE` Redis aborts on
-the next write while AOF is on or a replica is attached, or else on the next
+the next write while AOF is on or a replica is attached, and on the next
 thread-safe context lock. docs/CLUSTER.md and docs/NATIVE-TYPES.md describe
 them, and rustdoc points to them. A search of upstream issues and pull
-requests found no report of them.
+requests on 2026-11-05 found no report of them.
 
 ## Unload while ACL rules name module commands
 

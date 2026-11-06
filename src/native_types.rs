@@ -147,9 +147,10 @@ pub trait AuxData: NativeType {
     /// at least one value. When nothing was written, Redis returns without
     /// freeing that context, which also holds an execution unit open. After a
     /// save in the server process, such as `SAVE`, Redis then aborts on the
-    /// next write while AOF is on or a replica is attached, or else on the
-    /// next [`ThreadSafeContext::lock`](crate::ThreadSafeContext::lock). A
-    /// `BGSAVE` runs the callback in a child process and is not affected. See
+    /// next write while AOF is on or a replica is attached, and on the next
+    /// [`ThreadSafeContext::lock`](crate::ThreadSafeContext::lock) or
+    /// `try_lock`. A `BGSAVE` runs the callback in a child process and is not
+    /// affected. See
     /// `docs/NATIVE-TYPES.md` in the dependency source revision pinned by
     /// `Cargo.lock` for the versions and the reproduction.
     fn aux_save(io: &mut RdbWriter, when: AuxWhen);

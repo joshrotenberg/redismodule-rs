@@ -51,15 +51,16 @@ bitflags! {
         /// [`RdbReader`](crate::io::RdbReader) can return an error. The abort
         /// message names the key, even with `hide-user-data-from-log yes`.
         /// With it, the read returns, the `RdbReader` method returns an error,
-        /// and Redis fails the load instead: at startup it exits with status
-        /// 1. Redis also skips diskless load on a replica while a loaded
-        /// module registers a data type without this option.
+        /// and Redis fails the load instead; at startup it logs the failure
+        /// and exits with status 1. Redis also skips diskless load on a
+        /// replica while a loaded module registers a data type without this
+        /// option, except with `repl-diskless-load flushdb` in 8.10.2.
         ///
         /// It covers every type the module registers, in `rdb_load` and
         /// `aux_load`. `RdbReader` checks for the error after each read; a raw
         /// read through [`RdbReader::as_ptr`](crate::io::RdbReader::as_ptr)
-        /// must call `RedisModule_IsIOError`, because with this option a
-        /// failed read returns 0 or NULL.
+        /// must check [`is_io_error`](crate::raw::is_io_error), because with
+        /// this option a failed read returns 0 or NULL.
         ///
         /// See `docs/NATIVE-TYPES.md` in the dependency source revision pinned
         /// by `Cargo.lock` for the reproduction.

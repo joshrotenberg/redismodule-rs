@@ -47,9 +47,9 @@ fn init(ctx: &RegistrationContext<'_>, _args: &[RedisString]) -> Status {
   `rdb_load`.
 - `RdbReader` checks the error after each read, so a type that reads only
   through it and passes errors on with `?` needs nothing else.
-- A raw read through `RdbReader::as_ptr` must call `RedisModule_IsIOError`
-  before using the result. With the option a failed read returns 0 or NULL
-  instead of aborting.
+- A raw read through `RdbReader::as_ptr` must check for the error with
+  `raw::is_io_error` (`RedisModule_IsIOError`) before using the result. With
+  the option a failed read returns 0 or NULL instead of aborting.
 - `set_module_options` replaces the stored mask, so combine options with `|`
   in one call.
 - `INFO modules` lists the option as `options=[handle-io-errors]`.
@@ -60,7 +60,7 @@ The `data_type` example (type `mytype123`, no options) on Redis 7.4.11 and
 8.10.2, started with `--hide-user-data-from-log yes --rdbcompression no`:
 `alloc.set user:secret-key 64`, `SAVE`, the RDB file cut 32 bytes into the
 value, and a restart on that file. Redis aborts (exit status 134) and the
-crash report starts with:
+crash report contains:
 
 ```text
 Guru Meditation: Error loading data from RDB (short read or EOF). Read performed by module 'alloc' about type 'mytype123' after reading '0' bytes of a value for key named: 'user:secret-key'. #module.c:7661
@@ -77,8 +77,9 @@ prints `[additional info] Reading key 'user:secret-key'` on standard output.
 
 ## `aux_save` and `RedisModule_GetContextFromIO`
 
-On Redis 7.2 and later the SDK registers `aux_save2`, so an `AuxData::aux_save`
-that writes nothing saves nothing for the type. If that call first gets a
+The SDK registers `AuxData::aux_save` as `aux_save2` as well as `aux_save`.
+Redis 7.2 and later call `aux_save2`, so an `aux_save` that writes nothing
+saves nothing for the type. If that call first gets a
 context with `RedisModule_GetContextFromIO` through `RdbWriter::as_ptr`, Redis
 returns before it frees the context: `rdbSaveSingleModuleAux` returns early
 when nothing was written and skips `moduleFreeContext`. The early return is at
@@ -95,9 +96,16 @@ such as `SAVE`, the level stays raised for the life of the process, and:
   `blocked.c:357 'server.also_propagate.numops == 0'` (8.10.2;
   `blocked.c:326` in 7.2.16): Redis queues the write's propagation and never
   sends it;
-- without AOF or replicas, the next `ThreadSafeContext::lock` aborts Redis at
+- the next `ThreadSafeContext::lock` or `try_lock` aborts Redis at
   `module.c:9180 'server.execution_nesting == 0'` (8.10.2; `module.c:8509` in
-  7.2.16).
+  7.2.16). The assertion has no condition; the lock was reproduced without
+  AOF or replicas, and `try_lock` reaches it through
+  `RM_ThreadSafeContextTryLock` (from the source).
+
+Other effects follow from the source and were not reproduced:
+`postExecutionUnitOperations` returns early while the level is raised
+(`server.c:3908` in 8.10.2), so post-notification jobs queued after the save
+do not run.
 
 `FLUSHALL` with save points configured and `DEBUG RELOAD` also save in the
 server process (`db.c:1254` and `debug.c:639` in 8.10.2; not reproduced).

@@ -9,10 +9,12 @@ command's declared keys (`db.c:476` in 8.10.2, `db.c:210` in 7.4.11). Only a
 build with `DEBUG_ASSERTIONS` checks that the key hashes to that slot. Redis
 7.2 has no such shortcut.
 
-So every key a module reaches while a command runs must hash to the slot of
-that command's declared keys. For any other key:
+So every key a module reaches while a command that declares keys runs must
+hash to the slot of those keys. For any other key:
 
-- a read misses, even when the key exists;
+- a read looks in the declared keys' slot: it misses the key stored in the
+  key's own slot, and finds one that an earlier write stored in the declared
+  slot;
 - a write stores the key in the declared keys' slot, where clients do not find
   it: `GET` returns nil, `DEL` returns 0, and `CLUSTER COUNTKEYSINSLOT` counts
   the key in the declared slot.
@@ -26,16 +28,20 @@ To stay within the slot:
 
 - Declare every key the command takes, so that Redis rejects arguments in
   different slots with `CROSSSLOT` before the command runs.
-- Name keys the module creates with a hash tag taken from a declared key, so
-  they hash to its slot. `cluster::key_slot` computes a name's slot, and
-  `cluster::key_for_slot` builds a name for a slot.
+- Name keys the module creates with the declared key's hash tag, or with the
+  whole declared key as the tag when it has none (`{a}x` for `a`), so they
+  hash to its slot. `cluster::key_slot` computes a name's slot, and
+  `cluster::key_for_slot(cluster::key_slot(declared))` builds a name in the
+  declared key's slot.
 - In a notification callback, open only the notified key or keys that hash to
   its slot.
 
 On a cluster with more than one node, `call` also refuses a key that another
-node serves, with "Attempted to access a non local key in a cluster node" (the
-check at `module.c:7117` in 8.10.2). The reproduction below ran on one node,
-where every slot is local.
+node serves (the check at `module.c:7117` in 8.10.2): it returns
+`ERR RedisModule_Call failed: a key is in a slot this node does not serve`,
+and `call_ext` with `errors_as_replies` returns Redis's "Attempted to access a
+non local key in a cluster node". This is from the source; the reproduction
+below ran on one node, where every slot is local.
 
 ### Reproduction
 
@@ -53,8 +59,8 @@ reach the key named by their second argument. The keys' slots: `a` 15495,
 | `CLUSTER COUNTKEYSINSLOT 15495` (`a`'s slot) | 0 | 2 |
 | `CLUSTER COUNTKEYSINSLOT 7365` (`c`'s slot) | 1 | 0 |
 | `CLUSTER GETKEYSINSLOT 15495 10` | empty | `c`, `d` |
-| `DEL c` | 1 | 0 |
 | A command declaring `a` reads `c` | the value | the value |
+| `DEL c` | 1 | 0 |
 | A string notification callback for `SET trigger 1` reads `b` with `open_key` and `call` | `orig` | nil |
 | A command declaring no keys reads `b` | `orig` | `orig` |
 | A command declaring `a` writes `{a}x`, then `GET {a}x` | the value | the value |

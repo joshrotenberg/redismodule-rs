@@ -171,8 +171,8 @@ impl RdbReader {
     /// The raw IO pointer, for raw APIs such as [`crate::logging::log_io_error`].
     ///
     /// With [`ModuleOptions::HANDLE_IO_ERRORS`] set, a raw read through this
-    /// pointer that fails returns 0 or NULL; check `RedisModule_IsIOError`
-    /// before using the result.
+    /// pointer that fails returns 0 or NULL; check
+    /// [`is_io_error`](crate::raw::is_io_error) before using the result.
     ///
     /// [`ModuleOptions::HANDLE_IO_ERRORS`]: crate::ModuleOptions::HANDLE_IO_ERRORS
     pub fn as_ptr(&self) -> *mut raw::RedisModuleIO {
