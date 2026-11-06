@@ -127,6 +127,48 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-05: merged SDK master `9393416` into the branch as `f8e11bd`. It
+  brings SDK PR 234 for #225 (`9393416`), which documents three server
+  behaviors the SDK does not guard against, in `docs/CLUSTER.md`,
+  `docs/NATIVE-TYPES.md` and rustdoc. It changes no SDK code.
+
+  The host needed no adaptation. `git grep` in `wasm/`:
+  - Native types: `persist.rs` registers `wasm-libs`, which no key holds,
+    with aux callbacks when `wasm.persist` is `yes`. `init` sets
+    `ModuleOptions::HANDLE_IO_ERRORS` in the same branch, and `aux_load`
+    returns read errors, so a short RDB read fails the load rather than
+    aborting Redis.
+  - `aux_save` writes nothing when there are no libraries, but nothing in
+    `wasm/` calls `RdbWriter::as_ptr` or `RedisModule_GetContextFromIO`, so
+    no context is left open after `SAVE`.
+  - Cluster key access: the host opens no keys and has no keyspace
+    notification callbacks. A guest's calls go through `call_ext` while
+    WASM.CALL or WASM.CALL_RO runs, and both declare their `numkeys` keys.
+    Without `allow-cross-slot-keys`, `check_slot` refuses a call whose keys
+    leave the declared keys' slot.
+
+  A function with `allow-cross-slot-keys` that declares keys is affected.
+  On a one-node cluster with `b` set to `orig`,
+  `WASM.CALL get_args_cross 1 a b` (declares `a`, slot 15495, and GETs `b`,
+  slot 3300) replied nil on Redis 8.10.2 and `orig` on 7.2.16;
+  `WASM.CALL get_args_cross 0 b` replied `orig` on both. `docs/CLUSTER.md`
+  puts the change at 7.4; 7.4 itself was not run here. Writes from such a
+  function were not tried; per `docs/CLUSTER.md` they land in the declared
+  keys' slot.
+
+  The full `wasm/ci/check.sh` passed on Rust 1.94.0 and Redis 8.10.2:
+  - 612 tests: the host's 33 unit, 5 compiler and 36 library tests, the SDK's
+    105 unit, 263 integration and 148 doc tests, and 22 others;
+  - the four lockfiles were unchanged.
+
+  The unrelated Redis on this machine still held port 6641, so
+  `admission_code_counts_full_images_and_preserves_old_state_until_commit`
+  ran on 6941 for the check only (#218).
+
+  Not covered yet: `allow-cross-slot-keys` in `redis.wit` still says the
+  commands may use keys in any slot this node serves, and the cluster test
+  runs `get_args_cross` with `numkeys` 0 only.
+
 - 2026-11-05: merged SDK master `d84a510` into the branch as `dcd873e`. It
   brings SDK PR 233 for #231 (`d84a510`): while Redis pauses writes, every
   call from a post-notification job is refused, and `yield_now` from a job
