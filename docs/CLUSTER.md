@@ -28,19 +28,19 @@ To stay within the slot:
 
 - Declare every key the command takes, so that Redis rejects arguments in
   different slots with `CROSSSLOT` before the command runs.
-- Name keys the module creates with the declared key's hash tag, or with the
-  whole declared key as the tag when it has none (`{a}x` for `a`), so they
-  hash to its slot. `cluster::key_slot` computes a name's slot, and
-  `cluster::key_for_slot(cluster::key_slot(declared))` builds a name in the
-  declared key's slot.
+- Name keys the module creates so they hash to the declared key's slot: with
+  the declared key's hash tag, or, for a declared name without `{` or `}`,
+  with the whole name as the tag (`{a}x` for `a`). For any declared name,
+  `cluster::key_for_slot(cluster::key_slot(declared))` builds a name in its
+  slot, and `cluster::key_slot` checks a name.
 - In a notification callback, open only the notified key or keys that hash to
   its slot.
 
 On a cluster with more than one node, `call` also refuses a key that another
 node serves (the check at `module.c:7117` in 8.10.2): it returns
 `ERR RedisModule_Call failed: a key is in a slot this node does not serve`,
-and `call_ext` with `errors_as_replies` returns Redis's "Attempted to access a
-non local key in a cluster node". This is from the source; the reproduction
+and `call_ext` with `errors_as_replies` returns Redis's
+`ERR Attempted to access a non local key in a cluster node`. This is from the source; the reproduction
 below ran on one node, where every slot is local.
 
 ### Reproduction

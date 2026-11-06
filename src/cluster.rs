@@ -14,9 +14,11 @@
 //! clients do not find it. Only Redis builds with debug assertions check this.
 //! A command that declares no keys is not affected.
 //!
-//! A key named with the declared key's hash tag, or with the whole declared
-//! key as the tag when it has none, stays in its slot; [`key_slot`] checks a
-//! name and [`key_for_slot`] builds one. See
+//! A key named with the declared key's hash tag, or, for a declared name
+//! without `{` or `}`, with the whole name as the tag, stays in its slot.
+//! `key_for_slot(key_slot(declared))` builds a name in the slot of any
+//! declared name; [`key_slot`] checks a name and [`key_for_slot`] builds one.
+//! See
 //! `docs/CLUSTER.md` in the dependency source revision pinned by `Cargo.lock`
 //! for the reproduction.
 

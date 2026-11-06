@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Documentation of three server behaviors the SDK cannot guard against
+- Documentation of three server behaviors the SDK does not guard against
   (#225). [docs/CLUSTER.md](docs/CLUSTER.md): in cluster mode on Redis 7.4
   and later, keys that `open_key`, `open_key_writable` or `call` reach during
   a command that declares keys, from the command or a keyspace notification

@@ -79,10 +79,10 @@ prints `[additional info] Reading key 'user:secret-key'` on standard output.
 
 The SDK registers `AuxData::aux_save` as `aux_save2` as well as `aux_save`.
 Redis 7.2 and later call `aux_save2`, so an `aux_save` that writes nothing
-saves nothing for the type. If that call first gets a
-context with `RedisModule_GetContextFromIO` through `RdbWriter::as_ptr`, Redis
-returns before it frees the context: `rdbSaveSingleModuleAux` returns early
-when nothing was written and skips `moduleFreeContext`. The early return is at
+saves nothing for the type. If that call first gets a context with
+`RedisModule_GetContextFromIO` through `RdbWriter::as_ptr`, Redis returns
+before it frees the context: `rdbSaveSingleModuleAux` returns early when
+nothing was written and skips `moduleFreeContext`. The early return is at
 `rdb.c:1830` in 8.10.2, 1320 in 8.2.10, 1321 in 8.0.6, 1315 in 7.4.11 and 1250
 in 7.2.16. Redis 7.0.15 and earlier have no `aux_save2` path and free the
 context.
@@ -98,14 +98,15 @@ such as `SAVE`, the level stays raised for the life of the process, and:
   sends it;
 - the next `ThreadSafeContext::lock` or `try_lock` aborts Redis at
   `module.c:9180 'server.execution_nesting == 0'` (8.10.2; `module.c:8509` in
-  7.2.16). The assertion has no condition; the lock was reproduced without
-  AOF or replicas, and `try_lock` reaches it through
+  7.2.16). The assertion does not depend on AOF or replicas; the lock was
+  reproduced without them, and `try_lock` reaches the same assertion through
   `RM_ThreadSafeContextTryLock` (from the source).
 
 Other effects follow from the source and were not reproduced:
 `postExecutionUnitOperations` returns early while the level is raised
-(`server.c:3908` in 8.10.2), so post-notification jobs queued after the save
-do not run.
+(`server.c:3908` in 8.10.2), so jobs queued after the save with
+`add_post_notification_job` (`RedisModule_AddPostNotificationJob`) do not
+run.
 
 `FLUSHALL` with save points configured and `DEBUG RELOAD` also save in the
 server process (`db.c:1254` and `debug.c:639` in 8.10.2; not reproduced).

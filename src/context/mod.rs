@@ -1369,6 +1369,7 @@ impl RuntimeContext {
     }
 
     /// Opens a read-only key with flags, borrowing this context as in [`Self::open_key`].
+    ///
     /// The cluster slot rule on [`Self::open_key`] applies too.
     ///
     /// ```compile_fail,E0597
@@ -1417,6 +1418,7 @@ impl RuntimeContext {
     }
 
     /// Opens a writable key with flags, borrowing this context as in [`Self::open_key_writable`].
+    ///
     /// The cluster slot rule on [`Self::open_key_writable`] applies too.
     ///
     /// ```compile_fail,E0597
