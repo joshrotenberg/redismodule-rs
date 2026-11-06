@@ -176,6 +176,13 @@ For companion-module input checks and pure parser fuzzing outside Redis, see
 For shared state in INFO callbacks and the crash-report boundary, see
 [INFO handler state access](docs/INFO-HANDLERS.md) and its atomic counter example.
 
+For a native type's read errors during an RDB load, when to set
+`ModuleOptions::HANDLE_IO_ERRORS`, and an `aux_save` that gets a context and
+writes nothing, see [Native data types](docs/NATIVE-TYPES.md).
+
+For keys a command reaches outside its declared keys' slot in cluster mode, see
+[Cluster mode](docs/CLUSTER.md).
+
 For which module API functions have safe wrappers, which Redis version added
 each, and the missing ones ranked by evidence of need, see
 [Module API coverage](docs/API-COVERAGE.md).
@@ -400,6 +407,11 @@ SDK upgrade. An exhaustive compatibility fixture pins all 16,384 names.
 The first valid call builds a shared 48 KiB lookup table; subsequent calls
 allocate only the returned key. The `keys_pos` example
 provides `key_for_slot <slot>` to try it from a client.
+
+In cluster mode on Redis 7.4 and later, every key a command reaches must hash
+to the slot of the keys it declares, or reads miss and writes land in the
+declared slot. [Cluster mode](docs/CLUSTER.md) has the details and a
+reproduction.
 
 ## Upgrading a loaded module
 

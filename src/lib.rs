@@ -62,9 +62,10 @@
 //!
 //! The matching source checkout includes `README.md` and the `docs/` guides:
 //! `MIGRATING-3.0.md`, `COMPATIBILITY-FLOORS.md`, `CONFIGURATION.md`,
-//! `KEYSPACE-NOTIFICATIONS.md`, `TESTING-MODULES.md`, `SHIPPING-MODULES.md` and
-//! `UPGRADING-MODULES.md`. Open these from the dependency revision pinned by
-//! `Cargo.lock`; the README links the guides relative to that source tree.
+//! `KEYSPACE-NOTIFICATIONS.md`, `NATIVE-TYPES.md`, `CLUSTER.md`,
+//! `TESTING-MODULES.md`, `SHIPPING-MODULES.md` and `UPGRADING-MODULES.md`.
+//! Open these from the dependency revision pinned by `Cargo.lock`; the README
+//! links the guides relative to that source tree.
 //! This avoids substituting current master documentation for a pinned SDK.
 //!
 //! For unwrapped APIs, [`raw`] contains the native bindings. A raw context/key
