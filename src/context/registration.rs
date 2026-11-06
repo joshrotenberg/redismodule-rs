@@ -184,9 +184,14 @@ impl<'load> RegistrationContext<'load> {
 
     /// Sets module behavior options during initialization.
     ///
-    /// For example, `HANDLE_IO_ERRORS` enables handling persistence read errors
-    /// instead of terminating the server. Each call replaces the stored mask.
-    /// Redis stores bits it does not act on, such as
+    /// A module that registers native types should set
+    /// [`ModuleOptions::HANDLE_IO_ERRORS`]: without it, a short read during an
+    /// RDB load aborts Redis inside the read, and the abort message names the
+    /// key even with `hide-user-data-from-log yes`. With it, the read error
+    /// reaches the type's `rdb_load` and Redis fails the load instead.
+    ///
+    /// Each call replaces the stored mask, so pass every option in one call,
+    /// combined with `|`. Redis stores bits it does not act on, such as
     /// `REQUIRE_LOADED_KEYS_IN_RAM` on Redis OSS, and neither rejects nor
     /// reports them; `RedisModule_GetModuleOptionsAll` does not list that bit,
     /// so it cannot detect support.

@@ -61,6 +61,12 @@ pub trait NativeType: Sized + Send + 'static {
     /// corrupt: a `RESTORE` fails (Redis 6.0 exits instead), and Redis exits
     /// when an RDB file or a replica's full sync fails to load.
     ///
+    /// A read that runs out of data reaches this callback as an error only
+    /// when the module sets [`ModuleOptions::HANDLE_IO_ERRORS`]; without it,
+    /// Redis aborts inside the read.
+    ///
+    /// [`ModuleOptions::HANDLE_IO_ERRORS`]: crate::ModuleOptions::HANDLE_IO_ERRORS
+    ///
     /// # Errors
     ///
     /// Returns an error for data it cannot read.
@@ -135,6 +141,18 @@ pub trait AuxData: NativeType {
     /// Writes the type's data. Writing nothing saves nothing, on servers with
     /// `aux_save2` (Redis 7.2 and later), so the file still loads without the
     /// module. Like [`NativeType::rdb_save`], a panic ends the process.
+    ///
+    /// On those servers, a callback that gets a context with
+    /// `RedisModule_GetContextFromIO` through [`RdbWriter::as_ptr`] must write
+    /// at least one value. When nothing was written, Redis returns without
+    /// freeing that context, which also holds an execution unit open. After a
+    /// save in the server process, such as `SAVE`, Redis then aborts on the
+    /// next write while AOF is on or a replica is attached, and on the next
+    /// [`ThreadSafeContext::lock`](crate::ThreadSafeContext::lock) or
+    /// `try_lock`. A `BGSAVE` runs the callback in a child process and is not
+    /// affected. See
+    /// `docs/NATIVE-TYPES.md` in the dependency source revision pinned by
+    /// `Cargo.lock` for the versions and the reproduction.
     fn aux_save(io: &mut RdbWriter, when: AuxWhen);
 
     /// Reads what [`aux_save`](Self::aux_save) wrote. An error, or a panic,

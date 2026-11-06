@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Documentation of three server behaviors the SDK does not guard against
+  (#225). [docs/CLUSTER.md](docs/CLUSTER.md): in cluster mode on Redis 7.4
+  and later, keys that `open_key`, `open_key_writable` or `call` reach during
+  a command that declares keys, from the command or a keyspace notification
+  callback, must hash to the declared keys' slot, or reads miss and writes
+  land in that slot. [docs/NATIVE-TYPES.md](docs/NATIVE-TYPES.md): without
+  `ModuleOptions::HANDLE_IO_ERRORS`, a short read during an RDB load aborts
+  Redis and the abort message names the key under
+  `hide-user-data-from-log yes`; and on Redis 7.2 and later an `aux_save`
+  that calls `RedisModule_GetContextFromIO` through `RdbWriter::as_ptr` and
+  writes nothing leaves the context unreleased. After a `SAVE` that runs such
+  a callback, Redis aborts on the next write while AOF is on or a replica is
+  attached, and on the next thread-safe context lock. Rustdoc on
+  `ModuleOptions::HANDLE_IO_ERRORS`, `set_module_options`,
+  `NativeType::rdb_load`, `AuxData::aux_save`, `RdbReader`,
+  `RdbReader::as_ptr`, `RdbWriter::as_ptr`, the `cluster` module, the
+  `open_key` and `open_key_writable` methods, `call` and `call_ext` describes
+  each behavior where it applies.
+
 ### Changed
 
 - **Breaking:** `Context::replicate_verbatim` returns a `Status` instead of

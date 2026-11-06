@@ -98,6 +98,11 @@ policy: cluster modules need a separate design for slots, local ownership and
 output keys. This example rejects cluster mode rather than applying its
 database layout there.
 
+In cluster mode on Redis 7.4 and later, a notification callback that runs
+during a client's command that declares keys looks up every key in the slot of
+those keys. Open only the notified key or keys that hash to its slot; see
+[Cluster mode](CLUSTER.md).
+
 ## Calls during a write pause
 
 `CLIENT PAUSE ... WRITE`, `FAILOVER` and `CLUSTER FAILOVER` pause writes. A

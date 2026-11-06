@@ -1,4 +1,26 @@
 //! Cluster helpers that need no server.
+//!
+//! # Keys outside the running command's slot
+//!
+//! In cluster mode on Redis 7.4 and later, while a client runs a command that
+//! declares keys, Redis looks up every key in the slot of the declared keys,
+//! not in the key's own slot. A key that
+//! [`RuntimeContext::open_key`](crate::RuntimeContext::open_key),
+//! [`RuntimeContext::open_key_writable`](crate::RuntimeContext::open_key_writable)
+//! or [`RuntimeContext::call`](crate::RuntimeContext::call) reaches during
+//! such a command, from the command or from a keyspace notification callback
+//! it triggers, must hash to that slot. Otherwise a read misses a key stored
+//! in its own slot, and a write stores the key in the declared slot, where
+//! clients do not find it. Only Redis builds with debug assertions check this.
+//! A command that declares no keys is not affected.
+//!
+//! A key named with the declared key's hash tag, or, for a declared name
+//! without `{` or `}`, with the whole name as the tag, stays in its slot.
+//! `key_for_slot(key_slot(declared))` builds a name in the slot of any
+//! declared name; [`key_slot`] checks a name and [`key_for_slot`] builds one.
+//! See
+//! `docs/CLUSTER.md` in the dependency source revision pinned by `Cargo.lock`
+//! for the reproduction.
 
 /// The number of hash slots in a Redis cluster.
 pub const SLOTS: u16 = 16384;
