@@ -146,6 +146,11 @@ impl RedisModuleIO {
 /// and [`AuxData::aux_load`]. It has no writes: during a `RESTORE` the IO
 /// writes into the command's own argument, which would corrupt it.
 ///
+/// A read that runs out of data returns an error only when the module sets
+/// [`ModuleOptions::HANDLE_IO_ERRORS`]; without it, Redis aborts inside the
+/// read.
+///
+/// [`ModuleOptions::HANDLE_IO_ERRORS`]: crate::ModuleOptions::HANDLE_IO_ERRORS
 /// [`NativeType::rdb_load`]: crate::native_types::NativeType::rdb_load
 /// [`AuxData::aux_load`]: crate::native_types::AuxData::aux_load
 pub struct RdbReader {
@@ -164,6 +169,12 @@ impl RdbReader {
     }
 
     /// The raw IO pointer, for raw APIs such as [`crate::logging::log_io_error`].
+    ///
+    /// With [`ModuleOptions::HANDLE_IO_ERRORS`] set, a raw read through this
+    /// pointer that fails returns 0 or NULL; check
+    /// [`is_io_error`](crate::raw::is_io_error) before using the result.
+    ///
+    /// [`ModuleOptions::HANDLE_IO_ERRORS`]: crate::ModuleOptions::HANDLE_IO_ERRORS
     pub fn as_ptr(&self) -> *mut raw::RedisModuleIO {
         self.io.as_ptr()
     }
@@ -248,6 +259,13 @@ impl RdbWriter {
     }
 
     /// The raw IO pointer, for raw APIs such as [`crate::logging::log_io_error`].
+    ///
+    /// In [`AuxData::aux_save`] on Redis 7.2 and later, a callback that passes
+    /// it to `RedisModule_GetContextFromIO` must write at least one value:
+    /// when nothing was written, Redis does not free that context. See
+    /// [`AuxData::aux_save`] for the aborts that follow.
+    ///
+    /// [`AuxData::aux_save`]: crate::native_types::AuxData::aux_save
     pub fn as_ptr(&self) -> *mut raw::RedisModuleIO {
         self.io.as_ptr()
     }
