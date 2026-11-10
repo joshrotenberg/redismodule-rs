@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- SDK command callbacks refuse duplicate complete replies through the safe
+  `Context::reply*` methods (#224 prototype). A returned value or error after
+  a direct reply is dropped and logged, and a later panic is logged without
+  appending an error reply. `NoReply` and blocked-worker ownership retain their
+  contracts. Raw native replies and partial serialization are not counted;
+  see [docs/COMMAND-REPLIES.md](docs/COMMAND-REPLIES.md).
+
 - `MODULE UNLOAD` no longer stops the server when an ACL rule names one of the
   module's commands (#221). From Redis 7.2 the unload reapplies every user's
   command rules, asserts that each one still applies, and aborts at `acl.c`

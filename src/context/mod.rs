@@ -26,6 +26,7 @@ use self::call_reply::{CallResult, ErrorReply, PromiseCallReply, create_promise_
 use self::thread_safe::RedisLockIndicator;
 
 mod call_user;
+pub(crate) mod command_reply;
 pub use call_user::CallUserScope;
 pub(crate) mod post_notification;
 mod registration;
@@ -852,6 +853,8 @@ impl Context {
     /// Returns an error, without replying, if `result` holds no reply (such as
     /// the result of a dry run), if Redis cannot send it to this client (RESP3
     /// types to a RESP2 client), or if the running Redis lacks the API.
+    /// Also refuses a second complete safe reply in an SDK command callback;
+    /// see [`Self::reply`]. A failed forwarding attempt consumes no reply.
     pub fn reply_with_call_reply(&self, result: &CallResult) -> Result<(), RedisError> {
         let reply_with_call_reply =
             unsafe { crate::__available_api!(RedisModule_ReplyWithCallReply) };
@@ -859,12 +862,17 @@ impl Context {
             Ok(reply) => reply.get_raw(),
             Err(ErrorReply::RedisError(error)) => Some(error.get_raw()),
             Err(ErrorReply::Message(message)) => {
-                self.reply_error_string(message);
-                return Ok(());
+                return match self.reply_error_string(message) {
+                    raw::Status::Ok => Ok(()),
+                    raw::Status::Err => Err(RedisError::Str(command_reply::ALREADY_REPLIED)),
+                };
             }
         };
         let reply = reply.ok_or(RedisError::Str("ERR the call result holds no reply"))?;
-        if unsafe { reply_with_call_reply(self.ctx, reply) } != raw::REDISMODULE_OK as c_int {
+        let write = command_reply::begin(self.ctx)?;
+        let status = unsafe { reply_with_call_reply(self.ctx, reply) }.into();
+        write.finish(status);
+        if status != raw::Status::Ok {
             return Err(RedisError::Str(
                 "ERR Redis cannot send this reply to the client, for example RESP3 types to a RESP2 client",
             ));
@@ -951,24 +959,48 @@ impl Context {
         Ok(())
     }
 
-    /// Sends a reply to this invocation's client.
+    /// Sends a reply to this invocation's client. A second complete safe reply
+    /// is refused with [`Status::Err`] and a warning; see [`Self::reply`].
     pub fn reply_simple_string(&self, s: &str) -> raw::Status {
-        ReplyContext { ctx: self.ctx }.reply_simple_string(s)
+        command_reply::write(self.ctx, || {
+            ReplyContext { ctx: self.ctx }.reply_simple_string(s)
+        })
     }
 
-    /// Sends a reply to this invocation's client.
+    /// Sends an error to this invocation's client, subject to [`Self::reply`]'s
+    /// duplicate-reply check.
     pub fn reply_error_string(&self, s: &str) -> raw::Status {
-        ReplyContext { ctx: self.ctx }.reply_error_string(s)
+        command_reply::write(self.ctx, || {
+            ReplyContext { ctx: self.ctx }.reply_error_string(s)
+        })
     }
 
-    /// Sends a reply to this invocation's client.
+    /// Sends a value to this invocation's client, subject to [`Self::reply`]'s
+    /// duplicate-reply check.
     pub fn reply_with_key(&self, result: RedisValueKey) -> raw::Status {
-        ReplyContext { ctx: self.ctx }.reply_with_key(result)
+        command_reply::write(self.ctx, || {
+            ReplyContext { ctx: self.ctx }.reply_with_key(result)
+        })
     }
 
     /// Sends a reply to this invocation's client.
+    ///
+    /// Inside an SDK command callback, a second complete reply through a safe
+    /// `Context::reply*` method is refused with [`Status::Err`] and logged. This
+    /// also drops a handler's returned value or error after a direct reply.
+    /// Top-level [`RedisValue::NoReply`] sends nothing and consumes no reply.
+    ///
+    /// This prototype counts whole safe replies, not partial serialization or
+    /// raw `RedisModule_ReplyWith*` calls. Do not mix a raw aggregate header
+    /// with safe element writes: each safe call is treated as a whole reply.
+    /// After successfully blocking a client, keep returning `NoReply`; this
+    /// check does not coordinate with a later worker's reply. Key-blocking
+    /// callbacks retain their separate [`Self::key_blocking_reply`] writer.
     pub fn reply(&self, result: RedisResult) -> raw::Status {
-        ReplyContext { ctx: self.ctx }.reply(result)
+        if matches!(&result, Ok(RedisValue::NoReply)) {
+            return raw::Status::Ok;
+        }
+        command_reply::write(self.ctx, || ReplyContext { ctx: self.ctx }.reply(result))
     }
 }
 
