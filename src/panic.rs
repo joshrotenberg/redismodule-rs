@@ -95,8 +95,9 @@ pub(crate) fn current_command() -> u64 {
 /// Runs a command callback. If it panics, replies to the client with
 /// `ERR command panicked: <message>` and returns `REDISMODULE_OK`.
 ///
-/// When the panic happens after part of the reply was written, for example
-/// inside an array, the error reply is added after that part.
+/// After a complete safe command reply, logs the panic without appending an
+/// error. Partial serialization and raw native reply writes are not counted;
+/// a panic there still appends its error after the part already written.
 ///
 /// # Safety
 ///
@@ -106,7 +107,15 @@ pub unsafe fn run_command(ctx: *mut raw::RedisModuleCtx, command: impl FnOnce() 
     let previous = CURRENT_COMMAND.replace(NEXT_COMMAND.fetch_add(1, Ordering::Relaxed));
     // A nested command records its own released blocked clients.
     let released = crate::context::blocked::replace_released_unreplied(0);
+    // Keep the frame alive through panic recovery, after the command's own
+    // stack has unwound. Linking borrows it so its address remains stable.
+    let replies = crate::context::command_reply::Frame::new(ctx);
+    let _replies = replies.link();
     let status = catch_panic(command).unwrap_or_else(|message| {
+        if replies.complete() {
+            log_panic("command", &message);
+            return raw::REDISMODULE_OK as c_int;
+        }
         let reply = to_c_string(&format!("ERR command panicked: {message}"));
         // SAFETY: ctx is the context Redis passed to this command.
         unsafe {
