@@ -13,6 +13,12 @@
 //! `may-replicate`. Redis postpones those during a write pause, and in a
 //! transaction that starts the pause itself the SDK lets them replicate, as
 //! `replicate.write` shows.
+//!
+//! The other order, replicating and then pausing, aborts Redis too: it
+//! propagates the queued replication after the command returns, during the
+//! pause. `replicate.then_call` queues replication and then makes a call;
+//! outside a transaction the SDK refuses a `CLIENT PAUSE` or `FAILOVER` call,
+//! which would start a pause.
 use redis_module::{
     CallOptionsBuilder, CallResult, Context, EventContext, NextArg, RedisError, RedisGILGuard,
     RedisResult, RedisString, RedisValue, Status, ThreadSafeContext, redis_module,
@@ -135,6 +141,40 @@ fn replicate_forward(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ctx.call(command.try_as_str()?, args.as_slice())
 }
 
+/// `replicate.then_call verbatim|call|open|none key command [arg ...]`: queues
+/// replication, then runs the command through `call` and passes its reply on.
+/// `verbatim` replicates this command with `replicate_verbatim`, `call` sets
+/// the key through a replicated `call_ext`, `open` opens the key, which
+/// deletes it and queues a `DEL` if it expired, and `none` queues nothing.
+/// Redis propagates what was queued after the command returns.
+fn replicate_then_call(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let how = args.next_string()?;
+    let key = args.next_arg()?;
+    let command = args.next_string()?;
+    let args: Vec<RedisString> = args.collect();
+    match how.as_str() {
+        "verbatim" => {
+            if ctx.replicate_verbatim() == Status::Err {
+                return Err(RedisError::Str("ERR replicate_verbatim was refused"));
+            }
+        }
+        "call" => {
+            let options = CallOptionsBuilder::new().replicate().build();
+            let value = ctx.create_string("value");
+            let set: CallResult = ctx.call_ext("SET", &options, &[&key, &value]);
+            set?;
+        }
+        "open" => drop(ctx.open_key(&key)),
+        "none" => {}
+        _ => {
+            return Err(RedisError::Str("ERR expected verbatim, call, open or none"));
+        }
+    }
+    let args: Vec<&RedisString> = args.iter().collect();
+    ctx.call(&command, args.as_slice())
+}
+
 /// `replicate.timer command [arg ...]`: replicates the command from a timer
 /// callback. `replicate.result timer` reports the outcome.
 fn replicate_timer(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -221,6 +261,7 @@ redis_module! {
         ["replicate.call_to", replicate_call_to, "readonly", 0, 0, 0, ""],
         ["replicate.write", replicate_write, "write", 2, 2, 1, ""],
         ["replicate.forward", replicate_forward, "readonly", 0, 0, 0, ""],
+        ["replicate.then_call", replicate_then_call, "readonly", 0, 0, 0, ""],
         ["replicate.timer", replicate_timer, "readonly", 0, 0, 0, ""],
         ["replicate.event", replicate_event, "readonly", 0, 0, 0, ""],
         ["replicate.worker", replicate_worker, "readonly", 0, 0, 0, ""],

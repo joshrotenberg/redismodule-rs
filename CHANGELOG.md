@@ -97,6 +97,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that of `yield_now` that replication queued before a yield cannot be
   refused once a pause starts during it.
 
+- A module call that starts a replica pause no longer aborts the server
+  (#235). Redis propagates what an execution unit queued after the unit
+  ends, and sets the exemption for a pause only inside `EXEC`. A
+  `CLIENT PAUSE` through `call` after `replicate_verbatim` or a replicated
+  `call_ext`, or after opening an expired key, which queues a `DEL`, made
+  Redis abort at the `propagateNow` assertion (`server.c:3751` on 8.10.2,
+  `server.c:3254` on 7.2.16, and at `propagate`, `server.c:3609`, on 6.2.24,
+  except for the expired key, which 6.2 propagates at once). `FAILOVER`
+  through `call`, and `SHUTDOWN` through `call_blocking` while a replica
+  lags, abort the same way. Outside a transaction, `call`, `call_ext`,
+  `call_blocking` and the SDK helpers built on them now return
+  `ERR calls cannot pause replication outside a transaction` without running
+  `CLIENT PAUSE` in any mode or `FAILOVER` other than `FAILOVER ABORT`, and
+  `call_blocking` returns it for `SHUTDOWN` without `NOW` or `ABORT`, matching
+  names case-insensitively, from every context. A call that cannot block gets
+  Redis's own error for that `SHUTDOWN` on 7.0 and later, and 6.2 shuts down
+  without pausing. The SDK cannot see what is queued, so it refuses when
+  nothing is queued too, and on Redis 6.0, which does not abort. Inside
+  `EXEC` the call runs. The `replicate` example's `replicate.then_call` and
+  the `call` example's `call.blocking_after_set` queue replication and then
+  make a call.
+
 - `RedisString::parse_unsigned_integer`, and with it `NextArg::next_u64` and
   `ArgCursor::next_u64`, accept the whole `u64` range (#222). They parsed with
   the signed parser, so 9223372036854775808 through 18446744073709551615 got

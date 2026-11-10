@@ -68,6 +68,38 @@ const REPLICATION_PAUSED_ERROR: &str =
 const JOB_CALL_PAUSED_ERROR: &str =
     "ERR post-notification jobs cannot call commands while Redis pauses replication";
 
+/// The error a call to a command that would pause replication returns outside
+/// a transaction.
+const PAUSE_OUTSIDE_TRANSACTION_ERROR: &str =
+    "ERR calls cannot pause replication outside a transaction";
+
+/// True for a call that can start a replica pause (#235): `CLIENT PAUSE` in
+/// any mode, `FAILOVER` other than `FAILOVER ABORT`, and from a `blocking`
+/// call `SHUTDOWN` without `NOW` or `ABORT`, which pauses writes while it
+/// waits for lagging replicas. A call that cannot block gets an error from
+/// Redis 7.0 and later for that `SHUTDOWN`, and Redis 6.2 and earlier shut
+/// down without pausing. Names match case-insensitively. `args` is read only
+/// for those commands.
+fn pauses_replication<'a>(
+    command: &str,
+    blocking: bool,
+    mut args: impl Iterator<Item = &'a [u8]>,
+) -> bool {
+    let command = command.as_bytes();
+    if command.eq_ignore_ascii_case(b"CLIENT") {
+        args.next()
+            .is_some_and(|sub| sub.eq_ignore_ascii_case(b"PAUSE"))
+    } else if command.eq_ignore_ascii_case(b"FAILOVER") {
+        !args
+            .next()
+            .is_some_and(|arg| arg.eq_ignore_ascii_case(b"ABORT"))
+    } else if blocking && command.eq_ignore_ascii_case(b"SHUTDOWN") {
+        !args.any(|arg| arg.eq_ignore_ascii_case(b"NOW") || arg.eq_ignore_ascii_case(b"ABORT"))
+    } else {
+        false
+    }
+}
+
 #[derive(Clone)]
 pub struct CallOptions {
     options: CString,
@@ -1166,10 +1198,33 @@ impl RuntimeContext {
         // Redis would abort on the replicated command.
         // SAFETY: every caller passes a NUL-terminated format, raw::FMT or the
         // options of a CallOptions or BlockingCallOptions it borrows.
-        let replicated = unsafe { CStr::from_ptr(fmt) }.to_bytes().contains(&b'!');
+        let fmt_flags = unsafe { CStr::from_ptr(fmt) }.to_bytes();
+        let replicated = fmt_flags.contains(&b'!');
         if replicated && self.replication_refused() {
             return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
                 REPLICATION_PAUSED_ERROR.into(),
+            ))));
+        }
+        let mut call_args: StrCallArgs = args.into();
+        // Redis propagates what the execution unit queued, its own lazy-expire
+        // deletions included, after the unit ends. A replica pause that starts
+        // before then outside EXEC makes Redis abort at that propagation; only
+        // a pause inside EXEC exempts the rest of the transaction (#235). The
+        // SDK cannot see what is queued, so it refuses every such call outside
+        // a transaction.
+        //
+        // SAFETY: each argument is a live string that the caller's arguments
+        // or call_args own until the call returns.
+        let arg_bytes = call_args
+            .args_mut()
+            .iter()
+            .map(|&arg| unsafe { RedisString::string_as_slice(arg) });
+        let blocking = fmt_flags.contains(&b'K');
+        if pauses_replication(command, blocking, arg_bytes)
+            && !self.get_flags().contains(ContextFlags::MULTI)
+        {
+            return R::from(PromiseCallReply::Resolved(Err(ErrorReply::Message(
+                PAUSE_OUTSIDE_TRANSACTION_ERROR.into(),
             ))));
         }
         // The command can delete, replace or move any key's value.
@@ -1186,7 +1241,6 @@ impl RuntimeContext {
                 ))));
             }
         };
-        let mut call_args: StrCallArgs = args.into();
         let final_args = call_args.args_mut();
 
         // RedisModule_Call returns null both for a dry run that would succeed
@@ -1223,6 +1277,21 @@ impl RuntimeContext {
     /// command while Redis pauses replication; see
     /// [`EventContext::add_post_notification_job`].
     ///
+    /// Outside a transaction, `CLIENT PAUSE` in any mode and `FAILOVER` other
+    /// than `FAILOVER ABORT` return
+    /// `ERR calls cannot pause replication outside a transaction` without
+    /// running, from every context. Each starts a replica pause, and Redis
+    /// 6.2 and later abort when they then propagate replication queued
+    /// earlier in the same command, timer, event or worker. That includes
+    /// Redis's own deletion of an expired key the module opened, on 7.0 and
+    /// later, so the SDK cannot tell whether anything is queued and refuses
+    /// every such call. Names match case-insensitively; other `CLIENT`
+    /// subcommands, `CLIENT UNPAUSE` included, run. Inside `EXEC` the call
+    /// runs, because Redis replicates the rest of a transaction that starts a
+    /// pause. Redis 6.0 does not abort, and the SDK refuses there too. A
+    /// blocking call also refuses a `SHUTDOWN` that can wait for replicas; see
+    /// [`EventContext::call_blocking`].
+    ///
     /// On Redis 6.2, a command registered read-only whose call runs a write
     /// command inside `MULTI` during an earlier write pause aborts Redis:
     /// 6.2 propagates `EXEC` once the transaction changed data. The SDK cannot
@@ -1247,7 +1316,8 @@ impl RuntimeContext {
     /// the same transaction exception as [`Self::replicate`]; see
     /// [`Self::avoid_replication_traffic`]. From a post-notification job every
     /// call returns an error then, with or without the flag; see
-    /// [`EventContext::add_post_notification_job`]. The Redis 6.2 limit and
+    /// [`EventContext::add_post_notification_job`]. The refusal of calls that
+    /// would pause replication outside a transaction, the Redis 6.2 limit and
     /// the cluster slot rule that [`Self::call`] describes apply here too.
     ///
     /// The reply borrows this context. Redis 6.0 to 7.0 store the context in
@@ -1905,6 +1975,14 @@ impl RuntimeContext {
         /// post-notification job's calls are refused during the pause even
         /// without a replicate flag; see
         /// [`EventContext::add_post_notification_job`].
+        ///
+        /// A module call cannot start such a pause outside a transaction:
+        /// [`Self::call`], [`Self::call_ext`] and `call_blocking` refuse
+        /// `CLIENT PAUSE` and `FAILOVER` there, and `call_blocking` a
+        /// `SHUTDOWN` that can wait for replicas, because Redis would abort
+        /// when it propagates the replication already queued; see
+        /// [`Self::call`]. Send the pause from a client, or from a command
+        /// inside `MULTI`/`EXEC`.
         pub fn avoid_replication_traffic(&self) -> bool {
             unsafe { RedisModule_AvoidReplicaTraffic() == 1 }
         }
@@ -2066,7 +2144,12 @@ impl EventContext {
     /// also fails, without running the command, while Redis pauses
     /// replication, as [`RuntimeContext::call_ext`] does. From a
     /// post-notification job every call fails then, with or without the flag;
-    /// see [`Self::add_post_notification_job`].
+    /// see [`Self::add_post_notification_job`]. Outside a transaction it
+    /// refuses the calls that would pause replication, as
+    /// [`RuntimeContext::call`] describes, and `SHUTDOWN` without `NOW` or
+    /// `ABORT`: a blocking call can wait for that shutdown, which pauses
+    /// writes while it waits for lagging replicas. A call that cannot block
+    /// gets an error from Redis for it instead.
     #[cfg(any(
         feature = "min-redis-compatibility-version-8-0",
         feature = "min-redis-compatibility-version-7-4",
@@ -2143,6 +2226,10 @@ impl EventContext {
     /// [`Self::yield_now`] processes events and serves no clients during a
     /// pause.
     ///
+    /// Jobs run outside `EXEC`, so a job's call that would start a pause,
+    /// such as `CLIENT PAUSE`, returns an error whether or not a pause is
+    /// active; see [`RuntimeContext::call`].
+    ///
     /// See `docs/KEYSPACE-NOTIFICATIONS.md` in the dependency source revision
     /// pinned by `Cargo.lock` for replication, role/loading gates, database
     /// scopes and teardown; the source README links the matching guide.
@@ -2176,7 +2263,9 @@ impl EventContext {
     /// transaction. Read keys with [`RuntimeContext::open_key`], which runs no
     /// command, or copy the data before queuing the job. For the same reason a
     /// job's [`Self::yield_now`] processes events and serves no clients during
-    /// a pause.
+    /// a pause. A job's call that would start a pause, such as
+    /// `CLIENT PAUSE`, returns an error whether or not a pause is active; see
+    /// [`RuntimeContext::call`].
     ///
     /// See `docs/KEYSPACE-NOTIFICATIONS.md` in the dependency source revision
     /// pinned by `Cargo.lock`; the source README links the matching guide.
@@ -3187,6 +3276,69 @@ mod call_failure_tests {
                 .unwrap()
                 .starts_with("ERR RedisModule_Call failed: ")
         );
+    }
+}
+
+#[cfg(test)]
+mod pauses_replication_tests {
+    use super::pauses_replication;
+
+    fn pauses(command: &str, args: &[&str]) -> bool {
+        pauses_replication(command, false, args.iter().map(|arg| arg.as_bytes()))
+    }
+
+    fn pauses_blocking(command: &str, args: &[&str]) -> bool {
+        pauses_replication(command, true, args.iter().map(|arg| arg.as_bytes()))
+    }
+
+    #[test]
+    fn client_pause_in_every_mode_and_case() {
+        for args in [
+            &["PAUSE", "1000", "WRITE"][..],
+            &["PAUSE", "1000", "ALL"],
+            &["PAUSE", "1000"],
+            &["pause", "1000", "write"],
+            &["Pause"],
+        ] {
+            assert!(pauses("CLIENT", args), "{args:?}");
+            assert!(pauses("client", args), "{args:?}");
+        }
+        assert!(pauses_blocking("CLIENT", &["PAUSE", "1000"]));
+        for args in [&["UNPAUSE"][..], &["LIST"], &["SETNAME", "pause"], &[]] {
+            assert!(!pauses("CLIENT", args), "{args:?}");
+            assert!(!pauses_blocking("CLIENT", args), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn failover_unless_aborted() {
+        for args in [&[][..], &["TO", "127.0.0.1", "6380"], &["TIMEOUT", "10"]] {
+            assert!(pauses("FAILOVER", args), "{args:?}");
+            assert!(pauses("failover", args), "{args:?}");
+        }
+        assert!(pauses_blocking("FAILOVER", &[]));
+        assert!(!pauses("FAILOVER", &["ABORT"]));
+        assert!(!pauses("failover", &["abort"]));
+    }
+
+    #[test]
+    fn blocking_shutdown_unless_now_or_aborted() {
+        for args in [&[][..], &["NOSAVE"], &["SAVE", "FORCE"]] {
+            assert!(pauses_blocking("SHUTDOWN", args), "{args:?}");
+            assert!(pauses_blocking("shutdown", args), "{args:?}");
+            assert!(!pauses("SHUTDOWN", args), "{args:?}");
+        }
+        for args in [&["NOW"][..], &["nosave", "now"], &["ABORT"], &["abort"]] {
+            assert!(!pauses_blocking("SHUTDOWN", args), "{args:?}");
+        }
+    }
+
+    #[test]
+    fn other_commands_never_pause() {
+        for command in ["SET", "CLIENTS", "PAUSE", "CLUSTER", "DEBUG"] {
+            assert!(!pauses(command, &["PAUSE", "1000"]), "{command}");
+            assert!(!pauses_blocking(command, &["PAUSE", "1000"]), "{command}");
+        }
     }
 }
 

@@ -1094,6 +1094,18 @@ During a pause a job's `yield_now` processes events and serves no clients,
 even with `YieldMode::Clients`: a client command run during the yield, such
 as a replica's `REPLCONF ACK`, would make Redis abort the same way.
 
+Outside a transaction a call can no longer start a pause (#235): `call`,
+`call_ext` and `call_blocking` return
+`ERR calls cannot pause replication outside a transaction` for
+`CLIENT PAUSE` in any mode and `FAILOVER` other than `FAILOVER ABORT`, and
+`call_blocking` for `SHUTDOWN` without `NOW` or `ABORT`, without running the
+command. Redis 6.2 and later abort when replication queued earlier in the same command, timer,
+event or worker propagates during the pause, and from 7.0 that includes
+deleting an expired key the module opened. A module that paused clients this
+way gets the error now, also when nothing was queued and on Redis 6.0; send the
+pause from a client, or call it from a command inside `MULTI`/`EXEC`.
+`CLIENT UNPAUSE` and other `CLIENT` subcommands still run.
+
 ### Missing optional APIs on older Redis 6.0 servers
 
 `ThreadSafeContext::try_lock` and `MODULE_CONTEXT.try_lock()` return `None`

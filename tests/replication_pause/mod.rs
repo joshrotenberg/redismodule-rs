@@ -2,12 +2,15 @@
 //! when a module replicates during the pause; the SDK refuses instead, except
 //! for a `write` or `may-replicate` command in the transaction that starts the
 //! pause, which Redis replicates. Calls from post-notification jobs are refused
-//! during a pause with or without the replicate flag (#231).
+//! during a pause with or without the replicate flag (#231). Outside a
+//! transaction, calls that would start a pause are refused, because Redis
+//! aborts when it propagates replication the command queued before (#235).
 //!
 //! Each test attaches a replica, so the primary has a replication backlog and
 //! Redis 7.0 and later propagate (6.2 propagates without one), then pauses
-//! writes on the primary. Redis 6.0 has no `CLIENT PAUSE WRITE` or
-//! `CLIENT UNPAUSE`, and the tests skip there.
+//! writes on the primary or tries to. Redis 6.0 has no `CLIENT PAUSE WRITE` or
+//! `CLIENT UNPAUSE`, and the tests skip there, except two #235 tests that need
+//! neither.
 use super::utils::{TestConnection, wait_until};
 use anyhow::{Context, Result, ensure};
 use redis::Value;
@@ -708,4 +711,240 @@ fn test_replication_pause_lets_job_yields_serve_clients_outside_a_pause() -> Res
     let counts: Vec<i64> = redis::cmd("notify_stream.probe_counts").query(&mut primary)?;
     assert_eq!(counts, [1, 1], "the job ran once");
     Ok(())
+}
+
+/// The error a call that would pause replication returns outside a
+/// transaction (#235).
+const PAUSE_REFUSED: &str = "ERR calls cannot pause replication outside a transaction";
+
+/// Runs a call that would pause replication and checks that the SDK refused
+/// it and that the server is still up. Without the refusal Redis aborts at the
+/// end of the command and the query fails with a connection error.
+fn assert_pause_refused(primary: &mut TestConnection, call: &mut redis::Cmd) -> Result<()> {
+    let error = call
+        .query::<Value>(primary)
+        .expect_err("the pausing call ran");
+    assert_eq!(error.code(), Some("ERR"), "{error}");
+    assert!(
+        error.to_string().contains(&PAUSE_REFUSED["ERR ".len()..]),
+        "{error}"
+    );
+    survived(primary)
+}
+
+/// [`assert_pause_refused`] for the `replicate` example, which also reports
+/// that Redis did not pause.
+fn assert_replicate_pause_refused(
+    primary: &mut TestConnection,
+    call: &mut redis::Cmd,
+) -> Result<()> {
+    assert_pause_refused(primary, call)?;
+    assert_eq!(paused(primary)?, 0);
+    Ok(())
+}
+
+/// Checks that the server answers and logged no assertion.
+fn survived(primary: &mut TestConnection) -> Result<()> {
+    assert_eq!(redis::cmd("PING").query::<String>(primary)?, "PONG");
+    let log = primary.server_log()?;
+    ensure!(!log.contains("ASSERTION FAILED"), "server log: {log}");
+    Ok(())
+}
+
+/// `CLIENT PAUSE` through `call` after `replicate_verbatim` queued the
+/// command's own replication. Redis 6.2 and later abort when they propagate
+/// it during the replica pause, in each mode; `ALL` is the default. Redis 6.0
+/// has no modes and does not abort, and the SDK refuses there too.
+#[test]
+fn test_replication_pause_refuses_client_pause_after_replicate_verbatim() -> Result<()> {
+    let mut primary = TestConnection::new("replicate");
+    let modes: &[&[&str]] = if server_version(&mut primary)? >= (6, 2) {
+        &[&["WRITE"], &["all"], &[]]
+    } else {
+        &[&[]]
+    };
+    let mut replica = primary.replica()?;
+    for mode in modes {
+        assert_replicate_pause_refused(
+            &mut primary,
+            redis::cmd("replicate.then_call")
+                .arg(&["verbatim", "key", "client", "PAUSE", "20000"])
+                .arg(*mode),
+        )?;
+    }
+    acknowledge(&mut primary, &replica)?;
+    // The replica ran each command that the primary refused to pause in,
+    // and refused the pause too.
+    assert_eq!(
+        command_calls(&mut replica, "replicate.then_call")?,
+        modes.len() as u64
+    );
+    survived(&mut replica)
+}
+
+/// The same after a replicated `call_ext`.
+#[test]
+fn test_replication_pause_refuses_client_pause_after_a_replicated_call() -> Result<()> {
+    let Some((mut primary, mut replica)) = primary_with_replica("replicate")? else {
+        return Ok(());
+    };
+    assert_replicate_pause_refused(
+        &mut primary,
+        redis::cmd("replicate.then_call")
+            .arg(&["call", "key", "CLIENT", "PAUSE", "20000", "WRITE"]),
+    )?;
+    acknowledge(&mut primary, &replica)?;
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("key")
+            .query::<Option<String>>(&mut replica)?
+            .as_deref(),
+        Some("value")
+    );
+    Ok(())
+}
+
+/// Opening an expired key deletes it and queues a `DEL` for propagation, which
+/// the module neither asked for nor can see. Redis 7.0 and later abort when
+/// they propagate it during the pause; 6.2 propagates the deletion at once.
+/// The SDK refuses on every version, so it refuses a pause with nothing
+/// queued too.
+#[test]
+fn test_replication_pause_refuses_client_pause_after_a_lazy_expire() -> Result<()> {
+    let Some((mut primary, mut replica)) = primary_with_replica("replicate")? else {
+        return Ok(());
+    };
+    redis::cmd("DEBUG")
+        .arg(&["SET-ACTIVE-EXPIRE", "0"])
+        .query::<()>(&mut primary)?;
+    redis::cmd("SET")
+        .arg(&["expiring", "value", "PX", "1"])
+        .query::<()>(&mut primary)?;
+    acknowledge(&mut primary, &replica)?;
+    // Replicas keep expired keys until the primary deletes them.
+    assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut replica)?, 2);
+    std::thread::sleep(Duration::from_millis(50));
+    assert_replicate_pause_refused(
+        &mut primary,
+        redis::cmd("replicate.then_call")
+            .arg(&["open", "expiring", "CLIENT", "PAUSE", "20000", "WRITE"]),
+    )?;
+    acknowledge(&mut primary, &replica)?;
+    // The deletion reached the replica, which keeps only the marker key.
+    assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut replica)?, 1);
+
+    assert_replicate_pause_refused(
+        &mut primary,
+        redis::cmd("replicate.then_call")
+            .arg(&["none", "key", "CLIENT", "PAUSE", "20000", "WRITE"]),
+    )
+}
+
+/// `FAILOVER` pauses writes when it starts. `FAILOVER ABORT` does not, and
+/// reaches Redis.
+#[test]
+fn test_replication_pause_refuses_failover_after_replicate_verbatim() -> Result<()> {
+    let Some((mut primary, _replica)) = primary_with_replica("replicate")? else {
+        return Ok(());
+    };
+    assert_replicate_pause_refused(
+        &mut primary,
+        redis::cmd("replicate.then_call").arg(&["verbatim", "key", "FAILOVER"]),
+    )?;
+    let error = redis::cmd("replicate.then_call")
+        .arg(&["none", "key", "failover", "abort"])
+        .query::<Value>(&mut primary)
+        .expect_err("no failover is in progress");
+    assert!(
+        error.to_string().contains("No failover in progress"),
+        "{error}"
+    );
+    let info: String = redis::cmd("INFO").arg("replication").query(&mut primary)?;
+    assert!(info.lines().any(|line| line == "role:master"), "{info}");
+    survived(&mut primary)
+}
+
+/// Other `CLIENT` subcommands reach Redis.
+#[test]
+fn test_replication_pause_lets_calls_run_other_client_subcommands() -> Result<()> {
+    let mut primary = TestConnection::new("replicate");
+    let reply: Value = redis::cmd("replicate.then_call")
+        .arg(&["verbatim", "key", "CLIENT", "GETNAME"])
+        .query(&mut primary)?;
+    assert_eq!(reply, Value::Nil);
+    if server_version(&mut primary)? >= (6, 2) {
+        redis::cmd("replicate.then_call")
+            .arg(&["verbatim", "key", "CLIENT", "UNPAUSE"])
+            .query::<()>(&mut primary)?;
+    }
+    survived(&mut primary)
+}
+
+/// Inside `EXEC` Redis replicates the rest of the transaction during a pause
+/// that the transaction started, so a call there may pause.
+#[test]
+fn test_replication_pause_lets_calls_pause_inside_a_transaction() -> Result<()> {
+    let Some((mut primary, mut replica)) = primary_with_replica("replicate")? else {
+        return Ok(());
+    };
+    let ((), ()): ((), ()) = redis::pipe()
+        .atomic()
+        .cmd("replicate.then_call")
+        .arg(&["call", "key", "CLIENT", "PAUSE", "20000", "WRITE"])
+        .cmd("SET")
+        .arg(&["after", "value"])
+        .query(&mut primary)?;
+    assert_eq!(paused(&mut primary)?, 1);
+    unpause(&mut primary)?;
+    acknowledge(&mut primary, &replica)?;
+    for key in ["key", "after"] {
+        assert_eq!(
+            redis::cmd("GET")
+                .arg(key)
+                .query::<Option<String>>(&mut replica)?
+                .as_deref(),
+            Some("value"),
+            "{key}"
+        );
+    }
+    Ok(())
+}
+
+/// `SHUTDOWN` without `NOW` pauses writes while it waits for lagging replicas,
+/// and a blocking call can wait for it. `DEBUG SLEEP` keeps the replica from
+/// acknowledging the write before it; Redis then aborts when it propagates
+/// the replicated `SET` that the command queued. The SDK refuses whether or
+/// not a replica lags. A plain call cannot wait, and Redis refuses `SHUTDOWN`
+/// without `NOW` there itself.
+#[test]
+#[cfg(feature = "redis-7-2-examples")]
+fn test_replication_pause_refuses_shutdown_through_blocking_calls() -> Result<()> {
+    let Some((mut primary, replica)) = primary_with_replica("call")? else {
+        return Ok(());
+    };
+    let mut sleeper = replica.connection()?;
+    let sleep = std::thread::spawn(move || {
+        redis::cmd("DEBUG")
+            .arg(&["SLEEP", "2"])
+            .query::<()>(&mut sleeper)
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    redis::cmd("SET")
+        .arg(&["before", "value"])
+        .query::<()>(&mut primary)?;
+    assert_pause_refused(
+        &mut primary,
+        redis::cmd("call.blocking_after_set").arg(&["key", "SHUTDOWN", "NOSAVE"]),
+    )?;
+    sleep.join().expect("the DEBUG SLEEP thread panicked")?;
+    let error = redis::cmd("call.blocking_after_set")
+        .arg(&["key", "SHUTDOWN", "ABORT"])
+        .query::<Value>(&mut primary)
+        .expect_err("no shutdown is in progress");
+    assert!(
+        error.to_string().contains("No shutdown in progress"),
+        "{error}"
+    );
+    acknowledge(&mut primary, &replica)?;
+    survived(&mut primary)
 }

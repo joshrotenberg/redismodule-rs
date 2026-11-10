@@ -233,8 +233,10 @@ jobs:
 
       - name: Test replication refusal during a write pause
         # Redis 6.2 aborts when a module replicates during any client pause,
-        # with or without AOF and replicas. 6.0 has no write pause, and the
-        # tests skip there.
+        # with or without AOF and replicas, and when a module call pauses
+        # after the command queued replication. 6.0 has no write pause and
+        # does not abort; the tests skip there, except the refusals of a
+        # CLIENT PAUSE without a mode and of other CLIENT subcommands.
         env:
           TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
         run: |
@@ -251,7 +253,13 @@ jobs:
             replication_pause::test_replication_pause_refuses_replicate_in_transactions \
             replication_pause::test_replication_pause_refuses_write_commands_that_another_command_calls \
             replication_pause::test_replication_pause_lets_write_commands_replicate_in_the_transaction_that_pauses \
-            replication_pause::test_replication_pause_lets_write_commands_replicate_each_way_in_the_transaction_that_pauses
+            replication_pause::test_replication_pause_lets_write_commands_replicate_each_way_in_the_transaction_that_pauses \
+            replication_pause::test_replication_pause_refuses_client_pause_after_replicate_verbatim \
+            replication_pause::test_replication_pause_refuses_client_pause_after_a_replicated_call \
+            replication_pause::test_replication_pause_refuses_client_pause_after_a_lazy_expire \
+            replication_pause::test_replication_pause_refuses_failover_after_replicate_verbatim \
+            replication_pause::test_replication_pause_lets_calls_run_other_client_subcommands \
+            replication_pause::test_replication_pause_lets_calls_pause_inside_a_transaction
           do
             grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-replication-tests.txt"
           done
@@ -373,7 +381,13 @@ jobs:
             replication_pause::test_replication_pause_refuses_replicate_in_transactions \
             replication_pause::test_replication_pause_refuses_write_commands_that_another_command_calls \
             replication_pause::test_replication_pause_lets_write_commands_replicate_in_the_transaction_that_pauses \
-            replication_pause::test_replication_pause_lets_write_commands_replicate_each_way_in_the_transaction_that_pauses
+            replication_pause::test_replication_pause_lets_write_commands_replicate_each_way_in_the_transaction_that_pauses \
+            replication_pause::test_replication_pause_refuses_client_pause_after_replicate_verbatim \
+            replication_pause::test_replication_pause_refuses_client_pause_after_a_replicated_call \
+            replication_pause::test_replication_pause_refuses_client_pause_after_a_lazy_expire \
+            replication_pause::test_replication_pause_refuses_failover_after_replicate_verbatim \
+            replication_pause::test_replication_pause_lets_calls_run_other_client_subcommands \
+            replication_pause::test_replication_pause_lets_calls_pause_inside_a_transaction
           do
             grep -Fx -- "$test_name: test" "$RUNNER_TEMP/replication-pause-tests.txt"
           done
