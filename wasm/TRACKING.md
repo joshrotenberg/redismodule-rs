@@ -127,6 +127,53 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-10: merged SDK master `e6d6740` into the branch as `e208f53`. It
+  brings SDK PR 237 for #235 (`e6d6740`): outside a transaction, `call`,
+  `call_ext` and `call_blocking` refuse `CLIENT PAUSE` in any mode,
+  `FAILOVER` other than `FAILOVER ABORT`, and from a blocking call
+  `SHUTDOWN` without `NOW` or `ABORT`, with
+  `ERR calls cannot pause replication outside a transaction`.
+
+  The host needed no adaptation. `git grep` in `wasm/`:
+  - The host's own calls are `COMMAND INFO` (`busy.rs:196`) and
+    `CONFIG GET replica-serve-stale-data` (`flags.rs:109`); neither pauses.
+  - A guest's calls go through `call_ext` in `run_command` (`host.rs:144`)
+    while WASM.CALL or WASM.CALL_RO runs. The host keeps no command
+    allowlist or denylist: `run_command` (`host.rs:128`) checks the loading
+    state, the cluster slot and, for read-only functions, write and
+    may-replicate commands (`host.rs:140`, `busy.rs:140`). Everything else
+    is left to script mode (`host.rs:251`). Redis flags `CLIENT PAUSE`,
+    `CLIENT UNPAUSE`, `FAILOVER` and `SHUTDOWN` `noscript`, so none of them
+    ran from a guest before or after this sync.
+  - Nothing in `wasm/` uses `call_blocking` or `BlockingCallOptions`, so
+    the `SHUTDOWN` refusal never applies to the host.
+
+  A guest now gets the new error instead of Redis's script-mode error for
+  `CLIENT PAUSE` and `FAILOVER` outside a transaction. On Redis 8.10.2,
+  through the hello guest's `run_flat`, `run` and `run_ro`:
+  - `CLIENT PAUSE 10 WRITE`, `client pause 10` and `FAILOVER` replied
+    `ERR calls cannot pause replication outside a transaction`, from
+    WASM.CALL and WASM.CALL_RO. With `src/context/mod.rs` from `9393416`
+    the same calls replied `ERR command 'client|pause' is not allowed on
+    script mode` and `ERR command 'failover' is not allowed on script mode`.
+  - `CLIENT UNPAUSE`, `FAILOVER ABORT` and `SHUTDOWN` replied the
+    script-mode error on both builds.
+  - Inside `MULTI`/`EXEC` the SDK lets the call through
+    (`src/context/mod.rs:1224`), and `CLIENT PAUSE` and `FAILOVER` replied
+    the script-mode error on both builds.
+
+  The full `wasm/ci/check.sh` passed on Rust 1.94.0 and Redis 8.10.2:
+  - 622 tests: the host's 33 unit, 5 compiler and 36 library tests, the SDK's
+    109 unit, 269 integration and 148 doc tests, and 22 others;
+  - the four lockfiles were unchanged.
+
+  Six of the seven new `replication_pause` tests ran;
+  `test_replication_pause_refuses_shutdown_through_blocking_calls` needs
+  the `redis-7-2-examples` feature, which `check.sh` does not enable. Port
+  6641 was free, so
+  `admission_code_counts_full_images_and_preserves_old_state_until_commit`
+  ran on it unchanged (#218).
+
 - 2026-11-05: merged SDK master `9393416` into the branch as `f8e11bd`. It
   brings SDK PR 234 for #225 (`9393416`), which documents three server
   behaviors the SDK does not guard against, in `docs/CLUSTER.md`,
