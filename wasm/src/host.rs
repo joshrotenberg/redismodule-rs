@@ -164,8 +164,8 @@ impl CallState {
         }
     }
 
-    /// Fails if a command using `args` would leave the call's slot, as Lua
-    /// does on a cluster node for a script without `allow-cross-slot-keys`.
+    /// Fails if a command using `args` would leave the call's slot, for the
+    /// function's flag policy or Redis 7.4+'s declared-slot lookup limit.
     fn check_slot(&mut self, command: &str, args: &[&[u8]]) -> Result<(), String> {
         let Some(slot) = flags::command_slot(self.ctx(), command, args) else {
             return Ok(());

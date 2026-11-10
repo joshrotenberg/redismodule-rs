@@ -25,6 +25,7 @@
 //! WASM.CALL local_only 0         replies ok; no-cluster keeps it off cluster nodes
 //! WASM.CALL get_args 0 k ...     GETs each argument as a key: one slot on a cluster node
 //! WASM.CALL get_args_cross 0 k ...  the same with allow-cross-slot-keys
+//! WASM.CALL set_arg_cross 0 key value  SET an argument key with that flag
 //! ```
 //!
 //! The functions above call Redis with `pcall`, so an error reply comes back
@@ -57,7 +58,7 @@ use redis_wasm_guest::{LogLevel, Value, call, log, pcall};
 
 /// The functions and their flags. A function that does not write says so, as
 /// a Lua function would.
-const FUNCTIONS: [(&str, FunctionFlags); 22] = [
+const FUNCTIONS: [(&str, FunctionFlags); 23] = [
     ("hello", FunctionFlags::NO_WRITES),
     ("incr_twice", FunctionFlags::empty()),
     ("hash_pairs", FunctionFlags::NO_WRITES),
@@ -84,6 +85,7 @@ const FUNCTIONS: [(&str, FunctionFlags); 22] = [
         "get_args_cross",
         FunctionFlags::NO_WRITES.union(FunctionFlags::ALLOW_CROSS_SLOT_KEYS),
     ),
+    ("set_arg_cross", FunctionFlags::ALLOW_CROSS_SLOT_KEYS),
     ("run", FunctionFlags::empty()),
     ("acl_check", FunctionFlags::NO_WRITES),
     ("resp_shape", FunctionFlags::NO_WRITES),
@@ -189,6 +191,10 @@ fn run(name: &str, keys: &[Vec<u8>], args: &[Vec<u8>]) -> Value {
         "get_args" | "get_args_cross" => Ok(Value::Array(
             args.iter().map(|key| pcall("GET", &[key])).collect(),
         )),
+        "set_arg_cross" => first(args, name, "a key").and_then(|key| {
+            let value = first(&args[1..], name, "a value")?;
+            Ok(pcall("SET", &[key, value]))
+        }),
         "run" => command_of(args)
             .map(|(command, args)| {
                 call(&command, args);

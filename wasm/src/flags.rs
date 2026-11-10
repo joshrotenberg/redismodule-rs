@@ -21,8 +21,8 @@ pub(crate) struct Mode {
     pub(crate) read_only: bool,
     /// Commands are not checked against `maxmemory`: `allow-oom`.
     pub(crate) allow_oom: bool,
-    /// On a cluster node without `allow-cross-slot-keys`: the keys of every
-    /// command must hash to one slot.
+    /// The keys of every command must hash to one slot: without
+    /// `allow-cross-slot-keys`, or with declared keys on Redis 7.4 and later.
     pub(crate) one_slot: bool,
     /// That slot, once known: the declared keys', or the first command's.
     pub(crate) slot: Option<u16>,
@@ -83,7 +83,15 @@ pub(crate) fn check(
         }
     }
 
-    let one_slot = cluster && !obey && !flags.contains(FunctionFlags::ALLOW_CROSS_SLOT_KEYS);
+    let mut one_slot = cluster && !obey && !flags.contains(FunctionFlags::ALLOW_CROSS_SLOT_KEYS);
+    if cluster && !one_slot && !keys.is_empty() {
+        // Redis 7.4+ may use the outer command's cached slot for every key
+        // lookup. This storage restriction is separate from Lua's flag
+        // policy: replay must not bypass it, and a call that waited for its
+        // library to compile keeps its original declared-key contract.
+        let version = ctx.get_redis_version()?;
+        one_slot = (version.major, version.minor) >= (7, 4);
+    }
     Ok(Mode {
         loading: false,
         read_only: no_writes || read_only,

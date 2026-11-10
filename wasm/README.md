@@ -94,6 +94,9 @@ Lua; the error replies have Lua's codes and say "function" where Lua's say
 - `allow-cross-slot-keys`: on a cluster node, the commands the function calls
   may use keys in any slot the node serves. Without it, they must use one slot:
   the declared keys' slot, or the first one used.
+  On Redis 7.4 and later, a call with declared keys still restricts guest
+  commands to that slot. Use `numkeys` 0 to access multiple local slots on
+  those servers.
 
 A function without flags may write, so like a Lua function it does not run on
 a read-only replica, from `WASM.CALL_RO`, or over `maxmemory`. Two of Lua's
