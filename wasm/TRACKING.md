@@ -139,6 +139,29 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-10: merged SDK master `7daa167` into the branch as `acc7be4`. It
+  brings [PR 238](https://github.com/joshrotenberg/redismodule-rs/pull/238),
+  which refuses duplicate complete replies through safe `Context` reply methods.
+  It preserves handler signatures and blocked-client behavior;
+  leaves #224 open.
+
+  The host needed no adaptation. Its command handlers return one value or
+  `NoReply` after blocking, and compile waiters return their final value through
+  the blocked-client callback. Guest replies become complete `RedisValue` trees
+  before client serialization. The host does not call the safe `Context` reply
+  methods directly or mix them with raw aggregate reply headers.
+
+  The full `wasm/ci/check.sh` passed locally on Rust 1.94.0, Redis 8.10.2 and
+  Node.js 26.12.1 (CI pins Node.js 24.22.1):
+  - 476 workspace tests, including 33 host unit, 5 compiler and 41 library tests;
+  - 149 workspace doc tests, the separate allocator fallback test and 4 guest
+    SDK tests;
+  - formatting, Clippy, examples, host and guest builds, and both SDK doc floors;
+  - all four snapshot lockfiles unchanged.
+
+  The local check remapped test port 6641 to 6941 and restored it afterward.
+  Experiment push CI remains pending publication of this sync.
+
 - 2026-11-10: merged SDK master `e6d6740` into the branch as `e208f53`. It
   brings SDK PR 237 for #235 (`e6d6740`): outside a transaction, `call`,
   `call_ext` and `call_blocking` refuse `CLIENT PAUSE` in any mode,
