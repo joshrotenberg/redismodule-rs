@@ -11,6 +11,21 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Duplicate command replies
+
+SDK command callbacks now count complete safe replies (#224 prototype). A
+second `Context::reply*` call is refused before emission, a returned second
+reply is dropped with a warning, and a panic after a complete safe reply is
+logged without appending another reply. The frame stays linked through panic
+recovery and matches nested invocations by context. `NoReply` sends nothing,
+and failed call-reply forwarding does not consume the reply. Dropping a
+blocked handle, replying directly and returning `NoReply` keeps the direct
+reply. Worker-owned blocked replies keep their existing contract.
+
+Raw native calls and partial serialization remain outside the prototype;
+the full issue remains open. docs/COMMAND-REPLIES.md records the boundary and
+measurement procedure. No new streaming API is introduced.
+
 ## Server behaviors documented for modules
 
 Three server behaviors that the SDK does not guard against are documented, with

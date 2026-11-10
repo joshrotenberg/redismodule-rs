@@ -305,6 +305,14 @@ become a handle. `block_client_on_reply` uses the same invocation checks and
 keeps its existing result type. On Redis 6.0, where the newer denial flag is
 absent, nested module-call clients are rejected through client lookup.
 
+Safe command replies now have a whole-reply guard. After one complete
+`Context::reply*` call, another safe reply or the handler's returned reply is
+refused and logged. Return `RedisValue::NoReply` after a direct reply. Code
+that used a raw aggregate header followed by safe element writes must instead
+construct a `RedisValue` aggregate or use raw native calls for the entire
+reply. Raw writes and partial serialization are not tracked; see
+[COMMAND-REPLIES.md](COMMAND-REPLIES.md).
+
 After successful blocking, return `RedisValue::NoReply`; returning a normal
 result would produce a second reply. Worker errors must be sent through the
 blocked client's thread-safe context. Dropping the handle without a reply

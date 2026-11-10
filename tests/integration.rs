@@ -4707,6 +4707,71 @@ fn test_test_helper_err() -> Result<()> {
 }
 
 #[test]
+fn test_command_reply_guard_keeps_the_connection_aligned() -> Result<()> {
+    let mut con = TestConnection::new("test_helper");
+    for protocol in [2, 3] {
+        let _: Value = redis::cmd("HELLO").arg(protocol).query(&mut con)?;
+        for mode in [
+            "return",
+            "direct",
+            "value",
+            "key",
+            "error",
+            "wrongarity",
+            "twice",
+            "panic",
+            "released",
+            "forward",
+            "forward-twice",
+            "nested",
+            "no-reply-first",
+        ] {
+            let replies: Vec<String> = redis::pipe()
+                .cmd("test_helper.reply_guard")
+                .arg(mode)
+                .cmd("PING")
+                .arg("after")
+                .query(&mut con)?;
+            assert_eq!(replies, ["first", "after"], "RESP{protocol}, {mode}");
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        }
+        for mode in ["array", "array-return"] {
+            let replies: Vec<Value> = redis::pipe()
+                .cmd("test_helper.reply_guard")
+                .arg(mode)
+                .cmd("PING")
+                .arg("after")
+                .query(&mut con)?;
+            assert_eq!(
+                replies,
+                [
+                    Value::Array(vec![Value::Int(1), Value::Nil, Value::Array(vec![])]),
+                    Value::BulkString(b"after".to_vec()),
+                ],
+                "RESP{protocol}, {mode}"
+            );
+        }
+        for (mode, detail) in [
+            ("forward-message", "first"),
+            ("error-direct", "first"),
+            ("forward-fail", "the call result holds no reply"),
+        ] {
+            let error = redis::cmd("test_helper.reply_guard")
+                .arg(mode)
+                .query::<Value>(&mut con)
+                .expect_err("the first reply should be an error");
+            assert_eq!(error.detail(), Some(detail), "RESP{protocol}, {mode}");
+            assert_eq!(
+                redis::cmd("PING").arg("after").query::<String>(&mut con)?,
+                "after",
+                "RESP{protocol}, {mode}"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn test_key_delete_result() -> Result<()> {
     let mut con = TestConnection::new("string");
 

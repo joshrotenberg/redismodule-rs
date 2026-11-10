@@ -25,7 +25,7 @@ use crate::{Context, ContextFlags, RedisError, RedisResult, RedisString, RedisVa
 /// SDK's command callbacks are not tracked this way, so a handle they drop
 /// always sends the error, even when the command also replies. A command that
 /// releases its handle, replies itself through [`Context::reply`] and then
-/// returns `NoReply` sends two replies.
+/// returns `NoReply` keeps that complete safe reply.
 pub struct BlockedClient {
     pub(crate) inner: NonNull<raw::RedisModuleBlockedClient>,
     /// Whether a reply was sent through this client's thread-safe context.
@@ -67,7 +67,9 @@ pub fn __command_reply_after_release(response: RedisResult) -> RedisResult {
     }
     RELEASED_UNREPLIED.set(0);
     match response {
-        Ok(crate::RedisValue::NoReply) => Err(RedisError::Str(RELEASED_WITHOUT_REPLY)),
+        Ok(crate::RedisValue::NoReply) if !super::command_reply::current_complete() => {
+            Err(RedisError::Str(RELEASED_WITHOUT_REPLY))
+        }
         response => response,
     }
 }
