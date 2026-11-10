@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use redis::{Connection, RedisResult, Value};
 
 /// The functions the example guest provides, in its order.
-const FUNCTIONS: [&str; 22] = [
+const FUNCTIONS: [&str; 23] = [
     "hello",
     "incr_twice",
     "hash_pairs",
@@ -31,6 +31,7 @@ const FUNCTIONS: [&str; 22] = [
     "local_only",
     "get_args",
     "get_args_cross",
+    "set_arg_cross",
     "run",
     "acl_check",
     "resp_shape",
@@ -362,15 +363,25 @@ fn error_text(result: RedisResult<Value>) -> String {
 /// Sends a command in RESP and returns the raw reply, for replies the client
 /// library cannot represent, such as an error inside an array.
 fn raw_reply(port: u16, args: &[&str]) -> String {
+    raw_pipeline_reply(port, &[args])
+}
+
+/// Reads the complete wire replies to a pipeline, including nested errors.
+fn raw_pipeline_reply(port: u16, commands: &[&[&str]]) -> String {
+    raw_pipeline_reply_with_timeout(port, commands, Duration::from_millis(500))
+}
+
+fn raw_pipeline_reply_with_timeout(port: u16, commands: &[&[&str]], timeout: Duration) -> String {
     let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
-    let mut request = format!("*{}\r\n", args.len());
-    for arg in args {
-        request.push_str(&format!("${}\r\n{arg}\r\n", arg.len()));
+    let mut request = String::new();
+    for args in commands {
+        request.push_str(&format!("*{}\r\n", args.len()));
+        for arg in *args {
+            request.push_str(&format!("${}\r\n{arg}\r\n", arg.len()));
+        }
     }
     stream.write_all(request.as_bytes()).expect("send");
-    stream
-        .set_read_timeout(Some(Duration::from_millis(500)))
-        .expect("timeout");
+    stream.set_read_timeout(Some(timeout)).expect("timeout");
     let mut reply = Vec::new();
     let mut buffer = [0; 1024];
     while let Ok(n) = stream.read(&mut buffer) {
@@ -1239,6 +1250,353 @@ fn a_cluster_routes_wasm_call_by_its_keys() {
         get_args("get_args_cross", "0", &[&on_a_too, &on_a]),
         "*2\r\n$-1\r\n$1\r\n2\r\n"
     );
+}
+
+#[test]
+fn cross_slot_calls_respect_declared_keys() {
+    let server = Server::start(6652, &["--cluster-enabled", "yes"]);
+    let mut con = server.connection();
+    let _: () = redis::cmd("CLUSTER")
+        .arg(&["ADDSLOTSRANGE", "0", "16383"])
+        .query(&mut con)
+        .unwrap();
+    wait_for("the cluster to form", || {
+        let info: String = redis::cmd("CLUSTER").arg("INFO").query(&mut con).ok()?;
+        info.contains("cluster_state:ok").then_some(())
+    });
+    load(&mut con, "hello");
+    for (key, value) in [("a", "a-value"), ("b", "b-value")] {
+        let _: () = redis::cmd("SET")
+            .arg(&[key, value])
+            .query(&mut con)
+            .unwrap();
+    }
+    let server_info: String = redis::cmd("INFO").arg("server").query(&mut con).unwrap();
+    let version: Vec<u32> = server_info
+        .lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .expect("server version")
+        .trim()
+        .split('.')
+        .take(2)
+        .map(|part| part.parse().expect("numeric Redis version"))
+        .collect();
+    let declared_slot = (version[0], version[1]) >= (7, 4);
+    let refused = "-ERR Function attempted to access keys that do not hash to the same slot\r\n";
+    let read = |command: &str, numkeys: &str, keys: &[&str]| {
+        let mut args = vec![command, "get_args_cross", numkeys];
+        args.extend_from_slice(keys);
+        raw_pipeline_reply(6652, &[&args, &["PING"]])
+    };
+    for command in ["WASM.CALL", "WASM.CALL_RO"] {
+        if declared_slot {
+            let unknown = redis::cmd(command)
+                .arg(&["run_ro", "1", "a", "not-a-redis-command"])
+                .query(&mut con);
+            assert!(error_text(unknown).contains("unknown command"));
+        }
+        let pong: String = redis::cmd(command)
+            .arg(&["run_ro", "1", "a", "PING"])
+            .query(&mut con)
+            .unwrap();
+        assert_eq!(pong, "PONG", "a known command with no keys must run");
+        let expected = if declared_slot {
+            format!("*1\r\n{refused}+PONG\r\n")
+        } else {
+            "*1\r\n$7\r\nb-value\r\n+PONG\r\n".into()
+        };
+        assert_eq!(read(command, "1", &["a", "b"]), expected);
+        assert_eq!(
+            read(command, "1", &["a", "a"]),
+            "*1\r\n$7\r\na-value\r\n+PONG\r\n"
+        );
+        assert_eq!(
+            read(command, "0", &["a", "b"]),
+            "*2\r\n$7\r\na-value\r\n$7\r\nb-value\r\n+PONG\r\n"
+        );
+    }
+
+    let slot: u16 = redis::cmd("CLUSTER")
+        .arg(&["KEYSLOT", "a"])
+        .query(&mut con)
+        .unwrap();
+    let count = |con: &mut Connection| {
+        redis::cmd("CLUSTER")
+            .arg("COUNTKEYSINSLOT")
+            .arg(slot)
+            .query::<usize>(con)
+            .unwrap()
+    };
+    let before = count(&mut con);
+    let multiple = error_text(call(
+        &mut con,
+        &["run", "1", "a", "MSET", "a", "first", "b", "second"],
+    ));
+    if declared_slot {
+        assert!(
+            multiple.contains(refused.trim().trim_start_matches('-')),
+            "{multiple}"
+        );
+    } else {
+        assert!(
+            multiple.contains("CROSSSLOT") || multiple.contains("non local key"),
+            "{multiple}"
+        );
+    }
+    let write = call(&mut con, &["set_arg_cross", "1", "a", "b", "changed"]);
+    if declared_slot {
+        assert_eq!(error_text(write), refused.trim().trim_start_matches('-'));
+    } else {
+        assert_eq!(write.unwrap(), Value::Okay);
+    }
+    let value: String = redis::cmd("GET").arg("b").query(&mut con).unwrap();
+    assert_eq!(value, if declared_slot { "b-value" } else { "changed" });
+    assert_eq!(
+        count(&mut con),
+        before,
+        "a key was stored in the wrong slot"
+    );
+    let declared_keys: Vec<String> = redis::cmd("CLUSTER")
+        .arg("GETKEYSINSLOT")
+        .arg(slot)
+        .arg(10)
+        .query(&mut con)
+        .unwrap();
+    assert_eq!(declared_keys, ["a"]);
+
+    let readonly = redis::cmd("WASM.CALL_RO")
+        .arg(&["set_arg_cross", "1", "a", "b", "readonly"])
+        .query(&mut con);
+    assert!(error_text(readonly).contains("write flag using WASM.CALL_RO"));
+    assert_eq!(
+        call(&mut con, &["set_arg_cross", "0", "b", "no-keys"]).unwrap(),
+        Value::Okay
+    );
+    assert_eq!(
+        call(&mut con, &["set_arg_cross", "1", "a", "a", "same-slot"]).unwrap(),
+        Value::Okay
+    );
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("b")
+            .query::<String>(&mut con)
+            .unwrap(),
+        "no-keys"
+    );
+    assert_eq!(
+        redis::cmd("GET")
+            .arg("a")
+            .query::<String>(&mut con)
+            .unwrap(),
+        "same-slot"
+    );
+
+    // Hold the compiler after an RDB restart so the next call must use the
+    // blocked-client completion path. Its saved keys must keep the same slot
+    // contract even though that callback is no longer the original command.
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    struct CompilerGate(PathBuf);
+    impl Drop for CompilerGate {
+        fn drop(&mut self) {
+            // Release the owned helper on a failed assertion too.
+            let _ = std::fs::write(&self.0, b"");
+        }
+    }
+    let directory = tempfile::tempdir_in(target_dir()).expect("compiler fixture directory");
+    let launcher = directory.path().join("compiler");
+    let gate = CompilerGate(directory.path().join("compiler.ready"));
+    symlink(
+        target_dir().join("debug/redis-wasm-compiler"),
+        directory.path().join("compiler.bin"),
+    )
+    .unwrap();
+    std::fs::write(
+        &launcher,
+        b"#!/bin/sh\nwhile [ ! -e \"$0.ready\" ]; do sleep 0.01; done\nexec \"$0.bin\" \"$@\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for (key, value) in [("a", "a-value"), ("b", "b-value")] {
+        let _: () = redis::cmd("SET")
+            .arg(&[key, value])
+            .query(&mut con)
+            .unwrap();
+    }
+    let _: () = redis::cmd("SAVE").query(&mut con).unwrap();
+    server.shutdown();
+    drop(con);
+    let server = Server::restart(
+        6652,
+        &[
+            "--cluster-enabled",
+            "yes",
+            "--wasm.compiler-path",
+            launcher.to_str().unwrap(),
+            "--wasm.compiler-wall-seconds",
+            "30",
+        ],
+    );
+    let mut con = server.connection();
+    wait_for("the cluster to restart", || {
+        let info: String = redis::cmd("CLUSTER").arg("INFO").query(&mut con).ok()?;
+        info.contains("cluster_state:ok").then_some(())
+    });
+    assert_eq!(info(&mut con)["compiling"], 1);
+    let pending = std::thread::spawn(|| {
+        raw_pipeline_reply_with_timeout(
+            6652,
+            &[
+                &["WASM.CALL_RO", "get_args_cross", "1", "a", "b"],
+                &["PING"],
+            ],
+            Duration::from_secs(10),
+        )
+    });
+    wait_for("the declared-key call to block", || {
+        let info: String = redis::cmd("INFO").arg("clients").query(&mut con).ok()?;
+        info.lines()
+            .any(|line| line.trim() == "blocked_clients:1")
+            .then_some(())
+    });
+    std::fs::write(&gate.0, b"").expect("release compiler fixture");
+    let expected = if declared_slot {
+        format!("*1\r\n{refused}+PONG\r\n")
+    } else {
+        "*1\r\n$7\r\nb-value\r\n+PONG\r\n".into()
+    };
+    assert_eq!(pending.join().expect("waiting call"), expected);
+}
+
+#[test]
+fn cross_slot_replay_checks_every_declared_command_key() {
+    let args = [
+        "--cluster-enabled",
+        "yes",
+        "--appendonly",
+        "yes",
+        "--appendfsync",
+        "always",
+        "--aof-use-rdb-preamble",
+        "no",
+    ];
+    let server = Server::start(6653, &args);
+    let mut con = server.connection();
+    let _: () = redis::cmd("CLUSTER")
+        .arg(&["ADDSLOTSRANGE", "0", "16383"])
+        .query(&mut con)
+        .unwrap();
+    wait_for("the replay cluster to form", || {
+        let info: String = redis::cmd("CLUSTER").arg("INFO").query(&mut con).ok()?;
+        info.contains("cluster_state:ok").then_some(())
+    });
+    load(&mut con, "hello");
+    for (key, value) in [
+        ("a", "orig-a"),
+        ("b", "orig-b"),
+        ("c", "orig-c"),
+        ("d", "orig-d"),
+    ] {
+        let _: () = redis::cmd("SET")
+            .arg(&[key, value])
+            .query(&mut con)
+            .unwrap();
+    }
+    server.shutdown();
+    drop(con);
+
+    // Normal guest calls propagate their effects. Build an explicit replay
+    // fixture to exercise RedisModule_Call's mustObeyClient path instead.
+    let aof_dir = server_dir(6653).join("appendonlydir");
+    let manifest = std::fs::read_to_string(aof_dir.join("appendonly.aof.manifest")).unwrap();
+    let incremental = manifest
+        .lines()
+        .rev()
+        .find_map(|line| {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            if fields.first() != Some(&"file")
+                || !fields.windows(2).any(|pair| pair == ["type", "i"])
+            {
+                return None;
+            }
+            fields.get(1).map(|name| (*name).to_owned())
+        })
+        .expect("incremental AOF");
+    let mut aof = std::fs::OpenOptions::new()
+        .append(true)
+        .open(aof_dir.join(incremental))
+        .unwrap();
+    let commands: &[&[&str]] = &[
+        &[
+            "WASM.CALL",
+            "run",
+            "1",
+            "a",
+            "MSET",
+            "a",
+            "first",
+            "b",
+            "second",
+        ],
+        &["WASM.CALL", "run", "0", "MSET", "c", "third", "d", "fourth"],
+        &["SET", "after-replay", "survived"],
+    ];
+    for args in commands {
+        let mut command = redis::cmd(args[0]);
+        command.arg(&args[1..]);
+        aof.write_all(&command.get_packed_command()).unwrap();
+    }
+    aof.sync_all().unwrap();
+    drop(aof);
+
+    let server = Server::restart(6653, &args);
+    let mut con = server.connection();
+    wait_for("the replay cluster to restart", || {
+        let info: String = redis::cmd("CLUSTER").arg("INFO").query(&mut con).ok()?;
+        info.contains("cluster_state:ok").then_some(())
+    });
+    let server_info: String = redis::cmd("INFO").arg("server").query(&mut con).unwrap();
+    let version: Vec<u32> = server_info
+        .lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .unwrap()
+        .trim()
+        .split('.')
+        .take(2)
+        .map(|part| part.parse().unwrap())
+        .collect();
+    let protected = (version[0], version[1]) >= (7, 4);
+    for (key, modern, legacy) in [("a", "orig-a", "first"), ("b", "orig-b", "second")] {
+        let value: String = redis::cmd("GET").arg(key).query(&mut con).unwrap();
+        assert_eq!(
+            value,
+            if protected { modern } else { legacy },
+            "replayed key {key}"
+        );
+    }
+    for (key, value) in [
+        ("c", "third"),
+        ("d", "fourth"),
+        ("after-replay", "survived"),
+    ] {
+        assert_eq!(
+            redis::cmd("GET")
+                .arg(key)
+                .query::<String>(&mut con)
+                .unwrap(),
+            value
+        );
+    }
+    let slot: u16 = redis::cmd("CLUSTER")
+        .arg(&["KEYSLOT", "a"])
+        .query(&mut con)
+        .unwrap();
+    let keys: Vec<String> = redis::cmd("CLUSTER")
+        .arg("GETKEYSINSLOT")
+        .arg(slot)
+        .arg(10)
+        .query(&mut con)
+        .unwrap();
+    assert_eq!(keys, ["a"]);
 }
 
 /// `INFO wasm` as field names, without the `wasm_` prefix, and values.

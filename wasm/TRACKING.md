@@ -7,7 +7,7 @@ scope and readiness. Historical H/S/G IDs remain useful for the evidence below.
 
 Status: `done`, `next` (being worked on or first in line), `todo`, `blocked`.
 
-Last updated 2026-10-29.
+Last updated 2026-11-10.
 
 ## Where it stands
 
@@ -61,6 +61,18 @@ Rust 1.95 or later and the workspace pins 1.94), `wit-component` 0.236 and
 `wit-bindgen` 0.44.
 
 ### Current checkpoint
+
+Issue 236: on Redis 7.4 and later, a cluster call with declared keys refuses
+guest commands outside their slot, including functions with
+`allow-cross-slot-keys`. Calls without declared keys and Redis 7.2 retain their
+cross-slot behavior. The declared-key regression covers `WASM.CALL`,
+`WASM.CALL_RO`, write refusal before mutation, and a call that waits for its
+library to compile after an RDB restart. The storage guard checks every
+reported command key before execution, including an explicit multi-key AOF
+replay whose first key matches but a later key does not. Known keyless commands
+remain allowed. The regressions pass on Redis 7.2.16, 7.4.11 and
+8.10.2. The WIT and README state the limit; the November 5 gap below is
+historical.
 
 The bounded compiler work from
 [PR 192](https://github.com/joshrotenberg/redismodule-rs/pull/192) is merged at

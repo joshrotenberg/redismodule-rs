@@ -130,7 +130,9 @@ impl CallState {
             return Err("ERR a library may not call Redis while it loads".into());
         }
         let args: Vec<&[u8]> = args.iter().map(Vec::as_slice).collect();
-        if self.mode.one_slot {
+        if let Some(slot) = self.mode.declared_slot {
+            flags::check_declared_slot(self.ctx(), command, &args, slot)?;
+        } else if self.mode.one_slot {
             self.check_slot(command, &args)?;
         }
         let effects = busy::note_call(self.ctx(), command, &args);
@@ -164,8 +166,9 @@ impl CallState {
         }
     }
 
-    /// Fails if a command using `args` would leave the call's slot, as Lua
-    /// does on a cluster node for a script without `allow-cross-slot-keys`.
+    /// Fails if a command using `args` would leave the slot selected by the
+    /// ordinary function flag policy. The storage guard checks every key
+    /// separately, including on replay clients.
     fn check_slot(&mut self, command: &str, args: &[&[u8]]) -> Result<(), String> {
         let Some(slot) = flags::command_slot(self.ctx(), command, args) else {
             return Ok(());
@@ -173,10 +176,7 @@ impl CallState {
         match self.mode.slot {
             None => self.mode.slot = Some(slot),
             Some(first) if first != slot => {
-                return Err(
-                    "ERR Function attempted to access keys that do not hash to the same slot"
-                        .into(),
-                );
+                return Err(flags::CROSS_SLOT_ERROR.into());
             }
             Some(_) => {}
         }

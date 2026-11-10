@@ -105,6 +105,9 @@ world library {
         no-cluster,
         /// On a cluster node, the commands the function calls may use keys in
         /// any slot this node serves, not only one slot.
+        /// On Redis 7.4 and later, a call that declares keys still restricts
+        /// every guest command to the declared keys' slot. Use numkeys 0 for
+        /// cross-slot calls on those servers.
         allow-cross-slot-keys,
     }
 
