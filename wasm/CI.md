@@ -55,6 +55,11 @@ The compiler executable uses System allocation independently of the module's
 Redis allocator. Keep both artifacts from the same build together when testing
 or deploying; the private protocol rejects a build/configuration mismatch.
 
+The server helper checks `INFO server` against its child's process ID during
+readiness and on every connection it returns. A colliding listener cannot pass
+as that child. Early child exits report the exit status and captured output;
+the harness still waits for RDB or AOF loading to finish before running a test.
+
 ## Bounds, diagnostics and cost
 
 The job has a 30-minute hard limit. Validation commands each have a 12-minute
