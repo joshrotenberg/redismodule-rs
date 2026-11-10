@@ -3,9 +3,9 @@
 //! Needs `redis-server` on the PATH and the `wasm32-unknown-unknown` target.
 
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::sync::OnceLock;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -146,8 +146,21 @@ impl Server {
     }
 
     fn launch(port: u16, extra_args: &[&str], with_module: bool) -> Self {
+        // Check the local address before connecting or building the module.
+        // A probe cannot reserve the socket for Redis or detect every bind
+        // conflict, so readiness must also check the child's identity.
+        drop(
+            TcpListener::bind(("127.0.0.1", port)).unwrap_or_else(|error| {
+                panic!("cannot start redis-server on port {port}: {error}")
+            }),
+        );
         let dir = server_dir(port);
         let log = dir.join("redis.log");
+        let output = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+            .expect("server log");
         let mut command = Command::new("redis-server");
         command
             .args([
@@ -167,14 +180,24 @@ impl Server {
             command.arg("--loadmodule").arg(module_path());
         }
         let child = command
-            .stdout(Stdio::null())
+            .stdout(output.try_clone().expect("server stdout log"))
+            .stderr(output)
             .spawn()
             .expect("start redis-server");
-        let server = Self { child, log, port };
+        let mut server = Self { child, log, port };
         let deadline = Instant::now() + Duration::from_secs(10);
         // Redis accepts connections, and answers INFO, while it is still
         // loading an RDB or AOF, so wait for the load to finish too.
-        while !server.loaded() {
+        loop {
+            if let Some(status) = server.child.try_wait().expect("server exit status") {
+                panic!(
+                    "redis-server exited before readiness with {status}; log:\n{}",
+                    server.log()
+                );
+            }
+            if server.loaded() {
+                break;
+            }
             assert!(
                 Instant::now() < deadline,
                 "redis-server did not start and load its data; log:\n{}",
@@ -186,15 +209,12 @@ impl Server {
     }
 
     /// Whether the server accepts connections and has finished loading its
-    /// RDB or AOF. Connecting and reading the INFO reply each give up after a
+    /// RDB or AOF. Connecting and reading each INFO reply give up after a
     /// second; the client's connection handshake has no read timeout, as for
     /// every connection in these tests.
     fn loaded(&self) -> bool {
-        let timeout = Duration::from_secs(1);
-        redis::Client::open(format!("redis://127.0.0.1:{}/", self.port))
-            .and_then(|client| client.get_connection_with_timeout(timeout))
+        owned_connection(self.port, self.child.id())
             .and_then(|mut con| {
-                con.set_read_timeout(Some(timeout))?;
                 redis::cmd("INFO")
                     .arg("persistence")
                     .query::<String>(&mut con)
@@ -203,9 +223,11 @@ impl Server {
     }
 
     fn connection(&self) -> Connection {
-        redis::Client::open(format!("redis://127.0.0.1:{}/", self.port))
-            .and_then(|client| client.get_connection())
-            .expect("connect")
+        let con = owned_connection(self.port, self.child.id()).expect("connect to owned server");
+        con.set_read_timeout(None).expect("connection read timeout");
+        con.set_write_timeout(None)
+            .expect("connection write timeout");
+        con
     }
 
     fn log(&self) -> String {
@@ -221,11 +243,103 @@ impl Server {
     }
 }
 
+/// Returns a connection only after it identifies the child the test started.
+/// Keep the identity query on the connection returned to the caller, so a
+/// later listener cannot receive that connection's commands.
+fn owned_connection(port: u16, expected_pid: u32) -> RedisResult<Connection> {
+    let timeout = Duration::from_secs(1);
+    let mut con = redis::Client::open(format!("redis://127.0.0.1:{port}/"))?
+        .get_connection_with_timeout(timeout)?;
+    con.set_read_timeout(Some(timeout))?;
+    con.set_write_timeout(Some(timeout))?;
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let pid = info
+        .lines()
+        .find_map(|line| line.strip_prefix("process_id:"))
+        .and_then(|pid| pid.trim_end().parse::<u32>().ok());
+    assert_eq!(
+        pid,
+        Some(expected_pid),
+        "redis-server on port {port} does not match the spawned child"
+    );
+    Ok(con)
+}
+
 impl Drop for Server {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+/// An ephemeral port for an owned harness fixture. Startup still has to
+/// verify the child because another process could bind it after this probe.
+fn harness_port() -> u16 {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("fixture port");
+    listener.local_addr().expect("fixture address").port()
+}
+
+#[test]
+fn server_harness_rejects_another_server_on_its_port() {
+    let port = harness_port();
+    std::fs::create_dir_all(server_dir(port)).expect("fixture directory");
+    let fixture = Server::launch(port, &[], false);
+    let attempt = std::panic::catch_unwind(|| Server::launch(port, &[], false));
+    assert!(attempt.is_err(), "the harness accepted another server");
+
+    // No database commands should reach the fixture. The client constructor
+    // also sends its CLIENT SETINFO handshake before the INFO queries.
+    let mut con = fixture.connection();
+    let commands: String = redis::cmd("INFO")
+        .arg("commandstats")
+        .query(&mut con)
+        .expect("fixture command statistics");
+    assert!(
+        commands
+            .lines()
+            .filter(|line| line.starts_with("cmdstat_"))
+            .all(|line| line.starts_with("cmdstat_info:")
+                || line.starts_with("cmdstat_client|setinfo:")),
+        "the fixture received database commands: {commands}"
+    );
+    assert_eq!(
+        redis::cmd("PING").query::<String>(&mut con).unwrap(),
+        "PONG"
+    );
+}
+
+#[test]
+fn server_harness_rejects_a_different_process_id() {
+    let port = harness_port();
+    std::fs::create_dir_all(server_dir(port)).expect("fixture directory");
+    let fixture = Server::launch(port, &[], false);
+    let mismatch = std::panic::catch_unwind(|| owned_connection(port, u32::MAX));
+    assert!(mismatch.is_err(), "a different process passed readiness");
+    assert_eq!(
+        redis::cmd("PING")
+            .query::<String>(&mut fixture.connection())
+            .unwrap(),
+        "PONG"
+    );
+}
+
+#[test]
+fn server_harness_reports_an_early_child_exit() {
+    let port = harness_port();
+    std::fs::create_dir_all(server_dir(port)).expect("fixture directory");
+    let failure =
+        std::panic::catch_unwind(|| Server::launch(port, &["--not-a-redis-option", "1"], false))
+            .err()
+            .expect("invalid server arguments must fail");
+    let message = failure
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| failure.downcast_ref::<&str>().copied())
+        .unwrap_or_default();
+    assert!(
+        message.contains("redis-server exited before readiness"),
+        "unexpected startup failure: {message}"
+    );
 }
 
 fn call(con: &mut Connection, args: &[&str]) -> RedisResult<Value> {
