@@ -221,7 +221,9 @@ impl WorkerContext {
     /// calling Redis. The unblock handler receives an [`EventContext`]. With a
     /// replicate flag the call also returns an error, without running the
     /// command, while Redis pauses replication, as
-    /// [`RuntimeContext::call_ext`] does.
+    /// [`RuntimeContext::call_ext`] does. Outside a transaction it refuses the
+    /// calls that would pause replication, `SHUTDOWN` without `NOW` among
+    /// them, as [`EventContext::call_blocking`] describes.
     #[cfg(any(
         feature = "min-redis-compatibility-version-8-0",
         feature = "min-redis-compatibility-version-7-4",

@@ -128,6 +128,17 @@ make Redis abort. Other clients then wait for the job to return instead of
 getting `-BUSY`, and `allow-busy` commands, the module's own included, wait
 too, so such a job must not wait for client input to finish.
 
+A job or a notification callback cannot start a pause through a call either
+(#235). Redis propagates the replication that the execution unit queued after
+the unit ends, and a pause that starts before then outside `EXEC` makes it
+abort. Jobs always run outside `EXEC`, and a callback does unless the write
+that fired it ran in a transaction. There `call`, `call_ext` and
+`call_blocking` return `ERR calls cannot pause replication outside a transaction`
+for `CLIENT PAUSE` and for `FAILOVER` other than `FAILOVER ABORT`, and
+`call_blocking` for `SHUTDOWN` without `NOW` or `ABORT`. Two checks come
+first: during a pause a job's call gets the post-notification job error above
+instead, and any call with a replicate flag gets the replicated-call error.
+
 ## Handle submission and write failures separately
 
 With a 7.2+ feature floor, `add_post_notification_job` returns `Status`. An older

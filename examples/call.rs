@@ -161,6 +161,28 @@ fn call_blocking_replicate(ctx: &Context, args: Vec<RedisString>) -> RedisResult
     }
 }
 
+/// `call.blocking_after_set key command [arg ...]`: sets the key through a
+/// replicated `call_ext`, whose replication Redis propagates after this
+/// command returns, then runs the command through `call_blocking`.
+fn call_blocking_after_set(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let (key, args) = args[1..].split_first().ok_or(RedisError::WrongArity)?;
+    let (command, args) = args.split_first().ok_or(RedisError::WrongArity)?;
+    let set_options = CallOptionsBuilder::new().replicate().build();
+    let value = ctx.create_string("value");
+    let set: CallResult = ctx.call_ext("SET", &set_options, &[key, &value]);
+    set?;
+    let args: Vec<&RedisString> = args.iter().collect();
+    let options = CallOptionsBuilder::new().build_blocking();
+    match ctx.call_blocking(command.try_as_str()?, &options, args.as_slice()) {
+        PromiseCallReply::Resolved(r) => r.map_or_else(|e| Err(e.into()), |v| Ok((&v).into())),
+        PromiseCallReply::Future(f) => {
+            let blocked_client = ctx.block_client()?;
+            call_blocking_handle_future(ctx, f, blocked_client);
+            Ok(RedisValue::NoReply)
+        }
+    }
+}
+
 fn call_blocking_from_detach_ctx(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     let blocked_client = ctx.block_client()?;
     thread::spawn(move || {
@@ -581,6 +603,7 @@ redis_module! {
         ["call.blocking", call_blocking, "", 0, 0, 0, ""],
         ["call.blocking_from_detached_ctx", call_blocking_from_detach_ctx, "", 0, 0, 0, ""],
         ["call.blocking_replicate", call_blocking_replicate, "", 0, 0, 0, ""],
+        ["call.blocking_after_set", call_blocking_after_set, "", 0, 0, 0, ""],
         ["call.blocking_abort", call_blocking_abort, "", 0, 0, 0, ""],
         ["call.blocking_keep", call_blocking_keep, "", 0, 0, 0, ""],
         ["call.blocking_abort_kept", call_blocking_abort_kept, "", 0, 0, 0, ""],

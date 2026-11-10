@@ -91,6 +91,23 @@ ends the exemption too, such as a replica's `REPLCONF ACK`, so during a pause
 a job's `yield_now` processes events and serves no clients. Upstream has no
 issue or pull request for this.
 
+## Calls that start a replica pause
+
+Redis queues an execution unit's replication and propagates it after the unit
+ends, and exempts a pause from its propagation assertion only when the pause
+starts inside `EXEC` (#235). A module command, timer, event, worker or
+keyspace callback that replicates and then runs `CLIENT PAUSE` or `FAILOVER`
+makes Redis 6.2 and later abort. Post-notification jobs and blocking calls
+exist from Redis 7.2, so a job that does so, and a blocking call's `SHUTDOWN`
+that waits for a lagging replica, make 7.2 and later abort. From Redis 7.0 the
+queue also holds Redis's own deletion of an expired key the module opened,
+which the module cannot see.
+Upstream's `call` and `call_ext` run these commands. Outside a transaction the
+SDK's calls now refuse `CLIENT PAUSE` in any mode and `FAILOVER` other than
+`FAILOVER ABORT`, and its blocking calls `SHUTDOWN` without `NOW` or `ABORT`,
+whether or not anything is queued; inside `EXEC` they run. Upstream has no
+issue or pull request for this, as of a search on 2026-11-10.
+
 ## Unsigned integer arguments
 
 `RedisString::parse_unsigned_integer`, which `NextArg::next_u64` and
