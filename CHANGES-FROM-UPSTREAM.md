@@ -95,11 +95,13 @@ issue or pull request for this.
 
 Redis queues an execution unit's replication and propagates it after the unit
 ends, and exempts a pause from its propagation assertion only when the pause
-starts inside `EXEC` (#235). A module command, timer, event, worker, job or
-keyspace callback that replicates and then runs `CLIENT PAUSE`, `FAILOVER`, or
-through a blocking call a `SHUTDOWN` that waits for a lagging replica, makes
-Redis 6.2 and later abort. From Redis 7.0 the queue also holds Redis's own
-deletion of an expired key the module opened, which the module cannot see.
+starts inside `EXEC` (#235). A module command, timer, event, worker or
+keyspace callback that replicates and then runs `CLIENT PAUSE` or `FAILOVER`
+makes Redis 6.2 and later abort. Post-notification jobs and blocking calls
+exist from Redis 7.2, so a job that does so, and a blocking call's `SHUTDOWN`
+that waits for a lagging replica, make 7.2 and later abort. From Redis 7.0 the
+queue also holds Redis's own deletion of an expired key the module opened,
+which the module cannot see.
 Upstream's `call` and `call_ext` run these commands. Outside a transaction the
 SDK's calls now refuse `CLIENT PAUSE` in any mode and `FAILOVER` other than
 `FAILOVER ABORT`, and its blocking calls `SHUTDOWN` without `NOW` or `ABORT`,

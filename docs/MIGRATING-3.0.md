@@ -1099,11 +1099,18 @@ Outside a transaction a call can no longer start a pause (#235): `call`,
 `ERR calls cannot pause replication outside a transaction` for
 `CLIENT PAUSE` in any mode and `FAILOVER` other than `FAILOVER ABORT`, and
 `call_blocking` for `SHUTDOWN` without `NOW` or `ABORT`, without running the
-command. Redis 6.2 and later abort when replication queued earlier in the same command, timer,
-event or worker propagates during the pause, and from 7.0 that includes
-deleting an expired key the module opened. A module that paused clients this
-way gets the error now, also when nothing was queued and on Redis 6.0; send the
-pause from a client, or call it from a command inside `MULTI`/`EXEC`.
+command. Redis 6.2 and later abort when replication queued earlier in the same
+command, timer, event or worker propagates during the pause, and from 7.0 that
+includes deleting an expired key the module opened. A module that paused
+clients this way gets the error now, also when nothing was queued and on Redis
+6.0; send the pause from a client, or call it from a command inside
+`MULTI`/`EXEC`. The SDK has no path to a pause from a timer, a worker or a
+server event that runs outside a transaction; code that calls
+`RedisModule_Call` through `raw` bypasses the check at its own risk. A module
+that shuts the server down from a blocking call uses `SHUTDOWN NOW`. The SDK checks only the command name
+and arguments: a refused call returns the pause error even where Redis would
+reject the command for another reason, such as `FAILOVER` on a replica or with
+no connected replica, a dry run, or a malformed `CLIENT PAUSE`.
 `CLIENT UNPAUSE` and other `CLIENT` subcommands still run.
 
 ### Missing optional APIs on older Redis 6.0 servers

@@ -135,8 +135,9 @@ abort. Jobs always run outside `EXEC`, and a callback does unless the write
 that fired it ran in a transaction. There `call`, `call_ext` and
 `call_blocking` return `ERR calls cannot pause replication outside a transaction`
 for `CLIENT PAUSE` and for `FAILOVER` other than `FAILOVER ABORT`, and
-`call_blocking` for `SHUTDOWN` without `NOW` or `ABORT`, whether or not a
-pause is active.
+`call_blocking` for `SHUTDOWN` without `NOW` or `ABORT`. Two checks come
+first: during a pause a job's call gets the post-notification job error above
+instead, and any call with a replicate flag gets the replicated-call error.
 
 ## Handle submission and write failures separately
 

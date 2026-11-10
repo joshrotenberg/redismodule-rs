@@ -366,7 +366,9 @@ jobs:
 
       - name: Test replication refusal during a write pause
         # Redis 7.0 aborts when a module replicates during any client pause
-        # once commands propagate, before the pause actions of 7.2.
+        # once commands propagate, before the pause actions of 7.2, and when
+        # a module call pauses after the command queued replication, a
+        # lazy-expire deletion included.
         run: |
           cargo build --example replicate --example lists --no-default-features --features min-redis-compatibility-version-7-0
           cargo test --no-default-features --features min-redis-compatibility-version-7-0 --test integration replication_pause:: -- --list | tee "$RUNNER_TEMP/replication-pause-tests.txt"

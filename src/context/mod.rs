@@ -1290,7 +1290,11 @@ impl RuntimeContext {
     /// runs, because Redis replicates the rest of a transaction that starts a
     /// pause. Redis 6.0 does not abort, and the SDK refuses there too. A
     /// blocking call, at the Redis 7.2 and later API floors, also refuses a
-    /// `SHUTDOWN` that can wait for replicas; see `call_blocking`.
+    /// `SHUTDOWN` that can wait for replicas; see `call_blocking`. The SDK
+    /// checks only the command name and arguments, so it returns this error
+    /// even where Redis would reject the command for another reason, such as
+    /// `FAILOVER` on a replica or with no connected replica, or a malformed
+    /// `CLIENT PAUSE`.
     ///
     /// On Redis 6.2, a command registered read-only whose call runs a write
     /// command inside `MULTI` during an earlier write pause aborts Redis:
@@ -1318,7 +1322,10 @@ impl RuntimeContext {
     /// call returns an error then, with or without the flag; see
     /// [`EventContext::add_post_notification_job`]. The refusal of calls that
     /// would pause replication outside a transaction, the Redis 6.2 limit and
-    /// the cluster slot rule that [`Self::call`] describes apply here too.
+    /// the cluster slot rule that [`Self::call`] describes apply here too. A
+    /// refused call returns the pause error with
+    /// [`CallOptionsBuilder::dry_run`] as well, and wherever Redis would reject
+    /// the command for another reason.
     ///
     /// The reply borrows this context. Redis 6.0 to 7.0 store the context in
     /// every reply; later releases store it in error replies created before
@@ -1978,11 +1985,11 @@ impl RuntimeContext {
         ///
         /// A module call cannot start such a pause outside a transaction:
         /// [`Self::call`], [`Self::call_ext`] and `call_blocking` refuse
-        /// `CLIENT PAUSE` and `FAILOVER` there, and `call_blocking` a
-        /// `SHUTDOWN` that can wait for replicas, because Redis would abort
-        /// when it propagates the replication already queued; see
-        /// [`Self::call`]. Send the pause from a client, or from a command
-        /// inside `MULTI`/`EXEC`.
+        /// `CLIENT PAUSE` and `FAILOVER` other than `FAILOVER ABORT` there,
+        /// and `call_blocking` a `SHUTDOWN` that can wait for replicas,
+        /// because Redis would abort when it propagates the replication
+        /// already queued; see [`Self::call`]. Send the pause from a client,
+        /// or from a command inside `MULTI`/`EXEC`.
         pub fn avoid_replication_traffic(&self) -> bool {
             unsafe { RedisModule_AvoidReplicaTraffic() == 1 }
         }

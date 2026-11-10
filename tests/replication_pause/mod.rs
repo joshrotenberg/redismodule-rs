@@ -779,6 +779,7 @@ fn test_replication_pause_refuses_client_pause_after_replicate_verbatim() -> Res
         command_calls(&mut replica, "replicate.then_call")?,
         modes.len() as u64
     );
+    assert_eq!(paused(&mut replica)?, 0);
     survived(&mut replica)
 }
 
