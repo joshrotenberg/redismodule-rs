@@ -67,7 +67,10 @@ guest commands outside their slot, including functions with
 `allow-cross-slot-keys`. Calls without declared keys and Redis 7.2 retain their
 cross-slot behavior. The declared-key regression covers `WASM.CALL`,
 `WASM.CALL_RO`, write refusal before mutation, and a call that waits for its
-library to compile after an RDB restart. It passes on Redis 7.2.16, 7.4.11 and
+library to compile after an RDB restart. The storage guard checks every
+reported command key before execution, including an explicit multi-key AOF
+replay whose first key matches but a later key does not. Known keyless commands
+remain allowed. The regressions pass on Redis 7.2.16, 7.4.11 and
 8.10.2. The WIT and README state the limit; the November 5 gap below is
 historical.
 

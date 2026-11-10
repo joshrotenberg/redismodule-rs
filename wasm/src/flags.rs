@@ -21,11 +21,13 @@ pub(crate) struct Mode {
     pub(crate) read_only: bool,
     /// Commands are not checked against `maxmemory`: `allow-oom`.
     pub(crate) allow_oom: bool,
-    /// The keys of every command must hash to one slot: without
-    /// `allow-cross-slot-keys`, or with declared keys on Redis 7.4 and later.
+    /// The function's flag policy limits its commands to one slot.
     pub(crate) one_slot: bool,
     /// That slot, once known: the declared keys', or the first command's.
     pub(crate) slot: Option<u16>,
+    /// Redis 7.4+ requires every command key to stay in this declared slot,
+    /// including during replay, independently of the function's flags.
+    pub(crate) declared_slot: Option<u16>,
 }
 
 impl Mode {
@@ -83,20 +85,23 @@ pub(crate) fn check(
         }
     }
 
-    let mut one_slot = cluster && !obey && !flags.contains(FunctionFlags::ALLOW_CROSS_SLOT_KEYS);
-    if cluster && !one_slot && !keys.is_empty() {
+    let one_slot = cluster && !obey && !flags.contains(FunctionFlags::ALLOW_CROSS_SLOT_KEYS);
+    let declared_slot = if cluster && !keys.is_empty() {
         // Redis 7.4+ may use the outer command's cached slot for every key
         // lookup. This storage restriction is separate from Lua's flag
         // policy: replay must not bypass it, and a call that waited for its
         // library to compile keeps its original declared-key contract.
         let version = ctx.get_redis_version()?;
-        one_slot = (version.major, version.minor) >= (7, 4);
-    }
+        ((version.major, version.minor) >= (7, 4)).then(|| cluster::key_slot(keys[0].as_slice()))
+    } else {
+        None
+    };
     Ok(Mode {
         loading: false,
         read_only: no_writes || read_only,
         allow_oom: flags.contains(FunctionFlags::ALLOW_OOM),
         one_slot,
+        declared_slot,
         // Redis has already refused declared keys in different slots.
         slot: if one_slot {
             keys.first().map(|key| cluster::key_slot(key))
@@ -122,16 +127,48 @@ fn running_stale(ctx: &Context, state: ContextFlags) -> bool {
     }
 }
 
-/// The hash slot of the keys `command` would use with `args`, or `None` if it
-/// uses none or Redis does not know it. Redis refuses a command whose own keys
-/// are in different slots, so the first key's slot stands for all of them.
+/// The first key's hash slot, for the ordinary Lua-style flag policy. Redis
+/// checks a command's own cross-slot routing outside replay. This is not
+/// sufficient for the declared-slot storage guard, which checks every key.
 pub(crate) fn command_slot(ctx: &Context, command: &str, args: &[&[u8]]) -> Option<u16> {
-    let argv: Vec<RedisString> = std::iter::once(command.as_bytes())
-        .chain(args.iter().copied())
-        .map(|arg| ctx.create_string(arg))
-        .collect();
+    let argv = command_args(ctx, command, args);
     let first = *ctx.get_command_keys(&argv).ok()?.first()?;
     Some(cluster::key_slot(argv.get(first)?.as_slice()))
+}
+
+pub(crate) const CROSS_SLOT_ERROR: &str =
+    "ERR Function attempted to access keys that do not hash to the same slot";
+
+/// Checks every command key before executing it. RedisModule_Call skips its
+/// own cluster routing checks for replay clients, so inspecting the first key
+/// would let a later key reach the declared slot. A valid keyless command is
+/// allowed; failed key discovery must not authorize native execution.
+pub(crate) fn check_declared_slot(
+    ctx: &Context,
+    command: &str,
+    args: &[&[u8]],
+    declared_slot: u16,
+) -> Result<(), String> {
+    let argv = command_args(ctx, command, args);
+    for position in ctx
+        .get_command_keys(&argv)
+        .map_err(|error| error.to_string())?
+    {
+        let key = argv
+            .get(position)
+            .ok_or("ERR command key position is out of range")?;
+        if cluster::key_slot(key.as_slice()) != declared_slot {
+            return Err(CROSS_SLOT_ERROR.into());
+        }
+    }
+    Ok(())
+}
+
+fn command_args(ctx: &Context, command: &str, args: &[&[u8]]) -> Vec<RedisString> {
+    std::iter::once(command.as_bytes())
+        .chain(args.iter().copied())
+        .map(|arg| ctx.create_string(arg))
+        .collect()
 }
 
 /// The flags in the order and spelling of `FUNCTION LIST`.
