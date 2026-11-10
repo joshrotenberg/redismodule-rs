@@ -1289,8 +1289,8 @@ impl RuntimeContext {
     /// subcommands, `CLIENT UNPAUSE` included, run. Inside `EXEC` the call
     /// runs, because Redis replicates the rest of a transaction that starts a
     /// pause. Redis 6.0 does not abort, and the SDK refuses there too. A
-    /// blocking call also refuses a `SHUTDOWN` that can wait for replicas; see
-    /// [`EventContext::call_blocking`].
+    /// blocking call, at the Redis 7.2 and later API floors, also refuses a
+    /// `SHUTDOWN` that can wait for replicas; see `call_blocking`.
     ///
     /// On Redis 6.2, a command registered read-only whose call runs a write
     /// command inside `MULTI` during an earlier write pause aborts Redis:
