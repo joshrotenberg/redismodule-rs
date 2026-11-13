@@ -1431,6 +1431,10 @@ impl RuntimeContext {
 
     /// Opens a read-only key within this runtime context's scope.
     ///
+    /// Panics during a keyspace scan if the running server lacks `NOEXPIRE`
+    /// support (Redis before 7.2). A plain open could expire a value Redis is
+    /// lending to the callback. Collect names and open them after the scan.
+    ///
     /// In cluster mode on Redis 7.4 and later, during a command that declares
     /// keys, the key must hash to the declared keys' slot; see
     /// [`crate::cluster`].
@@ -1479,7 +1483,7 @@ impl RuntimeContext {
 
     /// Opens a read-only key with flags, borrowing this context as in [`Self::open_key`].
     ///
-    /// The cluster slot rule on [`Self::open_key`] applies too.
+    /// The cluster slot rule and scan restrictions on [`Self::open_key`] apply too.
     ///
     /// ```compile_fail,E0597
     /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext, key::KeyFlags};
@@ -1498,6 +1502,7 @@ impl RuntimeContext {
     }
 
     /// Opens a writable key, borrowing this context until the key is closed.
+    /// The scan restrictions on [`Self::open_key`] apply too.
     ///
     /// In cluster mode on Redis 7.4 and later, during a command that declares
     /// keys, the key must hash to the declared keys' slot; see
@@ -1528,7 +1533,7 @@ impl RuntimeContext {
 
     /// Opens a writable key with flags, borrowing this context as in [`Self::open_key_writable`].
     ///
-    /// The cluster slot rule on [`Self::open_key_writable`] applies too.
+    /// The cluster slot rule and scan restrictions on [`Self::open_key_writable`] apply too.
     ///
     /// ```compile_fail,E0597
     /// # use redis_module::{DetachedFromClient, RedisString, ThreadSafeContext, key::KeyFlags};
@@ -1735,7 +1740,10 @@ impl RuntimeContext {
     ///
     /// For a client context, the client retains this selection after the
     /// module command returns. Use [`Self::with_db`] for temporary access.
+    /// Selection is refused while a key or keyspace scan callback runs on
+    /// this thread, including through another context.
     pub fn select_db(&self, db: i32) -> Result<(), RedisError> {
+        crate::key::database_will_change()?;
         let status: Status =
             unsafe { crate::__required_api!(RedisModule_SelectDb)(self.ctx, db) }.into();
         match status {
@@ -1746,7 +1754,8 @@ impl RuntimeContext {
 
     /// Runs `f` in `db`, restoring the original database when `f` returns or
     /// unwinds. Scopes may be nested. An invalid database returns an error
-    /// without running `f` or changing the current selection.
+    /// without running `f` or changing the current selection. The same holds
+    /// while a key or keyspace scan callback runs on this thread.
     ///
     /// The closure's value is returned unchanged, including a `Result` value.
     /// Selection covers only the synchronous execution of `f`. The closure may

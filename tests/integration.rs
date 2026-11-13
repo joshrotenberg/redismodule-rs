@@ -4475,6 +4475,138 @@ fn test_keyspace_scan_opens_leave_expired_keys_in_place() -> Result<()> {
 }
 
 #[test]
+fn test_scan_callback_database_selection_is_refused() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let count = 512_i64;
+    for (db, value) in [(0, "source"), (1, "destination")] {
+        redis::cmd("SELECT").arg(db).query::<()>(&mut con)?;
+        let mut set = redis::cmd("MSET");
+        for index in 0..count {
+            set.arg(format!("scan:{index}")).arg(value);
+        }
+        set.query::<()>(&mut con)?;
+    }
+    redis::cmd("SELECT").arg(0).query::<()>(&mut con)?;
+    let result: (i64, i64, i64, i64, i64) = redis::cmd("stale.keys_scan_db").query(&mut con)?;
+    redis::cmd("SELECT").arg(1).query::<()>(&mut con)?;
+    let mut get = redis::cmd("MGET");
+    for index in 0..count {
+        get.arg(format!("scan:{index}"));
+    }
+    let values: Vec<String> = get.query(&mut con)?;
+    let changed = values
+        .iter()
+        .filter(|value| *value != "destination")
+        .count();
+    eprintln!("scan database attempts={result:?}, destination keys changed={changed}");
+    assert!(
+        result.3 > 0,
+        "exercise a native batch with multiple callbacks"
+    );
+    assert_eq!(
+        result.0,
+        4 * count,
+        "all direct and scoped attempts refused"
+    );
+    assert_eq!(result.1, 0, "refused with_db never enters its closure");
+    assert_eq!(result.2, count, "all callback keys are present");
+    assert_eq!(result.4, 0, "normal with_db restores the selected database");
+    assert_eq!(changed, 0, "database contents stay unchanged");
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_scan_callback_open_and_reopen_expiry_guard() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let version = redis_module::Context::version_from_info(RedisValue::BulkString(info))?;
+    let protects_expiry = (version.major, version.minor) >= (7, 2);
+    redis::cmd("DEBUG")
+        .arg(&["SET-ACTIVE-EXPIRE", "0"])
+        .query::<()>(&mut con)?;
+    redis::cmd("SET")
+        .arg(&["scan:stable", "stable"])
+        .query::<()>(&mut con)?;
+    // Check refusal first with a non-expiring key. A regression fails here
+    // before attempting to open an expired value on an unprotected runtime.
+    for mode in [
+        "read",
+        "write",
+        "flags",
+        "write-flags",
+        "reopen-read",
+        "reopen-write",
+    ] {
+        let result: (i64, i64, String, String) = redis::cmd("stale.keys_scan_access")
+            .arg(&["scan:stable", mode])
+            .query(&mut con)?;
+        if protects_expiry {
+            assert_eq!((result.0, result.1), (1, 0));
+        } else {
+            assert_eq!((result.0, result.1), (0, 1), "unprotected open: {mode}");
+            assert!(result.2.contains("NOEXPIRE"), "{}", result.2);
+        }
+        assert_eq!(result.3, "string");
+    }
+    for mode in [
+        "read",
+        "write",
+        "flags",
+        "write-flags",
+        "reopen-read",
+        "reopen-write",
+    ] {
+        redis::cmd("SET")
+            .arg(&["scan:expired", "value", "PX", "1"])
+            .query::<()>(&mut con)?;
+        thread::sleep(Duration::from_millis(20));
+        let result: (i64, i64, String, String) = redis::cmd("stale.keys_scan_access")
+            .arg(&["scan:expired", mode])
+            .query(&mut con)?;
+        let remaining: i64 = redis::cmd("DBSIZE").query(&mut con)?;
+        eprintln!("scan access {mode}: {result:?}, physical keys remaining={remaining}");
+        assert_eq!(remaining, 2, "an open must not expire Redis's lent value");
+        assert_eq!(result.3, "string", "post-scan access works after refusal");
+        if protects_expiry {
+            assert_eq!((result.0, result.1), (1, 0));
+            assert!(result.2.is_empty());
+        } else {
+            assert_eq!((result.0, result.1), (0, 1));
+            assert!(result.2.contains("NOEXPIRE"), "{}", result.2);
+        }
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    if !protects_expiry {
+        // This fixture leaves the panic to scan's deferred-panic boundary.
+        let error = redis::cmd("stale.keys_scan_open")
+            .query::<i64>(&mut con)
+            .expect_err("an unprotected callback open must panic");
+        assert!(error.to_string().contains("NOEXPIRE"), "{error}");
+        assert_eq!(redis::cmd("DBSIZE").query::<i64>(&mut con)?, 2);
+        let value: String = redis::cmd("stale.call_then_read")
+            .arg(&["scan:stable", "PING"])
+            .query::<(String, String, String)>(&mut con)?
+            .2;
+        assert_eq!(value, "stable", "panic releases the scan's guards");
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    }
+    Ok(())
+}
+
+#[test]
+fn test_key_scan_callback_database_selection_is_refused() -> Result<()> {
+    let mut con = TestConnection::new("stale_keys");
+    redis::cmd("HSET")
+        .arg(&["hash", "field", "value"])
+        .query::<i64>(&mut con)?;
+    let result: (i64, i64, i64) = redis::cmd("stale.scan_db").arg("hash").query(&mut con)?;
+    assert_eq!(result, (2, 0, 0));
+    assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+    Ok(())
+}
+
+#[test]
 fn test_dbsize() -> Result<()> {
     let mut con = TestConnection::new("test_helper");
 

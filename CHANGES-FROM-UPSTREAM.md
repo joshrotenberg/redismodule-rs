@@ -11,6 +11,20 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Scan callback state
+
+`select_db` and `with_db` refuse database selection while a key or keyspace
+scan callback runs on the thread (#241). Redis scans the original database's
+dictionary but constructs later borrowed keys from the context's current
+database. Keeping the selection fixed preserves that association.
+
+SDK key opens and re-opens during keyspace scans require runtime `NOEXPIRE`
+support, checked through `RedisModule_GetOpenKeyModesAll` (#242). Older Redis
+versions ignore the flag and can expire a value the scan still holds. The
+SDK panics before a native open or any re-opening side effects when the
+capability is absent. Cleanup can run without repeating that refusal. Redis
+7.2 and later retain protected opens; ordinary access resumes after scanning.
+
 ## Duplicate command replies
 
 SDK command callbacks now count complete safe replies (#224 prototype). A
