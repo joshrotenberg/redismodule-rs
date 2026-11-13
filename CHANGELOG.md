@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Database selection is refused during key and keyspace scan callbacks
+  (#241), including `with_db` and selection through a captured context.
+  On servers without `NOEXPIRE` support, SDK key opens and re-opens during
+  keyspace scans panic before entering Redis (#242). Redis 7.2 and later
+  retain expiry-protected opens. Collect names and open them after scanning
+  when supporting older servers.
+
 - SDK command callbacks refuse duplicate complete replies through the safe
   `Context::reply*` methods (#224 prototype). A returned value or error after
   a direct reply is dropped and logged, and a later panic is logged without
