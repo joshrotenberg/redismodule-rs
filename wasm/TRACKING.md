@@ -7,7 +7,7 @@ scope and readiness. Historical H/S/G IDs remain useful for the evidence below.
 
 Status: `done`, `next` (being worked on or first in line), `todo`, `blocked`.
 
-Last updated 2026-11-10.
+Last updated 2026-11-13.
 
 ## Where it stands
 
@@ -138,6 +138,34 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-11-13: merged SDK master `75ddea1` into the branch as `22d823b`. It
+  brings [PR 243](https://github.com/joshrotenberg/redismodule-rs/pull/243)
+  for issues 241 and 242. Key and keyspace scan callbacks refuse database
+  selection through direct, scoped or captured contexts. Opening or re-opening
+  an SDK key during a keyspace scan requires runtime `NOEXPIRE` support;
+  unsupported servers panic before native access can expire a lent value.
+
+  The host needed no adaptation. It uses no native SDK scans, key opens or
+  database selection. Guest Redis commands use `Context::call_ext` outside
+  native scan callbacks.
+
+  The full `wasm/ci/check.sh` passed all 20 stages locally on Rust 1.94.0,
+  Redis 8.10.3 and Node.js 26.13.1 (CI pins Redis 8.10.2 and Node.js 24.22.1):
+
+  - 479 workspace tests, including the three new SDK scan regressions,
+    33 host unit, 5 compiler and 41 library tests with both guest languages;
+  - 149 workspace doc tests, the separate allocator fallback test and 4 guest
+    SDK tests;
+  - formatting, Clippy, examples, host and guest builds, and both SDK doc floors;
+  - all four snapshot lockfiles unchanged.
+
+  One manual bookkeeping timing test, 21 workspace doc examples and 2 guest
+  SDK doc examples remain ignored. Active defrag remains conditional on server
+  support; this local libc server does not establish jemalloc defrag coverage.
+  The older-server expiry-refusal arm is not exercised by Redis 8.10.3.
+  The local check remapped test port 6641 to 6941 and restored it afterward.
+  Experiment push CI remains pending publication of this sync.
 
 - 2026-11-10: merged SDK master `7daa167` into the branch as `acc7be4`. It
   brings [PR 238](https://github.com/joshrotenberg/redismodule-rs/pull/238),
