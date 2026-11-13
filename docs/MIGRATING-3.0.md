@@ -934,6 +934,11 @@ fn find<'a, T>(values: &'a HashMap<RedisString, T>, name: &str) -> Option<&'a T>
 - `Context::get_current_user` returns `Option<RedisString>`.
 - `ScanKeyCursor::scan` and `for_each` callbacks receive the value as
   `Option<&RedisString>`, and `KeysCursor::scan` takes the callback as `&mut F`.
+  Both scan forms refuse `select_db` and `with_db` on any context on the
+  thread. On Redis before 7.2, opening or re-opening an SDK key during a
+  keyspace scan panics because the server cannot honor `NOEXPIRE`. Collect
+  key names and open them after the scan. On Redis 7.2 and later, callback
+  opens continue to use `NOEXPIRE` until the scan returns.
 - A keyspace event handler gets the event name and key borrowed for the
   callback, so a handler declared with `&'static str` or `&'static [u8]` no
   longer compiles; declare plain `&str` and `&[u8]` and copy what it keeps.
