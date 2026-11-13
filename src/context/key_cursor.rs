@@ -79,6 +79,8 @@ impl<'ctx> ScanKeyCursor<'ctx> {
     /// Returns `true` if there are more fields to scan, `false` otherwise.
     ///
     /// The callback may be called multiple times per `RedisModule_ScanKey` invocation.
+    /// Database selection through any context on this thread is refused
+    /// until the callback returns.
     ///
     /// ## Example
     ///

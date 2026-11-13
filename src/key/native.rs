@@ -54,6 +54,16 @@ pub(crate) const MID_WRITE_ERROR: &str =
 const STALE_RAW: &str =
     "a key handle built from raw parts was used after the keyspace changed; open the key again";
 
+/// Refuses database selection while either native scan is running. The
+/// keyspace scan constructs later borrowed handles from the context's current
+/// database, even though it keeps walking the original database's dictionary.
+pub(crate) fn database_will_change() -> Result<(), RedisError> {
+    if FROZEN.get() != 0 {
+        return Err(RedisError::Str(FROZEN_ERROR));
+    }
+    Ok(())
+}
+
 /// The change count of a raw handle that has not been used yet: it takes the
 /// count it first sees.
 const UNSEEN: u64 = u64::MAX;
@@ -139,8 +149,8 @@ fn close_expired_access(except: Option<&Entry>) {
 /// callback keys that may have expired, or while this thread holds an
 /// `ACCESS_EXPIRED` key Redis is using, such as one a key scan is scanning: a
 /// plain open of such a key would delete its expired value under Redis.
-/// Otherwise no flags. Redis honors `NOEXPIRE` from 7.2; before that the flag
-/// is ignored and an open can still delete an expired key.
+/// Otherwise no flags. Opening under this guard also requires the running
+/// server to honor `NOEXPIRE`; see `open_expiry_guard`.
 fn expiry_guard() -> c_int {
     let access_expired = super::KeyFlags::ACCESS_EXPIRED.bits();
     let mut held = KEYSPACE_SCANS.get() != 0;
@@ -150,6 +160,24 @@ fn expiry_guard() -> c_int {
     } else {
         0
     }
+}
+
+/// Checks before any native open, close or database selection. Older servers
+/// ignore unknown open flags, so supplying `NOEXPIRE` alone is insufficient.
+/// Keep this check out of `expiry_guard`, which is also used during cleanup.
+fn open_expiry_guard() -> c_int {
+    let guard = expiry_guard();
+    if guard != 0 {
+        // SAFETY: API pointers are initialized at module load and remain
+        // unchanged; this capability query has no context or keyspace effects.
+        let supported = unsafe { raw::RedisModule_GetOpenKeyModesAll }
+            .is_some_and(|modes| unsafe { modes() } & guard == guard);
+        assert!(
+            supported,
+            "cannot open a key during a keyspace scan: Redis does not support NOEXPIRE"
+        );
+    }
+    guard
 }
 
 /// Closes the keys opened under the expiry guard once it has lifted, so they
@@ -313,6 +341,7 @@ impl Entry {
 
     /// Re-opens a closed key in the database it was opened in.
     fn reopen(&self) {
+        let guard = open_expiry_guard();
         close_expired_access(Some(self));
         let name = self.name.take().expect("a closed key keeps its name");
         let selected = unsafe { crate::__required_api!(RedisModule_GetSelectedDb)(self.ctx) };
@@ -322,7 +351,6 @@ impl Entry {
             unsafe { select(self.ctx, self.db) };
         }
         let mode = raw::KeyMode::from_bits_truncate(self.mode);
-        let guard = expiry_guard();
         self.guarded.set(guard != 0);
         let flags = self.flags | guard;
         let inner = raw::open_key_with_flags(self.ctx, name.as_ptr(), mode, flags);
@@ -383,10 +411,10 @@ impl NativeKey {
         flags: c_int,
     ) -> Self {
         let mode_bits = mode.bits();
+        let guard = open_expiry_guard();
         close_expired_access(None);
         let key_hash = key_hash(name);
         // The entry keeps the requested flags; the guard covers this open only.
-        let guard = expiry_guard();
         let inner = raw::open_key_with_flags(ctx, name, mode, flags | guard);
         let db = unsafe { crate::__required_api!(RedisModule_GetSelectedDb)(ctx) };
         // A missing key opened for reading has no native key to ask its name.

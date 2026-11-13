@@ -44,12 +44,14 @@ impl KeysCursor {
     ///
     /// The callback cannot change the keyspace: Redis closes the key it lent
     /// after the callback returns, reading the key's value, so calls,
-    /// `yield_now`, notifications and key writes are refused there, and pops
-    /// panic. Reading the lent key's string value is allowed. Keys the
-    /// callback opens open with `NOEXPIRE` (Redis 7.2+), since Redis can lend
+    /// `yield_now`, database selection, notifications and key writes are
+    /// refused there, and pops panic. Reading the lent key's string value is
+    /// allowed. Keys the callback opens open with `NOEXPIRE` (Redis 7.2+),
+    /// since Redis can lend
     /// keys that expired but are not yet deleted, and an open would delete
-    /// one; before 7.2, opening the lent key can still delete it. Collect what
-    /// to change and change it after `scan` returns.
+    /// one. On servers without `NOEXPIRE`, opening or re-opening an SDK key
+    /// panics before entering Redis. Collect what to change and change it
+    /// after `scan` returns.
     pub fn scan<F: FnMut(&RuntimeContext, &RedisString, Option<&RedisKey>)>(
         &self,
         ctx: &RuntimeContext,

@@ -303,6 +303,135 @@ fn keys_scan_keep(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     Ok(key_type_name(key.key_type()).into())
 }
 
+/// Tries direct and scoped database selection through both callback and
+/// captured contexts, without reading or changing the lent values.
+fn keys_scan_db(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    args.done()?;
+    let original = ctx.get_selected_db();
+    let cursor = KeysCursor::new();
+    let mut refused: i64 = 0;
+    let mut scoped_calls: i64 = 0;
+    let mut reads: i64 = 0;
+    let mut multi: i64 = 0;
+    loop {
+        let mut batch = 0;
+        let more = cursor.scan(ctx, &mut |scan_ctx, _, key| {
+            for context in [scan_ctx, &**ctx] {
+                if context.select_db(1).is_err() {
+                    refused += 1;
+                }
+                if context.with_db(1, |_| scoped_calls += 1).is_err() {
+                    refused += 1;
+                }
+            }
+            if key.is_some() {
+                reads += 1;
+            }
+            // Keep this regression safe against SDKs without the guard.
+            if ctx.get_selected_db() != original {
+                ctx.select_db(original).unwrap();
+            }
+            batch += 1;
+        });
+        if batch > 1 {
+            multi += 1;
+        }
+        if !more {
+            break;
+        }
+    }
+    ctx.with_db(1, |ctx| assert_eq!(ctx.get_selected_db(), 1))?;
+    Ok(RedisValue::Array(vec![
+        refused.into(),
+        scoped_calls.into(),
+        reads.into(),
+        multi.into(),
+        i64::from(ctx.get_selected_db()).into(),
+    ]))
+}
+
+/// Checks the same selection refusal for a hash/set/sorted-set scan.
+fn scan_db(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let name = args.next_arg()?;
+    args.done()?;
+    let cursor = ScanKeyCursor::new(ctx.open_key(&name));
+    let mut refused: i64 = 0;
+    let mut scoped_calls: i64 = 0;
+    cursor.for_each(|_, _, _| {
+        if ctx.select_db(1).is_err() {
+            refused += 1;
+        }
+        if ctx.with_db(1, |_| scoped_calls += 1).is_err() {
+            refused += 1;
+        }
+    });
+    ctx.with_db(1, |ctx| assert_eq!(ctx.get_selected_db(), 1))?;
+    Ok(RedisValue::Array(vec![
+        refused.into(),
+        scoped_calls.into(),
+        i64::from(ctx.get_selected_db()).into(),
+    ]))
+}
+
+/// Attempts fresh and closed-handle access while a scan lends a key.
+/// Catch each refusal in the callback, then use the same access path
+/// after scanning to check that its guard has ended.
+fn keys_scan_access(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let wanted = args.next_arg()?;
+    let mode = args.next_string()?;
+    args.done()?;
+    let stable = ctx.create_string("scan:stable");
+    let read = ctx.open_key(&stable);
+    let write = ctx.open_key_writable(&stable);
+    // Close both handles while keeping their SDK owners for the callback.
+    ctx.call("PING", &[] as &[&str])?;
+    let cursor = KeysCursor::new();
+    let mut opened: i64 = 0;
+    let mut refused: i64 = 0;
+    let mut refusal = String::new();
+    while cursor.scan(ctx, &mut |_, name, _| {
+        if name.as_slice() != wanted.as_slice() {
+            return;
+        }
+        let result = redis_module::panic::catch_panic(|| {
+            match mode.as_str() {
+                "read" => ctx.open_key(name).key_type(),
+                "write" => ctx.open_key_writable(name).key_type(),
+                "flags" => ctx
+                    .open_key_with_flags(name, redis_module::key::KeyFlags::NOEXPIRE)
+                    .key_type(),
+                "write-flags" => ctx
+                    .open_key_writable_with_flags(name, redis_module::key::KeyFlags::NOEXPIRE)
+                    .key_type(),
+                "reopen-read" => read.key_type(),
+                "reopen-write" => write.key_type(),
+                _ => panic!("unknown scan access mode"),
+            };
+        });
+        match result {
+            Ok(()) => opened += 1,
+            Err(message) => {
+                refused += 1;
+                refusal = message;
+            }
+        }
+    }) {}
+    let after = match mode.as_str() {
+        "reopen-read" => read.key_type(),
+        "reopen-write" => write.key_type(),
+        _ => ctx.open_key(&stable).key_type(),
+    };
+    Ok(RedisValue::Array(vec![
+        opened.into(),
+        refused.into(),
+        refusal.into(),
+        key_type_name(after).into(),
+    ]))
+}
+
 /// `stale.new_calls`: calls the `new` subscriber made, and refusals it got.
 fn new_calls(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(RedisValue::Array(vec![
@@ -398,6 +527,9 @@ redis_module! {
         ["stale.keys_scan_open", keys_scan_open, "readonly", 0, 0, 0, ""],
         ["stale.keys_scan_nested", keys_scan_nested, "readonly", 0, 0, 0, ""],
         ["stale.keys_scan_keep", keys_scan_keep, "write", 1, 1, 1, ""],
+        ["stale.keys_scan_db", keys_scan_db, "readonly", 0, 0, 0, ""],
+        ["stale.scan_db", scan_db, "readonly", 1, 1, 1, ""],
+        ["stale.keys_scan_access", keys_scan_access, "readonly", 1, 1, 1, ""],
         ["stale.new_calls", new_calls, "readonly", 0, 0, 0, ""],
         ["stale.raw_parts_after_call", raw_parts_after_call, "write", 1, 1, 1, ""],
         ["stale.yield_then_read", yield_then_read, "readonly", 1, 1, 1, ""],
