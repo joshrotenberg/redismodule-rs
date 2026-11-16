@@ -242,6 +242,16 @@ jobs:
             cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact
           done
 
+      - name: Test declared authentication hook refusal
+        env:
+          TEST_REDIS_SERVER_LEGACY_OPTIONS: "1"
+        run: |
+          cargo build --example hello --example auth_callbacks --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }}
+          test_name=auth_callbacks::test_auth_callbacks_unsupported_runtime_refuses_declared_hook
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-auth-tests.txt"
+          grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-auth-tests.txt"
+          cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact
+
       - name: Test unload refusal for ACL rules
         # Before 7.2 the unload goes ahead and the next ACL LIST stops the
         # server; the unload hook reads the rules through RM_Call.

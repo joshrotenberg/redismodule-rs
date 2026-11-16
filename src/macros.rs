@@ -327,6 +327,25 @@ macro_rules! redis_event_handler {
 ///
 /// Initialization hooks receive a borrowed [`RegistrationContext`](crate::RegistrationContext).
 /// Load-only APIs require it; command handlers continue receiving [`Context`](crate::Context).
+///
+/// `auth: handler,` declares one synchronous [`AuthCallback`](crate::AuthCallback)
+/// function path before `commands`. A declared hook fails load when its Redis
+/// 7.2 APIs are absent. Credentials are borrowed and Redis writes AUTH/HELLO's
+/// response. See [authentication](crate::AuthContext).
+///
+/// ```no_run
+/// use redis_module::{AuthContext, AuthDecision, AuthRequest, redis_module};
+/// fn authenticate(_: &AuthContext<'_>, _: AuthRequest<'_>) -> AuthDecision {
+///     AuthDecision::NotHandled
+/// }
+/// redis_module! {
+///     name: "auth_example", version: 1,
+///     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
+///     data_types: [],
+///     auth: authenticate,
+/// }
+/// # fn main() {}
+/// ```
 #[macro_export]
 macro_rules! redis_module {
     (
@@ -348,6 +367,7 @@ macro_rules! redis_module {
         $(init: $init_func:ident,)* $(,)*
         $(deinit: $deinit_func:ident,)* $(,)*
         $(info: $info_func:ident,)?
+        $(auth: $auth_handler:path,)?
         $(commands: [$($commands:tt)*] $(,)*)?
         $(event_handlers: [
             $([
@@ -394,6 +414,22 @@ macro_rules! redis_module {
         /// Redis module allocator.
         #[global_allocator]
         static REDIS_MODULE_ALLOCATOR: $allocator_type = $allocator_init;
+
+        $(
+            unsafe extern "C" fn __auth_callback(
+                ctx: *mut $crate::raw::RedisModuleCtx,
+                username: *mut $crate::raw::RedisModuleString,
+                password: *mut $crate::raw::RedisModuleString,
+                err: *mut *mut $crate::raw::RedisModuleString,
+            ) -> ::std::os::raw::c_int {
+                // The function-pointer type bounds every credential borrow to
+                // this invocation, including handlers which ask for 'static.
+                let handler: $crate::AuthCallback = $auth_handler;
+                // SAFETY: Redis invokes this registered module-auth callback
+                // with live credentials/error slot and the Redis lock held.
+                unsafe { $crate::__private::run_auth_callback(ctx, username, password, err, handler) }
+            }
+        )?
 
         // The old-style info command handler, if specified.
         $(
@@ -699,6 +735,13 @@ macro_rules! redis_module {
                     // them after a failed load and cannot remove them, so only
                     // their API is checked before init.
                     $(
+                        let _: $crate::AuthCallback = $auth_handler;
+                        if let Err(error) = $crate::__private::auth_callback_available() {
+                            context.log_warning(&error.to_string());
+                            return raw::Status::Err as c_int;
+                        }
+                    )?
+                    $(
                         let keyspace_handlers: &[&str] = &[$( stringify!($event_handler) ),*];
                         if !keyspace_handlers.is_empty() {
                             if let Err(error) = $crate::__private::keyspace_subscription_available() {
@@ -713,6 +756,15 @@ macro_rules! redis_module {
                             return $crate::Status::Err as c_int;
                         }
                     )*
+
+                    $(
+                        let _: $crate::AuthCallback = $auth_handler;
+                        // SAFETY: static generated trampoline, current OnLoad.
+                        if let Err(error) = unsafe { $crate::__private::register_auth_callback(&context, Some(__auth_callback)) } {
+                            context.log_warning(&error.to_string());
+                            return raw::Status::Err as c_int;
+                        }
+                    )?
 
                     // RedisModule_SubscribeToKeyspaceEvents does not fail once its
                     // APIs exist, which was checked before init. A failure here

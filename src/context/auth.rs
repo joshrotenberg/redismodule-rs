@@ -9,6 +9,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::{Context, RedisError, RedisString, RuntimeContext, raw};
 
+mod callback;
+pub use callback::{
+    AuthCallback, AuthContext, AuthDecision, AuthRequest, AuthTarget, Password, PublicAuthError,
+};
+#[doc(hidden)]
+pub use callback::{auth_callback_available, register_auth_callback, run_auth_callback};
+
 /// A Redis connection ID. IDs do not keep clients alive.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ClientId(pub u64);
@@ -134,6 +141,7 @@ impl Registry {
             || !self.closing.is_empty()
             || !self.removing.is_empty()
             || self.executing != 0
+            || callback::in_flight()
     }
     fn next(&mut self) -> Result<u64, RedisError> {
         self.next = self
@@ -673,7 +681,7 @@ impl Context {
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithUser) };
         let lease = UserLease::begin(user)?;
         let user = lease.ptr;
-        self.attach_identity(client, pending, false, |callback, private, id| unsafe {
+        attach_identity(client, pending, false, |callback, private, id| unsafe {
             attach(self.ctx, user, callback, private, id)
         })
     }
@@ -698,7 +706,7 @@ impl Context {
         let client = command_client(self)?;
         let _operation = NativeOperation::begin();
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithACLUser) };
-        self.attach_identity(client, pending, true, |callback, private, id| unsafe {
+        attach_identity(client, pending, true, |callback, private, id| unsafe {
             attach(
                 self.ctx,
                 name.as_ptr().cast(),
@@ -708,73 +716,6 @@ impl Context {
                 id,
             )
         })
-    }
-
-    fn attach_identity(
-        &self,
-        client: ClientId,
-        mut callback: PendingCallback,
-        require_installed: bool,
-        attach: impl FnOnce(raw::RedisModuleUserChangedFunc, *mut c_void, *mut u64) -> i32,
-    ) -> Result<ClientId, RedisError> {
-        registry().active()?;
-        let id = client.0;
-        let (key, private) = {
-            let mut registry = registry();
-            registry.active()?;
-            if registry.executing != 0 || registry.closing.contains(&client) {
-                return Err(RedisError::Str(
-                    "ERR identity attachment is refused during client cleanup",
-                ));
-            }
-            // None is a preallocated, not-yet-installed registration. Only
-            // native success below establishes ownership for this client ID.
-            // Detached/deferred callbacks have already left this map.
-            if require_installed
-                && !registry
-                    .subscriptions
-                    .values()
-                    .any(|s| s.installed_client == Some(ClientId(id)))
-            {
-                return Err(RedisError::Str(
-                    "ERR ACL attachment requires an installed SDK client identity",
-                ));
-            }
-            if registry
-                .subscriptions
-                .values()
-                .any(|s| s.pending_client == Some(ClientId(id)))
-            {
-                return Err(RedisError::Str(
-                    "ERR client identity attachment is already in progress",
-                ));
-            }
-            let key = registry.next()?;
-            let mut subscription = Subscription {
-                cookie: Box::new(Cookie(key)),
-                installed_client: None,
-                pending_client: Some(ClientId(id)),
-                callback: callback.0.take(),
-            };
-            let private = (&mut *subscription.cookie as *mut Cookie).cast();
-            registry.subscriptions.insert(key, subscription);
-            LIVE_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
-            (key, private)
-        };
-        let mut id = 0;
-        if attach(Some(changed), private, &mut id) != raw::REDISMODULE_OK as i32 {
-            let failed = registry().subscriptions.remove(&key);
-            contain(|| drop(failed));
-            LIVE_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
-            return Err(RedisError::Str(
-                "ERR Redis refused client identity attachment",
-            ));
-        }
-        let mut registry = registry();
-        let installed = registry.subscriptions.get_mut(&key).unwrap();
-        installed.pending_client = None;
-        installed.installed_client = Some(ClientId(id));
-        Ok(ClientId(id))
     }
 
     /// Redacts a current command argument from MONITOR, SLOWLOG and server logs
@@ -791,10 +732,76 @@ impl Context {
     }
 }
 
+fn attach_identity(
+    client: ClientId,
+    mut callback: PendingCallback,
+    require_installed: bool,
+    attach: impl FnOnce(raw::RedisModuleUserChangedFunc, *mut c_void, *mut u64) -> i32,
+) -> Result<ClientId, RedisError> {
+    registry().active()?;
+    let id = client.0;
+    let (key, private) = {
+        let mut registry = registry();
+        registry.active()?;
+        if registry.executing != 0 || registry.closing.contains(&client) {
+            return Err(RedisError::Str(
+                "ERR identity attachment is refused during client cleanup",
+            ));
+        }
+        // None is a preallocated, not-yet-installed registration. Only
+        // native success below establishes ownership for this client ID.
+        // Detached/deferred callbacks have already left this map.
+        if require_installed
+            && !registry
+                .subscriptions
+                .values()
+                .any(|s| s.installed_client == Some(ClientId(id)))
+        {
+            return Err(RedisError::Str(
+                "ERR ACL attachment requires an installed SDK client identity",
+            ));
+        }
+        if registry
+            .subscriptions
+            .values()
+            .any(|s| s.pending_client == Some(ClientId(id)))
+        {
+            return Err(RedisError::Str(
+                "ERR client identity attachment is already in progress",
+            ));
+        }
+        let key = registry.next()?;
+        let mut subscription = Subscription {
+            cookie: Box::new(Cookie(key)),
+            installed_client: None,
+            pending_client: Some(ClientId(id)),
+            callback: callback.0.take(),
+        };
+        let private = (&mut *subscription.cookie as *mut Cookie).cast();
+        registry.subscriptions.insert(key, subscription);
+        LIVE_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
+        (key, private)
+    };
+    let mut id = 0;
+    if attach(Some(changed), private, &mut id) != raw::REDISMODULE_OK as i32 {
+        let failed = registry().subscriptions.remove(&key);
+        contain(|| drop(failed));
+        LIVE_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
+        return Err(RedisError::Str(
+            "ERR Redis refused client identity attachment",
+        ));
+    }
+    let mut registry = registry();
+    let installed = registry.subscriptions.get_mut(&key).unwrap();
+    installed.pending_client = None;
+    installed.installed_client = Some(ClientId(id));
+    Ok(ClientId(id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    static PROTOCOL_TEST: Mutex<()> = Mutex::new(());
+    pub(super) static PROTOCOL_TEST: Mutex<()> = Mutex::new(());
     pub(super) static COOKIE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
     #[test]

@@ -9,6 +9,7 @@ use anyhow::Result;
 use redis::{RedisError, RedisResult, Value, VerbatimFormat};
 use redis_module::RedisValue;
 
+mod auth_callbacks;
 mod auth_users;
 mod configuration_ownership;
 mod correctness_gaps;
