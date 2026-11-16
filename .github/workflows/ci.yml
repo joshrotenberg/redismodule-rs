@@ -227,7 +227,8 @@ jobs:
             test_typed_timer_firing_passive_drop_panic_and_reentry \
             test_typed_timer_pending_unload_refusal_and_reload \
             test_typed_timer_init_rejects_creation_and_releases_owned_values \
-            test_typed_timer_unload_phase_rejects_creation_and_restores_after_refusal
+            test_typed_timer_unload_phase_rejects_creation_and_restores_after_refusal \
+            test_typed_timer_worker_notification_refuses_before_native_creation
           do
             cargo test --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }} --test integration "$test_name" -- --exact --list | tee "$RUNNER_TEMP/legacy-timer-tests.txt"
             grep -Fx -- "$test_name: test" "$RUNNER_TEMP/legacy-timer-tests.txt"
