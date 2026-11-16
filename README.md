@@ -366,6 +366,10 @@ invocations fail before native blocking. See [block.rs](examples/block.rs).
 
 ## Timers
 
+Module-owned users and privileged client identity attachment are described in
+[the authentication guide](docs/AUTHENTICATION.md) and
+[auth_users.rs](examples/auth_users.rs).
+
 `ctx.create_timer(delay, callback, data)?` returns a typed `TimerHandle<T>`.
 Callbacks and payloads require `Send + 'static`. Keep the handle to call
 `ctx.cancel_timer(&handle)?` or query `ctx.timer_remaining(&handle)?`;

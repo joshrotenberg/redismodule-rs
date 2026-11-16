@@ -517,6 +517,14 @@ macro_rules! redis_module {
                             return raw::Status::Err as c_int;
                         }
                     };
+                    // SAFETY: Init succeeded; this is this module's OnLoad.
+                    let user_load = match unsafe { $crate::__private::UserLoadGuard::begin() } {
+                        Ok(guard) => guard,
+                        Err(error) => {
+                            runtime_context.log_warning(&format!("{error}"));
+                            return raw::Status::Err as c_int;
+                        }
+                    };
                     // Redis would keep an event loop callback added by a load it
                     // then rejects.
                     let event_loop_load = $crate::__private::EventLoopLoadGuard::begin();
@@ -715,6 +723,7 @@ macro_rules! redis_module {
                         )*
                     )?
 
+                    user_load.commit();
                     timer_load.commit();
                     event_loop_load.commit();
                     raw::Status::Ok as c_int
@@ -784,6 +793,15 @@ macro_rules! redis_module {
                             return $crate::Status::Err as c_int;
                         }
                     };
+                    // Refuse new identities through deinit; abort restores active
+                    // state without destroying native-referenced callback data.
+                    let user_unload = match unsafe { $crate::__private::UserUnloadGuard::begin(&context) } {
+                        Ok(guard) => guard,
+                        Err(error) => {
+                            context.log_warning(&format!("{error}"));
+                            return $crate::Status::Err as c_int;
+                        }
+                    };
                     // Redis keeps pending one-shots, and watched descriptors,
                     // across unload. The guard refuses new ones from deinit and
                     // stops watching what is left when it commits.
@@ -811,6 +829,10 @@ macro_rules! redis_module {
                     )*
 
                     if let Err(error) = configuration_unload.commit() {
+                        context.log_warning(&format!("{error}"));
+                        return $crate::Status::Err as c_int;
+                    }
+                    if let Err(error) = user_unload.commit() {
                         context.log_warning(&format!("{error}"));
                         return $crate::Status::Err as c_int;
                     }

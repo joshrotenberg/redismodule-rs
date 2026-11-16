@@ -25,6 +25,8 @@ use std::ffi::CStr;
 use self::call_reply::{CallResult, ErrorReply, PromiseCallReply, create_promise_call_reply};
 use self::thread_safe::RedisLockIndicator;
 
+pub(crate) mod auth;
+pub use auth::{ClientChangeCallback, ClientId, ModuleUserHandle};
 mod call_user;
 pub(crate) mod command_reply;
 pub use call_user::CallUserScope;

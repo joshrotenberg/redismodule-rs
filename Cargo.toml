@@ -54,6 +54,10 @@ name = "parsed_configuration"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "auth_users"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "context_acl"
 crate-type = ["cdylib"]
 

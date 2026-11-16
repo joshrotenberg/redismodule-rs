@@ -11,6 +11,20 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Module users and client identity attachment
+
+Created Redis module users are held in an SDK registry with opaque module/load
+and monotonic generation identities (#216). Handle destruction does not call
+Redis; explicit removal and successful unload free native owners under the Redis
+lock. Client attachment always installs native one-shot cleanup, including when
+there is no consumer notification. Cleanup accepts owned `Send` captures and
+never fabricates a context for Redis's context-free callback. Refused unload
+restores existing subscriptions. Full ACL strings use Redis's transactional
+setter and omit secret-bearing parser diagnostics. Peer certificates are copied
+to owned bytes and command arguments can be redacted. See
+[the API guide](docs/AUTHENTICATION.md). Authentication callback registration and
+asynchronous completion remain outside this delivery.
+
 ## Main-thread timer creation
 
 `EventContext::create_timer` requires Redis's actual main thread (#244). It

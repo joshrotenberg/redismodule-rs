@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Module-owned users with opaque per-load generation handles, explicit locked
+  removal, transactional ACL updates and client identity attachment (#216).
+  Native one-shot cleanup runs on reauthentication, disconnect, revocation and
+  unload, including attachments without a consumer callback. Added owned peer
+  certificate copying and command-argument redaction. See
+  [module users](docs/AUTHENTICATION.md) and the `auth_users` example.
+
 - Documentation of three server behaviors the SDK does not guard against
   (#225). [docs/CLUSTER.md](docs/CLUSTER.md): in cluster mode on Redis 7.4
   and later, keys that `open_key`, `open_key_writable` or `call` reach during
