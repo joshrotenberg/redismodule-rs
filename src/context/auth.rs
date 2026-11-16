@@ -75,7 +75,7 @@ impl Drop for Cookie {
 }
 struct Subscription {
     cookie: Box<Cookie>,
-    client: Option<ClientId>,
+    installed_client: Option<ClientId>,
     callback: Option<ClientChangeCallback>,
 }
 #[derive(Clone, Copy, PartialEq)]
@@ -392,7 +392,7 @@ impl<'a> UserUnloadGuard<'a> {
         let clients: Vec<_> = registry()
             .subscriptions
             .values()
-            .filter_map(|s| s.client)
+            .filter_map(|s| s.installed_client)
             .collect();
         for client in clients {
             // SAFETY: OnUnload holds the Redis lock. Revocation synchronously
@@ -580,13 +580,19 @@ impl Context {
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithUser) };
         let lease = UserLease::begin(user)?;
         let user = lease.ptr;
-        self.attach_identity(pending, |callback, private, id| unsafe {
+        self.attach_identity(pending, false, |callback, private, id| unsafe {
             attach(self.ctx, user, callback, private, id)
         })
     }
 
     /// Attaches an existing ACL account by name (Redis 6.0+). The name is resolved
     /// by Redis at this call, never cached as a borrowed native user handle.
+    /// Requires this connection's current native callback to be an actually
+    /// installed SDK subscription. First attach a caller-selected created user
+    /// explicitly. Unknown, foreign, pending or detached ownership is refused
+    /// before native account lookup or identity change; no hidden bootstrap is
+    /// performed. This prevents a foreign prior callback from deleting the
+    /// incoming borrowed ACL account while native attachment still uses it.
     /// Missing and disabled accounts fail. This does not check a password.
     /// Installs cleanup even without a consumer callback; see [`ClientChangeCallback`].
     pub fn authenticate_client_with_acl_user(
@@ -598,7 +604,7 @@ impl Context {
         main_thread()?;
         let _operation = NativeOperation::begin();
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithACLUser) };
-        self.attach_identity(pending, |callback, private, id| unsafe {
+        self.attach_identity(pending, true, |callback, private, id| unsafe {
             attach(
                 self.ctx,
                 name.as_ptr().cast(),
@@ -613,6 +619,7 @@ impl Context {
     fn attach_identity(
         &self,
         mut callback: PendingCallback,
+        require_installed: bool,
         attach: impl FnOnce(raw::RedisModuleUserChangedFunc, *mut c_void, *mut u64) -> i32,
     ) -> Result<ClientId, RedisError> {
         registry().active()?;
@@ -637,10 +644,23 @@ impl Context {
                     "ERR identity attachment is refused during client cleanup",
                 ));
             }
+            // None is a preallocated, not-yet-installed registration. Only
+            // native success below establishes ownership for this client ID.
+            // Detached/deferred callbacks have already left this map.
+            if require_installed
+                && !registry
+                    .subscriptions
+                    .values()
+                    .any(|s| s.installed_client == Some(ClientId(id)))
+            {
+                return Err(RedisError::Str(
+                    "ERR ACL attachment requires an installed SDK client identity",
+                ));
+            }
             let key = registry.next()?;
             let mut subscription = Subscription {
                 cookie: Box::new(Cookie(key)),
-                client: None,
+                installed_client: None,
                 callback: callback.0.take(),
             };
             let private = (&mut *subscription.cookie as *mut Cookie).cast();
@@ -657,7 +677,11 @@ impl Context {
                 "ERR Redis refused client identity attachment",
             ));
         }
-        registry().subscriptions.get_mut(&key).unwrap().client = Some(ClientId(id));
+        registry()
+            .subscriptions
+            .get_mut(&key)
+            .unwrap()
+            .installed_client = Some(ClientId(id));
         Ok(ClientId(id))
     }
 
@@ -702,7 +726,7 @@ mod tests {
         let state = OwnedState(drops.clone());
         let mut subscription = Subscription {
             cookie: Box::new(Cookie(42)),
-            client: Some(ClientId(7)),
+            installed_client: Some(ClientId(7)),
             callback: Some(Box::new(move |client| {
                 assert_eq!(client, ClientId(7));
                 callback_calls.fetch_add(1, Ordering::Relaxed);

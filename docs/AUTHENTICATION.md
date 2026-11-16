@@ -30,8 +30,18 @@ client. These are privileged operations: they do not verify a password.
 Authorize the caller before exposing either operation in a module command.
 Attachment requires a real client present in Redis's client-ID index. Internal
 clients, including Lua's client, are refused before transferring subscriptions.
-The ACL form resolves the name at attachment time and rejects missing or disabled
-accounts. It never retains a lookup-derived native user handle. A native
+The ACL form requires a current, actually installed SDK-owned client identity.
+An untracked connection, foreign native callback or pending registration is
+refused before native account lookup or identity change. The caller may first
+explicitly attach a chosen created user with `authenticate_client_with_user`,
+then hand off to the ACL account. The SDK never inserts a hidden bootstrap user.
+This precondition ensures the old native callback is the known SDK trampoline:
+a foreign callback could otherwise delete an incoming borrowed ACL account
+before native attachment finishes. A lawful native overwrite consumes the old
+SDK installation, so that connection must establish ownership again.
+
+The ACL form then resolves the name at attachment time and rejects missing or
+disabled accounts. It never retains a lookup-derived native user handle. A native
 rejection returns an error without replacing the previous subscription.
 
 Both forms install native cleanup even when the consumer callback is `None`.
@@ -86,6 +96,19 @@ User creation, single-directive ACL updates, attachment, revocation and peer
 certificates require Redis 6.0 APIs. Redaction requires Redis 7.0 and full ACL
 strings require Redis 7.0. Missing APIs return capability errors at every SDK
 compile-time floor; the default floor is unchanged.
+
+For the administrative example, an explicit handoff is:
+
+```text
+auth_users.create service
+auth_users.defaults service
+auth_users.attach service none
+auth_users.attach_acl existing-account track
+```
+
+`defaults` grants broad permissions for the example. Applications must choose the
+created identity's permissions and authorize the caller before the handoff.
+A rejected ACL handoff preserves the selected created identity.
 
 See [auth_users.rs](../examples/auth_users.rs). The example's commands are an
 administrative demonstration and do not implement application authorization.

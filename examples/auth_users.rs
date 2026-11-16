@@ -12,6 +12,9 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 static USERS: RedisGILGuard<BTreeMap<String, ModuleUserHandle>> =
     RedisGILGuard::new(BTreeMap::new());
 scoped_tls::scoped_thread_local!(static CURRENT: Context);
+static FOREIGN_CHANGED: AtomicI64 = AtomicI64::new(0);
+static FOREIGN_ERRORS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static CHECKED_NATIVE_CALLS: AtomicI64 = AtomicI64::new(0);
 static RAW_PROBE: AtomicBool = AtomicBool::new(false);
 static RAW_TARGET: RedisGILGuard<Option<ModuleUserHandle>> = RedisGILGuard::new(None);
 static RAW_ERRORS: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -191,6 +194,92 @@ unsafe extern "C" fn raw_client_change(
 }
 fn raw_probe_result(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(RAW_ERRORS.lock().unwrap().clone().into())
+}
+unsafe extern "C" fn foreign_changed(_: u64, _: *mut std::ffi::c_void) {
+    redis_module::panic::run_callback(
+        "foreign auth cleanup",
+        || {
+            FOREIGN_CHANGED.fetch_add(1, Ordering::Relaxed);
+            if CURRENT.is_set() {
+                CURRENT.with(|ctx| {
+                    let target = RAW_TARGET.lock(ctx).as_ref().unwrap().clone();
+                    let errors = vec![
+                        ctx.remove_module_user(&target).unwrap_err().to_string(),
+                        ctx.set_module_user_acl(&target, "off")
+                            .unwrap_err()
+                            .to_string(),
+                        ctx.set_module_user_acl_string(&target, "reset off")
+                            .unwrap_err()
+                            .to_string(),
+                        ctx.authenticate_client_with_acl_user(b"default", callback("track"))
+                            .unwrap_err()
+                            .to_string(),
+                    ];
+                    *FOREIGN_ERRORS.lock().unwrap() = errors;
+                });
+            }
+        },
+        || (),
+    );
+}
+fn foreign_identity(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let name = arg(&args, 1)?.as_bytes();
+    let mut id = 0;
+    // A lawful raw integration installs a different native callback, outside
+    // the SDK ownership registry. No borrowed account pointer is retained.
+    let status = unsafe {
+        redis_module::raw::RedisModule_AuthenticateClientWithACLUser.unwrap()(
+            ctx.get_raw(),
+            name.as_ptr().cast(),
+            name.len(),
+            Some(foreign_changed),
+            std::ptr::null_mut(),
+            &mut id,
+        )
+    };
+    if status != redis_module::raw::REDISMODULE_OK as i32 {
+        return Err(RedisError::Str("ERR foreign fixture attachment failed"));
+    }
+    Ok((id as i64).into())
+}
+fn pending_probe(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let target = user(ctx, "owner")?;
+    *RAW_TARGET.lock(ctx) = Some(target.clone());
+    let result = CURRENT.set(ctx, || ctx.authenticate_client_with_user(&target, None));
+    RAW_TARGET.lock(ctx).take();
+    Ok((result?.0 as i64).into())
+}
+unsafe extern "C" fn forbidden_checked_attach(
+    _: *mut redis_module::raw::RedisModuleCtx,
+    _: *const std::ffi::c_char,
+    _: usize,
+    _: redis_module::raw::RedisModuleUserChangedFunc,
+    _: *mut std::ffi::c_void,
+    _: *mut u64,
+) -> i32 {
+    CHECKED_NATIVE_CALLS.fetch_add(1, Ordering::Relaxed);
+    redis_module::raw::REDISMODULE_ERR as i32
+}
+fn checked_probe(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let original = unsafe { redis_module::raw::RedisModule_AuthenticateClientWithACLUser };
+    unsafe {
+        redis_module::raw::RedisModule_AuthenticateClientWithACLUser =
+            Some(forbidden_checked_attach);
+    }
+    let result = ctx.authenticate_client_with_acl_user(b"default", callback("track"));
+    unsafe {
+        redis_module::raw::RedisModule_AuthenticateClientWithACLUser = original;
+    }
+    Ok(vec![
+        result.unwrap_err().to_string(),
+        CHECKED_NATIVE_CALLS.load(Ordering::Relaxed).to_string(),
+    ]
+    .into())
+}
+fn foreign_results(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    let mut results = FOREIGN_ERRORS.lock().unwrap().clone();
+    results.push(FOREIGN_CHANGED.load(Ordering::Relaxed).to_string());
+    Ok(results.into())
 }
 fn attach_pubsub_cleanup(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let kind = arg(&args, 1)?.to_owned();
@@ -454,6 +543,9 @@ fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
     RAW_PROBE.store(false, Ordering::Relaxed);
     RAW_TARGET.lock(ctx).take();
     RAW_ERRORS.lock().unwrap().clear();
+    FOREIGN_ERRORS.lock().unwrap().clear();
+    FOREIGN_CHANGED.store(0, Ordering::Relaxed);
+    CHECKED_NATIVE_CALLS.store(0, Ordering::Relaxed);
     // A lawful raw event integration may call safe APIs using its actual
     // native context. It is independent of the SDK's auth-change trampoline.
     unsafe {
@@ -506,6 +598,7 @@ fn deinit(ctx: &EventContext) -> Status {
         USERS.lock(ctx).clear();
         RAW_TARGET.lock(ctx).take();
         RAW_ERRORS.lock().unwrap().clear();
+        FOREIGN_ERRORS.lock().unwrap().clear();
         WORKER_RESULTS.lock().unwrap().clear();
         Status::Ok
     }
@@ -543,6 +636,10 @@ redis_module! {
         redis_command!("auth_users.yield_reentry", yield_reentry).write(),
         redis_command!("auth_users.cleanup_timing", cleanup_timing).read_only(),
         redis_command!("auth_users.raw_probe_result", raw_probe_result).read_only(),
+        redis_command!("auth_users.foreign", foreign_identity).write(),
+        redis_command!("auth_users.pending_probe", pending_probe).write(),
+        redis_command!("auth_users.checked_probe", checked_probe).write(),
+        redis_command!("auth_users.foreign_results", foreign_results).read_only(),
         redis_command!("auth_users.early_unload", early_unload).read_only(),
         redis_command!("auth_users.finish", finish).read_only(),
     ],

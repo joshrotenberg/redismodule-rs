@@ -17,7 +17,10 @@ Created Redis module users are held in an SDK registry with opaque module/load
 and monotonic generation identities (#216). Handle destruction does not call
 Redis; explicit removal and successful unload free native owners under the Redis
 lock. Client attachment always installs native one-shot cleanup, including when
-there is no consumer notification. Cleanup accepts owned `Send` captures and
+there is no consumer notification. Safe ACL-name handoff requires a live,
+installed SDK subscription; unknown or foreign ownership is rejected before
+native account lookup and identity changes. A caller can explicitly select a
+created identity first. Cleanup accepts owned `Send` captures and
 never fabricates a context for Redis's context-free callback. Refused unload
 restores existing subscriptions. Consumers are deferred across native user and
 command calls so they cannot free a user still borrowed by native attachment or

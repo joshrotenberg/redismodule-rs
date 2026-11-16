@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Module-owned users with opaque per-load generation handles, explicit locked
   removal, transactional ACL updates and client identity attachment (#216).
-  Native one-shot cleanup runs on reauthentication, disconnect, revocation and
+  ACL-name handoff requires an installed SDK-owned identity and never inserts
+  an implicit bootstrap user. Native one-shot cleanup runs on reauthentication, disconnect, revocation and
   unload, including attachments without a consumer callback. Added owned peer
   certificate copying and command-argument redaction. See
   [module users](docs/AUTHENTICATION.md) and the `auth_users` example.

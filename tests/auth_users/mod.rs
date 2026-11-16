@@ -209,6 +209,9 @@ fn test_module_users_unload_refusal_cleanup_and_reload() -> Result<()> {
         .query(&mut tracked)?;
     // ACL-derived and no-consumer attachments still belong to the module.
     let mut no_callback = con.connection()?;
+    redis::cmd("auth_users.attach")
+        .arg(("owner", "none"))
+        .query::<i64>(&mut no_callback)?;
     redis::cmd("auth_users.attach_acl")
         .arg(("default", "none"))
         .query::<i64>(&mut no_callback)?;
@@ -474,6 +477,12 @@ fn test_module_users_pubsub_destruction_defers_consumers_across_native_calls() -
                 .query::<()>(&mut con)?;
         }
         let mut client = con.connection()?;
+        if mode != "module" {
+            create(&mut con, "explicit-bootstrap")?;
+            redis::cmd("auth_users.attach")
+                .arg(("explicit-bootstrap", "none"))
+                .query::<i64>(&mut client)?;
+        }
         redis::cmd("auth_users.attach_pubsub_cleanup")
             .arg((if mode == "module" { "module" } else { "acl" }, name))
             .query::<i64>(&mut client)?;
@@ -516,6 +525,11 @@ fn test_module_users_pubsub_destruction_defers_consumers_across_native_calls() -
             // Asynchronous destruction delivers cleanup after the scoped
             // context ended. Verify the policy was applied before removing it.
             let mut probe = con.connection()?;
+            if mode != "module" {
+                redis::cmd("auth_users.attach")
+                    .arg(("explicit-bootstrap", "none"))
+                    .query::<i64>(&mut probe)?;
+            }
             redis::cmd(if mode == "module" {
                 "auth_users.attach"
             } else {
@@ -554,7 +568,11 @@ fn test_module_users_yielded_auth_defers_scoped_context_cleanup() -> Result<()> 
     redis::cmd("ACL")
         .arg(("SETUSER", name, "on", "nopass", "+@all", "~*", "&*"))
         .query::<()>(&mut con)?;
+    create(&mut con, "explicit-bootstrap")?;
     let mut client = con.connection()?;
+    redis::cmd("auth_users.attach")
+        .arg(("explicit-bootstrap", "none"))
+        .query::<i64>(&mut client)?;
     redis::cmd("auth_users.attach_pubsub_cleanup")
         .arg(("acl", name))
         .query::<i64>(&mut client)?;
@@ -590,5 +608,99 @@ fn test_module_users_yielded_auth_defers_scoped_context_cleanup() -> Result<()> 
     redis::cmd("MODULE")
         .arg(("UNLOAD", "auth_users"))
         .query::<()>(&mut con)?;
+    Ok(())
+}
+
+#[test]
+fn test_module_users_acl_handoff_requires_installed_sdk_ownership() -> Result<()> {
+    const REFUSAL: &str = "ERR ACL attachment requires an installed SDK client identity";
+    let mut con = TestConnection::new("auth_users");
+    create(&mut con, "owner")?;
+    let mut client = con.connection()?;
+    let first: Vec<String> = redis::cmd("auth_users.checked_probe").query(&mut client)?;
+    assert_eq!(first, [REFUSAL, "0"]);
+    assert_eq!(
+        redis::cmd("ACL")
+            .arg("WHOAMI")
+            .query::<String>(&mut client)?,
+        "default"
+    );
+    assert_eq!(stats(&mut con)?, [0, 1]);
+    redis::cmd("ACL")
+        .arg(("SETUSER", "foreign-acl", "on", "nopass", "+@all", "~*"))
+        .query::<()>(&mut con)?;
+    redis::cmd("auth_users.foreign")
+        .arg("foreign-acl")
+        .query::<i64>(&mut client)?;
+    let foreign: Vec<String> = redis::cmd("auth_users.checked_probe").query(&mut client)?;
+    assert_eq!(foreign, [REFUSAL, "0"]);
+    assert_eq!(
+        redis::cmd("ACL")
+            .arg("WHOAMI")
+            .query::<String>(&mut client)?,
+        "foreign-acl"
+    );
+    assert_eq!(
+        redis::cmd("auth_users.foreign_results").query::<Vec<String>>(&mut con)?,
+        ["0"]
+    );
+    assert_eq!(stats(&mut con)?, [0, 2]);
+    // During created-user native attachment only a pending new registration
+    // exists. A raw prior callback must not mistake it for installed ownership.
+    redis::cmd("auth_users.pending_probe").query::<i64>(&mut client)?;
+    let errors: Vec<String> = redis::cmd("auth_users.foreign_results").query(&mut con)?;
+    assert_eq!(
+        &errors[..2],
+        ["ERR module user is in a native operation"; 2]
+    );
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    if info
+        .lines()
+        .any(|line| line.starts_with("redis_version:6."))
+    {
+        assert!(errors[2].contains("SetModuleUserACLString is not available"));
+    } else {
+        assert_eq!(errors[2], "ERR module user is in a native operation");
+    }
+    assert_eq!(&errors[3..], [REFUSAL, "1"]);
+    assert_eq!(
+        redis::cmd("ACL")
+            .arg("WHOAMI")
+            .query::<String>(&mut client)?,
+        "owner"
+    );
+    assert_eq!(stats(&mut con)?, [0, 3]);
+    // The caller explicitly established an owned identity; ACL handoff is now legal.
+    redis::cmd("auth_users.attach_acl")
+        .arg(("default", "track"))
+        .query::<i64>(&mut client)?;
+    assert_eq!(
+        redis::cmd("ACL")
+            .arg("WHOAMI")
+            .query::<String>(&mut client)?,
+        "default"
+    );
+    redis::cmd("AUTH")
+        .arg(("default", "anything"))
+        .query::<()>(&mut client)?;
+    assert_eq!(stats(&mut con)?, [1, 4]);
+    // A lawful native overwrite consumes the old SDK installation immediately;
+    // its now-foreign callback must not inherit that old ownership capability.
+    redis::cmd("auth_users.attach")
+        .arg(("owner", "track"))
+        .query::<i64>(&mut client)?;
+    redis::cmd("auth_users.foreign")
+        .arg("foreign-acl")
+        .query::<i64>(&mut client)?;
+    assert_eq!(stats(&mut con)?, [2, 5]);
+    let overwritten: Vec<String> = redis::cmd("auth_users.checked_probe").query(&mut client)?;
+    assert_eq!(overwritten, [REFUSAL, "0"]);
+    assert_eq!(
+        redis::cmd("ACL")
+            .arg("WHOAMI")
+            .query::<String>(&mut client)?,
+        "foreign-acl"
+    );
+    assert_eq!(stats(&mut con)?, [2, 6]);
     Ok(())
 }
