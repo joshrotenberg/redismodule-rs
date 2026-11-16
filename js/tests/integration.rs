@@ -995,6 +995,7 @@ fn queued_drain_refuses_unload_even_after_unwatch() -> Result<()> {
 /// busy runner.
 #[test]
 fn test_connections_wait_for_slow_commands() -> Result<()> {
+    let _serial = support::serial_native_test();
     let mut con = server()?;
     redis::cmd("DEBUG")
         .arg(&["SLEEP", "0.5"])
