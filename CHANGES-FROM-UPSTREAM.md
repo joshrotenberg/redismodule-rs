@@ -11,6 +11,21 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Main-thread timer creation
+
+`EventContext::create_timer` requires Redis's actual main thread (#244). It
+checks the OS thread before native API lookup or timer registry publication.
+Holding the Redis lock on a worker does not protect native event-loop timer
+registration from the main event loop. Worker-origin notifications now receive
+an error and release callback captures and payloads immediately. The check does
+not identify the main thread from `OnLoad`, which a worker can invoke.
+
+The regression substitutes a counting native stub and an absent API on a locked
+worker. Both paths check the exact refusal and owned-value drops, no native
+call or callback firing, immediate unload and a clean reload. It never invokes
+native timer registration on a worker. Main-thread creation and typed handle
+contracts remain; see the [migration notes](docs/MIGRATING-3.0.md#timers-use-typed-handles).
+
 ## Scan callback state
 
 `select_db` and `with_db` refuse database selection while a key or keyspace

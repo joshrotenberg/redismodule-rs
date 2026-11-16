@@ -212,9 +212,14 @@ impl EventContext {
     /// Creates a one-shot timer and returns a typed cancellation handle.
     ///
     /// The callback and payload are owned until firing or explicit cancellation.
-    /// They must be `Send + 'static`, since creation can occur in a notification
-    /// on a worker while Redis invokes the timer on its main thread. `Sync` is
-    /// not required. Zero runs on a later event-loop turn; positive fractional
+    /// They must be `Send + 'static`; `Sync` is not required. Creation requires
+    /// Redis's main thread, including when called from a notification: holding
+    /// the Redis lock on a worker does not protect the native event loop. A
+    /// worker-origin call returns an error and drops its callback and payload
+    /// before looking up native timer APIs or retaining timer state.
+    /// Main-thread detection is available on Linux and macOS; creation is
+    /// refused on other platforms.
+    /// Zero runs on a later event-loop turn; positive fractional
     /// milliseconds round up. Excessive periods return an error.
     ///
     /// Creation requires a successfully loaded `redis_module!` module. It returns
@@ -246,6 +251,9 @@ impl EventContext {
         F: FnOnce(&Self, T) + Send + 'static,
         T: Send + 'static,
     {
+        if !crate::configuration::lifecycle::is_main_thread() {
+            return Err(RedisError::Str("ERR timers require the Redis main thread"));
+        }
         let period = period_millis(period)?;
         // SAFETY: the live context proves Redis initialized its immutable API table.
         let create = unsafe {
