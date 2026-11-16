@@ -139,6 +139,18 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-16: merged SDK master `5a67245`, including
+  [PR 247](https://github.com/joshrotenberg/redismodule-rs/pull/247) for
+  issue 215. The private `call_reply.echo` example delegates its byte arguments
+  and synchronous call to a shared handler body. Its separate Rust harness
+  scripts call results without native handles; real-server tests retain the
+  registered wrapper and RESP2/RESP3 contract checks.
+
+  The host needs no adaptation. The prototype adds no public SDK API and
+  does not emulate the host's native calls or direct reply writers. Host and
+  guest source and the four dependency snapshots are unchanged. Sync validation
+  uses the full `wasm/ci/check.sh` with both Rust and JavaScript guests required.
+
 - 2026-11-16: merged SDK master `ec5876a`, including
   [PR 245](https://github.com/joshrotenberg/redismodule-rs/pull/245) for
   issue 244. `EventContext::create_timer` now requires Redis's actual main
