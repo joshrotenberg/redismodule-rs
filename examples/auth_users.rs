@@ -12,6 +12,8 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 static USERS: RedisGILGuard<BTreeMap<String, ModuleUserHandle>> =
     RedisGILGuard::new(BTreeMap::new());
 scoped_tls::scoped_thread_local!(static CURRENT: Context);
+static SCOPED_CLEANUP: AtomicI64 = AtomicI64::new(0);
+static LATER_CLEANUP: AtomicI64 = AtomicI64::new(0);
 static REENTRY: AtomicI64 = AtomicI64::new(0);
 static WORKER_RESULTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static NATIVE_WORKER_CALLS: AtomicI64 = AtomicI64::new(0);
@@ -165,13 +167,20 @@ fn attach_pubsub_cleanup(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let probe = Probe(false);
     let callback: ClientChangeCallback = Box::new(move |_| {
         CHANGED.fetch_add(1, Ordering::Relaxed);
-        CURRENT.with(|ctx| {
-            if let Some(handle) = target {
-                ctx.remove_module_user(&handle).unwrap();
-            } else {
-                ctx.call("ACL", &["DELUSER", &owned_name]).unwrap();
-            }
-        });
+        if CURRENT.is_set() {
+            CURRENT.with(|ctx| {
+                if let Some(handle) = target {
+                    ctx.remove_module_user(&handle).unwrap();
+                } else {
+                    ctx.call("ACL", &["DELUSER", &owned_name]).unwrap();
+                }
+            });
+            SCOPED_CLEANUP.fetch_add(1, Ordering::Relaxed);
+        } else {
+            // Newer Redis schedules Pub/Sub disconnection after the setter
+            // returns. That callback has no scoped context to reenter.
+            LATER_CLEANUP.fetch_add(1, Ordering::Relaxed);
+        }
         drop(probe);
         REENTRY.fetch_add(1, Ordering::Relaxed);
     });
@@ -223,6 +232,28 @@ fn restrict_pubsub(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
                 }
             }
             _ => return Err(RedisError::Str("ERR unknown call mode")),
+        }
+        Ok("OK".into())
+    })
+}
+fn cleanup_timing(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(vec![
+        SCOPED_CLEANUP.load(Ordering::Relaxed),
+        LATER_CLEANUP.load(Ordering::Relaxed),
+    ]
+    .into())
+}
+fn yield_reentry(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let ready = arg(&args, 1)?;
+    CURRENT.set(ctx, || -> RedisResult {
+        std::fs::write(ready, b"ready").map_err(|_| RedisError::Str("ERR yield marker failed"))?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while REENTRY.load(Ordering::Relaxed) == 0 {
+            if std::time::Instant::now() >= deadline {
+                return Err(RedisError::Str("ERR auth yield timed out"));
+            }
+            ctx.yield_now(redis_module::YieldMode::Clients, None)?;
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         Ok("OK".into())
     })
@@ -379,6 +410,8 @@ fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
     CHANGED.store(0, Ordering::Relaxed);
     DROPPED.store(0, Ordering::Relaxed);
     REENTRY.store(0, Ordering::Relaxed);
+    SCOPED_CLEANUP.store(0, Ordering::Relaxed);
+    LATER_CLEANUP.store(0, Ordering::Relaxed);
     NATIVE_WORKER_CALLS.store(0, Ordering::Relaxed);
     WORKER_RESULTS.lock().unwrap().clear();
     REFUSE.store(false, Ordering::Relaxed);
@@ -438,6 +471,8 @@ redis_module! {
         redis_command!("auth_users.absent_api", absent_api).read_only(),
         redis_command!("auth_users.attach_pubsub_cleanup", attach_pubsub_cleanup).write(),
         redis_command!("auth_users.restrict_pubsub", restrict_pubsub).write(),
+        redis_command!("auth_users.yield_reentry", yield_reentry).write(),
+        redis_command!("auth_users.cleanup_timing", cleanup_timing).read_only(),
         redis_command!("auth_users.early_unload", early_unload).read_only(),
         redis_command!("auth_users.finish", finish).read_only(),
     ],

@@ -483,15 +483,103 @@ fn test_module_users_pubsub_destruction_defers_consumers_across_native_calls() -
         redis::cmd("auth_users.restrict_pubsub")
             .arg((mode, name))
             .query::<()>(&mut con)?;
-        assert_eq!(
-            redis::cmd("auth_users.reentry_result").query::<i64>(&mut con)?,
-            1,
-            "{mode}"
-        );
+        utils::wait_until(Duration::from_secs(2), "native Pub/Sub cleanup", || {
+            Ok(redis::cmd("auth_users.reentry_result").query::<i64>(&mut con)? == 1)
+        })?;
         assert_eq!(stats(&mut con)?, [1, 1], "{mode}");
+        let timing: Vec<i64> = redis::cmd("auth_users.cleanup_timing").query(&mut con)?;
+        assert!(timing == [1, 0] || timing == [0, 1], "{mode}: {timing:?}");
+        if timing == [1, 0] {
+            if mode == "module" {
+                redis::cmd("auth_users.remove")
+                    .arg(name)
+                    .query::<()>(&mut con)
+                    .expect_err("synchronous consumer removed owner");
+            } else {
+                assert_eq!(
+                    redis::cmd("ACL")
+                        .arg(("GETUSER", name))
+                        .query::<Option<redis::Value>>(&mut con)?,
+                    None
+                );
+            }
+        } else {
+            // Asynchronous destruction delivers cleanup after the scoped
+            // context ended. Verify the policy was applied before removing it.
+            let mut probe = con.connection()?;
+            redis::cmd(if mode == "module" {
+                "auth_users.attach"
+            } else {
+                "auth_users.attach_acl"
+            })
+            .arg((name, "none"))
+            .query::<i64>(&mut probe)?;
+            redis::cmd("PUBLISH")
+                .arg(("channel", "message"))
+                .query::<i64>(&mut probe)
+                .expect_err("new channel restrictions retained");
+            if mode == "module" {
+                redis::cmd("auth_users.remove")
+                    .arg(name)
+                    .query::<()>(&mut con)?;
+            } else {
+                redis::cmd("ACL")
+                    .arg(("DELUSER", name))
+                    .query::<i64>(&mut con)?;
+            }
+        }
         redis::cmd("MODULE")
             .arg(("UNLOAD", "auth_users"))
             .query::<()>(&mut con)?;
     }
+    Ok(())
+}
+
+#[test]
+fn test_module_users_yielded_auth_defers_scoped_context_cleanup() -> Result<()> {
+    let mut con = TestConnection::new("auth_users");
+    redis::cmd("CONFIG")
+        .arg(("SET", "busy-reply-threshold", 1))
+        .query::<()>(&mut con)?;
+    let name = "yield-acl";
+    redis::cmd("ACL")
+        .arg(("SETUSER", name, "on", "nopass", "+@all", "~*", "&*"))
+        .query::<()>(&mut con)?;
+    let mut client = con.connection()?;
+    redis::cmd("auth_users.attach_pubsub_cleanup")
+        .arg(("acl", name))
+        .query::<i64>(&mut client)?;
+    let ready = std::env::temp_dir().join(format!(
+        "sdk-auth-yield-{}-{}",
+        std::process::id(),
+        con.port()
+    ));
+    let mut admin = con.connection()?;
+    admin.set_read_timeout(Some(Duration::from_secs(7)))?;
+    let marker = ready.clone();
+    let yielding = std::thread::spawn(move || {
+        redis::cmd("auth_users.yield_reentry")
+            .arg(marker.to_str().unwrap())
+            .query::<()>(&mut admin)
+    });
+    utils::wait_until(Duration::from_secs(2), "auth yield scoped context", || {
+        Ok(ready.exists())
+    })?;
+    let auth = redis::cmd("AUTH")
+        .arg((name, "anything"))
+        .query::<()>(&mut client);
+    if let Err(error) = auth {
+        assert!(error.is_io_error(), "{error}");
+    }
+    yielding.join().expect("yield client thread panicked")?;
+    std::fs::remove_file(ready)?;
+    assert_eq!(
+        redis::cmd("auth_users.reentry_result").query::<i64>(&mut con)?,
+        1
+    );
+    assert_eq!(stats(&mut con)?, [1, 1]);
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "auth_users"))
+        .query::<()>(&mut con)?;
     Ok(())
 }
