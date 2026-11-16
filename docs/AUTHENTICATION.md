@@ -51,7 +51,10 @@ Cookies remain valid through native callback
 return and consumer execution. Reentrant attachment from cleanup is refused;
 other cleanup operations run after the original native borrow ends. The SDK
 removes subscription ownership before calling consumer code and holds no
-registry lock across native calls or callbacks. Callback execution and callback
+registry lock across native calls or callbacks. Created-user native leases also
+refuse reentrant removal or ACL mutation from lawful raw server-event hooks
+while attachment or a setter still borrows that user. These leases end before
+deferred consumers run. Callback execution and callback
 destruction on every preflight/refusal path are contained without adding panic payloads to SDK logs; the configured
 process panic hook still runs. As elsewhere in Rust, a second panic during
 unwinding can abort the process.

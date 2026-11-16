@@ -12,6 +12,9 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 static USERS: RedisGILGuard<BTreeMap<String, ModuleUserHandle>> =
     RedisGILGuard::new(BTreeMap::new());
 scoped_tls::scoped_thread_local!(static CURRENT: Context);
+static RAW_PROBE: AtomicBool = AtomicBool::new(false);
+static RAW_TARGET: RedisGILGuard<Option<ModuleUserHandle>> = RedisGILGuard::new(None);
+static RAW_ERRORS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static SCOPED_CLEANUP: AtomicI64 = AtomicI64::new(0);
 static LATER_CLEANUP: AtomicI64 = AtomicI64::new(0);
 static REENTRY: AtomicI64 = AtomicI64::new(0);
@@ -154,6 +157,41 @@ fn revoke(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ))?;
     Ok("OK".into())
 }
+unsafe extern "C" fn raw_client_change(
+    ctx: *mut redis_module::raw::RedisModuleCtx,
+    _: redis_module::raw::RedisModuleEvent,
+    subevent: u64,
+    _: *mut std::ffi::c_void,
+) {
+    redis_module::panic::run_callback(
+        "auth raw client event",
+        || {
+            if subevent != redis_module::raw::REDISMODULE_SUBEVENT_CLIENT_CHANGE_DISCONNECTED
+                || !RAW_PROBE.swap(false, Ordering::Relaxed)
+            {
+                return;
+            }
+            // SAFETY: Redis supplies this module-associated event invocation with
+            // the lock held. No context is fabricated for the ctx-less auth hook.
+            let ctx = unsafe { EventContext::new(ctx) };
+            let target = RAW_TARGET.lock(&ctx).as_ref().unwrap().clone();
+            let results = vec![
+                ctx.remove_module_user(&target).unwrap_err().to_string(),
+                ctx.set_module_user_acl(&target, "off")
+                    .unwrap_err()
+                    .to_string(),
+                ctx.set_module_user_acl_string(&target, "reset off")
+                    .unwrap_err()
+                    .to_string(),
+            ];
+            *RAW_ERRORS.lock().unwrap() = results;
+        },
+        || (),
+    );
+}
+fn raw_probe_result(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RAW_ERRORS.lock().unwrap().clone().into())
+}
 fn attach_pubsub_cleanup(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let kind = arg(&args, 1)?.to_owned();
     let name = arg(&args, 2)?.to_owned();
@@ -198,7 +236,13 @@ fn restrict_pubsub(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         let args = ["SETUSER", name, "resetchannels"];
         match kind {
             "module" => {
-                ctx.set_module_user_acl_string(&user(ctx, name)?, "resetchannels")?;
+                let target = user(ctx, name)?;
+                *RAW_TARGET.lock(ctx) = Some(target.clone());
+                RAW_PROBE.store(true, Ordering::Relaxed);
+                let result = ctx.set_module_user_acl_string(&target, "resetchannels");
+                RAW_PROBE.store(false, Ordering::Relaxed);
+                RAW_TARGET.lock(ctx).take();
+                result?;
             }
             "call" => {
                 ctx.call("ACL", &args)?;
@@ -407,6 +451,25 @@ fn finish(_: &Context, _: Vec<RedisString>) -> RedisResult {
 }
 fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
     USERS.lock(ctx).clear();
+    RAW_PROBE.store(false, Ordering::Relaxed);
+    RAW_TARGET.lock(ctx).take();
+    RAW_ERRORS.lock().unwrap().clear();
+    // A lawful raw event integration may call safe APIs using its actual
+    // native context. It is independent of the SDK's auth-change trampoline.
+    unsafe {
+        let subscribe = redis_module::raw::RedisModule_SubscribeToServerEvent.unwrap();
+        if subscribe(
+            ctx.get_raw(),
+            redis_module::raw::RedisModuleEvent {
+                id: redis_module::raw::REDISMODULE_EVENT_CLIENT_CHANGE,
+                dataver: 1,
+            },
+            Some(raw_client_change),
+        ) != redis_module::raw::REDISMODULE_OK as i32
+        {
+            return Status::Err;
+        }
+    }
     CHANGED.store(0, Ordering::Relaxed);
     DROPPED.store(0, Ordering::Relaxed);
     REENTRY.store(0, Ordering::Relaxed);
@@ -438,6 +501,12 @@ fn deinit(ctx: &EventContext) -> Status {
     if WORKER.lock().unwrap().is_some() || REFUSE.swap(false, Ordering::Relaxed) {
         Status::Err
     } else {
+        // Handles are passive; dropping application state before SDK teardown
+        // leaves the native owners for the successful unload commit.
+        USERS.lock(ctx).clear();
+        RAW_TARGET.lock(ctx).take();
+        RAW_ERRORS.lock().unwrap().clear();
+        WORKER_RESULTS.lock().unwrap().clear();
         Status::Ok
     }
 }
@@ -473,6 +542,7 @@ redis_module! {
         redis_command!("auth_users.restrict_pubsub", restrict_pubsub).write(),
         redis_command!("auth_users.yield_reentry", yield_reentry).write(),
         redis_command!("auth_users.cleanup_timing", cleanup_timing).read_only(),
+        redis_command!("auth_users.raw_probe_result", raw_probe_result).read_only(),
         redis_command!("auth_users.early_unload", early_unload).read_only(),
         redis_command!("auth_users.finish", finish).read_only(),
     ],

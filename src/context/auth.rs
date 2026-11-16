@@ -53,6 +53,7 @@ struct NativeUser {
     ptr: NonNull<raw::RedisModuleUser>,
     free: unsafe extern "C" fn(*mut raw::RedisModuleUser),
     name: CString,
+    leased: bool,
 }
 // SAFETY: native access requires a RuntimeContext lock capability. Moving the
 // inert owner never calls Redis, and the registry never holds a lock across FFI.
@@ -66,6 +67,12 @@ impl Drop for PendingCallback {
     }
 }
 struct Cookie(u64);
+#[cfg(test)]
+impl Drop for Cookie {
+    fn drop(&mut self) {
+        tests::COOKIE_DROPS.fetch_add(1, Ordering::Relaxed);
+    }
+}
 struct Subscription {
     cookie: Box<Cookie>,
     client: Option<ClientId>,
@@ -135,6 +142,34 @@ impl Registry {
             .get(&handle.generation)
             .map(|u| u.ptr.as_ptr())
             .ok_or(INVALID)
+    }
+}
+
+// Redis can invoke lawful raw server-event hooks before its auth-change
+// callback. Keep created users exclusive across every native pointer borrow,
+// independently of SDK consumer deferral.
+struct UserLease {
+    generation: u64,
+    ptr: *mut raw::RedisModuleUser,
+}
+impl UserLease {
+    fn begin(handle: &ModuleUserHandle) -> Result<Self, RedisError> {
+        let mut registry = registry();
+        let ptr = registry.user(handle)?;
+        let user = registry.users.get_mut(&handle.generation).unwrap();
+        if user.leased {
+            return Err(RedisError::Str("ERR module user is in a native operation"));
+        }
+        user.leased = true;
+        Ok(Self {
+            generation: handle.generation,
+            ptr,
+        })
+    }
+}
+impl Drop for UserLease {
+    fn drop(&mut self) {
+        registry().users.get_mut(&self.generation).unwrap().leased = false;
     }
 }
 
@@ -332,13 +367,17 @@ impl<'a> UserUnloadGuard<'a> {
     pub unsafe fn begin(ctx: &'a RuntimeContext) -> Result<Self, RedisError> {
         let mut registry = registry();
         registry.active()?;
-        if !registry.users.is_empty()
+        let has_resources = !registry.users.is_empty()
             || !registry.subscriptions.is_empty()
-            || !registry.deferred.is_empty()
-        {
+            || !registry.deferred.is_empty();
+        if has_resources {
             main_thread()?;
         }
-        if registry.executing != 0 || NATIVE_OPERATIONS.load(Ordering::Relaxed) != 0 {
+        // Preserve unrelated modules' existing unload guards and diagnostics.
+        // A generic SDK call alone does not imply an auth resource is borrowed.
+        if registry.executing != 0
+            || (has_resources && NATIVE_OPERATIONS.load(Ordering::Relaxed) != 0)
+        {
             return Err(RedisError::Str("ERR module user cleanup is executing"));
         }
         registry.phase = Phase::Unloading;
@@ -415,9 +454,15 @@ impl RuntimeContext {
         };
         let ptr = NonNull::new(unsafe { create(name.as_ptr()) })
             .ok_or(RedisError::Str("ERR Redis could not create module user"))?;
-        registry()
-            .users
-            .insert(generation, NativeUser { ptr, free, name });
+        registry().users.insert(
+            generation,
+            NativeUser {
+                ptr,
+                free,
+                name,
+                leased: false,
+            },
+        );
         Ok(ModuleUserHandle { owner, generation })
     }
 
@@ -430,6 +475,9 @@ impl RuntimeContext {
         let user = {
             let mut registry = registry();
             registry.user(handle)?;
+            if registry.users.get(&handle.generation).unwrap().leased {
+                return Err(RedisError::Str("ERR module user is in a native operation"));
+            }
             registry.users.remove(&handle.generation).unwrap()
         };
         unsafe {
@@ -449,7 +497,8 @@ impl RuntimeContext {
         let directive =
             CString::new(directive).map_err(|_| RedisError::Str("ERR invalid ACL directive"))?;
         let _operation = NativeOperation::begin();
-        let user = registry().user(handle)?;
+        let lease = UserLease::begin(handle)?;
+        let user = lease.ptr;
         if unsafe { set(user, directive.as_ptr()) } == raw::REDISMODULE_OK as i32 {
             Ok(())
         } else {
@@ -475,7 +524,8 @@ impl RuntimeContext {
         let set = unsafe { crate::__available_api!(RedisModule_SetModuleUserACLString) };
         let rules = CString::new(rules).map_err(|_| RedisError::Str("ERR invalid ACL rules"))?;
         let _operation = NativeOperation::begin();
-        let user = registry().user(handle)?;
+        let lease = UserLease::begin(handle)?;
+        let user = lease.ptr;
         // Passing no error slot makes Redis free any secret-bearing diagnostic.
         if unsafe { set(self.ctx, user, rules.as_ptr(), std::ptr::null_mut()) }
             == raw::REDISMODULE_OK as i32
@@ -528,7 +578,8 @@ impl Context {
         main_thread()?;
         let _operation = NativeOperation::begin();
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithUser) };
-        let user = registry().user(user)?;
+        let lease = UserLease::begin(user)?;
+        let user = lease.ptr;
         self.attach_identity(pending, |callback, private, id| unsafe {
             attach(self.ctx, user, callback, private, id)
         })
@@ -627,8 +678,78 @@ impl Context {
 #[cfg(test)]
 mod tests {
     use super::*;
+    static PROTOCOL_TEST: Mutex<()> = Mutex::new(());
+    pub(super) static COOKIE_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn first_subscription_waits_for_outer_native_guard_across_threads() {
+        let _serial = PROTOCOL_TEST.lock().unwrap();
+        assert_eq!(LIVE_SUBSCRIPTIONS.load(Ordering::Relaxed), 0);
+        assert_eq!(NATIVE_OPERATIONS.load(Ordering::Relaxed), 0);
+        COOKIE_DROPS.store(0, Ordering::Relaxed);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let drops = Arc::new(AtomicUsize::new(0));
+        struct OwnedState(Arc<AtomicUsize>);
+        impl Drop for OwnedState {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        // Begin with no live auth. The first installation and notification
+        // arrive inside the already-running native/Yield operation.
+        let outer = NativeOperation::begin();
+        let callback_calls = calls.clone();
+        let state = OwnedState(drops.clone());
+        let mut subscription = Subscription {
+            cookie: Box::new(Cookie(42)),
+            client: Some(ClientId(7)),
+            callback: Some(Box::new(move |client| {
+                assert_eq!(client, ClientId(7));
+                callback_calls.fetch_add(1, Ordering::Relaxed);
+                drop(state);
+            })),
+        };
+        let private = (&mut *subscription.cookie as *mut Cookie).cast();
+        registry().subscriptions.insert(42, subscription);
+        LIVE_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
+        // SAFETY: this is the actual Rust trampoline with its owned live cookie;
+        // the synthetic consumer performs no Redis FFI and needs no context.
+        unsafe {
+            changed(7, private);
+        }
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(drops.load(Ordering::Relaxed), 0);
+        assert_eq!(COOKIE_DROPS.load(Ordering::Relaxed), 0);
+        assert_eq!(registry().deferred.len(), 1);
+        let nested_calls = calls.clone();
+        let nested_drops = drops.clone();
+        let observation = std::thread::spawn(move || {
+            let nested = NativeOperation::begin();
+            drop(nested);
+            (
+                nested_calls.load(Ordering::Relaxed),
+                nested_drops.load(Ordering::Relaxed),
+                COOKIE_DROPS.load(Ordering::Relaxed),
+            )
+        })
+        .join()
+        .unwrap();
+        assert_eq!(observation, (0, 0, 0));
+        assert_eq!(NATIVE_OPERATIONS.load(Ordering::Relaxed), 1);
+        drop(outer);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(drops.load(Ordering::Relaxed), 1);
+        assert_eq!(COOKIE_DROPS.load(Ordering::Relaxed), 1);
+        assert_eq!(LIVE_SUBSCRIPTIONS.load(Ordering::Relaxed), 0);
+        assert_eq!(NATIVE_OPERATIONS.load(Ordering::Relaxed), 0);
+        let registry = registry();
+        assert!(registry.subscriptions.is_empty());
+        assert!(registry.deferred.is_empty());
+        assert_eq!(registry.executing, 0);
+    }
     #[test]
     fn native_call_without_auth_has_no_registry_access() {
+        let _serial = PROTOCOL_TEST.lock().unwrap();
         assert_eq!(LIVE_SUBSCRIPTIONS.load(Ordering::Relaxed), 0);
         let before = REGISTRY_ACCESSES.load(Ordering::Relaxed);
         for _ in 0..10_000 {
@@ -684,6 +805,7 @@ mod tests {
                 ptr: NonNull::dangling(),
                 free: never_free,
                 name: c"test".into(),
+                leased: false,
             },
         );
         let valid = ModuleUserHandle {

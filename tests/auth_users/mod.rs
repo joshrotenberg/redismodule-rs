@@ -489,6 +489,15 @@ fn test_module_users_pubsub_destruction_defers_consumers_across_native_calls() -
         assert_eq!(stats(&mut con)?, [1, 1], "{mode}");
         let timing: Vec<i64> = redis::cmd("auth_users.cleanup_timing").query(&mut con)?;
         assert!(timing == [1, 0] || timing == [0, 1], "{mode}: {timing:?}");
+        let raw_errors: Vec<String> = redis::cmd("auth_users.raw_probe_result").query(&mut con)?;
+        if mode == "module" && timing == [1, 0] {
+            assert_eq!(
+                raw_errors,
+                vec!["ERR module user is in a native operation"; 3]
+            );
+        } else {
+            assert!(raw_errors.is_empty());
+        }
         if timing == [1, 0] {
             if mode == "module" {
                 redis::cmd("auth_users.remove")
