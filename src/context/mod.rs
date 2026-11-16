@@ -2182,6 +2182,7 @@ impl EventContext {
             .map_or(ptr::null(), |text| text.as_ptr());
         // SAFETY: the thread check above verifies main-thread use. Redis reads
         // busy_reply only during the call.
+        let _auth_operation = auth::NativeOperation::begin();
         unsafe { yield_api(self.ctx, flags as c_int, busy_reply) };
         Ok(())
     }

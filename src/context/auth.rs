@@ -85,9 +85,9 @@ struct Registry {
     users: BTreeMap<u64, NativeUser>,
     subscriptions: BTreeMap<u64, Subscription>,
     executing: usize,
-    native_depth: usize,
     deferred: VecDeque<(ClientId, Subscription)>,
 }
+static NATIVE_OPERATIONS: AtomicUsize = AtomicUsize::new(0);
 static LIVE_SUBSCRIPTIONS: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
 static REGISTRY_ACCESSES: AtomicUsize = AtomicUsize::new(0);
@@ -98,7 +98,6 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     users: BTreeMap::new(),
     subscriptions: BTreeMap::new(),
     executing: 0,
-    native_depth: 0,
     deferred: VecDeque::new(),
 });
 fn registry() -> MutexGuard<'static, Registry> {
@@ -149,31 +148,21 @@ fn contain(f: impl FnOnce()) {
 // Native code may still be using an incoming user/client after it invokes the
 // change trampoline. Defer consumer code until the outer SDK FFI call returns.
 // This also covers AUTH/HELLO and ACL commands made through RuntimeContext::call.
-pub(crate) struct NativeOperation {
-    active: bool,
-}
+pub(crate) struct NativeOperation;
 impl NativeOperation {
     pub(crate) fn begin() -> Self {
-        // With no live installations there is no consumer to defer. This
-        // common call path performs one atomic load and no registry locking.
-        if LIVE_SUBSCRIPTIONS.load(Ordering::Relaxed) == 0 {
-            return Self { active: false };
-        }
-        registry().native_depth += 1;
-        Self { active: true }
+        // Count even before the first installation: a yielding native call can
+        // process a command that adds a subscription. Atomics also keep queued
+        // consumers deferred if a different lawful worker runs during a yield.
+        NATIVE_OPERATIONS.fetch_add(1, Ordering::Relaxed);
+        Self
     }
 }
 impl Drop for NativeOperation {
     fn drop(&mut self) {
-        if !self.active {
-            return;
-        }
-        let ready = {
-            let mut registry = registry();
-            registry.native_depth -= 1;
-            registry.native_depth == 0
-        };
-        if ready {
+        let outer = NATIVE_OPERATIONS.fetch_sub(1, Ordering::Relaxed) == 1;
+        // No live authentication: constant-time atomics, no registry locking.
+        if outer && LIVE_SUBSCRIPTIONS.load(Ordering::Relaxed) != 0 {
             loop {
                 let next = registry().deferred.pop_front();
                 let Some((client, subscription)) = next else {
@@ -204,7 +193,7 @@ unsafe extern "C" fn changed(client: u64, private: *mut c_void) {
         let subscription = {
             let mut registry = registry();
             let subscription = registry.subscriptions.remove(&key);
-            if registry.native_depth != 0 {
+            if NATIVE_OPERATIONS.load(Ordering::Relaxed) != 0 {
                 if let Some(subscription) = subscription {
                     registry
                         .deferred
@@ -349,7 +338,7 @@ impl<'a> UserUnloadGuard<'a> {
         {
             main_thread()?;
         }
-        if registry.executing != 0 || registry.native_depth != 0 {
+        if registry.executing != 0 || NATIVE_OPERATIONS.load(Ordering::Relaxed) != 0 {
             return Err(RedisError::Str("ERR module user cleanup is executing"));
         }
         registry.phase = Phase::Unloading;
@@ -644,7 +633,6 @@ mod tests {
         let before = REGISTRY_ACCESSES.load(Ordering::Relaxed);
         for _ in 0..10_000 {
             let operation = NativeOperation::begin();
-            assert!(!operation.active);
             drop(operation);
         }
         assert_eq!(REGISTRY_ACCESSES.load(Ordering::Relaxed), before);
@@ -685,7 +673,6 @@ mod tests {
             users: BTreeMap::new(),
             subscriptions: BTreeMap::new(),
             executing: 0,
-            native_depth: 0,
             deferred: VecDeque::new(),
         };
         unsafe extern "C" fn never_free(_: *mut raw::RedisModuleUser) {

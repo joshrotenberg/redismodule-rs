@@ -42,7 +42,7 @@ the Redis lock held, so it must not reacquire that lock. Captures remain `Send`;
 there is no promise of delivery on the registration thread. When a notification
 occurs during an SDK native operation, the SDK defers consumer code until the
 outer native operation returns. This includes the common native call boundary
-used by `call`, `call_ext` and blocking-call variants. Notifications outside such
+used by `call`, `call_ext`, blocking-call variants and `yield_now`. Notifications outside such
 operations deliver immediately. Cookies remain valid through native callback
 return and consumer execution. Reentrant attachment from cleanup is refused;
 other cleanup operations run after the original native borrow ends. The SDK
