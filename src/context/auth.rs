@@ -76,6 +76,7 @@ impl Drop for Cookie {
 struct Subscription {
     cookie: Box<Cookie>,
     installed_client: Option<ClientId>,
+    pending_client: Option<ClientId>,
     callback: Option<ClientChangeCallback>,
 }
 #[derive(Clone, Copy, PartialEq)]
@@ -657,10 +658,20 @@ impl Context {
                     "ERR ACL attachment requires an installed SDK client identity",
                 ));
             }
+            if registry
+                .subscriptions
+                .values()
+                .any(|s| s.pending_client == Some(ClientId(id)))
+            {
+                return Err(RedisError::Str(
+                    "ERR client identity attachment is already in progress",
+                ));
+            }
             let key = registry.next()?;
             let mut subscription = Subscription {
                 cookie: Box::new(Cookie(key)),
                 installed_client: None,
+                pending_client: Some(ClientId(id)),
                 callback: callback.0.take(),
             };
             let private = (&mut *subscription.cookie as *mut Cookie).cast();
@@ -677,11 +688,10 @@ impl Context {
                 "ERR Redis refused client identity attachment",
             ));
         }
-        registry()
-            .subscriptions
-            .get_mut(&key)
-            .unwrap()
-            .installed_client = Some(ClientId(id));
+        let mut registry = registry();
+        let installed = registry.subscriptions.get_mut(&key).unwrap();
+        installed.pending_client = None;
+        installed.installed_client = Some(ClientId(id));
         Ok(ClientId(id))
     }
 
@@ -727,6 +737,7 @@ mod tests {
         let mut subscription = Subscription {
             cookie: Box::new(Cookie(42)),
             installed_client: Some(ClientId(7)),
+            pending_client: None,
             callback: Some(Box::new(move |client| {
                 assert_eq!(client, ClientId(7));
                 callback_calls.fetch_add(1, Ordering::Relaxed);

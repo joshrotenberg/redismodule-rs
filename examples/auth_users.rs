@@ -214,6 +214,12 @@ unsafe extern "C" fn foreign_changed(_: u64, _: *mut std::ffi::c_void) {
                         ctx.authenticate_client_with_acl_user(b"default", callback("track"))
                             .unwrap_err()
                             .to_string(),
+                        ctx.authenticate_client_with_user(
+                            &user(ctx, "other").unwrap(),
+                            callback("track"),
+                        )
+                        .unwrap_err()
+                        .to_string(),
                     ];
                     *FOREIGN_ERRORS.lock().unwrap() = errors;
                 });

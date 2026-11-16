@@ -616,6 +616,7 @@ fn test_module_users_acl_handoff_requires_installed_sdk_ownership() -> Result<()
     const REFUSAL: &str = "ERR ACL attachment requires an installed SDK client identity";
     let mut con = TestConnection::new("auth_users");
     create(&mut con, "owner")?;
+    create(&mut con, "other")?;
     let mut client = con.connection()?;
     let first: Vec<String> = redis::cmd("auth_users.checked_probe").query(&mut client)?;
     assert_eq!(first, [REFUSAL, "0"]);
@@ -662,14 +663,21 @@ fn test_module_users_acl_handoff_requires_installed_sdk_ownership() -> Result<()
     } else {
         assert_eq!(errors[2], "ERR module user is in a native operation");
     }
-    assert_eq!(&errors[3..], [REFUSAL, "1"]);
+    assert_eq!(
+        &errors[3..],
+        [
+            REFUSAL,
+            "ERR client identity attachment is already in progress",
+            "1"
+        ]
+    );
     assert_eq!(
         redis::cmd("ACL")
             .arg("WHOAMI")
             .query::<String>(&mut client)?,
         "owner"
     );
-    assert_eq!(stats(&mut con)?, [0, 3]);
+    assert_eq!(stats(&mut con)?, [0, 4]);
     // The caller explicitly established an owned identity; ACL handoff is now legal.
     redis::cmd("auth_users.attach_acl")
         .arg(("default", "track"))
@@ -683,7 +691,7 @@ fn test_module_users_acl_handoff_requires_installed_sdk_ownership() -> Result<()
     redis::cmd("AUTH")
         .arg(("default", "anything"))
         .query::<()>(&mut client)?;
-    assert_eq!(stats(&mut con)?, [1, 4]);
+    assert_eq!(stats(&mut con)?, [1, 5]);
     // A lawful native overwrite consumes the old SDK installation immediately;
     // its now-foreign callback must not inherit that old ownership capability.
     redis::cmd("auth_users.attach")
@@ -692,7 +700,7 @@ fn test_module_users_acl_handoff_requires_installed_sdk_ownership() -> Result<()
     redis::cmd("auth_users.foreign")
         .arg("foreign-acl")
         .query::<i64>(&mut client)?;
-    assert_eq!(stats(&mut con)?, [2, 5]);
+    assert_eq!(stats(&mut con)?, [2, 6]);
     let overwritten: Vec<String> = redis::cmd("auth_users.checked_probe").query(&mut client)?;
     assert_eq!(overwritten, [REFUSAL, "0"]);
     assert_eq!(
@@ -701,6 +709,6 @@ fn test_module_users_acl_handoff_requires_installed_sdk_ownership() -> Result<()
             .query::<String>(&mut client)?,
         "foreign-acl"
     );
-    assert_eq!(stats(&mut con)?, [2, 6]);
+    assert_eq!(stats(&mut con)?, [2, 7]);
     Ok(())
 }

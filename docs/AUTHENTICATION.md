@@ -37,7 +37,10 @@ explicitly attach a chosen created user with `authenticate_client_with_user`,
 then hand off to the ACL account. The SDK never inserts a hidden bootstrap user.
 This precondition ensures the old native callback is the known SDK trampoline:
 a foreign callback could otherwise delete an incoming borrowed ACL account
-before native attachment finishes. A lawful native overwrite consumes the old
+before native attachment finishes. Per-client pending admission also refuses
+nested attachment from a lawful raw prior callback, including attempts with a
+different created user. Pending registrations never count as installed.
+A lawful native overwrite consumes the old
 SDK installation, so that connection must establish ownership again.
 
 The ACL form then resolves the name at attachment time and rejects missing or
