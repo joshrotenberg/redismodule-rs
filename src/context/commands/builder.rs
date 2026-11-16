@@ -503,10 +503,10 @@ impl CommandBuilder {
                     short_name.to_string_lossy()
                 )));
             }
-            if let Some(callback) = child.callback {
-                super::replicating::record(callback, &prepared.flags);
-            }
             let full_name = CString::new([name.as_bytes(), b"|", short_name.as_bytes()].concat())?;
+            if let Some(callback) = child.callback {
+                super::replicating::record(callback, &prepared.flags, full_name.as_bytes());
+            }
             registered.push((child, full_name, prepared));
         }
         for (child, full_name, prepared) in registered {
@@ -742,7 +742,11 @@ pub(super) fn register_base_command(
     }
     super::acl_rules::record_registered_command(name.as_bytes());
     if let Some(callback) = callback {
-        super::replicating::record(callback, flags.to_str().unwrap_or_default());
+        super::replicating::record(
+            callback,
+            flags.to_str().unwrap_or_default(),
+            name.as_bytes(),
+        );
     }
     Ok(name)
 }

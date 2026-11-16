@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Module-owned users with opaque per-load generation handles, explicit locked
+  removal, transactional ACL updates and client identity attachment (#216).
+  Full ACL updates require verified Redis 7.4+; single directives remain 6.0+.
+  ACL-name handoff requires an installed SDK-owned identity and never inserts
+  an implicit bootstrap user. Client-affecting mutations require a quiescent
+  ordinary SDK command on an indexed connection, outside native loading states.
+  Revocation also requires an
+  installed SDK identity. Explicitly drain users and identities before unload;
+  live ownership refuses unload before deinit. Native one-shot cleanup runs on
+  reauthentication, disconnect and revocation, including attachments without a
+  consumer callback. Added owned peer
+  certificate copying and command-argument redaction. See
+  [module users](docs/AUTHENTICATION.md) and the `auth_users` example.
+
 - A private adapted `call_reply.echo` handler and an isolated Rust test harness
   (#215). Shared binary and call-error fixtures also run through native module
   registration with RESP2 and RESP3 wire checks. The example adds no public SDK
