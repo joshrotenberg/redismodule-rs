@@ -5,13 +5,75 @@ use redis_module::{
     RedisString, RedisValue, redis_module, redisvalue::RedisValueKey,
 };
 
+#[path = "handler-testing/shared.rs"]
+mod handler;
+use handler::{CommandIo, HandlerError, HandlerResult, Reply, echo_handler};
+
+struct NativeIo<'a>(&'a Context);
+
+impl CommandIo for NativeIo<'_> {
+    fn call(&mut self, command: &str, args: &[&[u8]]) -> HandlerResult {
+        self.0
+            .call(command, args)
+            .map_err(|error| match error {
+                RedisError::WrongArity => HandlerError::WrongArity,
+                error => HandlerError::Message(error.to_string()),
+            })
+            .and_then(owned_reply)
+    }
+}
+
+fn owned_reply(value: RedisValue) -> HandlerResult {
+    Ok(match value {
+        RedisValue::SimpleStringStatic(s) => Reply::Simple(s.into()),
+        RedisValue::SimpleString(s) => Reply::Simple(s),
+        RedisValue::BulkString(s) => Reply::Bulk(s.into_bytes()),
+        RedisValue::StringBuffer(bytes) => Reply::Bulk(bytes),
+        RedisValue::Integer(n) => Reply::Integer(n),
+        RedisValue::Array(values) => Reply::Array(
+            values
+                .into_iter()
+                .map(owned_reply)
+                .collect::<Result<_, _>>()?,
+        ),
+        RedisValue::Null => Reply::Null,
+        RedisValue::NullArray => Reply::NullArray,
+        RedisValue::StaticError(error) => Reply::Error(error.into()),
+        RedisValue::Error(error) => Reply::Error(error),
+        _ => {
+            return Err(HandlerError::Message(
+                "ERR unsupported prototype reply kind".into(),
+            ));
+        }
+    })
+}
+
+fn native_reply(value: Reply) -> RedisValue {
+    match value {
+        Reply::Simple(s) => RedisValue::SimpleString(s),
+        Reply::Bulk(bytes) => RedisValue::StringBuffer(bytes),
+        Reply::Integer(n) => RedisValue::Integer(n),
+        Reply::Array(values) => RedisValue::Array(values.into_iter().map(native_reply).collect()),
+        Reply::Null => RedisValue::Null,
+        Reply::NullArray => RedisValue::NullArray,
+        Reply::Error(error) => RedisValue::Error(error),
+    }
+}
+
 fn forward(ctx: &Context, args: Vec<RedisString>, command: &str) -> RedisResult {
     let args: Vec<_> = args.iter().skip(1).map(RedisString::as_slice).collect();
     ctx.call(command, args.as_slice())
 }
 
 fn echo(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
-    forward(ctx, args, "ECHO")
+    // Keep every native argv owner alive until the shared body returns.
+    let argv: Vec<_> = args.iter().map(RedisString::as_slice).collect();
+    echo_handler(&mut NativeIo(ctx), &argv)
+        .map(native_reply)
+        .map_err(|error| match error {
+            HandlerError::WrongArity => RedisError::WrongArity,
+            HandlerError::Message(error) => RedisError::String(error),
+        })
 }
 
 /// Classifies failed calls without decoding or copying the error message.

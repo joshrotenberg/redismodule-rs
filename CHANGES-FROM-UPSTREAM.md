@@ -11,6 +11,18 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Adapted handler tests
+
+`call_reply.echo` delegates its byte arguments and synchronous `ECHO` call to a
+private shared body (#215). A separate dependency-free Rust workspace scripts
+ordered call results and captures owned replies, with sticky mismatch failures.
+The native wrapper retains registration and Redis argument ownership. Shared
+fixtures check it through RESP2 and RESP3 on a real server. The harness is
+compiled only by its own tests; production module builds import only the shared
+body. This is an example prototype, not a public SDK API or support for running
+unchanged `Context` handlers without Redis. See
+[docs/TESTING-MODULES.md](docs/TESTING-MODULES.md#test-an-adapted-handler-without-redis).
+
 ## Main-thread timer creation
 
 `EventContext::create_timer` requires Redis's actual main thread (#244). It

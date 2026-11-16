@@ -97,6 +97,13 @@ jobs:
           cargo clippy --manifest-path examples/module-testing/Cargo.toml --all-targets -- -D warnings
           cargo test --manifest-path examples/module-testing/Cargo.toml
 
+      - name: Test the isolated adapted handler
+        if: matrix.floor == '6-0'
+        run: |
+          cargo fmt --manifest-path examples/handler-testing/Cargo.toml -- --check
+          cargo clippy --manifest-path examples/handler-testing/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path examples/handler-testing/Cargo.toml
+
       - name: Check multi-consumer compatibility floors
         if: matrix.floor == '6-0'
         run: |
@@ -588,3 +595,4 @@ jobs:
           cargo test --lib
           cargo test --manifest-path examples/module-testing/Cargo.toml
           python3 examples/compatibility-floors/check.py
+          cargo test --manifest-path examples/handler-testing/Cargo.toml

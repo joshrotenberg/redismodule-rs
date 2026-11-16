@@ -1,0 +1,11 @@
+[package]
+name = "adapted-handler-tests"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+license = "BSD-3-Clause"
+
+# No SDK dependency, module registration or Redis global allocator.
+[workspace]
+resolver = "3"
