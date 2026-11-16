@@ -364,6 +364,14 @@ starting work, send the reply through the blocked client's `ThreadSafeContext`,
 and return `RedisValue::NoReply`. Scripts, transactions and other denied
 invocations fail before native blocking. See [block.rs](examples/block.rs).
 
+## Module users
+
+Module-owned users and privileged client identity attachment require explicit
+command-side drain before unload. Client-affecting mutations require a quiescent
+ordinary SDK command on an indexed connection. See
+[the authentication guide](docs/AUTHENTICATION.md) and
+[auth_users.rs](examples/auth_users.rs).
+
 ## Timers
 
 `ctx.create_timer(delay, callback, data)?` returns a typed `TimerHandle<T>`.

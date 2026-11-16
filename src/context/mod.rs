@@ -25,6 +25,8 @@ use std::ffi::CStr;
 use self::call_reply::{CallResult, ErrorReply, PromiseCallReply, create_promise_call_reply};
 use self::thread_safe::RedisLockIndicator;
 
+pub(crate) mod auth;
+pub use auth::{ClientChangeCallback, ClientId, ModuleUserHandle};
 mod call_user;
 pub(crate) mod command_reply;
 pub use call_user::CallUserScope;
@@ -633,7 +635,8 @@ impl<'a> StrCallArgs<'a> {
 
 /// The context, argument count and callback address of the SDK command
 /// callback running on this thread, or a null context outside one.
-type CommandArgs = (*mut raw::RedisModuleCtx, c_int, usize);
+type CommandNames = [*mut raw::RedisModuleString; 2];
+type CommandArgs = (*mut raw::RedisModuleCtx, c_int, usize, CommandNames);
 
 /// The signature of an SDK command callback.
 type CommandCallbackFn =
@@ -645,14 +648,30 @@ thread_local! {
     /// of a `Copy` tuple has no destructor, which would keep glibc from
     /// unloading the module.
     static COMMAND_ARGS: std::cell::Cell<CommandArgs> =
-        const { std::cell::Cell::new((ptr::null_mut(), 0, 0)) };
+        const { std::cell::Cell::new((ptr::null_mut(), 0, 0, [ptr::null_mut(); 2])) };
 }
 
 /// The address of the SDK command callback that Redis is running with `ctx`,
 /// if this thread runs one.
 fn running_command_callback(ctx: *mut raw::RedisModuleCtx) -> Option<usize> {
-    let (running, _, callback) = COMMAND_ARGS.get();
+    let (running, _, callback, _) = COMMAND_ARGS.get();
     (!ctx.is_null() && running == ctx).then_some(callback)
+}
+
+// Native callback arguments remain live through the dispatch invocation. Copy
+// only the first two string pointers, without retaining an argv-array borrow.
+// Reading names is deferred until an auth mutation asks for provenance.
+fn ordinary_running_command(ctx: *mut raw::RedisModuleCtx) -> bool {
+    let (running, _, callback, names) = COMMAND_ARGS.get();
+    if ctx.is_null() || running != ctx || names[0].is_null() {
+        return false;
+    }
+    // SAFETY: CommandArgcScope binds these native-owned arguments to this live
+    // invocation. Safe SDK methods do not replace or free callback arguments.
+    let command = unsafe { RedisString::string_as_slice(names[0]) };
+    let subcommand =
+        (!names[1].is_null()).then(|| unsafe { RedisString::string_as_slice(names[1]) });
+    commands::replicating::ordinary(callback, command, subcommand)
 }
 
 /// Records the running SDK command callback's context, argument count and
@@ -668,15 +687,30 @@ impl CommandArgcScope {
     ///
     /// `ctx` and `argc` must be the context and argument count Redis passed to
     /// the running command callback, `callback` must be that callback, and the
-    /// scope must end before it returns.
+    /// scope must end before it returns. Non-null `argv` must be Redis's callback
+    /// argument array, and its first two native-owned strings must remain live
+    /// throughout the scope. Raw FFI must not invalidate those borrowed inputs.
     #[must_use]
     pub unsafe fn begin(
         ctx: *mut raw::RedisModuleCtx,
         argc: c_int,
         callback: CommandCallbackFn,
+        argv: *mut *mut raw::RedisModuleString,
     ) -> Self {
+        let mut names = [ptr::null_mut(); 2];
+        if !argv.is_null() {
+            for (index, name) in names.iter_mut().enumerate().take(argc.max(0) as usize) {
+                // SAFETY: the caller supplies native-owned live callback argv.
+                *name = unsafe { *argv.add(index) };
+            }
+        }
         Self {
-            previous: COMMAND_ARGS.replace((ctx, argc, commands::replicating::address(callback))),
+            previous: COMMAND_ARGS.replace((
+                ctx,
+                argc,
+                commands::replicating::address(callback),
+                names,
+            )),
         }
     }
 }
@@ -774,7 +808,7 @@ impl Context {
         if !self.is_keys_position_request() {
             return Ok(());
         }
-        let (ctx, argc, _) = COMMAND_ARGS.get();
+        let (ctx, argc, _, _) = COMMAND_ARGS.get();
         if ctx != self.ctx {
             return Err(RedisError::Str(
                 "ERR key positions can only be checked in an SDK command callback",
@@ -1278,6 +1312,7 @@ impl RuntimeContext {
         // RedisModule_Call returns null both for a dry run that would succeed
         // and, without the E flag, for a call that failed; errno tells them
         // apart, so clear it first.
+        let _auth_operation = auth::NativeOperation::begin();
         clear_errno();
         let reply: *mut raw::RedisModuleCallReply = unsafe {
             let p_call = crate::__required_api!(RedisModule_Call);
@@ -2179,6 +2214,7 @@ impl EventContext {
             .map_or(ptr::null(), |text| text.as_ptr());
         // SAFETY: the thread check above verifies main-thread use. Redis reads
         // busy_reply only during the call.
+        let _auth_operation = auth::NativeOperation::begin();
         unsafe { yield_api(self.ctx, flags as c_int, busy_reply) };
         Ok(())
     }
@@ -3436,24 +3472,39 @@ mod command_args_tests {
         let outer_ctx = ptr::dangling_mut();
         let inner_ctx = ptr::dangling_mut::<u64>().cast();
         // SAFETY: test only; no Redis call reads these values.
-        let outer = unsafe { CommandArgcScope::begin(outer_ctx, 6, outer_command) };
+        let outer =
+            unsafe { CommandArgcScope::begin(outer_ctx, 6, outer_command, ptr::null_mut()) };
         let (outer_address, inner_address) = (address(outer_command), address(inner_command));
         assert_eq!(running_command_callback(outer_ctx), Some(outer_address));
         assert_eq!(running_command_callback(inner_ctx), None);
         {
-            let _inner = unsafe { CommandArgcScope::begin(inner_ctx, 2, inner_command) };
-            assert_eq!(COMMAND_ARGS.get(), (inner_ctx, 2, inner_address));
+            let _inner =
+                unsafe { CommandArgcScope::begin(inner_ctx, 2, inner_command, ptr::null_mut()) };
+            assert_eq!(
+                COMMAND_ARGS.get(),
+                (inner_ctx, 2, inner_address, [ptr::null_mut(); 2])
+            );
             assert_eq!(running_command_callback(outer_ctx), None);
             assert_eq!(running_command_callback(inner_ctx), Some(inner_address));
         }
-        assert_eq!(COMMAND_ARGS.get(), (outer_ctx, 6, outer_address));
+        assert_eq!(
+            COMMAND_ARGS.get(),
+            (outer_ctx, 6, outer_address, [ptr::null_mut(); 2])
+        );
         let _ = std::panic::catch_unwind(|| {
-            let _inner = unsafe { CommandArgcScope::begin(inner_ctx, 2, inner_command) };
+            let _inner =
+                unsafe { CommandArgcScope::begin(inner_ctx, 2, inner_command, ptr::null_mut()) };
             panic!("command failed");
         });
-        assert_eq!(COMMAND_ARGS.get(), (outer_ctx, 6, outer_address));
+        assert_eq!(
+            COMMAND_ARGS.get(),
+            (outer_ctx, 6, outer_address, [ptr::null_mut(); 2])
+        );
         drop(outer);
-        assert_eq!(COMMAND_ARGS.get(), (ptr::null_mut(), 0, 0));
+        assert_eq!(
+            COMMAND_ARGS.get(),
+            (ptr::null_mut(), 0, 0, [ptr::null_mut(); 2])
+        );
         assert_eq!(running_command_callback(ptr::null_mut()), None);
     }
 }
