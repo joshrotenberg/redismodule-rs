@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   certificate copying and command-argument redaction. See
   [module users](docs/AUTHENTICATION.md) and the `auth_users` example.
 
+- A private adapted `call_reply.echo` handler and an isolated Rust test harness
+  (#215). Shared binary and call-error fixtures also run through native module
+  registration with RESP2 and RESP3 wire checks. The example adds no public SDK
+  test API; see [docs/TESTING-MODULES.md](docs/TESTING-MODULES.md).
+
 - Documentation of three server behaviors the SDK does not guard against
   (#225). [docs/CLUSTER.md](docs/CLUSTER.md): in cluster mode on Redis 7.4
   and later, keys that `open_key`, `open_key_writable` or `call` reach during

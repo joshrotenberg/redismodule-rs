@@ -17,6 +17,9 @@ mod stream_fields;
 mod unload_acl_rules;
 mod utils;
 
+#[path = "../examples/handler-testing/cases.rs"]
+mod handler_cases;
+
 #[test]
 fn test_canonical_slot_name_native_and_boundaries() -> Result<()> {
     let mut con = TestConnection::new("canonical_slot_name");
@@ -8186,19 +8189,49 @@ fn test_call_binary_data() -> Result<()> {
 /// Values whose bytes a forwarded call reply must keep: empty, ASCII, Unicode,
 /// NUL, CR, LF, CRLF, invalid UTF-8, and a 4 KiB value ending in invalid UTF-8.
 fn call_reply_inputs() -> Vec<Vec<u8>> {
-    let mut large = vec![b'x'; 4096];
-    large.push(0xff);
-    vec![
-        b"".to_vec(),
-        b"ASCII".to_vec(),
-        "h\u{e9}llo \u{65e5}\u{672c}".as_bytes().to_vec(),
-        b"a\0b".to_vec(),
-        b"\r".to_vec(),
-        b"\n".to_vec(),
-        b"\r\n".to_vec(),
-        vec![0xff, 0, 0xfe],
-        large,
-    ]
+    handler_cases::binary_inputs()
+}
+
+/// The no-server harness uses these same call-boundary cases. Native command
+/// registration, adapter conversions and wire framing are checked only here.
+#[test]
+fn test_adapted_echo_contract() -> Result<()> {
+    let mut con = TestConnection::new("call_reply");
+    for case in handler_cases::echo_cases() {
+        let args: Vec<_> = case.argv.iter().map(Vec::as_slice).collect();
+        for protocol in [2, 3] {
+            redis::cmd("HELLO").arg(protocol).query::<Value>(&mut con)?;
+            let result = redis::cmd("call_reply.echo")
+                .arg(&args[1..])
+                .query::<Value>(&mut con);
+            match &case.expected {
+                Ok(bytes) => assert_eq!(
+                    result?,
+                    Value::BulkString(bytes.clone()),
+                    "RESP{protocol} {}: {:?}",
+                    case.name,
+                    args
+                ),
+                Err(expected) => {
+                    let error = result.expect_err("call arity error");
+                    assert_eq!(error.code(), Some("ERR"));
+                    assert_eq!(error.detail(), expected.strip_prefix("ERR "));
+                }
+            }
+            assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        }
+        let expected = match case.expected {
+            Ok(bytes) => {
+                let mut wire = format!("${}\r\n", bytes.len()).into_bytes();
+                wire.extend(bytes);
+                wire.extend_from_slice(b"\r\n");
+                wire
+            }
+            Err(error) => format!("-{error}\r\n").into_bytes(),
+        };
+        assert_reply_wire_bytes(&con, &args, &expected, &expected)?;
+    }
+    Ok(())
 }
 
 #[test]
@@ -8333,6 +8366,16 @@ fn assert_reply_wire(
     resp2: &[u8],
     resp3: &[u8],
 ) -> Result<()> {
+    let args: Vec<_> = args.iter().map(|arg| arg.as_bytes()).collect();
+    assert_reply_wire_bytes(con, &args, resp2, resp3)
+}
+
+fn assert_reply_wire_bytes(
+    con: &TestConnection,
+    args: &[&[u8]],
+    resp2: &[u8],
+    resp3: &[u8],
+) -> Result<()> {
     use std::io::{Read, Write};
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], con.port()));
     let timeout = Duration::from_secs(5);
@@ -8343,7 +8386,9 @@ fn assert_reply_wire(
     for protocol in [2, 3, 2] {
         stream.write_all(&redis::cmd("HELLO").arg(protocol).get_packed_command())?;
         parser.parse_value(&mut stream)?.extract_error()?;
-        let mut request = redis::cmd(args[0]).arg(&args[1..]).get_packed_command();
+        let mut command = redis::Cmd::new();
+        command.arg(args[0]).arg(&args[1..]);
+        let mut request = command.get_packed_command();
         request.extend(redis::cmd("PING").get_packed_command());
         stream.write_all(&request)?;
         let mut expected = if protocol == 2 { resp2 } else { resp3 }.to_vec();
