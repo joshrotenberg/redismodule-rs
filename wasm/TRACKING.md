@@ -139,6 +139,12 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-16: merged SDK master `c008be7`, including the module-user and
+  client-identity helpers from PR 248, the first stage of issue 216. The host
+  and guests need no source adaptation. The pinned workspace lock adds only
+  the SDK test dependency `scoped-tls` 1.0.1; the three guest lock snapshots
+  remain unchanged. Experiment push CI remains pending publication.
+
 - 2026-11-16: merged SDK master `5a67245`, including
   [PR 247](https://github.com/joshrotenberg/redismodule-rs/pull/247) for
   issue 215. The private `call_reply.echo` example delegates its byte arguments
