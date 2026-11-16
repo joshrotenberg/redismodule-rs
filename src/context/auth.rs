@@ -421,7 +421,13 @@ impl<'a> UserUnloadGuard<'a> {
         }
         // Native revocation has drained each successful installation. Redis
         // itself performs the same synchronous cleanup when unloading modules.
-        registry().phase = Phase::Unloaded;
+        // Rust statics are not dropped by dlclose; release the empty queue's
+        // backing allocation explicitly while this locked invocation is live.
+        {
+            let mut registry = registry();
+            registry.deferred = VecDeque::new();
+            registry.phase = Phase::Unloaded;
+        }
         self.committed = true;
         Ok(())
     }
