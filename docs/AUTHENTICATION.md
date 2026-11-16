@@ -30,8 +30,7 @@ client. These are privileged operations: they do not verify a password.
 Authorize the caller before exposing either operation in a module command.
 Attachment requires a real client present in Redis's client-ID index. Internal
 clients, including Lua's client, are refused before transferring subscriptions.
-The
-ACL form resolves the name at attachment time and rejects missing or disabled
+The ACL form resolves the name at attachment time and rejects missing or disabled
 accounts. It never retains a lookup-derived native user handle. A native
 rejection returns an error without replacing the previous subscription.
 
@@ -46,9 +45,10 @@ outer native operation returns. This includes the common native call boundary
 used by `call`, `call_ext` and blocking-call variants. Notifications outside such
 operations deliver immediately. Cookies remain valid through native callback
 return and consumer execution. Reentrant attachment from cleanup is refused;
-other cleanup operations run after the original native borrow ends. The SDK removes subscription ownership before calling consumer code and
-holds no registry lock across native calls or callbacks. Callback execution and callback destruction on every preflight/refusal path
-are contained without adding panic payloads to SDK logs; the configured
+other cleanup operations run after the original native borrow ends. The SDK
+removes subscription ownership before calling consumer code and holds no
+registry lock across native calls or callbacks. Callback execution and callback
+destruction on every preflight/refusal path are contained without adding panic payloads to SDK logs; the configured
 process panic hook still runs. As elsewhere in Rust, a second panic during
 unwinding can abort the process.
 

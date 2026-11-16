@@ -152,6 +152,81 @@ fn revoke(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     ))?;
     Ok("OK".into())
 }
+fn attach_pubsub_cleanup(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let kind = arg(&args, 1)?.to_owned();
+    let name = arg(&args, 2)?.to_owned();
+    let handle = if kind == "module" {
+        Some(user(ctx, &name)?)
+    } else {
+        None
+    };
+    let owned_name = name.clone();
+    let target = handle.clone();
+    let probe = Probe(false);
+    let callback: ClientChangeCallback = Box::new(move |_| {
+        CHANGED.fetch_add(1, Ordering::Relaxed);
+        CURRENT.with(|ctx| {
+            if let Some(handle) = target {
+                ctx.remove_module_user(&handle).unwrap();
+            } else {
+                ctx.call("ACL", &["DELUSER", &owned_name]).unwrap();
+            }
+        });
+        drop(probe);
+        REENTRY.fetch_add(1, Ordering::Relaxed);
+    });
+    let id = if let Some(handle) = handle {
+        ctx.authenticate_client_with_user(&handle, Some(callback))?
+    } else {
+        ctx.authenticate_client_with_acl_user(name.as_bytes(), Some(callback))?
+    };
+    Ok((id.0 as i64).into())
+}
+fn restrict_pubsub(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let kind = arg(&args, 1)?;
+    let name = arg(&args, 2)?;
+    CURRENT.set(ctx, || -> RedisResult {
+        let args = ["SETUSER", name, "resetchannels"];
+        match kind {
+            "module" => {
+                ctx.set_module_user_acl_string(&user(ctx, name)?, "resetchannels")?;
+            }
+            "call" => {
+                ctx.call("ACL", &args)?;
+            }
+            "typed" => {
+                let reply: redis_module::CallResult = ctx.call_ext(
+                    "ACL",
+                    &redis_module::CallOptionsBuilder::new().build(),
+                    &args,
+                );
+                reply.map_err(RedisError::from)?;
+            }
+            #[cfg(any(
+                feature = "min-redis-compatibility-version-7-2",
+                feature = "min-redis-compatibility-version-7-4",
+                feature = "min-redis-compatibility-version-8-0"
+            ))]
+            "blocking" => {
+                let reply: redis_module::PromiseCallReply = ctx.call_blocking(
+                    "ACL",
+                    &redis_module::CallOptionsBuilder::new().build_blocking(),
+                    &args,
+                );
+                match reply {
+                    redis_module::PromiseCallReply::Resolved(reply) => {
+                        reply.map_err(RedisError::from)?;
+                    }
+                    redis_module::PromiseCallReply::Future(_) => {
+                        return Err(RedisError::Str("ERR ACL unexpectedly blocked"));
+                    }
+                }
+            }
+            _ => return Err(RedisError::Str("ERR unknown call mode")),
+        }
+        Ok("OK".into())
+    })
+}
 fn absent_api(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     let user = user(ctx, "owner")?;
     let (with_user, with_acl) = unsafe {
@@ -361,6 +436,8 @@ redis_module! {
         redis_command!("auth_users.reentry", reentry).write(),
         redis_command!("auth_users.reentry_result", reentry_result).read_only(),
         redis_command!("auth_users.absent_api", absent_api).read_only(),
+        redis_command!("auth_users.attach_pubsub_cleanup", attach_pubsub_cleanup).write(),
+        redis_command!("auth_users.restrict_pubsub", restrict_pubsub).write(),
         redis_command!("auth_users.early_unload", early_unload).read_only(),
         redis_command!("auth_users.finish", finish).read_only(),
     ],

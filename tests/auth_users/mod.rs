@@ -357,8 +357,8 @@ fn test_module_users_passive_handle_drop_and_runtime_capabilities() -> Result<()
         assert_eq!(
             outcomes,
             [
-                "ERR RedisModule_SetModuleUserACLString is not available",
-                "ERR RedisModule_RedactClientCommandArgument is not available"
+                "ERR RedisModule_SetModuleUserACLString is not available in this Redis server",
+                "ERR RedisModule_RedactClientCommandArgument is not available in this Redis server"
             ]
         );
     } else {
@@ -444,5 +444,54 @@ fn test_module_users_early_refusals_contain_capture_destructors() -> Result<()> 
         con.server_log()?
             .contains("auth_users inactive callback drop contained")
     );
+    Ok(())
+}
+
+#[test]
+fn test_module_users_pubsub_destruction_defers_consumers_across_native_calls() -> Result<()> {
+    let modes = vec!["module", "call", "typed"];
+    #[cfg(any(
+        feature = "min-redis-compatibility-version-7-2",
+        feature = "min-redis-compatibility-version-7-4",
+        feature = "min-redis-compatibility-version-8-0"
+    ))]
+    let modes = {
+        let mut modes = modes;
+        modes.push("blocking");
+        modes
+    };
+    for mode in modes {
+        let mut con = TestConnection::new("auth_users");
+        let name = "pubsub-owner";
+        if mode == "module" {
+            create(&mut con, name)?;
+            redis::cmd("auth_users.rule")
+                .arg((name, "&*"))
+                .query::<()>(&mut con)?;
+        } else {
+            redis::cmd("ACL")
+                .arg(("SETUSER", name, "on", "+@all", "~*", "&*"))
+                .query::<()>(&mut con)?;
+        }
+        let mut client = con.connection()?;
+        redis::cmd("auth_users.attach_pubsub_cleanup")
+            .arg((if mode == "module" { "module" } else { "acl" }, name))
+            .query::<i64>(&mut client)?;
+        redis::cmd("SUBSCRIBE")
+            .arg("channel")
+            .query::<redis::Value>(&mut client)?;
+        redis::cmd("auth_users.restrict_pubsub")
+            .arg((mode, name))
+            .query::<()>(&mut con)?;
+        assert_eq!(
+            redis::cmd("auth_users.reentry_result").query::<i64>(&mut con)?,
+            1,
+            "{mode}"
+        );
+        assert_eq!(stats(&mut con)?, [1, 1], "{mode}");
+        redis::cmd("MODULE")
+            .arg(("UNLOAD", "auth_users"))
+            .query::<()>(&mut con)?;
+    }
     Ok(())
 }
