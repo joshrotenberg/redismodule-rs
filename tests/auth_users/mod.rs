@@ -13,6 +13,15 @@ fn create(con: &mut TestConnection, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn drain_and_unload(con: &mut TestConnection) -> Result<()> {
+    redis::cmd("auth_users.drain").query::<()>(con)?;
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "auth_users"))
+        .query::<()>(con)?;
+    Ok(())
+}
+
+const QUIESCENT: &str = "ERR client identity mutation requires a quiescent command";
 const FULL_FLOOR: &str = "ERR transactional ACL updates require Redis 7.4 or later";
 fn full_supported(con: &mut TestConnection) -> Result<bool> {
     let info: String = redis::cmd("INFO").arg("server").query(con)?;
@@ -257,27 +266,47 @@ fn test_module_users_unload_refusal_cleanup_and_reload() -> Result<()> {
     redis::cmd("auth_users.attach_acl")
         .arg(("default", "none"))
         .query::<i64>(&mut no_callback)?;
-    redis::cmd("auth_users.refuse").query::<()>(&mut con)?;
+    let before = con.server_log()?.matches("auth_users deinit").count();
     redis::cmd("MODULE")
         .arg(("UNLOAD", "auth_users"))
         .query::<()>(&mut con)
-        .expect_err("deinit refusal");
+        .expect_err("live SDK ownership refuses before deinit");
+    assert_eq!(
+        con.server_log()?.matches("auth_users deinit").count(),
+        before
+    );
     assert_eq!(stats(&mut con)?, [0, 0]);
     assert_eq!(redis::cmd("PING").query::<String>(&mut tracked)?, "PONG");
-    create(&mut con, "after-refusal")?;
-    redis::cmd("MODULE")
-        .arg(("UNLOAD", "auth_users"))
+    assert_eq!(
+        redis::cmd("ACL")
+            .arg("WHOAMI")
+            .query::<String>(&mut tracked)?,
+        "owner"
+    );
+    // Refusal preserves the created handle as well as both installed identities.
+    redis::cmd("auth_users.defaults")
+        .arg("owner")
         .query::<()>(&mut con)?;
+    create(&mut con, "after-refusal")?;
+    redis::cmd("auth_users.drain").query::<()>(&mut con)?;
+    assert_eq!(stats(&mut con)?, [1, 1]);
     redis::cmd("PING")
         .query::<String>(&mut tracked)
-        .expect_err("tracked connection closed on unload");
+        .expect_err("explicit drain revoked tracked client");
     redis::cmd("PING")
         .query::<String>(&mut no_callback)
-        .expect_err("no-consumer connection closed on unload");
+        .expect_err("explicit drain revoked no-consumer client");
     assert!(
         con.server_log()?
             .contains(&format!("auth_users cleanup {id}"))
     );
+    redis::cmd("auth_users.refuse").query::<()>(&mut con)?;
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "auth_users"))
+        .query::<()>(&mut con)
+        .expect_err("empty registry reaches deinit refusal");
+    create(&mut con, "after-deinit-refusal")?;
+    drain_and_unload(&mut con)?;
     // Failed init leaves neither native owners nor a bound SDK lifecycle.
     redis::cmd("MODULE")
         .arg("LOAD")
@@ -290,9 +319,7 @@ fn test_module_users_unload_refusal_cleanup_and_reload() -> Result<()> {
         .arg(utils::module_path("auth_users")?)
         .query::<()>(&mut con)?;
     create(&mut con, "owner")?;
-    redis::cmd("MODULE")
-        .arg(("UNLOAD", "auth_users"))
-        .query::<()>(&mut con)?;
+    drain_and_unload(&mut con)?;
     Ok(())
 }
 
@@ -312,10 +339,12 @@ fn test_module_users_worker_refusal_and_main_thread_cleanup_panics() -> Result<(
     })?;
     let results: Vec<String> = redis::cmd("auth_users.worker_results").query(&mut con)?;
     assert_eq!(
-        results[..5],
-        vec!["ERR client identity operations require the Redis main thread"; 5]
+        results,
+        [
+            "ERR client identity operations require the Redis main thread",
+            "0"
+        ]
     );
-    assert_eq!(results[5], "0");
     assert_eq!(stats(&mut con)?, [0, 0]);
     assert_eq!(redis::cmd("PING").query::<String>(&mut client)?, "PONG");
     redis::cmd("auth_users.revoke")
@@ -335,9 +364,7 @@ fn test_module_users_worker_refusal_and_main_thread_cleanup_panics() -> Result<(
             .query::<String>(&mut client)
             .expect_err("revoked connection");
     }
-    redis::cmd("MODULE")
-        .arg(("UNLOAD", "auth_users"))
-        .query::<()>(&mut con)?;
+    drain_and_unload(&mut con)?;
     Ok(())
 }
 
@@ -364,14 +391,12 @@ fn test_module_users_scoped_context_reentry_retains_native_lifetimes() -> Result
             "{action}"
         );
         assert_eq!(stats(&mut con)?, [1, 1], "{action}");
-        if action != "attach-again" {
+        if action == "delete-acl" {
             redis::cmd("PING")
                 .query::<String>(&mut client)
                 .expect_err("reentrant revocation");
         }
-        redis::cmd("MODULE")
-            .arg(("UNLOAD", "auth_users"))
-            .query::<()>(&mut con)?;
+        drain_and_unload(&mut con)?;
     }
     Ok(())
 }
@@ -436,9 +461,7 @@ fn test_module_users_passive_handle_drop_and_runtime_capabilities() -> Result<()
 #[test]
 fn test_module_users_native_post_load_rejection_allows_reload() -> Result<()> {
     let mut con = TestConnection::new("auth_users");
-    redis::cmd("MODULE")
-        .arg(("UNLOAD", "auth_users"))
-        .query::<()>(&mut con)?;
+    drain_and_unload(&mut con)?;
     let initialized = con.server_log()?.matches("auth_users initialized").count();
     redis::cmd("MODULE")
         .arg("LOADEX")
@@ -455,9 +478,7 @@ fn test_module_users_native_post_load_rejection_allows_reload() -> Result<()> {
         .arg(utils::module_path("auth_users")?)
         .query::<()>(&mut con)?;
     create(&mut con, "reloaded")?;
-    redis::cmd("MODULE")
-        .arg(("UNLOAD", "auth_users"))
-        .query::<()>(&mut con)?;
+    drain_and_unload(&mut con)?;
     Ok(())
 }
 
@@ -484,9 +505,7 @@ fn test_module_users_early_refusals_contain_capture_destructors() -> Result<()> 
     );
     assert_eq!(stats(&mut con)?, [0, 3]);
     redis::cmd("auth_users.early_unload").query::<()>(&mut con)?;
-    redis::cmd("MODULE")
-        .arg(("UNLOAD", "auth_users"))
-        .query::<()>(&mut con)?;
+    drain_and_unload(&mut con)?;
     assert!(
         con.server_log()?
             .contains("auth_users inactive callback drop contained")
@@ -529,9 +548,7 @@ fn test_module_users_pubsub_destruction_defers_consumers_across_native_calls() -
                 .query::<i64>(&mut probe)?,
             1
         );
-        redis::cmd("MODULE")
-            .arg(("UNLOAD", "auth_users"))
-            .query::<()>(&mut legacy)?;
+        drain_and_unload(&mut legacy)?;
         return Ok(());
     }
     drop(legacy);
@@ -638,9 +655,7 @@ fn test_module_users_pubsub_destruction_defers_consumers_across_native_calls() -
                     .query::<i64>(&mut con)?;
             }
         }
-        redis::cmd("MODULE")
-            .arg(("UNLOAD", "auth_users"))
-            .query::<()>(&mut con)?;
+        drain_and_unload(&mut con)?;
     }
     Ok(())
 }
@@ -692,9 +707,7 @@ fn test_module_users_yielded_auth_defers_scoped_context_cleanup() -> Result<()> 
         1
     );
     assert_eq!(stats(&mut con)?, [1, 1]);
-    redis::cmd("MODULE")
-        .arg(("UNLOAD", "auth_users"))
-        .query::<()>(&mut con)?;
+    drain_and_unload(&mut con)?;
     Ok(())
 }
 
@@ -737,29 +750,9 @@ fn test_module_users_acl_handoff_requires_installed_sdk_ownership() -> Result<()
     // exists. A raw prior callback must not mistake it for installed ownership.
     redis::cmd("auth_users.pending_probe").query::<i64>(&mut client)?;
     let errors: Vec<String> = redis::cmd("auth_users.foreign_results").query(&mut con)?;
-    assert_eq!(
-        &errors[..2],
-        ["ERR module user is in a native operation"; 2]
-    );
-    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
-    if info
-        .lines()
-        .any(|line| line.starts_with("redis_version:6."))
-    {
-        assert!(errors[2].contains("SetModuleUserACLString is not available"));
-    } else if full_supported(&mut con)? {
-        assert_eq!(errors[2], "ERR module user is in a native operation");
-    } else {
-        assert_eq!(errors[2], FULL_FLOOR);
-    }
-    assert_eq!(
-        &errors[3..],
-        [
-            REFUSAL,
-            "ERR client identity attachment is already in progress",
-            "1"
-        ]
-    );
+    assert_eq!(errors[0], QUIESCENT);
+    assert_eq!(errors[1], "ERR module user is in a native operation");
+    assert_eq!(&errors[2..], [QUIESCENT, QUIESCENT, QUIESCENT, "1"]);
     assert_eq!(
         redis::cmd("ACL")
             .arg("WHOAMI")
@@ -828,5 +821,126 @@ fn test_module_users_full_acl_refuses_unverified_or_legacy_runtime_before_setter
         .arg(("owner", "none"))
         .query::<i64>(&mut client)?;
     assert_eq!(redis::cmd("PING").query::<String>(&mut client)?, "PONG");
+    Ok(())
+}
+
+#[test]
+fn test_module_users_mutations_require_quiescent_command_and_owned_revocation() -> Result<()> {
+    const OWNED: &str = "ERR revocation requires an installed SDK client identity";
+    const COMMAND: &str = "ERR client identity mutation requires an ordinary SDK command";
+    let mut con = TestConnection::new("auth_users");
+    create(&mut con, "owner")?;
+    create(&mut con, "other")?;
+    let mut client = con.connection()?;
+    let id: i64 = redis::cmd("CLIENT").arg("ID").query(&mut client)?;
+    let probe: Vec<String> = redis::cmd("auth_users.revocation_probe")
+        .arg(id)
+        .query(&mut con)?;
+    assert_eq!(probe, [OWNED, "0"]);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut client)?, "PONG");
+    redis::cmd("auth_users.foreign")
+        .arg("default")
+        .query::<i64>(&mut client)?;
+    let probe: Vec<String> = redis::cmd("auth_users.revocation_probe")
+        .arg(id)
+        .query(&mut con)?;
+    assert_eq!(probe, [OWNED, "0"]);
+    assert_eq!(
+        redis::cmd("auth_users.foreign_results").query::<Vec<String>>(&mut con)?,
+        ["0"]
+    );
+    redis::cmd("auth_users.attach")
+        .arg(("owner", "track"))
+        .query::<i64>(&mut client)?;
+    let probe: Vec<String> = redis::cmd("auth_users.revocation_probe")
+        .arg(id)
+        .query(&mut con)?;
+    assert_eq!(probe, ["ERR client does not exist", "1"]);
+    assert_eq!(
+        redis::cmd("auth_users.raw_probe_result").query::<Vec<String>>(&mut con)?,
+        vec![QUIESCENT; 5]
+    );
+    assert_eq!(stats(&mut con)?, [0, 2]);
+    assert_eq!(
+        redis::cmd("ACL")
+            .arg("WHOAMI")
+            .query::<String>(&mut client)?,
+        "owner"
+    );
+    // Error unwinding releases closing admission without consuming the old slot.
+    redis::cmd("auth_users.attach")
+        .arg(("owner", "track"))
+        .query::<i64>(&mut client)?;
+    assert_eq!(stats(&mut con)?, [1, 3]);
+    redis::cmd("auth_users.revoke")
+        .arg(id)
+        .query::<()>(&mut con)?;
+    assert_eq!(stats(&mut con)?, [2, 4]);
+    let probe: Vec<String> = redis::cmd("auth_users.revocation_probe")
+        .arg(id)
+        .query(&mut con)?;
+    assert_eq!(probe, [OWNED, "0"]);
+    for mode in ["reply", "timeout"] {
+        let errors: Vec<String> = redis::cmd("auth_users.reply_probe")
+            .arg(mode)
+            .query(&mut con)?;
+        assert_eq!(errors, vec![COMMAND; 5], "{mode}");
+        if mode == "timeout" {
+            utils::wait_until(Duration::from_secs(2), "timeout fixture worker", || {
+                Ok(redis::cmd("auth_users.finish").query::<i64>(&mut con)? == 1)
+            })?;
+        }
+    }
+    let internal: Vec<String> = redis::cmd("EVAL")
+        .arg(("return redis.call('auth_users.internal_refusals')", 0))
+        .query(&mut con)?;
+    assert_eq!(
+        internal,
+        vec!["ERR client identity mutation requires a connected client"; 5]
+    );
+    let nested: Vec<String> = redis::cmd("auth_users.call_refusals").query(&mut con)?;
+    assert_eq!(nested, vec![QUIESCENT; 5]);
+    let source = redis::cmd("auth_users.alias_source")
+        .query::<()>(&mut con)
+        .expect_err("known source name is admitted before ownership check");
+    assert!(
+        source
+            .to_string()
+            .contains("ACL attachment requires an installed SDK client identity"),
+        "{source}"
+    );
+    let alias = redis::cmd("auth_users.raw_busy_alias")
+        .query::<()>(&mut con)
+        .expect_err("raw alias cannot inherit callback metadata");
+    assert!(
+        alias
+            .to_string()
+            .contains(COMMAND.trim_start_matches("ERR ")),
+        "{alias}"
+    );
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let legacy = info
+        .lines()
+        .any(|line| line.starts_with("redis_version:6."));
+    if !legacy {
+        let error = redis::cmd("auth_users.busy_probe")
+            .query::<()>(&mut con)
+            .expect_err("allow-busy command");
+        assert!(
+            error
+                .to_string()
+                .contains(COMMAND.trim_start_matches("ERR ")),
+            "{error}"
+        );
+    } else {
+        // Redis6 has no allow-busy command flag. Raw-name refusal above still runs.
+        let commands: Vec<Option<redis::Value>> = redis::cmd("COMMAND")
+            .arg(("INFO", "auth_users.busy_probe"))
+            .query(&mut con)?;
+        assert_eq!(commands, [None]);
+    }
+    assert_eq!(stats(&mut con)?, [2, if legacy { 14 } else { 15 }]);
+    // No pending, deferred or live subscription remains after explicit drain.
+    drain_and_unload(&mut con)?;
     Ok(())
 }

@@ -139,7 +139,7 @@ macro_rules! __redis_command_callback {
                     // SAFETY: Redis passed this ctx and argc to this callback,
                     // and the scope ends inside it.
                     let _argc = unsafe {
-                        $crate::__private::CommandArgcScope::begin(ctx, argc, Self::invoke)
+                        $crate::__private::CommandArgcScope::begin(ctx, argc, Self::invoke, argv)
                     };
                     let response = $handler(&context, args);
                     let response = $crate::__private::command_reply_after_release(

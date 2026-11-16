@@ -3,10 +3,12 @@
 `RuntimeContext::create_module_user` creates an unlinked Redis ACL user owned by
 this module's current load. Keep its `ModuleUserHandle` in module state. Cloning
 or dropping the handle does not free a native user. Use
-`remove_module_user(&handle)` under a locked command or main-thread event context to
-invalidate every clone and disconnect its clients. Successful module unload
-revokes remaining attached clients and frees remaining users. Handles cannot
-resolve after removal or through a different module or load generation.
+`Context::remove_module_user(&handle)` from an ordinary SDK command to invalidate
+every clone and disconnect its clients. Explicitly revoke installed identities
+and remove all created users before unloading. Unload refuses live SDK ownership
+before user deinitialization and preserves existing handles and identities.
+Successful empty-registry unload performs no native client or user cleanup.
+Handles cannot resolve after removal or through a different module or load generation.
 
 Creation and identity attachment require an active `redis_module!` module.
 They return an error during initialization and unload. This avoids retaining
@@ -53,7 +55,7 @@ rejection returns an error without replacing the previous subscription.
 
 Both forms install native cleanup even when the consumer callback is `None`.
 An optional `ClientChangeCallback` runs once on reauthentication (including the
-same user), disconnect, revocation or successful unload. Capture owned `Send`
+same user), disconnect or explicit revocation. Capture owned `Send`
 state. Redis provides a `ClientId` and no context to this callback. It runs with
 the Redis lock held, so it must not reacquire that lock. Captures remain `Send`;
 there is no promise of delivery on the registration thread. When a notification
@@ -65,8 +67,8 @@ closure for a later event-loop turn, so their notification can arrive after
 the setter and any scoped caller context have ended. Consumers must own all
 required cleanup state and cannot assume a context remains available.
 Cookies remain valid through native callback
-return and consumer execution. Reentrant attachment from cleanup is refused;
-other cleanup operations run after the original native borrow ends. The SDK
+return and consumer execution. Client-affecting mutations from cleanup are
+refused, including through a borrowed scoped command context. The SDK
 removes subscription ownership before calling consumer code and holds no
 registry lock across native calls or callbacks. Created-user native leases also
 refuse reentrant removal or ACL mutation from lawful raw server-event hooks
@@ -76,18 +78,43 @@ destruction on every preflight/refusal path are contained without adding panic p
 process panic hook still runs. As elsewhere in Rust, a second panic during
 unwinding can abort the process.
 
-Removal, complete ACL-string updates, attachment, revocation and certificate
-access require Redis's actual main thread. Holding a worker's Redis lock does
-not pause client-owning I/O threads or make synchronous Pub/Sub-client destruction
-safe. These operations refuse worker execution before native access. Thread
-detection supports Linux and macOS; client operations are refused elsewhere.
-Creation and single-directive updates still require a real runtime lock.
+Removal, complete ACL-string updates, attachment and revocation are `Context`
+methods, but the Rust type alone does not authorize them. They require this exact
+SDK command-dispatch invocation on an indexed connection, Redis's actual main
+thread, no active SDK native operation and no executing auth consumer. Commands
+registered `allow-busy` are refused because they can run during another module's
+Yield. Unknown callback metadata and callbacks shared with any `allow-busy`
+registration are refused. The actual invocation name must also match an SDK
+registration for that callback, including the subcommand name. A raw alias
+reusing a known callback address, or an unrecorded renamed invocation, does not
+inherit that provenance. Names compare ASCII case-insensitively. Event, worker,
+blocked-reply, timeout, internal-call
+and scoped native-callback reentry paths do not acquire this capability.
+The check precedes registry invalidation and client-affecting native FFI.
+Thread detection supports Linux and macOS; client operations are refused elsewhere.
+Creation and single-directive updates need a real runtime lock; their native
+paths do not close clients or invoke user-change callbacks.
+
+`Context::deauthenticate_and_close_client` additionally requires the target's
+actually installed current-load SDK subscription. Missing, foreign, stale,
+pending or already-closing ownership is refused without changing its identity.
+Closing admission lasts through native return, including native failure.
+A client ID alone does not grant revocation of an arbitrary connection.
+
+These checks cover legal raw callbacks inside SDK-guarded calls and Yield.
+Unsafe raw FFI that bypasses those scopes or forges invocation provenance does
+not establish this safety boundary. No global cross-module phase protocol or
+unchecked safe helper is provided.
 
 Unload refuses new auth work before user deinitialization. A refused deinit
-restores the active lifecycle with existing native subscriptions intact. On
-success, synchronous native client revocation consumes subscriptions while the
-module remains loaded, then created users are freed. No native user free runs
-from an arbitrary Rust destructor.
+restores the active lifecycle. An unload with any created user, live or pending
+subscription, deferred consumer, executing cleanup or in-flight auth ownership
+is refused before deinit. Drain explicitly from an admitted command: revoke
+owned client IDs, then remove created handles. Retry unload after pending
+notifications have completed. No native user free runs from a Rust destructor.
+Dropping the last handle while a user is still registered loses the caller's
+removal capability and keeps unload refused, so retain handles until removal.
+The example's `auth_users.drain` command demonstrates explicit cleanup.
 
 `RuntimeContext::client_certificate` copies an allocated native PEM string to
 owned bytes and releases it using its actual producer context, including with
@@ -115,7 +142,8 @@ auth_users.attach_acl existing-account track
 
 `defaults` grants broad permissions for the example. Applications must choose the
 created identity's permissions and authorize the caller before the handoff.
-A rejected ACL handoff preserves the selected created identity.
+A rejected ACL handoff preserves the selected created identity. Run
+`auth_users.drain` before `MODULE UNLOAD auth_users`.
 
 See [auth_users.rs](../examples/auth_users.rs). The example's commands are an
 administrative demonstration and do not implement application authorization.

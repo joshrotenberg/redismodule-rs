@@ -5,12 +5,13 @@ use redis_module::{
     RedisGILGuard, RedisResult, RedisString, RedisValue, RegistrationContext, Status,
     ThreadSafeContext, redis_command, redis_module,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 static USERS: RedisGILGuard<BTreeMap<String, ModuleUserHandle>> =
     RedisGILGuard::new(BTreeMap::new());
+static CLIENTS: Mutex<BTreeSet<ClientId>> = Mutex::new(BTreeSet::new());
 scoped_tls::scoped_thread_local!(static CURRENT: Context);
 static FULL_SET_CALLS: AtomicI64 = AtomicI64::new(0);
 static FOREIGN_CHANGED: AtomicI64 = AtomicI64::new(0);
@@ -112,11 +113,13 @@ fn remove(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 fn attach(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let id =
         ctx.authenticate_client_with_user(&user(ctx, arg(&args, 1)?)?, callback(arg(&args, 2)?))?;
+    CLIENTS.lock().unwrap().insert(id);
     Ok((id.0 as i64).into())
 }
 fn attach_acl(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let id =
         ctx.authenticate_client_with_acl_user(arg(&args, 1)?.as_bytes(), callback(arg(&args, 2)?))?;
+    CLIENTS.lock().unwrap().insert(id);
     Ok((id.0 as i64).into())
 }
 fn stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
@@ -179,15 +182,22 @@ unsafe extern "C" fn raw_client_change(
             // the lock held. No context is fabricated for the ctx-less auth hook.
             let ctx = unsafe { EventContext::new(ctx) };
             let target = RAW_TARGET.lock(&ctx).as_ref().unwrap().clone();
-            let results = vec![
-                ctx.remove_module_user(&target).unwrap_err().to_string(),
+            let mut results = vec![
                 ctx.set_module_user_acl(&target, "off")
                     .unwrap_err()
                     .to_string(),
-                ctx.set_module_user_acl_string(&target, "reset off")
-                    .unwrap_err()
-                    .to_string(),
             ];
+            if CURRENT.is_set() {
+                CURRENT.with(|command| {
+                    results.push(command.remove_module_user(&target).unwrap_err().to_string());
+                    results.push(
+                        command
+                            .set_module_user_acl_string(&target, "reset off")
+                            .unwrap_err()
+                            .to_string(),
+                    );
+                });
+            }
             *RAW_ERRORS.lock().unwrap() = results;
         },
         || (),
@@ -312,7 +322,9 @@ fn pending_probe(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     *RAW_TARGET.lock(ctx) = Some(target.clone());
     let result = CURRENT.set(ctx, || ctx.authenticate_client_with_user(&target, None));
     RAW_TARGET.lock(ctx).take();
-    Ok((result?.0 as i64).into())
+    let id = result?;
+    CLIENTS.lock().unwrap().insert(id);
+    Ok((id.0 as i64).into())
 }
 unsafe extern "C" fn forbidden_checked_attach(
     _: *mut redis_module::raw::RedisModuleCtx,
@@ -381,6 +393,7 @@ fn attach_pubsub_cleanup(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     } else {
         ctx.authenticate_client_with_acl_user(name.as_bytes(), Some(callback))?
     };
+    CLIENTS.lock().unwrap().insert(id);
     Ok((id.0 as i64).into())
 }
 fn restrict_pubsub(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
@@ -497,8 +510,8 @@ fn reentry(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         Some(Box::new(move |client| {
             CHANGED.fetch_add(1, Ordering::Relaxed);
             CURRENT.with(|ctx| match action_copy.as_str() {
-                "same-client" => ctx.deauthenticate_and_close_client(client).unwrap(),
-                "remove-incoming" => ctx.remove_module_user(&incoming).unwrap(),
+                "same-client" => assert!(ctx.deauthenticate_and_close_client(client).is_err()),
+                "remove-incoming" => assert!(ctx.remove_module_user(&incoming).is_err()),
                 "delete-acl" => {
                     ctx.call("ACL", &["DELUSER", "reentry-acl"]).unwrap();
                 }
@@ -521,17 +534,11 @@ fn reentry(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             ctx.authenticate_client_with_user(&target, None)
         }
     })?;
+    CLIENTS.lock().unwrap().insert(id);
     Ok((id.0 as i64).into())
 }
 fn reentry_result(_: &Context, _: Vec<RedisString>) -> RedisResult {
     Ok(REENTRY.load(Ordering::Relaxed).into())
-}
-unsafe extern "C" fn forbidden_worker_revoke(
-    _: *mut redis_module::raw::RedisModuleCtx,
-    _: u64,
-) -> i32 {
-    NATIVE_WORKER_CALLS.fetch_add(1, Ordering::Relaxed);
-    0
 }
 fn worker(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let client = ClientId(
@@ -539,8 +546,6 @@ fn worker(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
             .parse()
             .map_err(|_| RedisError::Str("ERR invalid ID"))?,
     );
-    let stale = ctx.create_module_user("worker-stale")?;
-    ctx.remove_module_user(&stale)?;
     let mut worker = WORKER.lock().unwrap();
     if worker.is_some() {
         return Err(RedisError::Str("ERR worker already exists"));
@@ -548,47 +553,159 @@ fn worker(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     *worker = Some(std::thread::spawn(move || {
         let owner = ThreadSafeContext::new();
         let ctx = owner.lock();
-        // Only inert/missing APIs are installed for worker refusal probes. A
-        // regression cannot enter native connection/event-loop operations.
-        let (revoke, acl, cert) = unsafe {
-            (
-                redis_module::raw::RedisModule_DeauthenticateAndCloseClient,
-                redis_module::raw::RedisModule_SetModuleUserACLString,
-                redis_module::raw::RedisModule_GetClientCertificate,
-            )
-        };
+        let cert = unsafe { redis_module::raw::RedisModule_GetClientCertificate };
         unsafe {
-            redis_module::raw::RedisModule_DeauthenticateAndCloseClient =
-                Some(forbidden_worker_revoke);
-            redis_module::raw::RedisModule_SetModuleUserACLString = None;
             redis_module::raw::RedisModule_GetClientCertificate = None;
         }
-        let first = ctx
-            .deauthenticate_and_close_client(client)
-            .unwrap_err()
-            .to_string();
+        let results = vec![ctx.client_certificate(client).unwrap_err().to_string()];
         unsafe {
-            redis_module::raw::RedisModule_DeauthenticateAndCloseClient = None;
-        }
-        let results = vec![
-            first,
-            ctx.deauthenticate_and_close_client(client)
-                .unwrap_err()
-                .to_string(),
-            ctx.set_module_user_acl_string(&stale, "on")
-                .unwrap_err()
-                .to_string(),
-            ctx.remove_module_user(&stale).unwrap_err().to_string(),
-            ctx.client_certificate(client).unwrap_err().to_string(),
-        ];
-        unsafe {
-            redis_module::raw::RedisModule_DeauthenticateAndCloseClient = revoke;
-            redis_module::raw::RedisModule_SetModuleUserACLString = acl;
             redis_module::raw::RedisModule_GetClientCertificate = cert;
         }
         *WORKER_RESULTS.lock().unwrap() = results;
     }));
+    let _ = ctx;
     Ok("OK".into())
+}
+// Explicit command-side cleanup. Keep handles until native removal succeeds;
+// aliases and disconnected/replaced client IDs may already be stale.
+fn drain(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let clients: Vec<_> = CLIENTS.lock().unwrap().iter().copied().collect();
+    for client in clients {
+        let _ = ctx.deauthenticate_and_close_client(client);
+    }
+    CLIENTS.lock().unwrap().clear();
+    let handles: Vec<_> = USERS.lock(ctx).values().cloned().collect();
+    for handle in handles {
+        match ctx.remove_module_user(&handle) {
+            Ok(()) => (),
+            Err(error) if error.to_string().contains("stale or foreign") => (),
+            Err(error) => return Err(error),
+        }
+    }
+    USERS.lock(ctx).clear();
+    Ok("OK".into())
+}
+unsafe extern "C" fn refused_revoke(_: *mut redis_module::raw::RedisModuleCtx, client: u64) -> i32 {
+    CHECKED_NATIVE_CALLS.fetch_add(1, Ordering::Relaxed);
+    CURRENT.with(|ctx| {
+        let other = user(ctx, "other").unwrap();
+        *RAW_ERRORS.lock().unwrap() = vec![
+            ctx.authenticate_client_with_user(&other, callback("drop-panic"))
+                .unwrap_err()
+                .to_string(),
+            ctx.authenticate_client_with_acl_user(b"default", callback("drop-panic"))
+                .unwrap_err()
+                .to_string(),
+            ctx.deauthenticate_and_close_client(ClientId(client))
+                .unwrap_err()
+                .to_string(),
+            ctx.remove_module_user(&other).unwrap_err().to_string(),
+            ctx.set_module_user_acl_string(&other, "off")
+                .unwrap_err()
+                .to_string(),
+        ];
+    });
+    redis_module::raw::REDISMODULE_ERR as i32
+}
+fn revocation_probe(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let id = ClientId(
+        arg(&args, 1)?
+            .parse()
+            .map_err(|_| RedisError::Str("ERR invalid ID"))?,
+    );
+    let original = unsafe { redis_module::raw::RedisModule_DeauthenticateAndCloseClient };
+    CHECKED_NATIVE_CALLS.store(0, Ordering::Relaxed);
+    unsafe {
+        redis_module::raw::RedisModule_DeauthenticateAndCloseClient = Some(refused_revoke);
+    }
+    let result = CURRENT.set(ctx, || ctx.deauthenticate_and_close_client(id));
+    unsafe {
+        redis_module::raw::RedisModule_DeauthenticateAndCloseClient = original;
+    }
+    Ok(vec![
+        result.unwrap_err().to_string(),
+        CHECKED_NATIVE_CALLS.load(Ordering::Relaxed).to_string(),
+    ]
+    .into())
+}
+fn reply_refusals(ctx: &Context, handle: ModuleUserHandle) -> RedisResult {
+    let (attach, acl, full, revoke) = unsafe {
+        (
+            redis_module::raw::RedisModule_AuthenticateClientWithUser,
+            redis_module::raw::RedisModule_AuthenticateClientWithACLUser,
+            redis_module::raw::RedisModule_SetModuleUserACLString,
+            redis_module::raw::RedisModule_DeauthenticateAndCloseClient,
+        )
+    };
+    unsafe {
+        redis_module::raw::RedisModule_AuthenticateClientWithUser = None;
+        redis_module::raw::RedisModule_AuthenticateClientWithACLUser = None;
+        redis_module::raw::RedisModule_SetModuleUserACLString = None;
+        redis_module::raw::RedisModule_DeauthenticateAndCloseClient = None;
+    }
+    // The removed handle also makes an admission regression fail without native
+    // user free. All other mutation entry points have missing inert APIs.
+    let errors = vec![
+        ctx.authenticate_client_with_user(&handle, callback("drop-panic"))
+            .unwrap_err()
+            .to_string(),
+        ctx.authenticate_client_with_acl_user(b"default", callback("drop-panic"))
+            .unwrap_err()
+            .to_string(),
+        ctx.remove_module_user(&handle).unwrap_err().to_string(),
+        ctx.set_module_user_acl_string(&handle, "off")
+            .unwrap_err()
+            .to_string(),
+        ctx.deauthenticate_and_close_client(ClientId(0))
+            .unwrap_err()
+            .to_string(),
+    ];
+    unsafe {
+        redis_module::raw::RedisModule_AuthenticateClientWithUser = attach;
+        redis_module::raw::RedisModule_AuthenticateClientWithACLUser = acl;
+        redis_module::raw::RedisModule_SetModuleUserACLString = full;
+        redis_module::raw::RedisModule_DeauthenticateAndCloseClient = revoke;
+    }
+    Ok(errors.into())
+}
+fn internal_refusals(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    reply_refusals(ctx, user(ctx, "reply-stale")?)
+}
+fn call_refusals(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    ctx.call("auth_users.internal_refusals", &[] as &[&str])
+}
+fn reply_timeout(ctx: &Context) -> RedisResult {
+    let stale = user(ctx, "reply-stale")?;
+    reply_refusals(ctx, stale)
+}
+fn reply_probe(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let stale = ctx.create_module_user("reply-stale")?;
+    ctx.remove_module_user(&stale)?;
+    USERS
+        .lock(ctx)
+        .insert("reply-stale".to_owned(), stale.clone());
+    let timeout = arg(&args, 1)? == "timeout";
+    let blocked = ctx.block_client_on_reply(
+        timeout.then_some(std::time::Duration::from_millis(1)),
+        reply_refusals,
+        reply_timeout,
+    )?;
+    if timeout {
+        *WORKER.lock().unwrap() = Some(std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            blocked.unblock(stale);
+        }));
+    } else {
+        blocked.unblock(stale);
+    }
+    Ok(RedisValue::NoReply)
+}
+fn alias_source(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    inactive_probe(ctx, args)
+}
+fn inactive_probe(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    ctx.authenticate_client_with_acl_user(b"default", callback("drop-panic"))?;
+    Ok("unexpected".into())
 }
 fn worker_results(_: &Context, _: Vec<RedisString>) -> RedisResult {
     let mut results = WORKER_RESULTS.lock().unwrap().clone();
@@ -605,12 +722,52 @@ fn finish(_: &Context, _: Vec<RedisString>) -> RedisResult {
 }
 fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
     USERS.lock(ctx).clear();
+    CLIENTS.lock().unwrap().clear();
     RAW_PROBE.store(false, Ordering::Relaxed);
     RAW_TARGET.lock(ctx).take();
     RAW_ERRORS.lock().unwrap().clear();
     FOREIGN_ERRORS.lock().unwrap().clear();
     FOREIGN_CHANGED.store(0, Ordering::Relaxed);
     CHECKED_NATIVE_CALLS.store(0, Ordering::Relaxed);
+    let alias_callback = redis_module::__redis_command_callback!(alias_source);
+    if redis_module::commands::CommandBuilder::__new("auth_users.alias_source", alias_callback)
+        .read_only()
+        .register(ctx)
+        .is_err()
+    {
+        return Status::Err;
+    }
+    // A lawful raw alias reuses a known SDK callback address but has no SDK
+    // registration-name provenance. It must not inherit the safe source name.
+    let supports_busy = unsafe {
+        redis_module::raw::RedisModule_GetServerVersion.is_some_and(|version| version() >= 0x070000)
+    };
+    if supports_busy
+        && redis_module::commands::CommandBuilder::__new(
+            "auth_users.busy_probe",
+            redis_module::__redis_command_callback!(inactive_probe),
+        )
+        .read_only()
+        .flags(redis_module::CommandFlags::ALLOW_BUSY)
+        .register(ctx)
+        .is_err()
+    {
+        return Status::Err;
+    }
+    if unsafe {
+        redis_module::raw::RedisModule_CreateCommand.unwrap()(
+            ctx.get_raw(),
+            c"auth_users.raw_busy_alias".as_ptr(),
+            Some(alias_callback),
+            if supports_busy { c"allow-busy" } else { c"" }.as_ptr(),
+            0,
+            0,
+            0,
+        )
+    } != redis_module::raw::REDISMODULE_OK as i32
+    {
+        return Status::Err;
+    }
     // A lawful raw event integration may call safe APIs using its actual
     // native context. It is independent of the SDK's auth-change trampoline.
     unsafe {
@@ -644,11 +801,12 @@ fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
     }
 }
 fn deinit(ctx: &EventContext) -> Status {
+    eprintln!("auth_users deinit");
     assert!(ctx.create_module_user("unload-denied").is_err());
     if EARLY_UNLOAD.swap(false, Ordering::Relaxed) {
         let before = DROPPED.load(Ordering::Relaxed);
         let error = ctx
-            .call("auth_users.attach", &["owner", "drop-panic"])
+            .call("auth_users.inactive_probe", &[] as &[&str])
             .unwrap_err()
             .to_string();
         assert!(error.contains("lifecycle is not active"), "{error}");
@@ -658,8 +816,7 @@ fn deinit(ctx: &EventContext) -> Status {
     if WORKER.lock().unwrap().is_some() || REFUSE.swap(false, Ordering::Relaxed) {
         Status::Err
     } else {
-        // Handles are passive; dropping application state before SDK teardown
-        // leaves the native owners for the successful unload commit.
+        // The SDK admitted unload only after explicit command-side drain.
         USERS.lock(ctx).clear();
         RAW_TARGET.lock(ctx).take();
         RAW_ERRORS.lock().unwrap().clear();
@@ -708,5 +865,12 @@ redis_module! {
         redis_command!("auth_users.foreign_results", foreign_results).read_only(),
         redis_command!("auth_users.early_unload", early_unload).read_only(),
         redis_command!("auth_users.finish", finish).read_only(),
+        redis_command!("auth_users.drain", drain).write(),
+        redis_command!("auth_users.revocation_probe", revocation_probe).write(),
+        redis_command!("auth_users.reply_probe", reply_probe).write(),
+        redis_command!("auth_users.internal_refusals", internal_refusals).read_only(),
+        redis_command!("auth_users.call_refusals", call_refusals).read_only(),
+        redis_command!("auth_users.inactive_probe", inactive_probe).read_only(),
+
     ],
 }
