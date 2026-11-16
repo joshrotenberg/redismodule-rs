@@ -2,7 +2,7 @@
 //! The IDs are local to this module; they are never cast into native timer IDs.
 use redis_module::{
     Context, EventContext, NextArg, NotifyEvent, RedisError, RedisGILGuard, RedisResult,
-    RedisString, RedisValue, RegistrationContext, Status, ThreadSafeContext, TimerHandle,
+    RedisString, RedisValue, RegistrationContext, Status, ThreadSafeContext, TimerHandle, raw,
     redis_event_handler, redis_module,
 };
 use std::cell::Cell;
@@ -22,7 +22,9 @@ static FIRED: AtomicI64 = AtomicI64::new(0);
 static DATA_DROPS: AtomicI64 = AtomicI64::new(0);
 static CAPTURE_DROPS: AtomicI64 = AtomicI64::new(0);
 static REENTRY_OK: AtomicI64 = AtomicI64::new(0);
-static CROSSED_THREAD: AtomicBool = AtomicBool::new(false);
+static WORKER_MISSING_API: AtomicBool = AtomicBool::new(false);
+static WORKER_NATIVE_CALLS: AtomicI64 = AtomicI64::new(0);
+static WORKER_ERROR: Mutex<String> = Mutex::new(String::new());
 static DEINIT_MODE: AtomicI64 = AtomicI64::new(0);
 static WORKER: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
@@ -192,7 +194,7 @@ fn probe_counts(_: &Context, _: Vec<RedisString>) -> RedisResult {
         DATA_DROPS.load(Ordering::SeqCst),
         CAPTURE_DROPS.load(Ordering::SeqCst),
         REENTRY_OK.load(Ordering::SeqCst),
-        i64::from(CROSSED_THREAD.load(Ordering::SeqCst)),
+        WORKER_NATIVE_CALLS.load(Ordering::SeqCst),
     ]
     .into())
 }
@@ -207,35 +209,89 @@ fn invalid_delay(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     Err(RedisError::Str("ERR excessive delay was accepted"))
 }
 
+type CreateTimerFn = unsafe extern "C" fn(
+    *mut raw::RedisModuleCtx,
+    raw::mstime_t,
+    raw::RedisModuleTimerProc,
+    *mut std::ffi::c_void,
+) -> raw::RedisModuleTimerID;
+
+struct RestoreCreateTimer(Option<CreateTimerFn>);
+
+impl Drop for RestoreCreateTimer {
+    fn drop(&mut self) {
+        // SAFETY: the notification still holds the Redis lock. Restore even if
+        // a regression panics, before another module callback can use this API.
+        unsafe { raw::RedisModule_CreateTimer = self.0 };
+    }
+}
+
+unsafe extern "C" fn count_native_timer(
+    _: *mut raw::RedisModuleCtx,
+    _: raw::mstime_t,
+    _: raw::RedisModuleTimerProc,
+    _: *mut std::ffi::c_void,
+) -> raw::RedisModuleTimerID {
+    WORKER_NATIVE_CALLS.fetch_add(1, Ordering::SeqCst);
+    // Never call Redis's native timer API from this worker, even if the guard
+    // regresses. The test detects this stub call and any retained SDK state.
+    0
+}
+
 fn on_worker_event(ctx: &EventContext, _: NotifyEvent, _: &str, key: &[u8]) {
     if key != b"timer:worker-origin" {
         return;
     }
-    let creator = thread::current().id();
     let capture = Capture::new(None);
     let data = TrackedData {
         value: Cell::new(7),
         drop_path: None,
     };
-    ctx.create_timer(
+    // SAFETY: notifications hold the Redis lock. No other module callback can
+    // read this API table until the guard restores it. The stub makes a missing
+    // thread check deterministic without reproducing the native event-loop race;
+    // the absent-API case also checks that refusal precedes API lookup.
+    let _restore = unsafe {
+        let restore = RestoreCreateTimer(raw::RedisModule_CreateTimer);
+        raw::RedisModule_CreateTimer = if WORKER_MISSING_API.load(Ordering::SeqCst) {
+            None
+        } else {
+            Some(count_native_timer)
+        };
+        restore
+    };
+    let result = ctx.create_timer(
         Duration::from_millis(1),
         move |_, _: TrackedData| {
             capture.touch();
-            CROSSED_THREAD.store(thread::current().id() != creator, Ordering::SeqCst);
             FIRED.fetch_add(1, Ordering::SeqCst);
             drop(capture);
         },
         data,
-    )
-    .unwrap();
+    );
+    *WORKER_ERROR.lock().unwrap() = match result {
+        Err(error) => error.to_string(),
+        Ok(_) => "worker timer creation unexpectedly succeeded".to_owned(),
+    };
 }
 
-fn worker(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+fn worker(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let mut args = args.into_iter().skip(1);
+    let missing_api = match args.next() {
+        None => false,
+        Some(mode) => match mode.try_as_str()? {
+            "stub" => false,
+            "missing-api" => true,
+            _ => return Err(RedisError::Str("ERR expected stub or missing-api")),
+        },
+    };
+    args.done()?;
     let mut worker = WORKER.lock().unwrap();
     if worker.is_some() {
         return Err(RedisError::Str("ERR join the previous worker"));
     }
     let blocked = ctx.block_client()?;
+    WORKER_MISSING_API.store(missing_api, Ordering::SeqCst);
     *worker = Some(thread::spawn(move || {
         let owner = ThreadSafeContext::with_blocked_client(blocked);
         let result = {
@@ -245,6 +301,12 @@ fn worker(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
         owner.reply(result);
     }));
     Ok(RedisValue::NoReply)
+}
+
+fn worker_error(_: &Context, _: Vec<RedisString>) -> RedisResult {
+    Ok(RedisValue::SimpleString(
+        WORKER_ERROR.lock().unwrap().clone(),
+    ))
 }
 
 fn join_worker() -> Result<bool, RedisError> {
@@ -272,7 +334,9 @@ fn init(ctx: &RegistrationContext<'_>, args: &[RedisString]) -> Status {
     DATA_DROPS.store(0, Ordering::SeqCst);
     CAPTURE_DROPS.store(0, Ordering::SeqCst);
     REENTRY_OK.store(0, Ordering::SeqCst);
-    CROSSED_THREAD.store(false, Ordering::SeqCst);
+    WORKER_MISSING_API.store(false, Ordering::SeqCst);
+    WORKER_NATIVE_CALLS.store(0, Ordering::SeqCst);
+    WORKER_ERROR.lock().unwrap().clear();
     let mode = args
         .first()
         .and_then(|arg| arg.try_as_str().ok())
@@ -374,6 +438,7 @@ redis_module! {
         ["timer.probe_counts", probe_counts, "readonly", 0, 0, 0, ""],
         ["timer.invalid_delay", invalid_delay, "", 0, 0, 0, ""],
         ["timer.worker", worker, "", 0, 0, 0, ""],
+        ["timer.worker_error", worker_error, "readonly", 0, 0, 0, ""],
         ["timer.finish", finish, "", 0, 0, 0, ""],
     ],
 }

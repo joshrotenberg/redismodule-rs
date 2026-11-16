@@ -243,13 +243,24 @@ timer, so cancelling through one handle makes cancellation through another
 return `None`.
 
 Both callback captures and payloads must be `Send + 'static`; `Sync` is not
-required. A timer may be registered from an event delivered on a locked worker
-and later run on Redis's main thread. Copy borrowed arguments into owned
-values and replace shared `Rc` captures with transferable ownership or suitable
-thread-safe state. `RedisString` remains non-`Send`; retain owned `String` or
-`Vec<u8>` data instead of a native string owner.
+required. Copy borrowed arguments into owned values and replace shared `Rc`
+captures with transferable ownership or suitable thread-safe state.
+`RedisString` remains non-`Send`; retain owned `String` or `Vec<u8>` data
+instead of a native string owner.
 
-Creation validates the delay and required APIs before retaining state. Zero
+Creation now requires Redis's actual main thread (#244). An event delivered on
+a locked worker returns `ERR timers require the Redis main thread`, releasing
+its callback captures and payload without retaining a timer. The Redis lock
+does not protect native timer registration from the main event loop. This check
+uses OS thread identity, not the thread that called `MODULE LOAD`.
+Main-thread detection is available on Linux and macOS; other platforms refuse
+creation. To schedule from a worker on Redis 7.0 or later, explicitly queue
+`event_loop::add_one_shot` with owned `Send + 'static` state and create the timer
+inside that main-thread callback. The one-shot returns a submission result,
+not a timer handle; handle the later creation result inside its callback.
+Older runtimes lack that scheduling API.
+
+Creation checks the main thread, delay and required APIs before retaining state. Zero
 delay schedules the next event-loop opportunity, positive submillisecond
 delays round up to one millisecond, and durations that overflow the native
 timer calculation return an error.

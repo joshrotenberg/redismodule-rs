@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Timer creation refuses worker-origin events before looking up native APIs or
+  retaining timer state (#244). The Redis lock does not protect native timer
+  registration from the main event loop. Main-thread creation, cancellation
+  and metadata queries retain their existing contracts. Worker refusals release
+  callback captures and payloads immediately; see the timer migration notes.
+
 - Database selection is refused during key and keyspace scan callbacks
   (#241), including `with_db` and selection through a captured context.
   On servers without `NOEXPIRE` support, SDK key opens and re-opens during
