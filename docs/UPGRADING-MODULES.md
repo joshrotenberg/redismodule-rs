@@ -69,6 +69,11 @@ unload goes ahead unchecked; check the rules yourself before unloading.
 
 ## SDK timers and unload
 
+Create timers only from Redis's main thread. A notification delivered on a
+locked worker is refused before native registration, with its captured state
+released immediately. Holding the Redis lock does not protect Redis's native
+event-loop timer list from its main thread.
+
 Retain typed `TimerHandle<T>` values for timers that may need to be cancelled
 before an upgrade. Dropping a handle does not stop its timer. Cancel pending
 timers explicitly while the module is active, and then request `MODULE UNLOAD`.
