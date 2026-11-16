@@ -19,7 +19,10 @@ Redis; explicit removal and successful unload free native owners under the Redis
 lock. Client attachment always installs native one-shot cleanup, including when
 there is no consumer notification. Cleanup accepts owned `Send` captures and
 never fabricates a context for Redis's context-free callback. Refused unload
-restores existing subscriptions. Full ACL strings use Redis's transactional
+restores existing subscriptions. Consumers are deferred across native user and
+command calls so they cannot free a user still borrowed by native attachment or
+an ACL update. Client-affecting operations refuse worker execution before FFI.
+Full ACL strings validate native quoting and use Redis's transactional
 setter and omit secret-bearing parser diagnostics. Peer certificates are copied
 to owned bytes and command arguments can be redacted. See
 [the API guide](docs/AUTHENTICATION.md). Authentication callback registration and

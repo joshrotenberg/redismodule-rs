@@ -322,6 +322,7 @@ name = "system_allocator_fallback"
 required-features = ["system-allocator-fallback"]
 
 [dev-dependencies]
+scoped-tls = "1"
 anyhow = "1"
 # 1.2.3 and later require Rust 1.88; keep test builds on the SDK MSRV.
 redis = { version = "=1.2.2", default-features = false }

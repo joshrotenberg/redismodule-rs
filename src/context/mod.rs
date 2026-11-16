@@ -1280,6 +1280,7 @@ impl RuntimeContext {
         // RedisModule_Call returns null both for a dry run that would succeed
         // and, without the E flag, for a call that failed; errno tells them
         // apart, so clear it first.
+        let _auth_operation = auth::NativeOperation::begin();
         clear_errno();
         let reply: *mut raw::RedisModuleCallReply = unsafe {
             let p_call = crate::__required_api!(RedisModule_Call);

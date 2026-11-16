@@ -1,9 +1,10 @@
 //! Module-owned users and privileged client identity attachment.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{CString, c_void};
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::{Context, RedisError, RedisString, RuntimeContext, raw};
@@ -14,7 +15,9 @@ pub struct ClientId(pub u64);
 
 /// One-shot cleanup for an attached client identity.
 ///
-/// Runs with Redis locked, possibly on a worker holding a thread-safe context.
+/// Runs with Redis locked. During SDK native calls, consumer delivery is deferred
+/// until the outer native call returns. Native notifications outside such calls
+/// deliver immediately. Reattachment from cleanup is refused.
 /// Captures must be owned and `Send`. No context is provided by Redis; do not
 /// reacquire the Redis lock in this callback. It also runs on same-user reauth,
 /// disconnect, explicit revocation and successful module unload. Panics are
@@ -55,6 +58,13 @@ struct NativeUser {
 // inert owner never calls Redis, and the registry never holds a lock across FFI.
 unsafe impl Send for NativeUser {}
 
+// Own incoming state from method entry, including every preflight refusal.
+struct PendingCallback(Option<ClientChangeCallback>);
+impl Drop for PendingCallback {
+    fn drop(&mut self) {
+        contain(|| drop(self.0.take()));
+    }
+}
 struct Cookie(u64);
 struct Subscription {
     cookie: Box<Cookie>,
@@ -75,7 +85,12 @@ struct Registry {
     users: BTreeMap<u64, NativeUser>,
     subscriptions: BTreeMap<u64, Subscription>,
     executing: usize,
+    native_depth: usize,
+    deferred: VecDeque<(ClientId, Subscription)>,
 }
+static LIVE_SUBSCRIPTIONS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static REGISTRY_ACCESSES: AtomicUsize = AtomicUsize::new(0);
 static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     phase: Phase::Unloaded,
     owner: None,
@@ -83,8 +98,12 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     users: BTreeMap::new(),
     subscriptions: BTreeMap::new(),
     executing: 0,
+    native_depth: 0,
+    deferred: VecDeque::new(),
 });
 fn registry() -> MutexGuard<'static, Registry> {
+    #[cfg(test)]
+    REGISTRY_ACCESSES.fetch_add(1, Ordering::Relaxed);
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
 }
 const INACTIVE: RedisError = RedisError::Str("ERR module user lifecycle is not active");
@@ -127,28 +146,157 @@ fn contain(f: impl FnOnce()) {
         std::mem::forget(payload);
     }
 }
+// Native code may still be using an incoming user/client after it invokes the
+// change trampoline. Defer consumer code until the outer SDK FFI call returns.
+// This also covers AUTH/HELLO and ACL commands made through RuntimeContext::call.
+pub(crate) struct NativeOperation {
+    active: bool,
+}
+impl NativeOperation {
+    pub(crate) fn begin() -> Self {
+        // With no live installations there is no consumer to defer. This
+        // common call path performs one atomic load and no registry locking.
+        if LIVE_SUBSCRIPTIONS.load(Ordering::Relaxed) == 0 {
+            return Self { active: false };
+        }
+        registry().native_depth += 1;
+        Self { active: true }
+    }
+}
+impl Drop for NativeOperation {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let ready = {
+            let mut registry = registry();
+            registry.native_depth -= 1;
+            registry.native_depth == 0
+        };
+        if ready {
+            loop {
+                let next = registry().deferred.pop_front();
+                let Some((client, subscription)) = next else {
+                    break;
+                };
+                notify(client, subscription);
+            }
+        }
+    }
+}
+fn notify(client: ClientId, mut subscription: Subscription) {
+    registry().executing += 1;
+    let callback = subscription.callback.take();
+    if let Some(callback) = callback {
+        contain(|| callback(client));
+    }
+    // Redis clears callback/privdata AFTER the trampoline returns. Retain the
+    // cookie through consumer code so native recursive delivery can read it and
+    // observe an already-consumed registry entry without dereferencing freed data.
+    drop(subscription);
+    registry().executing -= 1;
+    LIVE_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
+}
 unsafe extern "C" fn changed(client: u64, private: *mut c_void) {
     contain(|| {
-        // SAFETY: each installed native callback owns one live registry cookie.
+        // SAFETY: the native installation or notify's stack retains this cookie.
         let key = unsafe { (*(private.cast::<Cookie>())).0 };
         let subscription = {
             let mut registry = registry();
             let subscription = registry.subscriptions.remove(&key);
-            if subscription.is_some() {
-                registry.executing += 1;
+            if registry.native_depth != 0 {
+                if let Some(subscription) = subscription {
+                    registry
+                        .deferred
+                        .push_back((ClientId(client), subscription));
+                }
+                return;
             }
             subscription
         };
-        if let Some(mut subscription) = subscription {
-            // Remove ownership before user code and run without a registry lock.
-            let callback = subscription.callback.take();
-            drop(subscription);
-            if let Some(callback) = callback {
-                contain(|| callback(ClientId(client)));
-            }
-            registry().executing -= 1;
+        if let Some(subscription) = subscription {
+            notify(ClientId(client), subscription);
         }
     });
+}
+
+fn main_thread() -> Result<(), RedisError> {
+    if crate::configuration::lifecycle::is_main_thread() {
+        Ok(())
+    } else {
+        Err(RedisError::Str(
+            "ERR client identity operations require the Redis main thread",
+        ))
+    }
+}
+
+// Validate only sdssplitargs' quote/escape grammar. Keep the exact input for
+// Redis's native transactional ACL parser. Native versions through 8.10 ignore
+// a NULL split result and can report success for malformed quoting.
+fn valid_acl_quoting(rules: &[u8]) -> bool {
+    fn space(b: u8) -> bool {
+        matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 11 | 12)
+    }
+    let mut i = 0;
+    while i < rules.len() {
+        while i < rules.len() && space(rules[i]) {
+            i += 1;
+        }
+        if i == rules.len() {
+            break;
+        }
+        let mut quote = 0;
+        loop {
+            let Some(&b) = rules.get(i) else {
+                if quote != 0 {
+                    return false;
+                }
+                break;
+            };
+            if quote == b'"' {
+                if b == b'\\' && rules.get(i + 1).is_some() {
+                    if rules.get(i + 1) == Some(&b'x')
+                        && rules.get(i + 2).is_some_and(u8::is_ascii_hexdigit)
+                        && rules.get(i + 3).is_some_and(u8::is_ascii_hexdigit)
+                    {
+                        i += 4;
+                    } else {
+                        i += 2;
+                    }
+                    continue;
+                }
+                if b == b'"' {
+                    if rules.get(i + 1).is_some_and(|b| !space(*b)) {
+                        return false;
+                    }
+                    i += 1;
+                    break;
+                }
+            } else if quote == b'\'' {
+                if b == b'\\' && rules.get(i + 1) == Some(&b'\'') {
+                    i += 2;
+                    continue;
+                }
+                if b == b'\'' {
+                    if rules.get(i + 1).is_some_and(|b| !space(*b)) {
+                        return false;
+                    }
+                    i += 1;
+                    break;
+                }
+            } else {
+                if matches!(b, b' ' | b'\n' | b'\r' | b'\t') {
+                    i += 1;
+                    break;
+                }
+                if b == b'"' || b == b'\'' {
+                    quote = b;
+                }
+            }
+            i += 1;
+        }
+    }
+    true
 }
 
 /// Internal `redis_module!` lifecycle binding, not a custom-loader API.
@@ -195,7 +343,13 @@ impl<'a> UserUnloadGuard<'a> {
     pub unsafe fn begin(ctx: &'a RuntimeContext) -> Result<Self, RedisError> {
         let mut registry = registry();
         registry.active()?;
-        if registry.executing != 0 {
+        if !registry.users.is_empty()
+            || !registry.subscriptions.is_empty()
+            || !registry.deferred.is_empty()
+        {
+            main_thread()?;
+        }
+        if registry.executing != 0 || registry.native_depth != 0 {
             return Err(RedisError::Str("ERR module user cleanup is executing"));
         }
         registry.phase = Phase::Unloading;
@@ -205,6 +359,7 @@ impl<'a> UserUnloadGuard<'a> {
         })
     }
     pub fn commit(mut self) -> Result<(), RedisError> {
+        let operation = NativeOperation::begin();
         // Authentication preflights this API before installing any subscription.
         let clients: Vec<_> = registry()
             .subscriptions
@@ -218,6 +373,7 @@ impl<'a> UserUnloadGuard<'a> {
                 raw::RedisModule_DeauthenticateAndCloseClient.unwrap()(self.ctx.ctx, client.0);
             }
         }
+        drop(operation);
         if !registry().subscriptions.is_empty() {
             return Err(RedisError::Str(
                 "ERR module client cleanup is still pending",
@@ -278,7 +434,10 @@ impl RuntimeContext {
 
     /// Removes a created user exactly once and revokes its clients (Redis 6.0+).
     /// Invalidates all clones before native free and any resulting callbacks.
+    /// Requires the actual Redis main thread; a worker lock is insufficient.
     pub fn remove_module_user(&self, handle: &ModuleUserHandle) -> Result<(), RedisError> {
+        main_thread()?;
+        let _operation = NativeOperation::begin();
         let user = {
             let mut registry = registry();
             registry.user(handle)?;
@@ -300,6 +459,7 @@ impl RuntimeContext {
         let set = unsafe { crate::__available_api!(RedisModule_SetModuleUserACL) };
         let directive =
             CString::new(directive).map_err(|_| RedisError::Str("ERR invalid ACL directive"))?;
+        let _operation = NativeOperation::begin();
         let user = registry().user(handle)?;
         if unsafe { set(user, directive.as_ptr()) } == raw::REDISMODULE_OK as i32 {
             Ok(())
@@ -311,14 +471,21 @@ impl RuntimeContext {
     /// Atomically applies a complete ACL rule string using Redis's transactional
     /// setter (Redis 7.0+). On error existing rules remain unchanged. No fallback
     /// to repeated single-rule calls is used. Errors omit ACL text and native
-    /// diagnostics, including password directives and hashes.
+    /// diagnostics, including password directives and hashes. Malformed native
+    /// quote/escape syntax is rejected before FFI. Requires the Redis main thread
+    /// because native ACL updates can synchronously destroy Pub/Sub clients.
     pub fn set_module_user_acl_string(
         &self,
         handle: &ModuleUserHandle,
         rules: &str,
     ) -> Result<(), RedisError> {
+        main_thread()?;
+        if !valid_acl_quoting(rules.as_bytes()) {
+            return Err(RedisError::Str("ERR invalid ACL rules"));
+        }
         let set = unsafe { crate::__available_api!(RedisModule_SetModuleUserACLString) };
         let rules = CString::new(rules).map_err(|_| RedisError::Str("ERR invalid ACL rules"))?;
+        let _operation = NativeOperation::begin();
         let user = registry().user(handle)?;
         // Passing no error slot makes Redis free any secret-bearing diagnostic.
         if unsafe { set(self.ctx, user, rules.as_ptr(), std::ptr::null_mut()) }
@@ -331,8 +498,11 @@ impl RuntimeContext {
     }
 
     /// Revokes and asynchronously closes a connection (Redis 6.0+).
-    /// Cleanup is synchronous and can run on the thread holding this lock.
+    /// Requires the Redis main thread: a worker lock does not pause I/O threads.
+    /// SDK consumer cleanup runs after native revocation returns.
     pub fn deauthenticate_and_close_client(&self, client: ClientId) -> Result<(), RedisError> {
+        main_thread()?;
+        let _operation = NativeOperation::begin();
         let revoke = unsafe { crate::__available_api!(RedisModule_DeauthenticateAndCloseClient) };
         if unsafe { revoke(self.ctx, client.0) } == raw::REDISMODULE_OK as i32 {
             Ok(())
@@ -343,7 +513,9 @@ impl RuntimeContext {
 
     /// Copies a peer certificate as owned PEM bytes (Redis 6.0+). `None` can
     /// mean missing client, non-TLS connection or no client certificate.
+    /// Requires Redis's main thread for native connection access.
     pub fn client_certificate(&self, client: ClientId) -> Result<Option<Vec<u8>>, RedisError> {
+        main_thread()?;
         let get = unsafe { crate::__available_api!(RedisModule_GetClientCertificate) };
         let string = unsafe { get(self.ctx, client.0) };
         // SAFETY: self is the actual producer context, including AutoMemory.
@@ -363,9 +535,12 @@ impl Context {
         user: &ModuleUserHandle,
         on_changed: Option<ClientChangeCallback>,
     ) -> Result<ClientId, RedisError> {
+        let pending = PendingCallback(on_changed);
+        main_thread()?;
+        let _operation = NativeOperation::begin();
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithUser) };
         let user = registry().user(user)?;
-        self.attach_identity(on_changed, |callback, private, id| unsafe {
+        self.attach_identity(pending, |callback, private, id| unsafe {
             attach(self.ctx, user, callback, private, id)
         })
     }
@@ -379,8 +554,11 @@ impl Context {
         name: &[u8],
         on_changed: Option<ClientChangeCallback>,
     ) -> Result<ClientId, RedisError> {
+        let pending = PendingCallback(on_changed);
+        main_thread()?;
+        let _operation = NativeOperation::begin();
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithACLUser) };
-        self.attach_identity(on_changed, |callback, private, id| unsafe {
+        self.attach_identity(pending, |callback, private, id| unsafe {
             attach(
                 self.ctx,
                 name.as_ptr().cast(),
@@ -394,28 +572,47 @@ impl Context {
 
     fn attach_identity(
         &self,
-        callback: Option<ClientChangeCallback>,
+        mut callback: PendingCallback,
         attach: impl FnOnce(raw::RedisModuleUserChangedFunc, *mut c_void, *mut u64) -> i32,
     ) -> Result<ClientId, RedisError> {
+        registry().active()?;
+        // Redis accepts CLIENT_LUA in the native attach API even though that
+        // internal client is absent from the ID index used for revocation.
+        // Only transfer subscriptions for a real, ID-addressable connection.
+        let get_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
+        let get_info = unsafe { crate::__available_api!(RedisModule_GetClientInfoById) };
+        let id = unsafe { get_id(self.ctx) };
+        if id == 0 || unsafe { get_info(std::ptr::null_mut(), id) } != raw::REDISMODULE_OK as i32 {
+            return Err(RedisError::Str(
+                "ERR identity attachment requires a connected client",
+            ));
+        }
         // Every successful installation must be revocable during SDK unload.
         let _ = unsafe { crate::__available_api!(RedisModule_DeauthenticateAndCloseClient) };
         let (key, private) = {
             let mut registry = registry();
             registry.active()?;
+            if registry.executing != 0 {
+                return Err(RedisError::Str(
+                    "ERR identity attachment is refused during client cleanup",
+                ));
+            }
             let key = registry.next()?;
             let mut subscription = Subscription {
                 cookie: Box::new(Cookie(key)),
                 client: None,
-                callback,
+                callback: callback.0.take(),
             };
             let private = (&mut *subscription.cookie as *mut Cookie).cast();
             registry.subscriptions.insert(key, subscription);
+            LIVE_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
             (key, private)
         };
         let mut id = 0;
         if attach(Some(changed), private, &mut id) != raw::REDISMODULE_OK as i32 {
             let failed = registry().subscriptions.remove(&key);
             contain(|| drop(failed));
+            LIVE_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
             return Err(RedisError::Str(
                 "ERR Redis refused client identity attachment",
             ));
@@ -425,7 +622,7 @@ impl Context {
     }
 
     /// Redacts a current command argument from MONITOR, SLOWLOG and server logs
-    /// (Redis 6.2+). Position zero and out-of-range positions are rejected.
+    /// (Redis 7.0+). Position zero and out-of-range positions are rejected.
     pub fn redact_client_command_argument(&self, position: usize) -> Result<(), RedisError> {
         let redact = unsafe { crate::__available_api!(RedisModule_RedactClientCommandArgument) };
         let position = i32::try_from(position)
@@ -442,6 +639,43 @@ impl Context {
 mod tests {
     use super::*;
     #[test]
+    fn native_call_without_auth_has_no_registry_access() {
+        assert_eq!(LIVE_SUBSCRIPTIONS.load(Ordering::Relaxed), 0);
+        let before = REGISTRY_ACCESSES.load(Ordering::Relaxed);
+        for _ in 0..10_000 {
+            let operation = NativeOperation::begin();
+            assert!(!operation.active);
+            drop(operation);
+        }
+        assert_eq!(REGISTRY_ACCESSES.load(Ordering::Relaxed), before);
+    }
+    #[test]
+    fn acl_quote_validation_preserves_native_lexical_forms() {
+        for valid in [
+            "",
+            "  ",
+            "reset on +get",
+            "'on' \"+get\"",
+            "~prefix\"suffix\"",
+            "\"~a\\x22b\"",
+            "'~a\\'b'",
+            "\"~a\\nb\"",
+            "\"~a\\\\b\"",
+        ] {
+            assert!(valid_acl_quoting(valid.as_bytes()), "{valid:?}");
+        }
+        for invalid in [
+            "'on",
+            "\"on",
+            "'on'suffix",
+            "\"on\"suffix",
+            "\"on\\\"",
+            "\"on\\",
+        ] {
+            assert!(!valid_acl_quoting(invalid.as_bytes()), "{invalid:?}");
+        }
+    }
+    #[test]
     fn foreign_and_previous_load_handles_never_resolve() {
         let owner = Arc::new(());
         let mut registry = Registry {
@@ -451,6 +685,8 @@ mod tests {
             users: BTreeMap::new(),
             subscriptions: BTreeMap::new(),
             executing: 0,
+            native_depth: 0,
+            deferred: VecDeque::new(),
         };
         unsafe extern "C" fn never_free(_: *mut raw::RedisModuleUser) {
             panic!("must never free");

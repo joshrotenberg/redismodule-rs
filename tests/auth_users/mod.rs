@@ -104,6 +104,28 @@ fn test_module_users_acl_transaction_stale_handles_and_redaction() -> Result<()>
         .arg("denied:key")
         .query::<Option<String>>(&mut client)
         .expect_err("failed atomic update retained key pattern");
+    for rules in [
+        "reset on +@all \"unterminated",
+        "reset on +@all 'unterminated",
+        "reset on +@all \"closed\"suffix",
+        "reset on +@all 'closed'suffix",
+    ] {
+        redis::cmd("auth_users.acl")
+            .arg(("owner", rules))
+            .query::<()>(&mut con)
+            .expect_err("malformed lexical ACL string");
+        redis::cmd("SET")
+            .arg(("allowed:key", "x"))
+            .query::<()>(&mut client)
+            .expect_err("lexical error preserves +get only");
+        redis::cmd("GET")
+            .arg("denied:key")
+            .query::<Option<String>>(&mut client)
+            .expect_err("lexical error preserves key pattern");
+    }
+    redis::cmd("auth_users.acl")
+        .arg(("owner", "reset 'on' \"+get\" ~allowed:*"))
+        .query::<()>(&mut con)?;
     // Disabling is a flag change; already attached clients retain their rules.
     redis::cmd("auth_users.rule")
         .arg(("owner", "off"))
@@ -230,23 +252,39 @@ fn test_module_users_unload_refusal_cleanup_and_reload() -> Result<()> {
 }
 
 #[test]
-fn test_module_users_worker_revocation_and_cleanup_panics() -> Result<()> {
+fn test_module_users_worker_refusal_and_main_thread_cleanup_panics() -> Result<()> {
     let mut con = TestConnection::new("auth_users");
     create(&mut con, "owner")?;
-    for (index, mode) in ["track", "panic", "drop-panic"].iter().enumerate() {
+    let mut client = con.connection()?;
+    let id: i64 = redis::cmd("auth_users.attach")
+        .arg(("owner", "track"))
+        .query(&mut client)?;
+    redis::cmd("auth_users.worker")
+        .arg(id)
+        .query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(2), "worker refusal probes", || {
+        Ok(redis::cmd("auth_users.finish").query::<i64>(&mut con)? == 1)
+    })?;
+    let results: Vec<String> = redis::cmd("auth_users.worker_results").query(&mut con)?;
+    assert_eq!(
+        results[..5],
+        vec!["ERR client identity operations require the Redis main thread"; 5]
+    );
+    assert_eq!(results[5], "0");
+    assert_eq!(stats(&mut con)?, [0, 0]);
+    assert_eq!(redis::cmd("PING").query::<String>(&mut client)?, "PONG");
+    redis::cmd("auth_users.revoke")
+        .arg(id)
+        .query::<()>(&mut con)?;
+    for (index, mode) in ["panic", "drop-panic"].iter().enumerate() {
         let mut client = con.connection()?;
         let id: i64 = redis::cmd("auth_users.attach")
             .arg(("owner", *mode))
             .query(&mut client)?;
-        redis::cmd("auth_users.worker")
+        redis::cmd("auth_users.revoke")
             .arg(id)
             .query::<()>(&mut con)?;
-        utils::wait_until(
-            Duration::from_secs(2),
-            "locked worker identity cleanup",
-            || Ok(redis::cmd("auth_users.finish").query::<i64>(&mut con)? == 1),
-        )?;
-        let count = index as i64 + 1;
+        let count = index as i64 + 2;
         assert_eq!(stats(&mut con)?, [count, count]);
         redis::cmd("PING")
             .query::<String>(&mut client)
@@ -255,5 +293,156 @@ fn test_module_users_worker_revocation_and_cleanup_panics() -> Result<()> {
     redis::cmd("MODULE")
         .arg(("UNLOAD", "auth_users"))
         .query::<()>(&mut con)?;
+    Ok(())
+}
+
+#[test]
+fn test_module_users_scoped_context_reentry_retains_native_lifetimes() -> Result<()> {
+    for action in [
+        "same-client",
+        "remove-incoming",
+        "delete-acl",
+        "attach-again",
+    ] {
+        let mut con = TestConnection::new("auth_users");
+        create(&mut con, "owner")?;
+        redis::cmd("ACL")
+            .arg(("SETUSER", "reentry-acl", "on", "+@all", "~*"))
+            .query::<()>(&mut con)?;
+        let mut client = con.connection()?;
+        redis::cmd("auth_users.reentry")
+            .arg(action)
+            .query::<i64>(&mut client)?;
+        assert_eq!(
+            redis::cmd("auth_users.reentry_result").query::<i64>(&mut con)?,
+            1,
+            "{action}"
+        );
+        assert_eq!(stats(&mut con)?, [1, 1], "{action}");
+        if action != "attach-again" {
+            redis::cmd("PING")
+                .query::<String>(&mut client)
+                .expect_err("reentrant revocation");
+        }
+        redis::cmd("MODULE")
+            .arg(("UNLOAD", "auth_users"))
+            .query::<()>(&mut con)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn test_module_users_passive_handle_drop_and_runtime_capabilities() -> Result<()> {
+    let mut con = TestConnection::new("auth_users");
+    create(&mut con, "original")?;
+    redis::cmd("auth_users.alias")
+        .arg(("original", "clone"))
+        .query::<()>(&mut con)?;
+    redis::cmd("auth_users.forget")
+        .arg("original")
+        .query::<()>(&mut con)?;
+    let mut client = con.connection()?;
+    redis::cmd("auth_users.attach")
+        .arg(("clone", "track"))
+        .query::<i64>(&mut client)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut client)?, "PONG");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let legacy = info
+        .lines()
+        .any(|line| line.starts_with("redis_version:6."));
+    let outcomes: Vec<String> = redis::cmd("auth_users.capabilities")
+        .arg("clone")
+        .query(&mut con)?;
+    if legacy {
+        assert_eq!(
+            outcomes,
+            [
+                "ERR RedisModule_SetModuleUserACLString is not available",
+                "ERR RedisModule_RedactClientCommandArgument is not available"
+            ]
+        );
+    } else {
+        assert_eq!(outcomes, ["OK", "OK"]);
+    }
+    redis::cmd("auth_users.create")
+        .arg(b"invalid\0name".as_slice())
+        .query::<()>(&mut con)
+        .expect_err("NUL name");
+    // A script's internal client cannot acquire an attached network identity.
+    redis::cmd("EVAL")
+        .arg((
+            "return redis.call('auth_users.attach_acl', 'default', 'track')",
+            0,
+        ))
+        .query::<i64>(&mut con)
+        .expect_err("internal client attachment");
+    assert_eq!(stats(&mut con)?, [0, 1]);
+    redis::cmd("auth_users.remove")
+        .arg("clone")
+        .query::<()>(&mut con)?;
+    utils::wait_until(Duration::from_secs(2), "clone native owner removal", || {
+        Ok(stats(&mut con)? == [1, 2])
+    })?;
+    Ok(())
+}
+
+#[test]
+fn test_module_users_native_post_load_rejection_allows_reload() -> Result<()> {
+    let mut con = TestConnection::new("auth_users");
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "auth_users"))
+        .query::<()>(&mut con)?;
+    let initialized = con.server_log()?.matches("auth_users initialized").count();
+    redis::cmd("MODULE")
+        .arg("LOADEX")
+        .arg(utils::module_path("auth_users")?)
+        .arg(("CONFIG", "auth_users.unknown", "1"))
+        .query::<()>(&mut con)
+        .expect_err("post-OnLoad unknown configuration");
+    assert_eq!(
+        con.server_log()?.matches("auth_users initialized").count(),
+        initialized + 1
+    );
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("auth_users")?)
+        .query::<()>(&mut con)?;
+    create(&mut con, "reloaded")?;
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "auth_users"))
+        .query::<()>(&mut con)?;
+    Ok(())
+}
+
+#[test]
+fn test_module_users_early_refusals_contain_capture_destructors() -> Result<()> {
+    let mut con = TestConnection::new("auth_users");
+    create(&mut con, "owner")?;
+    redis::cmd("auth_users.remove")
+        .arg("owner")
+        .query::<()>(&mut con)?;
+    let error = redis::cmd("auth_users.attach")
+        .arg(("owner", "drop-panic"))
+        .query::<i64>(&mut con)
+        .expect_err("stale handle callback capture");
+    assert!(error.to_string().contains("stale or foreign"));
+    assert!(!error.to_string().contains("panicked"));
+    assert_eq!(stats(&mut con)?, [0, 1]);
+    create(&mut con, "owner")?;
+    let errors: Vec<String> = redis::cmd("auth_users.absent_api").query(&mut con)?;
+    assert!(
+        errors
+            .iter()
+            .all(|error| error.contains("is not available") && !error.contains("panicked"))
+    );
+    assert_eq!(stats(&mut con)?, [0, 3]);
+    redis::cmd("auth_users.early_unload").query::<()>(&mut con)?;
+    redis::cmd("MODULE")
+        .arg(("UNLOAD", "auth_users"))
+        .query::<()>(&mut con)?;
+    assert!(
+        con.server_log()?
+            .contains("auth_users inactive callback drop contained")
+    );
     Ok(())
 }

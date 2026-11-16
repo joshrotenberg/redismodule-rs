@@ -364,11 +364,13 @@ starting work, send the reply through the blocked client's `ThreadSafeContext`,
 and return `RedisValue::NoReply`. Scripts, transactions and other denied
 invocations fail before native blocking. See [block.rs](examples/block.rs).
 
-## Timers
+## Module users
 
 Module-owned users and privileged client identity attachment are described in
 [the authentication guide](docs/AUTHENTICATION.md) and
 [auth_users.rs](examples/auth_users.rs).
+
+## Timers
 
 `ctx.create_timer(delay, callback, data)?` returns a typed `TimerHandle<T>`.
 Callbacks and payloads require `Send + 'static`. Keep the handle to call
