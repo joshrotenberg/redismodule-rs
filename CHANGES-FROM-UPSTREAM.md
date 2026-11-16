@@ -11,6 +11,32 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Module users and client identity attachment
+
+Created Redis module users are held in an SDK registry with opaque module/load
+and monotonic generation identities (#216). Handle destruction does not call
+Redis; explicit command-side removal frees native owners under the Redis lock.
+Unload refuses users, identities and pending cleanup before deinit; empty unload
+performs no client-affecting cleanup. Client attachment always installs native one-shot cleanup, including when
+there is no consumer notification. Safe ACL-name handoff requires a live,
+installed SDK subscription; unknown or foreign ownership is rejected before
+native account lookup and identity changes. A caller can explicitly select a
+created identity first. Cleanup accepts owned `Send` captures and
+never fabricates a context for Redis's context-free callback. Refused unload
+restores existing subscriptions. Consumers are deferred across native user and
+command calls so they cannot free a user still borrowed by native attachment or
+an ACL update. Client-affecting operations require a pointer-bound ordinary SDK command on an
+indexed connection, without active native scopes, cleanup consumers or native
+LOADING/ASYNC_LOADING flags. Events, blocked replies, internal calls, workers and
+allow-busy callbacks are refused.
+Revocation also requires actually installed SDK ownership and keeps closing
+admission through native return.
+Full ACL strings require verified Redis 7.4+, validate native quoting and use
+Redis's transactional setter and omit secret-bearing parser diagnostics. Peer certificates are copied
+to owned bytes and command arguments can be redacted. See
+[the API guide](docs/AUTHENTICATION.md). Authentication callback registration and
+asynchronous completion remain outside this delivery.
+
 ## Adapted handler tests
 
 `call_reply.echo` delegates its byte arguments and synchronous `ECHO` call to a

@@ -8,6 +8,16 @@ use std::cell::OnceCell;
 /// Helpers shared by commands, events, init hooks, and workers should take this
 /// type. Each more specialized view dereferences to it.
 ///
+/// Client-affecting authentication mutations require an ordinary command:
+///
+/// ```compile_fail,E0599
+/// fn helper(ctx: &redis_module::RuntimeContext, user: &redis_module::ModuleUserHandle) {
+///     ctx.remove_module_user(user);
+///     ctx.set_module_user_acl_string(user, "off");
+///     ctx.deauthenticate_and_close_client(redis_module::ClientId(1));
+/// }
+/// ```
+///
 /// A shared runtime view cannot be promoted to a client invocation:
 ///
 /// ```compile_fail,E0308
