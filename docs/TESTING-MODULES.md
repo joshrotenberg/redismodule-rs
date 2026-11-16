@@ -5,6 +5,90 @@ byte parsing in an ordinary Rust function so unit tests and a fuzzer can exercis
 it without Redis. These patterns test different boundaries; parser fuzzing does
 not establish that a callback's Redis API use or lifecycle is safe.
 
+## Test an adapted handler without Redis
+
+[examples/handler-testing](../examples/handler-testing) prototypes a private
+byte/effect boundary for `call_reply.echo` (#215). Its registered
+`fn echo(&Context, Vec<RedisString>) -> RedisResult` remains a native wrapper.
+The wrapper borrows each argument's bytes, including the command name, while
+keeping every `RedisString` owner alive. It calls this shared body:
+
+```rust,ignore
+fn echo_handler(io: &mut impl CommandIo, argv: &[&[u8]]) -> HandlerResult {
+    io.call("ECHO", &argv[1..])
+}
+```
+
+`CommandIo` exposes only synchronous `call(&str, &[&[u8]])`. The closed owned
+reply type admits simple strings, bulk bytes, integers, arrays, errors, null
+bulk strings and null arrays. Handler errors carry either wrong arity or an
+owned message. `NativeIo` calls `Context::call`, converts the admitted values
+and explicitly rejects other reply kinds, including native string handles.
+The wrapper converts the owned result back for the existing SDK serializer.
+There is no test dispatch inside `Context` or any SDK type.
+
+The isolated harness runs the shared body with scripted effects:
+
+```rust,ignore
+let output = HandlerHarness::default()
+    .expect_call("ECHO", &[b"a\0\xff"], Ok(Reply::Bulk(vec![b'a', 0, 255])))
+    .run(&[b"call_reply.echo", b"a\0\xff"], echo_handler)
+    .unwrap(); // Outer Result reports harness validity.
+assert_eq!(output, Ok(Reply::Bulk(vec![b'a', 0, 255])));
+```
+
+Expectations form a first-in, first-out queue. Names match literally; the
+harness does not implement Redis command lookup or case folding. Wrong command
+names, wrong argument count/order/bytes, extra calls and unused expectations
+fail the run. A mismatch remains failed even if the handler catches the error
+or makes a later correct call. An expected call error is ordinary handler
+input and can be recovered from. Empty synthetic argv is refused before the
+body runs; a native callback always includes its command name. Missing or extra
+ECHO operands reach the call unchanged and use the SDK call-boundary error,
+`ERR RedisModule_Call failed: wrong number of arguments`.
+
+Run the workspace separately; root workspace tests do not include it:
+
+```bash
+cargo +1.94.0 fmt --manifest-path examples/handler-testing/Cargo.toml -- --check
+cargo +1.94.0 clippy --manifest-path examples/handler-testing/Cargo.toml --all-targets -- -D warnings
+cargo +1.94.0 test --manifest-path examples/handler-testing/Cargo.toml
+```
+
+The package has no dependencies and installs no global allocator, so its tests
+use Rust's system allocator. `HandlerHarness` and `ScriptedIo` exist only under
+`cfg(test)` in that package. The native example imports only `shared.rs`, not
+the harness or its workspace. There is no SDK testing feature whose additive
+activation could pull mocks into a production module. CI formats, lints and
+tests this package explicitly on the Linux and macOS lowest-floor jobs and
+checks it on the minimum Rust version.
+
+`cases.rs` supplies both test paths with empty, ASCII, UTF-8, NUL, CR, LF,
+CRLF, invalid UTF-8 and 4 KiB-plus-one-byte arguments, plus missing and extra
+operand cases. `test_adapted_echo_contract` loads the real registered command
+and checks bulk reply kind/bytes or exact error code/message. Raw byte requests
+check RESP2, RESP3 and a return to RESP2 with a following `PING` on the same
+connection. These checks retain registration, native-adapter and wire coverage.
+Build examples before running that integration test.
+
+The no-server path tests the adapted body, not the unchanged native wrapper.
+Its semantic reply capture does not test serialization, native object
+lifetimes, callback safety, `ArgCursor`/`NextArg` numeric parsers or native
+allocator behavior. The facade has no key, timer, user, registration, blocking,
+replication, raw-pointer or typed call-reply methods. Such calls fail to compile
+against it. There are no fake native objects or assigned Redis API pointers.
+`call_ext`, `call_blocking`, direct reply writers, `NoReply`, partial aggregates
+and blocked clients are outside this prototype. A direct-reply consumer would
+need a separate scope decision or adaptation to return an owned reply.
+
+An alternative backend inside `Context` could aim at unchanged-handler tests,
+but it would also need Rust-owned `RedisString` storage, typed reply ownership,
+inherited context capabilities, argument conversion, reply admission and native
+pointer refusal. Allocator fallback alone supplies none of these. This private
+facade confines the example to an explicit effect boundary; it establishes no
+public SDK abstraction. Generalizing it needs concrete consumers and adapter
+cost measurement.
+
 ## Send input from a companion module
 
 A small companion module can call `notify_keyspace_event_bytes` to send unusual
