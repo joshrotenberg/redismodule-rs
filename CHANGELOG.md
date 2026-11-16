@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Full ACL updates require verified Redis 7.4+; single directives remain 6.0+.
   ACL-name handoff requires an installed SDK-owned identity and never inserts
   an implicit bootstrap user. Client-affecting mutations require a quiescent
-  ordinary SDK command on an indexed connection. Revocation also requires an
+  ordinary SDK command on an indexed connection, outside native loading states.
+  Revocation also requires an
   installed SDK identity. Explicitly drain users and identities before unload;
   live ownership refuses unload before deinit. Native one-shot cleanup runs on
   reauthentication, disconnect and revocation, including attachments without a

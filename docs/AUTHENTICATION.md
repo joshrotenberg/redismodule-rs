@@ -90,7 +90,10 @@ reusing a known callback address, or an unrecorded renamed invocation, does not
 inherit that provenance. Names compare ASCII case-insensitively. Event, worker,
 blocked-reply, timeout, internal-call
 and scoped native-callback reentry paths do not acquire this capability.
-The check precedes registry invalidation and client-affecting native FFI.
+Native `LOADING` and `ASYNC_LOADING` flags are also refused: loading-time Yield
+can process events without the usual busy-command exclusion. A missing native
+context-flags API fails closed. These checks precede registry invalidation and
+client-affecting native FFI.
 Thread detection supports Linux and macOS; client operations are refused elsewhere.
 Creation and single-directive updates need a real runtime lock; their native
 paths do not close clients or invoke user-change callbacks.

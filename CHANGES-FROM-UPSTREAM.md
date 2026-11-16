@@ -26,8 +26,9 @@ never fabricates a context for Redis's context-free callback. Refused unload
 restores existing subscriptions. Consumers are deferred across native user and
 command calls so they cannot free a user still borrowed by native attachment or
 an ACL update. Client-affecting operations require a pointer-bound ordinary SDK command on an
-indexed connection, without active native scopes or cleanup consumers. Events,
-blocked replies, internal calls, workers and allow-busy callbacks are refused.
+indexed connection, without active native scopes, cleanup consumers or native
+LOADING/ASYNC_LOADING flags. Events, blocked replies, internal calls, workers and
+allow-busy callbacks are refused.
 Revocation also requires actually installed SDK ownership and keeps closing
 admission through native return.
 Full ACL strings require verified Redis 7.4+, validate native quoting and use

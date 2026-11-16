@@ -668,6 +668,28 @@ fn reply_refusals(ctx: &Context, handle: ModuleUserHandle) -> RedisResult {
     }
     Ok(errors.into())
 }
+unsafe extern "C" fn loading_flags(_: *mut redis_module::raw::RedisModuleCtx) -> i32 {
+    redis_module::raw::REDISMODULE_CTX_FLAGS_LOADING as i32
+}
+unsafe extern "C" fn async_loading_flags(_: *mut redis_module::raw::RedisModuleCtx) -> i32 {
+    redis_module::raw::REDISMODULE_CTX_FLAGS_ASYNC_LOADING as i32
+}
+fn loading_probe(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let original = unsafe { redis_module::raw::RedisModule_GetContextFlags };
+    let flags: [Option<unsafe extern "C" fn(*mut redis_module::raw::RedisModuleCtx) -> i32>; 3] =
+        [Some(loading_flags), Some(async_loading_flags), None];
+    let mut results = Vec::new();
+    for flag in flags {
+        unsafe {
+            redis_module::raw::RedisModule_GetContextFlags = flag;
+        }
+        results.push(reply_refusals(ctx, user(ctx, "reply-stale")?)?);
+    }
+    unsafe {
+        redis_module::raw::RedisModule_GetContextFlags = original;
+    }
+    Ok(results.into())
+}
 fn internal_refusals(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     reply_refusals(ctx, user(ctx, "reply-stale")?)
 }
@@ -868,6 +890,7 @@ redis_module! {
         redis_command!("auth_users.drain", drain).write(),
         redis_command!("auth_users.revocation_probe", revocation_probe).write(),
         redis_command!("auth_users.reply_probe", reply_probe).write(),
+        redis_command!("auth_users.loading_probe", loading_probe).write(),
         redis_command!("auth_users.internal_refusals", internal_refusals).read_only(),
         redis_command!("auth_users.call_refusals", call_refusals).read_only(),
         redis_command!("auth_users.inactive_probe", inactive_probe).read_only(),

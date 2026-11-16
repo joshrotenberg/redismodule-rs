@@ -905,6 +905,21 @@ fn test_module_users_mutations_require_quiescent_command_and_owned_revocation() 
             }
         }
     }
+    let loading: Vec<Vec<String>> = redis::cmd("auth_users.loading_probe").query(&mut con)?;
+    assert_eq!(loading.len(), 3);
+    for errors in &loading[..2] {
+        assert_eq!(
+            errors,
+            &vec!["ERR client identity mutation is refused while Redis is loading"; 5]
+        );
+    }
+    assert_eq!(
+        loading[2],
+        vec!["ERR RedisModule_GetContextFlags is not available in this Redis server"; 5]
+    );
+    redis::cmd("auth_users.defaults")
+        .arg("owner")
+        .query::<()>(&mut con)?;
     let internal: Vec<String> = redis::cmd("EVAL")
         .arg(("return redis.call('auth_users.internal_refusals')", 0))
         .query(&mut con)?;
@@ -953,7 +968,7 @@ fn test_module_users_mutations_require_quiescent_command_and_owned_revocation() 
         stats(&mut con)?,
         [
             2,
-            10 + if version >= (7, 2) { 4 } else { 0 } + if version >= (7, 0) { 1 } else { 0 }
+            16 + if version >= (7, 2) { 4 } else { 0 } + if version >= (7, 0) { 1 } else { 0 }
         ]
     );
     // No pending, deferred or live subscription remains after explicit drain.

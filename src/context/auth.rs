@@ -94,6 +94,7 @@ struct Registry {
     subscriptions: BTreeMap<u64, Subscription>,
     executing: usize,
     closing: BTreeSet<ClientId>,
+    removing: BTreeSet<u64>,
     deferred: VecDeque<(ClientId, Subscription)>,
 }
 static NATIVE_OPERATIONS: AtomicUsize = AtomicUsize::new(0);
@@ -108,6 +109,7 @@ static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
     subscriptions: BTreeMap::new(),
     executing: 0,
     closing: BTreeSet::new(),
+    removing: BTreeSet::new(),
     deferred: VecDeque::new(),
 });
 fn registry() -> MutexGuard<'static, Registry> {
@@ -124,6 +126,14 @@ impl Registry {
         } else {
             Err(INACTIVE)
         }
+    }
+    fn has_auth_ownership(&self) -> bool {
+        !self.users.is_empty()
+            || !self.subscriptions.is_empty()
+            || !self.deferred.is_empty()
+            || !self.closing.is_empty()
+            || !self.removing.is_empty()
+            || self.executing != 0
     }
     fn next(&mut self) -> Result<u64, RedisError> {
         self.next = self
@@ -173,6 +183,34 @@ impl UserLease {
 impl Drop for UserLease {
     fn drop(&mut self) {
         registry().users.get_mut(&self.generation).unwrap().leased = false;
+    }
+}
+
+// Invalidate handles before native free, but keep the local native owner
+// observable to unload until that free returns. The last removal can otherwise
+// make the maps empty while a lawful raw callback still runs inside native free.
+struct UserRemoval {
+    generation: u64,
+    user: NativeUser,
+}
+impl UserRemoval {
+    fn begin(handle: &ModuleUserHandle) -> Result<Self, RedisError> {
+        let mut registry = registry();
+        registry.user(handle)?;
+        if registry.users.get(&handle.generation).unwrap().leased {
+            return Err(RedisError::Str("ERR module user is in a native operation"));
+        }
+        let user = registry.users.remove(&handle.generation).unwrap();
+        registry.removing.insert(handle.generation);
+        Ok(Self {
+            generation: handle.generation,
+            user,
+        })
+    }
+}
+impl Drop for UserRemoval {
+    fn drop(&mut self) {
+        registry().removing.remove(&self.generation);
     }
 }
 
@@ -372,12 +410,7 @@ impl UserUnloadGuard {
         // OnUnload has a fresh temporary context, which cannot prove the phase
         // of an outer foreign native callback. Require explicit command-side
         // drain instead of performing any client-affecting cleanup here.
-        if !registry.users.is_empty()
-            || !registry.subscriptions.is_empty()
-            || !registry.deferred.is_empty()
-            || !registry.closing.is_empty()
-            || registry.executing != 0
-        {
+        if registry.has_auth_ownership() {
             return Err(RedisError::Str(
                 "ERR drain module users and client identities before unload",
             ));
@@ -420,6 +453,16 @@ fn command_client(ctx: &Context) -> Result<ClientId, RedisError> {
     if !super::ordinary_running_command(ctx.ctx) {
         return Err(RedisError::Str(
             "ERR client identity mutation requires an ordinary SDK command",
+        ));
+    }
+    let get_flags = unsafe { crate::__available_api!(RedisModule_GetContextFlags) };
+    let flags = unsafe { get_flags(ctx.ctx) };
+    if flags
+        & (raw::REDISMODULE_CTX_FLAGS_LOADING | raw::REDISMODULE_CTX_FLAGS_ASYNC_LOADING) as i32
+        != 0
+    {
+        return Err(RedisError::Str(
+            "ERR client identity mutation is refused while Redis is loading",
         ));
     }
     let get_id = unsafe { crate::__available_api!(RedisModule_GetClientId) };
@@ -515,16 +558,9 @@ impl Context {
     pub fn remove_module_user(&self, handle: &ModuleUserHandle) -> Result<(), RedisError> {
         command_client(self)?;
         let _operation = NativeOperation::begin();
-        let user = {
-            let mut registry = registry();
-            registry.user(handle)?;
-            if registry.users.get(&handle.generation).unwrap().leased {
-                return Err(RedisError::Str("ERR module user is in a native operation"));
-            }
-            registry.users.remove(&handle.generation).unwrap()
-        };
+        let removal = UserRemoval::begin(handle)?;
         unsafe {
-            (user.free)(user.ptr.as_ptr());
+            (removal.user.free)(removal.user.ptr.as_ptr());
         }
         Ok(())
     }
@@ -618,6 +654,8 @@ impl Context {
     /// Requires this exact SDK command invocation on an indexed connection, on
     /// Redis's main thread, outside any SDK native call or cleanup consumer.
     /// Allow-busy commands and unknown/raw command registrations are refused.
+    /// Native LOADING and ASYNC_LOADING states are refused, because loading
+    /// Yield can process events without the usual busy-command exclusion.
     /// A blocked-client reply Context does not establish command provenance.
     /// Raw FFI that bypasses SDK native-operation scopes does not establish this
     /// safety boundary. Legal raw callbacks inside guarded SDK calls are refused
@@ -827,6 +865,51 @@ mod tests {
         assert_eq!(registry.executing, 0);
     }
     #[test]
+    fn last_native_user_removal_remains_owned_until_return() {
+        let _serial = PROTOCOL_TEST.lock().unwrap();
+        static FREES: AtomicUsize = AtomicUsize::new(0);
+        unsafe extern "C" fn synthetic_free(_: *mut raw::RedisModuleUser) {
+            FREES.fetch_add(1, Ordering::Relaxed);
+        }
+        let owner = Arc::new(());
+        let handle = ModuleUserHandle {
+            owner: owner.clone(),
+            generation: 99,
+        };
+        {
+            let mut registry = registry();
+            assert!(!registry.has_auth_ownership());
+            assert!(registry.phase == Phase::Unloaded);
+            registry.phase = Phase::Active;
+            registry.owner = Some(owner);
+            registry.users.insert(
+                99,
+                NativeUser {
+                    ptr: NonNull::dangling(),
+                    free: synthetic_free,
+                    name: c"synthetic-removal".into(),
+                    leased: false,
+                },
+            );
+        }
+        // Exercise actual removal admission and unload's actual ownership
+        // predicate, without Redis FFI or a hazardous native reentry sequence.
+        let removal = UserRemoval::begin(&handle).unwrap();
+        {
+            let registry = registry();
+            assert!(registry.users.is_empty());
+            assert!(registry.user(&handle).is_err());
+            assert!(registry.has_auth_ownership());
+            assert!(registry.removing.contains(&99));
+        }
+        drop(removal);
+        assert_eq!(FREES.load(Ordering::Relaxed), 0); // Drop performs no FFI.
+        let mut registry = registry();
+        assert!(!registry.has_auth_ownership());
+        registry.phase = Phase::Unloaded;
+        registry.owner = None;
+    }
+    #[test]
     fn native_call_without_auth_has_no_registry_access() {
         let _serial = PROTOCOL_TEST.lock().unwrap();
         assert_eq!(LIVE_SUBSCRIPTIONS.load(Ordering::Relaxed), 0);
@@ -874,6 +957,7 @@ mod tests {
             subscriptions: BTreeMap::new(),
             executing: 0,
             closing: BTreeSet::new(),
+            removing: BTreeSet::new(),
             deferred: VecDeque::new(),
         };
         unsafe extern "C" fn never_free(_: *mut raw::RedisModuleUser) {
