@@ -1,5 +1,5 @@
 use super::utils::{self, TestConnection};
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use std::time::Duration;
 
 fn stats(con: &mut TestConnection) -> Result<Vec<i64>> {
@@ -11,6 +11,19 @@ fn create(con: &mut TestConnection, name: &str) -> Result<()> {
         .arg(name)
         .query::<()>(con)?;
     Ok(())
+}
+
+const FULL_FLOOR: &str = "ERR transactional ACL updates require Redis 7.4 or later";
+fn full_supported(con: &mut TestConnection) -> Result<bool> {
+    let info: String = redis::cmd("INFO").arg("server").query(con)?;
+    let version = info
+        .lines()
+        .find_map(|line| line.strip_prefix("redis_version:"))
+        .context("missing server version")?;
+    let mut fields = version.split('.');
+    let major: i32 = fields.next().context("missing major")?.parse()?;
+    let minor: i32 = fields.next().context("missing minor")?.parse()?;
+    Ok((major, minor) >= (7, 4))
 }
 
 #[test]
@@ -71,9 +84,20 @@ fn test_module_users_attachment_reauth_failure_and_disconnect() -> Result<()> {
 fn test_module_users_acl_transaction_stale_handles_and_redaction() -> Result<()> {
     let mut con = TestConnection::new("auth_users");
     create(&mut con, "owner")?;
-    redis::cmd("auth_users.acl")
-        .arg(("owner", "reset on +get ~allowed:*"))
-        .query::<()>(&mut con)?;
+    let transactional = full_supported(&mut con)?;
+    if transactional {
+        redis::cmd("auth_users.acl")
+            .arg(("owner", "reset on +get ~allowed:*"))
+            .query::<()>(&mut con)?;
+    } else {
+        // Explicit fixture setup with independent directives, before attachment;
+        // this does not emulate a transactional SDK update.
+        for rule in ["reset", "on", "+get", "~allowed:*"] {
+            redis::cmd("auth_users.rule")
+                .arg(("owner", rule))
+                .query::<()>(&mut con)?;
+        }
+    }
     let mut client = con.connection()?;
     redis::cmd("auth_users.attach")
         .arg(("owner", "track"))
@@ -95,7 +119,15 @@ fn test_module_users_acl_transaction_stale_handles_and_redaction() -> Result<()>
         ))
         .query::<()>(&mut con)
         .expect_err("invalid ACL");
-    assert_eq!(error.to_string(), "ResponseError: invalid ACL rules");
+    if transactional {
+        assert_eq!(error.to_string(), "ResponseError: invalid ACL rules");
+    } else {
+        assert!(
+            error
+                .to_string()
+                .contains("transactional ACL updates require Redis 7.4")
+        );
+    }
     redis::cmd("SET")
         .arg(("allowed:key", "x"))
         .query::<()>(&mut client)
@@ -123,9 +155,11 @@ fn test_module_users_acl_transaction_stale_handles_and_redaction() -> Result<()>
             .query::<Option<String>>(&mut client)
             .expect_err("lexical error preserves key pattern");
     }
-    redis::cmd("auth_users.acl")
-        .arg(("owner", "reset 'on' \"+get\" ~allowed:*"))
-        .query::<()>(&mut con)?;
+    if transactional {
+        redis::cmd("auth_users.acl")
+            .arg(("owner", "reset 'on' \"+get\" ~allowed:*"))
+            .query::<()>(&mut con)?;
+    }
     // Disabling is a flag change; already attached clients retain their rules.
     redis::cmd("auth_users.rule")
         .arg(("owner", "off"))
@@ -159,7 +193,15 @@ fn test_module_users_acl_transaction_stale_handles_and_redaction() -> Result<()>
             .arg(("owner", "on"))
             .query::<redis::Value>(&mut con)
             .expect_err("stale handle");
-        assert!(error.to_string().contains("stale or foreign"));
+        if command == "auth_users.acl" && !transactional {
+            assert!(
+                error
+                    .to_string()
+                    .contains("transactional ACL updates require Redis 7.4")
+            );
+        } else {
+            assert!(error.to_string().contains("stale or foreign"));
+        }
     }
     // A new native user with the same name does not revive the stale generation.
     create(&mut con, "owner")?;
@@ -364,8 +406,10 @@ fn test_module_users_passive_handle_drop_and_runtime_capabilities() -> Result<()
                 "ERR RedisModule_RedactClientCommandArgument is not available in this Redis server"
             ]
         );
-    } else {
+    } else if full_supported(&mut con)? {
         assert_eq!(outcomes, ["OK", "OK"]);
+    } else {
+        assert_eq!(outcomes, [FULL_FLOOR, "OK"]);
     }
     redis::cmd("auth_users.create")
         .arg(b"invalid\0name".as_slice())
@@ -452,6 +496,45 @@ fn test_module_users_early_refusals_contain_capture_destructors() -> Result<()> 
 
 #[test]
 fn test_module_users_pubsub_destruction_defers_consumers_across_native_calls() -> Result<()> {
+    let mut legacy = TestConnection::new("auth_users");
+    if !full_supported(&mut legacy)? {
+        create(&mut legacy, "owner")?;
+        redis::cmd("auth_users.rule")
+            .arg(("owner", "&*"))
+            .query::<()>(&mut legacy)?;
+        let mut client = legacy.connection()?;
+        redis::cmd("auth_users.attach")
+            .arg(("owner", "track"))
+            .query::<i64>(&mut client)?;
+        redis::cmd("SUBSCRIBE")
+            .arg("channel")
+            .query::<redis::Value>(&mut client)?;
+        let error = redis::cmd("auth_users.restrict_pubsub")
+            .arg(("module", "owner"))
+            .query::<()>(&mut legacy)
+            .expect_err("synchronous-teardown runtime refused");
+        assert!(
+            error
+                .to_string()
+                .contains("transactional ACL updates require Redis 7.4")
+        );
+        assert_eq!(stats(&mut legacy)?, [0, 0]);
+        let mut probe = legacy.connection()?;
+        redis::cmd("auth_users.attach")
+            .arg(("owner", "none"))
+            .query::<i64>(&mut probe)?;
+        assert_eq!(
+            redis::cmd("PUBLISH")
+                .arg(("channel", "unchanged"))
+                .query::<i64>(&mut probe)?,
+            1
+        );
+        redis::cmd("MODULE")
+            .arg(("UNLOAD", "auth_users"))
+            .query::<()>(&mut legacy)?;
+        return Ok(());
+    }
+    drop(legacy);
     let modes = vec!["module", "call", "typed"];
     #[cfg(any(
         feature = "min-redis-compatibility-version-7-2",
@@ -497,7 +580,11 @@ fn test_module_users_pubsub_destruction_defers_consumers_across_native_calls() -
         })?;
         assert_eq!(stats(&mut con)?, [1, 1], "{mode}");
         let timing: Vec<i64> = redis::cmd("auth_users.cleanup_timing").query(&mut con)?;
-        assert!(timing == [1, 0] || timing == [0, 1], "{mode}: {timing:?}");
+        assert_eq!(
+            timing,
+            [0, 1],
+            "{mode}: supported native releases close asynchronously"
+        );
         let raw_errors: Vec<String> = redis::cmd("auth_users.raw_probe_result").query(&mut con)?;
         if mode == "module" && timing == [1, 0] {
             assert_eq!(
@@ -660,8 +747,10 @@ fn test_module_users_acl_handoff_requires_installed_sdk_ownership() -> Result<()
         .any(|line| line.starts_with("redis_version:6."))
     {
         assert!(errors[2].contains("SetModuleUserACLString is not available"));
-    } else {
+    } else if full_supported(&mut con)? {
         assert_eq!(errors[2], "ERR module user is in a native operation");
+    } else {
+        assert_eq!(errors[2], FULL_FLOOR);
     }
     assert_eq!(
         &errors[3..],
@@ -710,5 +799,34 @@ fn test_module_users_acl_handoff_requires_installed_sdk_ownership() -> Result<()
         "foreign-acl"
     );
     assert_eq!(stats(&mut con)?, [2, 7]);
+    Ok(())
+}
+
+#[test]
+fn test_module_users_full_acl_refuses_unverified_or_legacy_runtime_before_setter() -> Result<()> {
+    let mut con = TestConnection::new("auth_users");
+    create(&mut con, "owner")?;
+    let outcomes: Vec<String> = redis::cmd("auth_users.full_refusal_probe")
+        .arg("owner")
+        .query(&mut con)?;
+    assert_eq!(
+        outcomes[0],
+        if full_supported(&mut con)? {
+            "supported"
+        } else {
+            FULL_FLOOR
+        }
+    );
+    assert!(outcomes[1].contains("RedisModule_GetServerVersion is not available"));
+    assert_eq!(
+        outcomes[2],
+        "ERR cannot verify Redis runtime for transactional ACL updates"
+    );
+    assert_eq!(outcomes[3], "0");
+    let mut client = con.connection()?;
+    redis::cmd("auth_users.attach")
+        .arg(("owner", "none"))
+        .query::<i64>(&mut client)?;
+    assert_eq!(redis::cmd("PING").query::<String>(&mut client)?, "PONG");
     Ok(())
 }

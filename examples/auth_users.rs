@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 static USERS: RedisGILGuard<BTreeMap<String, ModuleUserHandle>> =
     RedisGILGuard::new(BTreeMap::new());
 scoped_tls::scoped_thread_local!(static CURRENT: Context);
+static FULL_SET_CALLS: AtomicI64 = AtomicI64::new(0);
 static FOREIGN_CHANGED: AtomicI64 = AtomicI64::new(0);
 static FOREIGN_ERRORS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static CHECKED_NATIVE_CALLS: AtomicI64 = AtomicI64::new(0);
@@ -227,6 +228,64 @@ unsafe extern "C" fn foreign_changed(_: u64, _: *mut std::ffi::c_void) {
         },
         || (),
     );
+}
+unsafe extern "C" fn refused_full_set(
+    _: *mut redis_module::raw::RedisModuleCtx,
+    _: *mut redis_module::raw::RedisModuleUser,
+    _: *const std::ffi::c_char,
+    _: *mut *mut redis_module::raw::RedisModuleString,
+) -> i32 {
+    FULL_SET_CALLS.fetch_add(1, Ordering::Relaxed);
+    redis_module::raw::REDISMODULE_ERR as i32
+}
+unsafe extern "C" fn invalid_runtime_version() -> i32 {
+    -1
+}
+fn full_refusal_probe(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    let handle = user(ctx, arg(&args, 1)?)?;
+    let (setter, version) = unsafe {
+        (
+            redis_module::raw::RedisModule_SetModuleUserACLString,
+            redis_module::raw::RedisModule_GetServerVersion,
+        )
+    };
+    FULL_SET_CALLS.store(0, Ordering::Relaxed);
+    unsafe {
+        redis_module::raw::RedisModule_SetModuleUserACLString = Some(refused_full_set);
+    }
+    let mut outcomes = Vec::new();
+    let encoded = version.map_or(0, |get| unsafe { get() });
+    if encoded > 0 && encoded < 0x00070400 {
+        outcomes.push(
+            ctx.set_module_user_acl_string(&handle, "reset off")
+                .unwrap_err()
+                .to_string(),
+        );
+    } else {
+        outcomes.push("supported".to_owned());
+    }
+    unsafe {
+        redis_module::raw::RedisModule_GetServerVersion = None;
+    }
+    outcomes.push(
+        ctx.set_module_user_acl_string(&handle, "reset off")
+            .unwrap_err()
+            .to_string(),
+    );
+    unsafe {
+        redis_module::raw::RedisModule_GetServerVersion = Some(invalid_runtime_version);
+    }
+    outcomes.push(
+        ctx.set_module_user_acl_string(&handle, "reset off")
+            .unwrap_err()
+            .to_string(),
+    );
+    unsafe {
+        redis_module::raw::RedisModule_SetModuleUserACLString = setter;
+        redis_module::raw::RedisModule_GetServerVersion = version;
+    }
+    outcomes.push(FULL_SET_CALLS.load(Ordering::Relaxed).to_string());
+    Ok(outcomes.into())
 }
 fn foreign_identity(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
     let name = arg(&args, 1)?.as_bytes();
@@ -643,6 +702,7 @@ redis_module! {
         redis_command!("auth_users.cleanup_timing", cleanup_timing).read_only(),
         redis_command!("auth_users.raw_probe_result", raw_probe_result).read_only(),
         redis_command!("auth_users.foreign", foreign_identity).write(),
+        redis_command!("auth_users.full_refusal_probe", full_refusal_probe).read_only(),
         redis_command!("auth_users.pending_probe", pending_probe).write(),
         redis_command!("auth_users.checked_probe", checked_probe).write(),
         redis_command!("auth_users.foreign_results", foreign_results).read_only(),

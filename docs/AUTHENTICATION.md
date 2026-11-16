@@ -15,11 +15,15 @@ lifecycle binding through a public safe API.
 
 Created users start disabled. Apply individual directives with
 `set_module_user_acl`, or a complete transactional update with
-`set_module_user_acl_string`. The latter uses the Redis 7.0 native setter;
-invalid rules preserve the previous permissions. A lexical preflight rejects
+`set_module_user_acl_string`. The safe wrapper requires Redis 7.4 or later,
+verified with the actual native runtime version before setter FFI. The native
+API exists on 7.0, but older implementations synchronously destroy Pub/Sub
+clients while traversing a shared client list; lawful callbacks can invalidate
+that iteration even when a different user is updated. Missing or unverifiable
+runtime versions fail closed. There is no fallback to a batch of directives.
+Invalid rules preserve the previous permissions. A lexical preflight rejects
 unterminated quotes and invalid quote boundaries that the native setter can
-otherwise report as successful empty updates. Valid input is passed unchanged. It never emulates a batch by
-applying directives one at a time. Errors omit ACL text and parser diagnostics
+otherwise report as successful empty updates. Valid input is passed unchanged. Errors omit ACL text and parser diagnostics
 because both can contain passwords or hashes. Changing a user to `off` prevents
 new attachments; use explicit removal or client revocation to disconnect
 existing clients.
@@ -91,13 +95,13 @@ AutoMemory enabled. `None` is ambiguous: missing client, non-TLS transport or no
 peer certificate. `Context::redact_client_command_argument` redacts a command
 argument from MONITOR and SLOWLOG. Position zero and out-of-range positions fail.
 Redact secret arguments before processing them. The example's `acl` and `rule`
-commands require redaction, so they require Redis 7.0 even though the underlying
-single-directive API is available on 6.0. Its fixed `defaults` helper contains no
+commands require redaction. `rule` requires Redis 7.0 and `acl` requires 7.4,
+although the underlying single-directive API is available on 6.0. Its fixed `defaults` helper contains no
 secret arguments and works on the older runtime.
 
 User creation, single-directive ACL updates, attachment, revocation and peer
-certificates require Redis 6.0 APIs. Redaction requires Redis 7.0 and full ACL
-strings require Redis 7.0. Missing APIs return capability errors at every SDK
+certificates require Redis 6.0 APIs. Redaction requires Redis 7.0. Safe full ACL
+strings require verified Redis 7.4 or later, beyond the native API's 7.0 floor. Missing APIs return capability errors at every SDK
 compile-time floor; the default floor is unchanged.
 
 For the administrative example, an explicit handoff is:

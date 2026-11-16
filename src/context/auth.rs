@@ -508,21 +508,37 @@ impl RuntimeContext {
     }
 
     /// Atomically applies a complete ACL rule string using Redis's transactional
-    /// setter (Redis 7.0+). On error existing rules remain unchanged. No fallback
+    /// setter (Redis 7.4+). On error existing rules remain unchanged. No fallback
     /// to repeated single-rule calls is used. Errors omit ACL text and native
     /// diagnostics, including password directives and hashes. Malformed native
     /// quote/escape syntax is rejected before FFI. Requires the Redis main thread
-    /// because native ACL updates can synchronously destroy Pub/Sub clients.
+    /// for native client and event-loop access. Redis before 7.4 is refused
+    /// before setter FFI: synchronous Pub/Sub teardown can invalidate a shared
+    /// native client iterator through lawful raw callbacks. No batch fallback
+    /// is used. The native version must be available and verifiable.
     pub fn set_module_user_acl_string(
         &self,
         handle: &ModuleUserHandle,
         rules: &str,
     ) -> Result<(), RedisError> {
         main_thread()?;
+        let set = unsafe { crate::__available_api!(RedisModule_SetModuleUserACLString) };
+        let get_version = unsafe { crate::__available_api!(RedisModule_GetServerVersion) };
+        let encoded = unsafe { get_version() };
+        if encoded <= 0 || encoded & !0x00ff_ffff != 0 {
+            return Err(RedisError::Str(
+                "ERR cannot verify Redis runtime for transactional ACL updates",
+            ));
+        }
+        let version = raw::Version::from(encoded);
+        if (version.major, version.minor) < (7, 4) {
+            return Err(RedisError::Str(
+                "ERR transactional ACL updates require Redis 7.4 or later",
+            ));
+        }
         if !valid_acl_quoting(rules.as_bytes()) {
             return Err(RedisError::Str("ERR invalid ACL rules"));
         }
-        let set = unsafe { crate::__available_api!(RedisModule_SetModuleUserACLString) };
         let rules = CString::new(rules).map_err(|_| RedisError::Str("ERR invalid ACL rules"))?;
         let _operation = NativeOperation::begin();
         let lease = UserLease::begin(handle)?;
