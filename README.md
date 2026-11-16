@@ -371,8 +371,9 @@ Callbacks and payloads require `Send + 'static`. Keep the handle to call
 `ctx.cancel_timer(&handle)?` or query `ctx.timer_remaining(&handle)?`;
 cancellation returns the payload at most once and queries expose only metadata.
 Dropping a handle leaves the timer running. Creation requires an active module
-bound through `redis_module!` and fails during initialization or unload. The
-SDK protects pending and firing timers during unload. See
+bound through `redis_module!` and Redis's main thread. It fails during
+initialization, unload or a worker-origin notification, even when the worker
+holds the Redis lock. The SDK protects pending and firing timers during unload. See
 [timer.rs](examples/timer.rs) and the
 [timer migration notes](docs/MIGRATING-3.0.md#timers-use-typed-handles).
 

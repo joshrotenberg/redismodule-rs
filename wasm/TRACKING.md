@@ -7,7 +7,7 @@ scope and readiness. Historical H/S/G IDs remain useful for the evidence below.
 
 Status: `done`, `next` (being worked on or first in line), `todo`, `blocked`.
 
-Last updated 2026-11-13.
+Last updated 2026-11-16.
 
 ## Where it stands
 
@@ -138,6 +138,18 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-11-16: merged SDK master `ec5876a`, including
+  [PR 245](https://github.com/joshrotenberg/redismodule-rs/pull/245) for
+  issue 244. `EventContext::create_timer` now requires Redis's actual main
+  thread before native API lookup or retained timer ownership. Worker-origin
+  notifications receive an error and release their callback and payload;
+  holding the Redis lock is not sufficient for native event-loop timer safety.
+
+  The host needs no adaptation because it never calls `create_timer`. Typed
+  cancellation and metadata-query contracts are unchanged. Sync validation
+  uses the full `wasm/ci/check.sh`, the four pinned lock snapshots and both
+  Rust and JavaScript guests. Earlier measurements remain historical.
 
 - 2026-11-13: merged SDK master `75ddea1` into the branch as `22d823b`. It
   brings [PR 243](https://github.com/joshrotenberg/redismodule-rs/pull/243)

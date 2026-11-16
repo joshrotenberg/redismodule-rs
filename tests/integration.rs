@@ -1297,18 +1297,22 @@ fn test_typed_timer_unload_phase_rejects_creation_and_restores_after_refusal() -
 }
 
 #[test]
-fn test_typed_timer_can_be_created_by_a_worker_notification() -> Result<()> {
+fn test_typed_timer_worker_notification_refuses_before_native_creation() -> Result<()> {
     let mut con = TestConnection::with_args("timer", &["worker"]);
-    for _ in 0..2 {
-        redis::cmd("timer.worker").query::<()>(&mut con)?;
+    for mode in ["stub", "missing-api"] {
+        redis::cmd("timer.worker").arg(mode).query::<()>(&mut con)?;
         utils::wait_until(Duration::from_secs(5), "timer worker join", || {
             Ok(redis::cmd("timer.finish").query::<i64>(&mut con)? == 1)
         })?;
-        utils::wait_until(
-            Duration::from_secs(5),
-            "worker-origin timer firing and cleanup",
-            || Ok(timer_probe_counts(&mut con)? == [1, 1, 1, 0, 1]),
-        )?;
+        let error: String = redis::cmd("timer.worker_error").query(&mut con)?;
+        assert_eq!(error, "ERR timers require the Redis main thread", "{mode}");
+        assert_eq!(
+            timer_probe_counts(&mut con)?,
+            [0, 1, 1, 0, 0],
+            "{mode}: no callback/native call, both owned values dropped once"
+        );
+        assert_eq!(redis::cmd("PING").query::<String>(&mut con)?, "PONG");
+        // Immediate unload proves the refusal retained no pending timer entry.
         redis::cmd("MODULE")
             .arg(&["UNLOAD", "timer"])
             .query::<()>(&mut con)?;
