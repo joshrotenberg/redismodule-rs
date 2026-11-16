@@ -23,7 +23,7 @@ fn drain_and_unload(con: &mut TestConnection) -> Result<()> {
 
 const QUIESCENT: &str = "ERR client identity mutation requires a quiescent command";
 const FULL_FLOOR: &str = "ERR transactional ACL updates require Redis 7.4 or later";
-fn full_supported(con: &mut TestConnection) -> Result<bool> {
+fn runtime_version(con: &mut TestConnection) -> Result<(i32, i32)> {
     let info: String = redis::cmd("INFO").arg("server").query(con)?;
     let version = info
         .lines()
@@ -32,7 +32,10 @@ fn full_supported(con: &mut TestConnection) -> Result<bool> {
     let mut fields = version.split('.');
     let major: i32 = fields.next().context("missing major")?.parse()?;
     let minor: i32 = fields.next().context("missing minor")?.parse()?;
-    Ok((major, minor) >= (7, 4))
+    Ok((major, minor))
+}
+fn full_supported(con: &mut TestConnection) -> Result<bool> {
+    Ok(runtime_version(con)? >= (7, 4))
 }
 
 #[test]
@@ -880,15 +883,26 @@ fn test_module_users_mutations_require_quiescent_command_and_owned_revocation() 
         .arg(id)
         .query(&mut con)?;
     assert_eq!(probe, [OWNED, "0"]);
+    let version = runtime_version(&mut con)?;
     for mode in ["reply", "timeout"] {
-        let errors: Vec<String> = redis::cmd("auth_users.reply_probe")
+        let errors = redis::cmd("auth_users.reply_probe")
             .arg(mode)
-            .query(&mut con)?;
-        assert_eq!(errors, vec![COMMAND; 5], "{mode}");
-        if mode == "timeout" {
-            utils::wait_until(Duration::from_secs(2), "timeout fixture worker", || {
-                Ok(redis::cmd("auth_users.finish").query::<i64>(&mut con)? == 1)
-            })?;
+            .query::<Vec<String>>(&mut con);
+        if version < (7, 2) {
+            let error = errors.expect_err("older server lacks blocked-reply fixture API");
+            assert!(
+                error
+                    .to_string()
+                    .contains("BlockClientSetPrivateData is not available"),
+                "{error}"
+            );
+        } else {
+            assert_eq!(errors?, vec![COMMAND; 5], "{mode}");
+            if mode == "timeout" {
+                utils::wait_until(Duration::from_secs(2), "timeout fixture worker", || {
+                    Ok(redis::cmd("auth_users.finish").query::<i64>(&mut con)? == 1)
+                })?;
+            }
         }
     }
     let internal: Vec<String> = redis::cmd("EVAL")
@@ -918,11 +932,7 @@ fn test_module_users_mutations_require_quiescent_command_and_owned_revocation() 
             .contains(COMMAND.trim_start_matches("ERR ")),
         "{alias}"
     );
-    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
-    let legacy = info
-        .lines()
-        .any(|line| line.starts_with("redis_version:6."));
-    if !legacy {
+    if version >= (7, 0) {
         let error = redis::cmd("auth_users.busy_probe")
             .query::<()>(&mut con)
             .expect_err("allow-busy command");
@@ -939,7 +949,13 @@ fn test_module_users_mutations_require_quiescent_command_and_owned_revocation() 
             .query(&mut con)?;
         assert_eq!(commands, [None]);
     }
-    assert_eq!(stats(&mut con)?, [2, if legacy { 14 } else { 15 }]);
+    assert_eq!(
+        stats(&mut con)?,
+        [
+            2,
+            10 + if version >= (7, 2) { 4 } else { 0 } + if version >= (7, 0) { 1 } else { 0 }
+        ]
+    );
     // No pending, deferred or live subscription remains after explicit drain.
     drain_and_unload(&mut con)?;
     Ok(())
