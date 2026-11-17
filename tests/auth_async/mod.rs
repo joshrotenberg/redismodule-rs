@@ -364,6 +364,7 @@ fn test_async_auth_positive_preparation_and_prepared_admission_observations() ->
         assert!(measured[0] > 0 && measured[1] >= 0);
         preparation_ns.push(measured[1]);
     }
+    server.set_read_timeout(Some(Duration::from_secs(3)))?;
     redis::cmd("auth_async.observe")
         .arg("start")
         .query::<()>(&mut server)?;
