@@ -543,3 +543,31 @@ fn sealed_initial_role_refuses_reply_loading_lua_multi_and_blocked_inputs() {
     drop(_boundary);
     finish();
 }
+
+#[test]
+fn resume_role_refuses_nested_native_and_loading_scopes() {
+    let _serial = setup();
+    let callback = CallbackLease::begin();
+    let ctx = std::ptr::dangling_mut();
+    let mut selected = api();
+    selected.reply = yes;
+    selected.flags = flags;
+    FLAGS.store(0, Ordering::Relaxed);
+    assert!(unsafe { resume_role(ctx, selected) }.is_ok());
+    let operation = users::NativeOperation::begin();
+    assert!(unsafe { resume_role(ctx, selected) }.is_err());
+    drop(operation);
+    let boundary = super::super::BoundaryLease::begin();
+    assert!(unsafe { resume_role(ctx, selected) }.is_err());
+    drop(boundary);
+    for flag in [
+        raw::REDISMODULE_CTX_FLAGS_LOADING,
+        raw::REDISMODULE_CTX_FLAGS_ASYNC_LOADING,
+    ] {
+        FLAGS.store(flag as usize, Ordering::Relaxed);
+        assert!(unsafe { resume_role(ctx, selected) }.is_err());
+    }
+    FLAGS.store(0, Ordering::Relaxed);
+    drop(callback);
+    finish();
+}

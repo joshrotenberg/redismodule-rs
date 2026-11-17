@@ -444,12 +444,8 @@ unsafe extern "C" fn resumed(
     let result = super::catch_auth(|| -> Result<i32, RedisError> {
         users::main_thread()?;
         let api = unsafe { Api::resolve()? };
-        if ctx.is_null()
-            || unsafe { (api.reply)(ctx) } == 0
-            || unsafe { (api.timeout)(ctx) } != 0
-            || unsafe { (api.disconnected)(ctx) } != 0
-        {
-            return Err(FAILED);
+        unsafe {
+            resume_role(ctx, api)?;
         }
         let private = unsafe { (api.get_private)(ctx) };
         let job = unsafe { from_cookie(private) }.ok_or(FAILED)?;
@@ -502,6 +498,27 @@ unsafe extern "C" fn resumed(
         _ if committed.get() => raw::REDISMODULE_AUTH_HANDLED as i32,
         _ => unsafe { super::deny(ctx, username, err, PublicAuthError::default()) },
     }
+}
+
+unsafe fn resume_role(ctx: *mut raw::RedisModuleCtx, api: Api) -> Result<(), RedisError> {
+    if ctx.is_null()
+        || unsafe { (api.reply)(ctx) } == 0
+        || unsafe { (api.timeout)(ctx) } != 0
+        || unsafe { (api.disconnected)(ctx) } != 0
+        || unsafe { (api.flags)(ctx) }
+            & (raw::REDISMODULE_CTX_FLAGS_LOADING | raw::REDISMODULE_CTX_FLAGS_ASYNC_LOADING) as i32
+            != 0
+        || users::NATIVE_OPERATIONS.load(Ordering::Relaxed) != 0
+        || super::INVOCATIONS.load(Ordering::Relaxed) != 0
+        || CALLBACKS.load(Ordering::Relaxed) != 1
+        || users::registry().executing != 0
+    {
+        return Err(FAILED);
+    }
+    // A native reply may precede the worker's UnblockClient return. Submission
+    // reachability remains separately owned; it is not a reason to reblock or
+    // to destroy the outcome. Only attachment/reply runs in this sealed role.
+    Ok(())
 }
 
 fn deadline_at(now: u64, duration: Duration) -> Result<(u64, i64), RedisError> {
