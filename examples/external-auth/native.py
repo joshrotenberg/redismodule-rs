@@ -437,16 +437,32 @@ def late_disconnect_and_drain(args):
             runtime.drain()
             drain_seconds = time.monotonic() - before
             stub.release.set()
-            assert runtime.admin.cmd("external_auth.status")[0:2] == [b"inactive", 0]
+            before_reload = runtime.admin.cmd("external_auth.status")
+            assert before_reload[0:2] == [b"inactive", 0]
             assert runtime.admin.cmd("MODULE", "UNLOAD", "external_auth") == b"OK"
             assert sha(args.module) == args.expected_module_sha256, "consumer changed before reload"
             assert runtime.admin.cmd("MODULE", "LOAD", str(args.module)) == b"OK"
-            assert runtime.admin.cmd("external_auth.status") == [b"inactive", 0, 0]
+            after_reload = runtime.admin.cmd("external_auth.status")
+            # Logical unload does not promise that the native loader unmaps
+            # every image/global. Record actual telemetry rather than treating
+            # a cumulative counter as worker or token ownership.
+            reload_state = {"before": [os.fsdecode(v) if isinstance(v, bytes) else v for v in before_reload],
+                            "after": [os.fsdecode(v) if isinstance(v, bytes) else v for v in after_reload]}
+            (runtime.directory / "reload-state.json").write_text(json.dumps(reload_state, indent=2) + "\n")
+            assert after_reload[0:2] == [b"inactive", 0]
+            assert after_reload[2] in (0, before_reload[2]), "reload unexpectedly started a worker"
+            # Require a new preparation/activation and real authentication on
+            # the new module registration, then drain its identities again.
+            runtime.configure(stub.address)
+            reloaded_client = runtime.connection()
+            assert reloaded_client.cmd("AUTH", "alice", "fake-allow") == b"OK"
+            assert reloaded_client.cmd("GET", "http:reload") is None
             runtime.drain()
             assert runtime.admin.cmd("MODULE", "UNLOAD", "external_auth") == b"OK"
             return {"expired_AUTH_seconds": elapsed, "stalled_provider_ping_seconds": responsiveness,
                     "cancel_drain_seconds": drain_seconds, "late_allow_lost": True,
-                    "blocked_disconnect": True, "unload_refused_until_join": True, "reload": True}
+                    "blocked_disconnect": True, "unload_refused_until_join": True, "reload": True,
+                    "reload_state": reload_state, "post_reload_AUTH_and_ACL": True}
     finally:
         close_stub(stub, args, "late-disconnect-drain")
 

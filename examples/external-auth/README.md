@@ -99,6 +99,8 @@ connect in progress remains subject to its connect timeout.
 ## Drain and unload
 
 `external_auth.status` returns `[phase, retained_slots, started_workers]`.
+The started-worker diagnostic may persist if the native loader retains the
+image across logical module unload and reload.
 There are at most four slots across unstarted deferred reservations and retained
 thread handles. Finished handles still consume slots until an administrator
 calls `external_auth.reap`. This backpressure is intentional. No Redis context
