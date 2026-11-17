@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source_inventory_run": "https://github.com/joshrotenberg/redismodule-rs/actions/runs/43998476386",
+  "source_inventory_head": "b0205dded20b4e61ef92e96bf0aaea1e8193f74b",
+  "source_artifact_sha256": "936aba4bc678dad9b6603038b7d1454f58706162d657e6706c37c6dc930b8dc4",
+  "image_config": "sha256:4bbf6d52fe8de40e9e20b1453e14abb40eb1c73cd1d2b22e8ed015ad0817a088",
+  "files_canonical_sha256": "9acaebe93b7c90375f619ec242ffbe7960cfc0ef208278353d83c654b6127b11",
+  "packages_stdout_sha256": "ca8b1b2b20821a4b1ca7093a74a6442847bc406990a5d40a007f673d4ac3d712",
+  "file_count": 4336,
+  "package_owner_limit": "15 optional canonical-path package-owner lookups unresolved. Exact image/file hashes and package versions are recorded; no claim that every file has resolved Debian ownership.",
+  "runtime_artifact_enrollment": false
+}

@@ -1,0 +1,37 @@
+name: Experimental auth builder inventory
+
+on:
+  pull_request:
+    paths:
+      - .github/experimental-auth/**
+      - .github/scripts/auth-rc3-*.py
+      - .github/workflows/experimental-auth-inventory.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    name: Pinned RC3 builder inventory (no compilation)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      SOURCE_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Inventory the pinned native Linux amd64 image
+        run: python3 .github/scripts/auth-rc3-inventory.py "$RUNNER_TEMP/auth-rc3-inventory"
+
+      - name: Preserve inventory and cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-rc3-inventory-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/auth-rc3-inventory
+          if-no-files-found: error
+          retention-days: 14

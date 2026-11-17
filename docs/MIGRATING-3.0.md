@@ -1364,3 +1364,19 @@ now `#[non_exhaustive]`: a `match` on it needs a `_` arm, so later variants do
 not break it. Existing variants, including the historical
 `RuleChanged` spelling, remain available. Existing attribute handlers need no
 changes and stay active alongside runtime subscriptions.
+
+
+## Optional asynchronous authentication experiment
+
+Synchronous auth callbacks remain the default. Enabling
+`experimental-auth-redis-8-12-rc3` adds `AuthDecision::Deferred`; update exhaustive
+matches when opting in. Create it through the live `AuthContext::defer`, with
+explicit `AuthRequest::copy_for_async` for worker credential input. Prepare the
+reviewed running-image receipt from an authorized ordinary command first.
+
+Async-installed notifications and abandoned SDK-owned captures require explicit
+`Context::reap_async_auth`. Existing synchronous notifications retain their
+execution timing. Cancellation does not release application worker/token
+ownership; explicit drain must finish before unload. See
+[authentication](AUTHENTICATION.md) for the pinned executable, immutable-host,
+deadline and ordinary-command cleanup contract.

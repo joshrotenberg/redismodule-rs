@@ -1,0 +1,226 @@
+name: Experimental auth native positive checks
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  builds:
+    name: Two pinned RC3 build witnesses
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      SOURCE_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+    outputs:
+      artifact_id: ${{ steps.witnesses.outputs['artifact-id'] }}
+      artifact_digest: ${{ steps.witnesses.outputs['artifact-digest'] }}
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Reproduce the accepted native artifact
+        run: python3 .github/scripts/auth-rc3-build.py "$RUNNER_TEMP/auth-rc3-builds"
+      - name: Compare both binaries with the reviewed manifest
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, json, os, pathlib
+          manifest = json.loads(pathlib.Path('.github/experimental-auth/accepted-runtime.json').read_text())
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'auth-rc3-builds'
+          for number in (1, 2):
+              data = (root / f'build-{number}/redis-server').read_bytes()
+              assert len(data) == manifest['artifact']['bytes']
+              assert hashlib.sha256(data).hexdigest() == manifest['artifact']['sha256']
+          PYCODE
+      - name: Preserve both artifacts and complete provenance
+        if: always()
+        id: witnesses
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-rc3-builds-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/auth-rc3-builds/*.stdout
+            ${{ runner.temp }}/auth-rc3-builds/*.stderr
+            ${{ runner.temp }}/auth-rc3-builds/report.json
+            ${{ runner.temp }}/auth-rc3-builds/*.tar.gz
+            ${{ runner.temp }}/auth-rc3-builds/build-*/**
+          if-no-files-found: error
+          retention-days: 14
+  positive:
+    name: Pinned RC3 native auth lifecycle (floor ${{ matrix.floor }})
+    strategy:
+      fail-fast: false
+      matrix:
+        floor: ["6-0", "7-2"]
+    needs: builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RUST_TEST_THREADS: "1"
+      TEST_REDIS_REQUIRE_ASYNC_AUTH: "1"
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install repository toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Verify reviewed exact runtime witness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_ASYNC_ARTIFACT_ID: ${{ needs.builds.outputs.artifact_id }}
+          SDK_ASYNC_ARTIFACT_DIGEST: ${{ needs.builds.outputs.artifact_digest }}
+        run: python3 .github/scripts/auth-rc3-fixture.py "$RUNNER_TEMP/auth-rc3-positive"
+      - name: Build experimental fixture
+        run: cargo build --example auth_async --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3
+      - name: Record observation environment
+        env:
+          OBSERVATION_FLOOR: ${{ matrix.floor }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, platform, subprocess
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'auth-rc3-positive'
+          module = pathlib.Path('target/debug/examples/libauth_async.so').resolve()
+          governor = pathlib.Path('/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor')
+          report = {
+              'floor': os.environ['OBSERVATION_FLOOR'],
+              'host': platform.uname()._asdict(),
+              'cpuinfo': pathlib.Path('/proc/cpuinfo').read_text(),
+              'cpu_affinity': sorted(os.sched_getaffinity(0)),
+              'cpu0_governor': governor.read_text().strip() if governor.exists() else None,
+              'rustc': subprocess.check_output(['rustc', '-Vv'], text=True, timeout=10),
+              'cargo': subprocess.check_output(['cargo', '-V'], text=True, timeout=10),
+              'sdk_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True, timeout=10).strip(),
+              'sdk_build': 'cargo build --example auth_async; default dev profile',
+              'rust_environment': {key: os.environ.get(key) for key in ['RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CARGO_PROFILE_DEV_OPT_LEVEL', 'CARGO_PROFILE_DEV_DEBUG']},
+              'module': str(module),
+              'module_sha256': hashlib.sha256(module.read_bytes()).hexdigest(),
+              'fixture': json.loads((root / 'fixture.json').read_text()),
+              'caveat': 'Hosted-runner observations; cache state, scheduling and CPU frequency uncontrolled. No absolute latency or pure receipt-cost claim.'
+          }
+          (root / 'observation-environment.json').write_text(json.dumps(report, indent=2) + '\n')
+          PY
+      - name: Prove module-local clock slot before Redis execution
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, shutil, subprocess
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'auth-rc3-positive'
+          environment = json.loads((root / 'observation-environment.json').read_text())
+          module = pathlib.Path(environment['module'])
+          data = module.read_bytes()
+          digest = hashlib.sha256(data).hexdigest()
+          if digest != environment['module_sha256'] or data[:6] != b'\x7fELF\x02\x01' or int.from_bytes(data[18:20], 'little') != 62:
+              raise SystemExit('unexpected module image before clock-slot proof')
+          readelf = shutil.which('readelf')
+          if readelf is None:
+              raise SystemExit('existing readelf missing; no installation or fallback')
+          def inspect(arguments):
+              return subprocess.check_output([readelf, *arguments], text=True, timeout=15, env=dict(os.environ, LC_ALL='C'))
+          version = inspect(['--version'])
+          if not version.startswith('GNU readelf '):
+              raise SystemExit('unreviewed ELF inspector output format')
+          symbols = inspect(['--wide', '--symbols', str(module)])
+          relocations = inspect(['--wide', '--relocs', str(module)])
+          (root / 'clock-slot-symbols.txt').write_text(symbols)
+          (root / 'clock-slot-relocations.txt').write_text(relocations)
+          name = 'RedisModule_MonotonicMicroseconds'
+          table, rows = None, []
+          for line in symbols.splitlines():
+              if line.startswith('Symbol table '):
+                  table = line.split("'")[1]
+              match = re.match(r'^\s*\d+:\s+([0-9a-fA-F]+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)', line)
+              if match and match[7].split('@', 1)[0] == name:
+                  rows.append({'table': table, 'value': int(match[1], 16), 'size': int(match[2]), 'type': match[3], 'bind': match[4], 'visibility': match[5], 'section': match[6]})
+          if sum(row['table'] == '.symtab' for row in rows) != 1:
+              raise SystemExit('missing or ambiguous module clock-slot definition')
+          for row in rows:
+              if row['type'] != 'OBJECT' or row['size'] != 8 or not row['section'].isdigit() or row['value'] == 0 or not (row['bind'] == 'LOCAL' or row['visibility'] == 'HIDDEN'):
+                  raise SystemExit('module clock slot may bind to an external/global definition')
+          if len({row['value'] for row in rows}) != 1 or name in relocations:
+              raise SystemExit('unresolved, named or preemptible clock-slot relocation')
+          if hashlib.sha256(module.read_bytes()).hexdigest() != digest:
+              raise SystemExit('module changed during binding inspection')
+          proof = {'module': str(module), 'module_sha256': digest, 'readelf': str(pathlib.Path(readelf).resolve()), 'readelf_sha256': hashlib.sha256(pathlib.Path(readelf).resolve().read_bytes()).hexdigest(), 'readelf_version': version, 'clock_slot': name, 'definitions': rows, 'named_clock_relocations': 0, 'proof': 'Defined LOCAL or HIDDEN module OBJECT pointer; no named clock relocation. Reject unknown/preemptible binding before module load.'}
+          (root / 'clock-slot-proof.json').write_text(json.dumps(proof, indent=2) + '\n')
+          PY
+      - name: Discover native positive cases
+        run: |
+          cargo test --test integration --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 auth_async:: -- --list | tee "$RUNNER_TEMP/auth-rc3-positive/discovery.txt"
+          for test_name in \
+            auth_async::test_async_auth_positive_success_denial_stale_and_ordinary_cleanup \
+            auth_async::test_async_auth_positive_timeout_and_late_completion_are_once_only \
+            auth_async::test_async_auth_positive_disconnect_retains_producer_until_release \
+            auth_async::test_async_auth_positive_preparation_and_prepared_admission_observations
+          do
+            grep -Fx -- "$test_name: test" "$RUNNER_TEMP/auth-rc3-positive/discovery.txt"
+          done
+      - name: Verify unprepared refusal and explicit preparation
+        run: |
+          cargo test --test integration --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 auth_async:: -- --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/auth-rc3-positive/refusal.log"
+      - name: Execute all native positive cases
+        run: |
+          cargo test --test integration --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 auth_async::test_async_auth_positive -- --ignored --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/auth-rc3-positive/positive.log"
+      - name: Require all positive cases to execute
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, math, os, pathlib, re, statistics
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'auth-rc3-positive'
+          data = (root / 'positive.log').read_text()
+          if not re.search(r'test result: ok\. 4 passed; 0 failed; 0 ignored;', data):
+              raise SystemExit('all four native positive cases must execute')
+          if data.count('ASYNC_POSITIVE_EXECUTED:') != 4:
+              raise SystemExit('native identity/cleanup evidence marker missing')
+          observations = json.loads((root / 'runtime/cost-observations.json').read_text())
+          summary = {'units': 'nanoseconds', 'scope': observations['admission_scope'], 'caveats': observations['caveats']}
+          for name, count in [('preparation_ns', 10), ('clock_bracket_baseline_ns', 200), ('prepared_admission_ns', 200)]:
+              values = observations[name]
+              if len(values) != count or not all(type(n) is int and n >= 0 for n in values):
+                  raise SystemExit('missing or invalid observation samples: ' + name)
+              ordered = sorted(values)
+              summary[name] = {'n': count, 'min': ordered[0], 'median': statistics.median(values), 'p95_nearest_rank': ordered[math.ceil(count * .95) - 1], 'max': ordered[-1]}
+          if observations['warmup_auths'] != 20:
+              raise SystemExit('missing warmup provenance')
+          environment = json.loads((root / 'observation-environment.json').read_text())
+          binding = json.loads((root / 'clock-slot-proof.json').read_text())
+          if binding['module_sha256'] != environment['module_sha256']:
+              raise SystemExit('loaded module differs from pre-load clock-slot proof')
+          identities = list((root / 'runtime').glob('*.txt'))
+          module_count = 0
+          for path in identities:
+              fields = dict(line.split(':', 1) for line in path.read_text().splitlines() if ':' in line)
+              if 'module_sha256' not in fields:
+                  continue
+              name = fields['module_archive']
+              if pathlib.PurePosixPath(name).name != name or not name.endswith('.so'):
+                  raise SystemExit('invalid retained module path')
+              digest = hashlib.sha256((root / 'runtime' / name).read_bytes()).hexdigest()
+              if digest != fields['module_sha256'] or digest != environment['module_sha256']:
+                  raise SystemExit('retained loaded module digest mismatch')
+              module_count += 1
+          if module_count != 6:
+              raise SystemExit('all six module identity records must retain their loaded bytes')
+          (root / 'cost-summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
+          PY
+      - name: Preserve native identities and lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-rc3-positive-${{ matrix.floor }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/auth-rc3-positive
+            target/**/integration-test/**
+            Cargo.lock
+          if-no-files-found: error
+          retention-days: 14

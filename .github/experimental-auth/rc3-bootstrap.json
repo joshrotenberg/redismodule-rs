@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "status": "Source-only bootstrap candidate. No execution or runtime trust is enabled by this file.",
+  "purpose": "Produce two reproducible official Redis 8.12-rc3 Linux amd64 redis-server artifacts for independent admission-manifest review.",
+  "runtime_admission": {
+    "enabled": false,
+    "approved_executable_entries": [],
+    "policy": "This recipe is build provenance input only. It never supplies a runtime expected digest and never enrolls a result automatically."
+  },
+  "source": {
+    "repository": "https://github.com/redis/redis.git",
+    "commit": "a93d7d19f82dbeab1e092b072c8f93dabd8733b1",
+    "tree": "9baee9bed7e1d0cffa92d2705786511c1cf3361f",
+    "commit_timestamp_utc": "2026-11-12T09:27:20Z",
+    "source_date_epoch": 1794475640,
+    "native_version": "8.11.242",
+    "native_version_number": "0x00080bf2",
+    "git_short_sha": "a93d7d19",
+    "git_dirty": "0",
+    "source_kind": "Fresh detached Git checkout, including verified Git metadata. Source archive and reused working tree are refused."
+  },
+  "builder": {
+    "registry": "docker.io/library/python",
+    "discovery_tag": "3.13.5-bookworm",
+    "execution_reference": "docker.io/library/python@sha256:0a0704ac83aa7b896a68b710c24f9502bbae87d32e6c7ef6148ce6a60ce05260",
+    "platform": "linux/amd64",
+    "index_digest": "sha256:6c6b3c2deae72b980c4323738be824884c9a2e17588c93db82612f8a3072be88",
+    "platform_manifest_digest": "sha256:0a0704ac83aa7b896a68b710c24f9502bbae87d32e6c7ef6148ce6a60ce05260",
+    "config_digest": "sha256:4bbf6d52fe8de40e9e20b1453e14abb40eb1c73cd1d2b22e8ed015ad0817a088",
+    "base_image_reference_from_manifest": "buildpack-deps:bookworm@sha256:f4ff545c6e7d36e7f5511f69f8a8d325fad868d93bcc05bf4b1093baa84219ab",
+    "registry_source": "https://registry-1.docker.io/v2/library/python/manifests/sha256:0a0704ac83aa7b896a68b710c24f9502bbae87d32e6c7ef6148ce6a60ce05260",
+    "tag_is_execution_input": false,
+    "layers": [
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:ebed137c7c18cb1906fb8314eabc10611ddf49a281f8c1b5eab987a7137f749f",
+        "size": 48494617
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:c2e76af9483f2d17a3e370639403df2c53a3da1480d533116a8694cd91f15d5a",
+        "size": 24020632
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:37f838b71c6b82c581b7543a313255b8c99c23cc9d96c1ad6f9f5f208c942553",
+        "size": 64400022
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:873a4c80287477653c01b20948fc34bb1bacf0f826bcc2ddc3bd2fe25b342d45",
+        "size": 211357776
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:51f8af1d7d3684de02ae52f1fdb31d31896fa310a1cf513df28496c0f688f7b2",
+        "size": 6161774
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:2effe4ca65f9da22b12c754df4a7dc92bb71be7cb4cb707918d515f01427fca0",
+        "size": 27391864
+      },
+      {
+        "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+        "digest": "sha256:e5af76e56a46c7426d79407979c3b60bb16cd18f9fc51fc57b67dcddb3456518",
+        "size": 250
+      }
+    ],
+    "toolchain": "All compiler, linker, binutils, make, git, shell, Python, libc headers and shared-library inputs come from these immutable image layers. No package install or mutable dependency resolution during either build.",
+    "toolchain_inventory_status": "Not executed. Exact real paths, versions and binary hashes must be recorded in a separate isolated preflight and reviewed before compilation. Image configuration/history is not claimed as executed tool discovery.",
+    "native_platform_requirement": "Native Linux x86_64 build host and native Linux x86_64 positive runtime. Refuse QEMU/Rosetta/user-mode emulation; a linux/amd64 container label alone is insufficient evidence."
+  },
+  "execution_phases": [
+    {
+      "phase": "source-only preparation",
+      "allowed_by_this_file": "Review source, OCI index/platform/config bytes and this declarative recipe. No layer download, engine start, container, compiler, test or Redis process."
+    },
+    {
+      "phase": "builder preflight",
+      "dependency": "Independent acceptance of this exact recipe and root release of the native/heavy lease. No compilation yet.",
+      "actions": [
+        "Verify actual native host architecture and immutable image identity; record kernel, engine and host/guest architecture.",
+        "Record dpkg package/version inventory and resolved version/SHA-256 of gcc, g++, cc, ld, as, ar, ranlib, nm, objcopy, strip, make, git, sh, date, sha256sum, readelf, python3 and all compiler driver subordinate programs.",
+        "Record dynamic loader/libc/libstdc++ and compiler runtime package provenance; verify all inputs are inside the pinned image.",
+        "Reject missing tools or unexpected architecture. Submit the exact observed inventory for independent acceptance before compilation; do not repair the image through apt/pip or host mounts."
+      ]
+    },
+    {
+      "phase": "two controlled builds",
+      "dependency": "Reviewed tool inventory plus separate root authorization to execute the build phase.",
+      "actions": [
+        "Create two distinct fresh build roots/containers without cache reuse. Expose the same canonical /build/redis source path inside each builder.",
+        "Acquire full official commit and verify Git tree. Disable replacement objects, system/global Git configuration, hooks, external diff and credential helpers for source checks.",
+        "Before each build verify HEAD, full index versus HEAD, worktree versus index, modes and symlink targets, and absence of untracked or ignored build inputs. Inventory every source file by relative path, mode and SHA-256; no preexisting object, release.h, .make-settings or dependency cache.",
+        "Use network-disabled builders with sanitized environment, read-only pinned image, no host compiler/library mounts and project-owned outputs.",
+        "Run the exact make argv below in each fresh source root. Record full compile/link output and generated .make-settings.",
+        "After each build revalidate tracked source bytes/modes and capture all generated outputs and dependency inputs. Unexpected source edits fail provenance.",
+        "Compare full redis-server byte length and SHA-256, ELF identity, generated release.h and expected redis_build_id across builds. A mismatch fails; no multi-hash fallback."
+      ]
+    },
+    {
+      "phase": "manifest enrollment",
+      "dependency": "Independent review of both builds and the full provenance.",
+      "actions": [
+        "Derive expected redis_build_id from verified generated metadata and pinned release.c, then compare actual owned runtime report without self-enrollment.",
+        "Commit an explicit immutable accepted artifact manifest only after independent approval of source/build provenance and matching digests.",
+        "Keep experimental positive admission disabled until the manifest and guard/ownership implementation are reviewed."
+      ]
+    }
+  ],
+  "controlled_environment": {
+    "canonical_source_path": "/build/redis",
+    "working_directory": "/build/redis/src",
+    "umask": "022",
+    "environment_allowlist": {
+      "PATH": "/usr/bin:/bin",
+      "LC_ALL": "C",
+      "LANG": "C",
+      "TZ": "UTC",
+      "SOURCE_DATE_EPOCH": "1794475640",
+      "GIT_CONFIG_NOSYSTEM": "1",
+      "GIT_CONFIG_GLOBAL": "/dev/null",
+      "GIT_NO_REPLACE_OBJECTS": "1"
+    },
+    "environment_policy": "Start with an empty environment plus this allowlist and explicitly recorded task-local temporary/build paths. No compiler wrappers, CCACHE, CFLAGS/LDFLAGS, MAKEFLAGS, LD_PRELOAD, LD_LIBRARY_PATH or CPU-native tuning inherited from the host.",
+    "parallel_jobs": 2,
+    "make_argv": [
+      "/usr/bin/make",
+      "-j2",
+      "redis-server",
+      "MALLOC=libc",
+      "BUILD_TLS=no",
+      "BUILD_COMPRESSION=no",
+      "USE_SYSTEMD=no",
+      "OPTIMIZATION=-O2",
+      "OPT=-O2",
+      "ENABLE_LTO=",
+      "CC=/usr/bin/gcc",
+      "CXX=/usr/bin/g++",
+      "AR=/usr/bin/ar",
+      "RANLIB=/usr/bin/ranlib",
+      "DEBUG=-g -ggdb",
+      "CFLAGS=",
+      "LDFLAGS=",
+      "REDIS_CFLAGS=",
+      "REDIS_LDFLAGS="
+    ],
+    "note": "ENABLE_LTO is empty, not the string 0. The pinned Makefile passes this value to dependency builds. Actual target/compiler flags are retained for review; no hidden alteration after a reproducibility mismatch."
+  },
+  "expected_artifact": {
+    "path": "src/redis-server",
+    "os": "linux",
+    "architecture": "x86_64",
+    "elf_class": "ELF64",
+    "elf_endianness": "little",
+    "elf_machine": "EM_X86_64",
+    "length": null,
+    "sha256": null,
+    "redis_build_id": null,
+    "null_policy": "Not built and not approved. Null values refuse admission; this file is not an allowlist entry."
+  },
+  "trust_limits": [
+    "Matching binaries establish reproducibility under the trusted builder and recorded inputs. They do not prove compiler honesty or unique source history for every byte-identical copy.",
+    "Runtime admission measures the actual running main ELF at explicit ordinary-command preparation and later trusts immutable process-image bytes. It does not attest arbitrary shared objects, native API interposition, in-memory patches or a hostile kernel.",
+    "An edited comment or other uncompiled input can leave identical bytes and metadata. Build provenance rejects dirty input; runtime cannot recover that history from byte equality."
+  ]
+}

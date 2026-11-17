@@ -11,6 +11,25 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Experimental asynchronous authentication
+
+The optional `experimental-auth-redis-8-12-rc3` feature adds an auth-only owned
+completion token and explicit credential copying (#216). Native blocking is
+restricted to a prepared, source-controlled exact Linux amd64 executable
+manifest for official Redis 8.12-rc3. An ordinary command measures the actual
+running image; AUTH performs receipt/native consistency checks without hidden
+image hashing. Missing or unapproved provenance refuses before native blocking
+or starter invocation. A byte-identical artifact is equivalent; runtime hashing
+does not establish every copy's historical source cleanliness.
+
+Native-cookie finalization, producer and submission return ownership are
+tracked separately. SDK-owned async cleanup is retained through failures,
+stale/late outcomes and synchronous replacement, and runs only from an explicit
+ordinary-command reaper. Existing synchronous delivery is preserved. Deadlines
+use the pinned runtime's monotonic clock and opaque timer IDs; unload requires
+explicit cancellation/drain with no live native or user payload ownership. See
+[authentication](docs/AUTHENTICATION.md) and the optional `auth_async` example.
+
 ## Synchronous authentication callbacks
 
 `redis_module!` accepts an `auth` function path (#216). Its callback receives
