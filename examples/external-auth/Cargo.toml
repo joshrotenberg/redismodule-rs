@@ -1,0 +1,35 @@
+[workspace]
+members = ["."]
+resolver = "3"
+
+[package]
+name = "external-auth"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.87"
+publish = false
+license = "BSD-3-Clause"
+
+[lib]
+path = "src/lib.rs"
+
+[[example]]
+name = "external_auth"
+path = "src/module.rs"
+crate-type = ["cdylib"]
+
+[features]
+default = ["floor-6-0"]
+floor-6-0 = ["redis-module/min-redis-compatibility-version-6-0"]
+floor-7-2 = ["redis-module/min-redis-compatibility-version-7-2"]
+
+[dependencies]
+redis-module = { git = "https://github.com/joshrotenberg/redismodule-rs", rev = "a2943e7870e00da01093759bc468978e85e01dc7", default-features = false, features = ["experimental-auth-redis-8-12-rc3"] }
+ureq = { version = "=3.5.2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Suppress dependency tracing, including HTTP payloads, in this isolated graph.
+# Native Redis authentication audit uses the SDK's native audit path.
+log = { version = "0.4", features = ["max_level_off"] }
+
+
