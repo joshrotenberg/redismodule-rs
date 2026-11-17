@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -40,6 +41,14 @@ with tarfile.open(fileobj=sys.stdin.buffer,mode='r|') as archive:
    if not (target.parent/item.linkname).resolve().is_relative_to(base): raise RuntimeError('symlink escape')
    target.parent.mkdir(parents=True,exist_ok=True);target.symlink_to(item.linkname)
   else: raise RuntimeError('unsupported archive entry')
+"""
+EXPORT = """import sys,zipfile,pathlib
+base=pathlib.Path('/build/evidence')
+if not base.is_dir(): raise RuntimeError('missing build evidence')
+with zipfile.ZipFile(sys.stdout.buffer,'w',compression=zipfile.ZIP_DEFLATED) as archive:
+ for path in sorted(base.rglob('*')):
+  if path.is_symlink(): raise RuntimeError('unexpected evidence symlink')
+  if path.is_file(): archive.write(path,str(path.relative_to(base)))
 """
 
 
@@ -173,7 +182,19 @@ def main():
             drun("extract-" + str(number), ["exec", "--interactive", container, *exec_env, "/usr/bin/python3", "-c", EXTRACT], stdin=transport, timeout=120)
             outcome, _ = drun("build-" + str(number), ["exec", container, *exec_env, "/usr/bin/python3", "/build/driver.py"], timeout=1080, required=False)
             # Capture failed build evidence before removing the tmpfs container.
-            drun("copy-" + str(number), ["cp", container + ":/build/evidence", str(output / ("build-" + str(number)))])
+            _, evidence = drun("copy-" + str(number), ["exec", container, *exec_env, "/usr/bin/python3", "-c", EXPORT])
+            if len(evidence) > 256 * 1024 * 1024:
+                raise RuntimeError("build evidence archive length ceiling")
+            destination = output / ("build-" + str(number)); destination.mkdir()
+            with zipfile.ZipFile(io.BytesIO(evidence)) as archive:
+                entries = archive.infolist()
+                if len(entries) > 10000 or sum(i.file_size for i in entries) > 512 * 1024 * 1024 or len({i.filename for i in entries}) != len(entries):
+                    raise RuntimeError("build evidence entry/expanded length ceiling")
+                for item in entries:
+                    path = Path(item.filename)
+                    if path.is_absolute() or '..' in path.parts or ((item.external_attr >> 16) & 0o170000) == 0o120000:
+                        raise RuntimeError("unsafe build evidence archive entry")
+                archive.extractall(destination)
             drun("remove-" + str(number), ["rm", "--force", container]);container = None
             if outcome.get("exit_code") != 0:
                 raise RuntimeError("controlled build failed; evidence retained")

@@ -24,7 +24,8 @@ def run(name, argv, cwd=ROOT, timeout=30):
     with (OUT / (name + ".stdout")).open("wb") as stdout, (OUT / (name + ".stderr")).open("wb") as stderr:
         p = subprocess.run(argv, cwd=cwd, stdout=stdout, stderr=stderr, timeout=timeout, check=False)
     if p.returncode:
-        raise RuntimeError("command failed: " + name)
+        tail = (OUT / (name + ".stderr")).read_bytes()[-8192:].decode("utf-8", "replace")
+        raise RuntimeError("command failed: " + name + "; stderr tail: " + tail)
     return (OUT / (name + ".stdout")).read_bytes()
 
 
