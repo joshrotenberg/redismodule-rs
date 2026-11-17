@@ -139,6 +139,12 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-17: merged SDK master `ba53d98`, including the isolated HTTP
+  authentication consumer from PR 252 for issue 217. The host and guests
+  need no source adaptation; all four Rust lock snapshots remain unchanged.
+  Validation uses the full `wasm/ci/check.sh` with Rust and JavaScript guests
+  required. Experiment push CI remains pending publication.
+
 - 2026-11-17: merged SDK master `a2943e7`, including opt-in asynchronous
   authentication from PR 251, the third stage of issue 216. The host and
   guests need no source adaptation. The workspace lock snapshot adds `sha2`
