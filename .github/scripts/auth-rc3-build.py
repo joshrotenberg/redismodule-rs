@@ -167,7 +167,7 @@ def main():
             record["source_transport_gzip_sha256"] = sha(compressed)
             report["builds"].append(record)
             label = owner + "-" + str(number)
-            _, created = drun("create-" + str(number), ["create", "--name", "sdk-auth-rc3-build-" + label, "--label", "sdk-auth-rc3-build-owner=" + owner, "--pull", "never", "--platform", "linux/amd64", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges=true", "--pids-limit", "128", "--memory", "4g", "--cpus", "2", "--user", "65534:65534", "--tmpfs", "/build:rw,nosuid,nodev,size=2147483648,uid=65534,gid=65534,mode=0755", "--workdir", "/", "--entrypoint", "/usr/bin/env", IMAGE, "-i", *[k + "=" + v for k, v in ENV.items()], "TMPDIR=/build/tmp", "PYTHONDONTWRITEBYTECODE=1", "/usr/bin/python3", "-c", "import time; time.sleep(1800)"])
+            _, created = drun("create-" + str(number), ["create", "--name", "sdk-auth-rc3-build-" + label, "--label", "sdk-auth-rc3-build-owner=" + owner, "--pull", "never", "--platform", "linux/amd64", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges=true", "--pids-limit", "128", "--memory", "4g", "--cpus", "2", "--user", "65534:65534", "--tmpfs", "/build:rw,exec,nosuid,nodev,size=2147483648,uid=65534,gid=65534,mode=0755", "--workdir", "/", "--entrypoint", "/usr/bin/env", IMAGE, "-i", *[k + "=" + v for k, v in ENV.items()], "TMPDIR=/build/tmp", "PYTHONDONTWRITEBYTECODE=1", "/usr/bin/python3", "-c", "import time; time.sleep(1800)"])
             container = created.decode().strip()
             if not re.fullmatch(r"[0-9a-f]{64}", container):
                 raise RuntimeError("invalid container identity")

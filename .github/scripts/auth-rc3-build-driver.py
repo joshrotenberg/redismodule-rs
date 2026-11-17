@@ -62,6 +62,12 @@ def main():
     try:
         if platform.system() != "Linux" or platform.machine() != "x86_64" or os.getuid() != 65534:
             raise RuntimeError("native Linux amd64 unprivileged builder required")
+        mounts = Path("/proc/self/mountinfo").read_bytes()
+        (OUT / "mountinfo.txt").write_bytes(mounts)
+        flags = os.statvfs(ROOT).f_flag
+        report["build_filesystem_flags"] = flags
+        if flags & os.ST_NOEXEC:
+            raise RuntimeError("private build filesystem is unexpectedly noexec")
         recipe = json.loads(Path("/build/recipe.json").read_bytes())
         expected = json.loads(Path("/build/toolchain.json").read_bytes())
         wanted_env = recipe["controlled_environment"]["environment_allowlist"]
