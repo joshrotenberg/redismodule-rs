@@ -143,4 +143,6 @@ API floors, then builds this separate consumer and explicitly runs `native.py`.
 The script refuses positive execution without `EXTERNAL_AUTH_POSITIVE=1` and
 the accepted server hash. It records native/module/lock/source identities,
 retains loaded module bytes and waits for every owned child and stub thread.
+Reload checks preserve the captured native module inventory, including built-in
+modules from the accepted executable.
 Older-server refusal CI verifies zero started workers and provider requests.

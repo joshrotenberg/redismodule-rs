@@ -204,10 +204,15 @@ class Runtime:
             entries = [dict(zip(row[::2], row[1::2])) for row in loaded]
             selected = [row for row in entries if row[b"name"] == b"external_auth"]
             assert len(selected) == 1 and Path(os.fsdecode(selected[0][b"path"])).resolve() == self.args.module
+            # The accepted executable includes built-in modules with empty
+            # paths. This consumer is the only dynamically loaded module.
+            assert all(row[b"name"] == b"external_auth" or row[b"path"] == b"" for row in entries)
+            self.initial_module_entries = entries
             module_hash = sha(self.args.module)
             retained = self.directory / ("module-" + module_hash + ".so")
             retained.write_bytes(self.args.module.read_bytes())
             self.identity = {"pid": self.process.pid, "port": self.port, "info": self.info,
+                             "module_list": repr(loaded),
                              "module_sha256": module_hash, "retained_module": retained.name,
                              "native_process_sha256": sha(native), "native_binary_sha256": sha(self.args.server)}
             (self.directory / "identity.json").write_text(json.dumps(self.identity, indent=2) + "\n")
@@ -452,13 +457,18 @@ def late_disconnect_and_drain(args):
             reload_state = {"before": [os.fsdecode(v) if isinstance(v, bytes) else v for v in before_reload],
                             "after": [os.fsdecode(v) if isinstance(v, bytes) else v for v in after_reload],
                             "pid": runtime.process.pid, "info": reload_info,
+                            "initial_module_entries": repr(runtime.initial_module_entries),
                             "module_list": repr(reload_modules), "module_sha256": reload_module_sha256,
                             "native_process_sha256": sha(Path("/proc/%d/exe" % runtime.process.pid))}
             (runtime.directory / "reload-state.json").write_text(json.dumps(reload_state, indent=2) + "\n")
             assert ("process_id:%d\r\n" % runtime.process.pid) in reload_info
             reload_entries = [dict(zip(row[::2], row[1::2])) for row in reload_modules]
-            assert len(reload_entries) == 1 and reload_entries[0][b"name"] == b"external_auth"
-            assert Path(os.fsdecode(reload_entries[0][b"path"])).resolve() == args.module
+            selected_reload = [row for row in reload_entries if row[b"name"] == b"external_auth"]
+            assert len(selected_reload) == 1
+            assert Path(os.fsdecode(selected_reload[0][b"path"])).resolve() == args.module
+            assert sorted(reload_entries, key=lambda row: row[b"name"]) == sorted(
+                runtime.initial_module_entries, key=lambda row: row[b"name"]
+            ), "native module inventory changed across reload"
             assert reload_module_sha256 == args.expected_module_sha256
             assert reload_state["native_process_sha256"] == args.accepted
             assert after_reload[0:2] == [b"inactive", 0]
