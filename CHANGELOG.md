@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Opt-in authentication-specific asynchronous completion (#216), behind
+  `experimental-auth-redis-8-12-rc3`. It requires explicit ordinary-command
+  preparation of an exact reviewed Linux amd64 Redis 8.12-rc3 executable.
+  Credentials are copied explicitly; one-use completion preserves Redis's
+  responses and explicit fallback. Monotonic deadlines, disconnect/native-free
+  ownership and ordinary-command reaping retain cleanup until it is safe.
+  Existing synchronous callback timing and older-runtime support are unchanged.
+
 - Synchronous typed authentication callbacks through `redis_module!`'s `auth`
   function field (#216). Borrowed binary credentials and a restricted
   `AuthContext` return Accept, Deny or explicit NotHandled; Redis owns AUTH/HELLO
@@ -19,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identity; historical native-auth rows do not prove callback ownership.
   `Context::drain_client_identities` reaches every retained installation and
   reconciles lost notifications only after verified native ID disappearance.
-  Asynchronous completion remains separate.
+  Experimental asynchronous completion is opt-in.
 
 - Module-owned users with opaque per-load generation handles, explicit locked
   removal, transactional ACL updates and client identity attachment (#216).

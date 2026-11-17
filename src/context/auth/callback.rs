@@ -1,4 +1,6 @@
-//! Synchronous Redis authentication, separate from ordinary command contexts.
+//! Redis authentication, separate from ordinary command contexts.
+#[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+pub(super) mod asynchronous;
 use std::cell::Cell;
 use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -9,7 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use super::{ClientChangeCallback, ClientId, ModuleUserHandle, NativeOperation, PendingCallback};
 use crate::{RedisError, RegistrationContext, raw};
 
-/// A synchronous auth function. Only an explicit [`AuthDecision::NotHandled`]
+/// An auth decision function. The function itself runs synchronously; only an
+/// explicit [`AuthDecision::NotHandled`]
 /// permits another module or Redis password authentication to handle the attempt.
 ///
 /// ```compile_fail,E0308
@@ -109,7 +112,7 @@ impl Password<'_> {
     }
 }
 
-/// The only outcomes of a synchronous authentication callback.
+/// Authentication outcomes. Deferred completion requires the explicit feature.
 pub enum AuthDecision {
     /// Request a trusted identity attachment. Native refusal denies the attempt.
     Accept(AuthTarget),
@@ -117,6 +120,9 @@ pub enum AuthDecision {
     Deny(PublicAuthError),
     /// Deliberately continue to another module hook or Redis password auth.
     NotHandled,
+    /// Explicit opt-in deferred authentication on a prepared, verified RC3 runtime.
+    #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+    Deferred(asynchronous::DeferredAuth),
 }
 
 enum Identity {
@@ -135,7 +141,7 @@ impl AuthTarget {
     pub fn module_user(user: ModuleUserHandle) -> Self {
         Self {
             identity: Identity::ModuleUser(user),
-            callback: PendingCallback(None),
+            callback: PendingCallback::new(None),
         }
     }
     /// Selects an existing ACL name for a connection with an already installed
@@ -146,12 +152,12 @@ impl AuthTarget {
     pub fn acl_user(name: Vec<u8>) -> Self {
         Self {
             identity: Identity::AclUser(name),
-            callback: PendingCallback(None),
+            callback: PendingCallback::new(None),
         }
     }
     /// Installs owned `Send` cleanup, with [`ClientChangeCallback`]'s rules.
     pub fn on_changed(mut self, callback: ClientChangeCallback) -> Self {
-        let previous = std::mem::replace(&mut self.callback, PendingCallback(Some(callback)));
+        let previous = std::mem::replace(&mut self.callback, PendingCallback::new(Some(callback)));
         drop(previous);
         self
     }
@@ -618,6 +624,10 @@ pub unsafe fn run_auth_callback(
             }
         };
         Ok(match decision {
+            #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+            AuthDecision::Deferred(deferred) => unsafe {
+                asynchronous::begin(&invocation, deferred, username, err)
+            },
             AuthDecision::NotHandled => raw::REDISMODULE_AUTH_NOT_HANDLED as i32,
             AuthDecision::Deny(public) => unsafe { deny(ctx, username, err, public) },
             AuthDecision::Accept(target) => match invocation.attach(target, &committed) {

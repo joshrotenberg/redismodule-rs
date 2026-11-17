@@ -272,5 +272,84 @@ GET auth:key
 
 Run setup and `auth_callbacks.drain` from a separate authorized administrative
 connection; the selected stub identity cannot execute them. Then run
-`MODULE UNLOAD auth_callbacks`. Authentication-specific blocking/completion is a
-separate API and is not provided here.
+`MODULE UNLOAD auth_callbacks`. The default build provides synchronous callbacks. The optional experiment below
+adds authentication-specific completion.
+
+
+## Experimental asynchronous completion
+
+Enable `experimental-auth-redis-8-12-rc3` explicitly. This experiment supports
+only an exact reviewed Linux x86_64 ELF executable from official Redis
+8.12-rc3, commit `a93d7d19f82dbeab1e092b072c8f93dabd8733b1`. Its native version
+is `8.11.242` (`0x00080bf2`), not a general prerelease range. Older runtimes and
+other operating systems keep synchronous support and refuse deferred admission.
+The feature alone, API availability, a version label or caller-supplied hash
+cannot enable blocking. An empty compiled manifest refuses all preparation.
+
+An authorized ordinary command calls `prepare_async_auth_runtime` before
+accepting deferred work. It verifies direct native server metadata and hashes
+an opened `/proc/self/exe` object against the reviewed artifact manifest. The
+build witness binds full source inventories, the fixed builder/tool inputs,
+two independent matching builds and generated release metadata. Runtime checks
+establish artifact equivalence, not unique source history: an uncompiled source
+edit can produce identical bytes. Native short Git SHA, dirty flag and CRC64
+build ID alone are insufficient.
+
+Preparation does synchronous filesystem I/O and has no elapsed-time guarantee.
+AUTH never opens, reads, hashes or stats an image, including an unprepared
+attempt. It checks the retained receipt's load/generation/process identity and
+native metadata before native blocking. The trusted host must keep running
+main-image bytes immutable after preparation. This is not kernel, shared-library
+or process-memory attestation. Executable pathname replacement does not replace
+the opened running-image object. Repreparation requires all prior async ownership
+to be drained; unload invalidates the receipt.
+
+Return `ctx.defer(timeout, starter)` from the live `AuthContext`. The resulting
+`AuthDecision::Deferred` is owned and unload-tracked even if retained instead of
+returned. A caller cannot construct a deferred decision from an event/deinit or
+worker context. Borrowed
+credentials cannot cross the callback lifetime. `AuthRequest::copy_for_async`
+explicitly creates an owned `Send` copy with no formatting/clone implementation;
+its password allocation is overwritten on drop. Application-created copies and
+allocator behavior remain outside that erasure guarantee.
+
+The starter runs once only after a proven committed native block and receives
+an owned `AuthCompletion`, never a context or native handle. It must return
+promptly and arrange its own computation. `accept`, `deny` and `not_handled`
+consume the token. Dropping it selects denial. Reblocking is not an outcome.
+Native AUTH/HELLO serialization and explicit fallback remain Redis-owned.
+Created-user leases and command-installed previous-identity requirements for
+ACL-name handoff remain in effect.
+
+Timeouts must be at least one whole millisecond and at most 24 hours. The
+monotonic epoch is when the initial callback returns the deferred decision,
+before admission/setup checks. Earlier handler/preparation work is outside it.
+Expiration is checked before blocking, starter invocation and identity commit;
+event-loop service can delay delivery. A timeout cannot relabel a committed
+identity. The currently firing native timer is never stopped or freed by the SDK.
+
+`reap_async_auth(limit)` runs retained SDK-owned async cleanup only from the
+same quiescent ordinary-command capability as identity mutation. Native reply,
+free, disconnect and timer callbacks do not run arbitrary retained consumers or
+destructors. A synchronous attachment that replaces an async installation
+preserves the old installation's deferred delivery policy. Existing synchronous
+callbacks keep their delivery timing. Intentional starter invocation executes
+application code; the SDK cannot control application-owned worker stacks,
+logging, temporary values or deliberate destruction inside that code.
+
+Shutdown closes new admission with `cancel_async_auth`, which selects one
+handled denial for each confirmed block. Release application completion tokens
+and let workers finish without waiting for unfinished workers under the Redis
+lock. Reap retained async payloads, drain client identities, reap again and remove
+created users before unloading. Retry command-side drain while native disconnect
+and finalization events complete. A missing client ID alone does not finalize a
+blocked handle. Unknown native ownership is retained and refuses unload; no
+public abort, private free, native counter repair or repeated unblock exists.
+
+The [auth_async example](../examples/auth_async.rs) supplies fixed test behavior
+and explicit setup, preparation, reaping and drain commands. Its administrative
+commands require application authorization. Positive tests are explicitly
+ignored in ordinary runs and must be executed with the reviewed native fixture,
+`TEST_REDIS_REQUIRE_ASYNC_AUTH=1` and `--ignored`; the positive CI lane must prove
+real native blocking and starter execution. Default, unsupported-host or
+all-refused results do not establish experimental runtime support.

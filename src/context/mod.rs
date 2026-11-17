@@ -30,6 +30,8 @@ pub use auth::{
     AuthCallback, AuthContext, AuthDecision, AuthRequest, AuthTarget, ClientChangeCallback,
     ClientId, ModuleUserHandle, Password, PublicAuthError,
 };
+#[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+pub use auth::{AuthCompletion, DeferredAuth, OwnedAuthCredentials, PreparedAuthRuntime};
 mod call_user;
 pub(crate) mod command_reply;
 pub use call_user::CallUserScope;

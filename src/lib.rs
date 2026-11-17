@@ -73,6 +73,8 @@
 //! callback, thread and lifetime rules.
 
 pub use crate::context::InfoContext;
+#[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+pub use crate::context::{AuthCompletion, DeferredAuth, OwnedAuthCredentials, PreparedAuthRuntime};
 
 // Paths used by registration macros. Consumers do not need to declare the
 // SDK's registration implementation dependencies themselves.

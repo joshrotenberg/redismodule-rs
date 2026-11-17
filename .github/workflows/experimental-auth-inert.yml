@@ -1,0 +1,36 @@
+name: Experimental auth inert checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  protocol:
+    name: Experimental auth protocol (Rust ${{ matrix.toolchain }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.94.0", "1.87.0"]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+      - name: Install repository toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          rustflags: ""
+      - name: Compile explicit experiment and run inert protocol cases
+        run: |
+          cargo check --workspace --all-targets --features experimental-auth-redis-8-12-rc3
+          cargo test --lib --features experimental-auth-redis-8-12-rc3
+      - name: Check explicit experiment documentation
+        if: matrix.toolchain == '1.94.0'
+        env:
+          RUSTDOCFLAGS: -D warnings
+          RUSTC_BOOTSTRAP: "1"
+        run: |
+          cargo doc --no-deps --features experimental-auth-redis-8-12-rc3
+          cargo test --doc --features experimental-auth-redis-8-12-rc3
