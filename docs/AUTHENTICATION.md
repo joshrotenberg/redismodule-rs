@@ -36,7 +36,11 @@ client. These are privileged operations: they do not verify a password.
 Authorize the caller before exposing either operation in a module command.
 Attachment requires a real client present in Redis's client-ID index. Internal
 clients, including Lua's client, are refused before transferring subscriptions.
-The ACL form requires a current, actually installed SDK-owned client identity.
+The ACL form requires a current SDK-owned client identity installed by an
+ordinary admitted command. A native-auth installation alone cannot prove that
+Redis still owns its callback: a suspended foreign notifier can overwrite that
+callback while leaving a historical SDK record. Such records never authorize
+a borrowed ACL account attachment.
 An untracked connection, foreign native callback or pending registration is
 refused before native account lookup or identity change. The caller may first
 explicitly attach a chosen created user with `authenticate_client_with_user`,
@@ -46,8 +50,10 @@ a foreign callback could otherwise delete an incoming borrowed ACL account
 before native attachment finishes. Per-client pending admission also refuses
 nested attachment from a lawful raw prior callback, including attempts with a
 different created user. Pending registrations never count as installed.
-A lawful native overwrite consumes the old
-SDK installation, so that connection must establish ownership again.
+A delivered native overwrite consumes the old SDK installation, so that
+connection must establish command-side ownership again. Every native-auth
+installation is conservatively classified as historical for ACL admission,
+including after a successful ACL handoff.
 
 The ACL form then resolves the name at attachment time and rejects missing or
 disabled accounts. It never retains a lookup-derived native user handle. A native
@@ -99,10 +105,16 @@ Creation and single-directive updates need a real runtime lock; their native
 paths do not close clients or invoke user-change callbacks.
 
 `Context::deauthenticate_and_close_client` additionally requires the target's
-actually installed current-load SDK subscription. Missing, foreign, stale,
-pending or already-closing ownership is refused without changing its identity.
+current-load SDK subscription. Missing, foreign, pending or already-closing
+ownership is refused without changing its identity. When a retained installation
+has a conclusively absent native client ID, an admitted command instead
+reconciles its notification and releases its cookie. An indexed client or an
+unknown lookup result never permits this retirement.
 Closing admission lasts through native return, including native failure.
-A client ID alone does not grant revocation of an arbitrary connection.
+A client ID alone does not grant revocation of an arbitrary connection. A
+retained historical installation grants administrative close authority for
+that connection even if a foreign module later replaced its native identity.
+It does not certify the connection's current identity or callback owner.
 
 These checks cover legal raw callbacks inside SDK-guarded calls and Yield.
 Unsafe raw FFI that bypasses those scopes or forges invocation provenance does
@@ -113,8 +125,15 @@ Unload refuses new auth work before user deinitialization. A refused deinit
 restores the active lifecycle. An unload with any created user, live or pending
 subscription, deferred consumer, executing cleanup or in-flight auth ownership
 is refused before deinit. Drain explicitly from an admitted command: revoke
-owned client IDs, then remove created handles. Retry unload after pending
-notifications have completed. No native user free runs from a Rust destructor.
+all identities with `Context::drain_client_identities`, then remove created
+handles. The drain enumerates the SDK registry, including installations without
+consumer callbacks and installations whose created user was already removed.
+Keep user handles until removal succeeds. If a foreign notifier erased an SDK
+callback, its cookie and capture remain retained while the native ID is indexed.
+Native closure can finish after drain returns a pending error; run drain again
+from a later ordinary command. Once disappearance is verified, this reconciliation
+delivers cleanup once outside registry locks. It does not promise delivery at
+the time of the lost native notification. Retry unload after cleanup completes. No native user free runs from a Rust destructor.
 Dropping the last handle while a user is still registered loses the caller's
 removal capability and keeps unload refused, so retain handles until removal.
 The example's `auth_users.drain` command demonstrates explicit cleanup.
@@ -150,5 +169,108 @@ A rejected ACL handoff preserves the selected created identity. Run
 
 See [auth_users.rs](../examples/auth_users.rs). The example's commands are an
 administrative demonstration and do not implement application authorization.
-Native AUTH/HELLO callback registration and asynchronous authentication completion
-are separate APIs and are not provided here.
+
+## Synchronous authentication callbacks
+
+Declare `auth: authenticate,` in `redis_module!`, after `init`, `deinit` and
+`info` when present, before `commands`. The handler is a function path:
+
+```rust,ignore
+fn authenticate(ctx: &AuthContext<'_>, request: AuthRequest<'_>) -> AuthDecision {
+    if request.username() != b"service" {
+        return AuthDecision::NotHandled;
+    }
+    if request.password().as_bytes() != b"example-only-password" {
+        return AuthDecision::Deny(PublicAuthError::default());
+    }
+    let user = { USERS.lock(ctx).as_ref().cloned() };
+    match user {
+        Some(user) => AuthDecision::Accept(AuthTarget::module_user(user)),
+        None => AuthDecision::Deny(PublicAuthError::new("Identity is not configured")),
+    }
+}
+```
+
+The password comparison above is a stub. Applications supply their own
+verification. An infrastructure or configuration failure must deny the attempt.
+Only explicit `NotHandled` continues to another module hook and then Redis ACL
+password authentication. Redis tries hooks in newest-registration-first order.
+The declared hook requires Redis 7.2 and its companion APIs at runtime; a missing
+API fails module load by name at every compile-time floor. The SDK default floor
+is unchanged. Registration happens after successful init and has no dynamic
+closure owner or runtime unregister operation.
+
+`AuthContext` supplies only `client_id` and a `RedisLockIndicator` implementation
+for module-owned `RedisGILGuard` state. It cannot become an ordinary `Context`
+or `RuntimeContext`, reply, call commands, yield, block clients or mutate users.
+Create/configure users explicitly after load in an administrative command, then
+keep their owned handles in module state for the auth handler. The callback
+never creates an implicit bootstrap identity. Before unload, stop accepting new
+module identities and explicitly drain installed clients and created users from
+ordinary commands. A live auth callback itself prevents unload even before its
+first attachment. Empty-registry unload performs no client-affecting cleanup.
+
+The native callback boundary is distinct from command mutation admission. It
+checks the active load, actual main thread, indexed client and native loading
+flags before calling the handler. Nested SDK native operations, executing auth
+callbacks/consumers and LOADING/ASYNC_LOADING states are conservatively denied.
+This includes auth reached during an SDK `Yield`; it never weakens the public
+command provenance rules. Unsafe native calls must obey their native contracts.
+
+`Accept` requests a target; successful native attachment establishes success.
+A removed, disabled or foreign handle, missing ACL account or other attachment
+failure produces a fixed handled denial. `AuthTarget::acl_user` retains the
+command-installed identity precondition described above. It cannot authenticate a
+fresh untracked client through trusted ACL-name mapping. Use a created target
+or deliberate Redis ACL password fallback for that connection. Optional
+`AuthTarget::on_changed` cleanup follows `ClientChangeCallback` ownership and
+execution rules. Every installation has native SDK cleanup even without it.
+
+Redis writes both AUTH and HELLO replies, including HELLO protocol negotiation,
+metadata and SETNAME. The handler returns a decision and writes no reply. A
+failed reauthentication preserves the prior session identity according to
+Redis's native behavior; it is not an implicit deauthenticate-and-close request.
+
+Credentials are binary slices borrowed from Redis for the invocation. `Password`
+has no cloning, formatting or owning native-string conversion. `as_bytes` is
+explicit; any copy or logging performed by the consumer remains its own action.
+There is no owned-password or asynchronous completion API in this delivery.
+
+Default denial uses Redis's WRONGPASS response. `PublicAuthError::new` accepts
+explicit static public text; CR, LF and NUL become spaces, and the error code
+remains WRONGPASS. Custom errors transfer one manual native string reference to
+Redis, which frees it after writing AUTH/HELLO's response. A handled denial adds
+one ACL auth-log attempt using the supplied username and fixed `module-auth`
+object only after a private fixed `CONFIG GET acllog-max-len` read positively
+verifies retention. The read uses RESP2 and the no-writes call flag, owns its
+reply through strict parsing, and contains no credentials. Native command filters
+can intercept it; a read lease bounds nested AUTH refusal without another read.
+Zero retention, an unavailable API, a read error or an unknown reply skips audit
+silently while authentication remains denied. This avoids native implementations
+that duplicate the audit object before returning early with retention disabled. Passwords, provider errors, ACL text and panic payloads are never added
+to SDK errors, audit objects or logs. `NotHandled` adds no module-denial audit;
+the eventual handler owns its result. Native ACL log aggregation and retention
+settings still apply.
+
+An auth panic produces fixed failure text and a fixed SDK diagnostic. The SDK
+does not use the generic payload-logging panic adapter here. Rust's configured
+process panic hook runs before containment, so an application hook or its own
+panic/log messages can still disclose credentials. Containment requires
+`panic = "unwind"`; a second panic while unwinding can abort the process.
+Native valid AUTH and HELLO AUTH paths redact their credential arguments from
+MONITOR and SLOWLOG before invoking hooks. This is not a privacy guarantee for
+malformed forms that Redis rejects before dispatch.
+
+The [auth_callbacks example](../examples/auth_callbacks.rs) uses fixed test
+credentials and bounded permissions:
+
+```text
+auth_callbacks.prepare
+AUTH stub stub-password
+GET auth:key
+```
+
+Run setup and `auth_callbacks.drain` from a separate authorized administrative
+connection; the selected stub identity cannot execute them. Then run
+`MODULE UNLOAD auth_callbacks`. Authentication-specific blocking/completion is a
+separate API and is not provided here.

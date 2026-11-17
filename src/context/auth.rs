@@ -9,6 +9,13 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::{Context, RedisError, RedisString, RuntimeContext, raw};
 
+mod callback;
+pub use callback::{
+    AuthCallback, AuthContext, AuthDecision, AuthRequest, AuthTarget, Password, PublicAuthError,
+};
+#[doc(hidden)]
+pub use callback::{auth_callback_available, register_auth_callback, run_auth_callback};
+
 /// A Redis connection ID. IDs do not keep clients alive.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct ClientId(pub u64);
@@ -20,7 +27,9 @@ pub struct ClientId(pub u64);
 /// deliver immediately. Reattachment from cleanup is refused.
 /// Captures must be owned and `Send`. No context is provided by Redis; do not
 /// reacquire the Redis lock in this callback. It also runs on same-user reauth,
-/// disconnect and explicit revocation. Panics are
+/// disconnect and explicit revocation. If foreign native code erases an
+/// installation without notification, explicit command-side drain reconciles
+/// cleanup only after conclusive native client-ID disappearance. Panics are
 /// contained without logging their payload (the process panic hook still runs).
 ///
 /// ```compile_fail,E0277
@@ -73,7 +82,13 @@ impl Drop for Cookie {
         tests::COOKIE_DROPS.fetch_add(1, Ordering::Relaxed);
     }
 }
+#[derive(Clone, Copy, PartialEq)]
+enum AttachmentOrigin {
+    Command,
+    NativeAuth,
+}
 struct Subscription {
+    origin: AttachmentOrigin,
     cookie: Box<Cookie>,
     installed_client: Option<ClientId>,
     pending_client: Option<ClientId>,
@@ -134,6 +149,7 @@ impl Registry {
             || !self.closing.is_empty()
             || !self.removing.is_empty()
             || self.executing != 0
+            || callback::in_flight()
     }
     fn next(&mut self) -> Result<u64, RedisError> {
         self.next = self
@@ -483,6 +499,93 @@ impl Drop for Closing {
     }
 }
 
+type ClientLookup = unsafe extern "C" fn(*mut c_void, u64) -> i32;
+
+// Called only after command_client has established quiescent command entry.
+// Native notifications precede unlinkClient's ID removal, including cached
+// masters. An installation still in this map after conclusive ID absence can
+// no longer be reached through that native client's callback slot. A foreign
+// notifier may have erased the slot after a reentrant AUTH installed it.
+fn retire_missing_identity(
+    client: ClientId,
+    lookup: Option<ClientLookup>,
+) -> Result<bool, RedisError> {
+    let lookup =
+        lookup.ok_or_else(|| raw::api_unavailable_error("RedisModule_GetClientInfoById"))?;
+    let admissible = |registry: &Registry| -> Result<(), RedisError> {
+        registry.active()?;
+        if NATIVE_OPERATIONS.load(Ordering::Relaxed) != 0
+            || callback::in_flight()
+            || registry.executing != 0
+            || !registry.closing.is_empty()
+            || !registry.removing.is_empty()
+            || !registry.deferred.is_empty()
+            || registry
+                .subscriptions
+                .values()
+                .any(|s| s.pending_client.is_some())
+        {
+            return Err(RedisError::Str(
+                "ERR client identity reconciliation is in progress",
+            ));
+        }
+        Ok(())
+    };
+    let (owner, keys) = {
+        let registry = registry();
+        admissible(&registry)?;
+        let keys: Vec<_> = registry
+            .subscriptions
+            .iter()
+            .filter_map(|(key, subscription)| {
+                (subscription.installed_client == Some(client)).then_some(*key)
+            })
+            .collect();
+        if keys.is_empty() {
+            return Ok(false);
+        }
+        (registry.owner.as_ref().unwrap().clone(), keys)
+    };
+    // NULL asks only about existence, so ERR conclusively means an absent ID;
+    // no client-info structure version can make an indexed client look absent.
+    let status = unsafe { lookup(std::ptr::null_mut(), client.0) };
+    if status == raw::REDISMODULE_OK as i32 {
+        return Ok(false);
+    }
+    if status != raw::REDISMODULE_ERR as i32 {
+        return Err(RedisError::Str(
+            "ERR cannot verify client identity disappearance",
+        ));
+    }
+    let retired: Vec<_> = {
+        let mut registry = registry();
+        admissible(&registry)?;
+        if !registry
+            .owner
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &owner))
+        {
+            return Err(INACTIVE);
+        }
+        if keys.iter().any(|key| {
+            !registry.subscriptions.get(key).is_some_and(|subscription| {
+                subscription.installed_client == Some(client)
+                    && subscription.pending_client.is_none()
+            })
+        }) {
+            return Err(INACTIVE);
+        }
+        keys.into_iter()
+            .filter_map(|key| registry.subscriptions.remove(&key))
+            .collect()
+    };
+    let changed = !retired.is_empty();
+    for subscription in retired {
+        notify(client, subscription);
+    }
+    Ok(changed)
+}
+
 impl RuntimeContext {
     /// Creates an unlinked Redis ACL user (Redis 6.0+).
     ///
@@ -614,12 +717,18 @@ impl Context {
 
     /// Revokes and asynchronously closes a connection (Redis 6.0+).
     /// Requires the Redis main thread: a worker lock does not pause I/O threads.
-    /// Requires this target's actually installed current-load SDK subscription.
+    /// Requires this target's retained current-load SDK subscription.
     /// Missing, stale, foreign, pending and closing ownership is refused without
     /// native revocation. Only quiescent ordinary SDK commands are admitted.
     /// SDK consumer cleanup runs after native revocation returns.
+    /// If a retained SDK installation's client has already disappeared, this
+    /// instead reconciles its historical notification and releases its cookie.
+    /// Indexed/pending/in-flight records are never retired on that basis.
     pub fn deauthenticate_and_close_client(&self, client: ClientId) -> Result<(), RedisError> {
         command_client(self)?;
+        if retire_missing_identity(client, unsafe { raw::RedisModule_GetClientInfoById })? {
+            return Ok(());
+        }
         let revoke = unsafe { crate::__available_api!(RedisModule_DeauthenticateAndCloseClient) };
         let _closing = {
             let mut registry = registry();
@@ -648,6 +757,41 @@ impl Context {
         }
     }
 
+    /// Explicitly drains every current-load SDK client installation.
+    ///
+    /// Requires the same quiescent ordinary-command admission as revocation.
+    /// Includes installations without a consumer callback and historical rows
+    /// whose native callback was erased by a suspended foreign notifier. A
+    /// missing native ID permits once-only contained reconciliation; an indexed
+    /// client never permits cookie retirement. Native closure may finish after
+    /// this command, so a pending error requires a later drain attempt.
+    ///
+    /// This does not remove created users. Keep their handles until explicit
+    /// removal succeeds, then unload only after all ownership has drained.
+    pub fn drain_client_identities(&self) -> Result<(), RedisError> {
+        command_client(self)?;
+        let clients: BTreeSet<_> = registry()
+            .subscriptions
+            .values()
+            .filter_map(|subscription| subscription.installed_client)
+            .collect();
+        for client in clients {
+            self.deauthenticate_and_close_client(client)?;
+        }
+        let registry = registry();
+        if !registry.subscriptions.is_empty()
+            || !registry.deferred.is_empty()
+            || !registry.closing.is_empty()
+            || !registry.removing.is_empty()
+            || registry.executing != 0
+        {
+            return Err(RedisError::Str(
+                "ERR client identity cleanup is still pending; retry drain",
+            ));
+        }
+        Ok(())
+    }
+
     /// Attaches a configured module-created identity to this connection (Redis
     /// 6.0+). This privileged operation does not check a password. It returns the
     /// native attachment outcome, not the result of an AUTH/HELLO exchange.
@@ -673,15 +817,20 @@ impl Context {
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithUser) };
         let lease = UserLease::begin(user)?;
         let user = lease.ptr;
-        self.attach_identity(client, pending, false, |callback, private, id| unsafe {
-            attach(self.ctx, user, callback, private, id)
-        })
+        attach_identity(
+            client,
+            pending,
+            false,
+            AttachmentOrigin::Command,
+            |callback, private, id| unsafe { attach(self.ctx, user, callback, private, id) },
+        )
     }
 
     /// Attaches an existing ACL account by name (Redis 6.0+). The name is resolved
     /// by Redis at this call, never cached as a borrowed native user handle.
     /// Requires this connection's current native callback to be an actually
-    /// installed SDK subscription. First attach a caller-selected created user
+    /// installed SDK subscription from a quiescent ordinary command. Historical
+    /// native-auth rows do not certify the current callback slot. First attach a caller-selected created user
     /// explicitly. Unknown, foreign, pending or detached ownership is refused
     /// before native account lookup or identity change; no hidden bootstrap is
     /// performed. This prevents a foreign prior callback from deleting the
@@ -698,83 +847,22 @@ impl Context {
         let client = command_client(self)?;
         let _operation = NativeOperation::begin();
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithACLUser) };
-        self.attach_identity(client, pending, true, |callback, private, id| unsafe {
-            attach(
-                self.ctx,
-                name.as_ptr().cast(),
-                name.len(),
-                callback,
-                private,
-                id,
-            )
-        })
-    }
-
-    fn attach_identity(
-        &self,
-        client: ClientId,
-        mut callback: PendingCallback,
-        require_installed: bool,
-        attach: impl FnOnce(raw::RedisModuleUserChangedFunc, *mut c_void, *mut u64) -> i32,
-    ) -> Result<ClientId, RedisError> {
-        registry().active()?;
-        let id = client.0;
-        let (key, private) = {
-            let mut registry = registry();
-            registry.active()?;
-            if registry.executing != 0 || registry.closing.contains(&client) {
-                return Err(RedisError::Str(
-                    "ERR identity attachment is refused during client cleanup",
-                ));
-            }
-            // None is a preallocated, not-yet-installed registration. Only
-            // native success below establishes ownership for this client ID.
-            // Detached/deferred callbacks have already left this map.
-            if require_installed
-                && !registry
-                    .subscriptions
-                    .values()
-                    .any(|s| s.installed_client == Some(ClientId(id)))
-            {
-                return Err(RedisError::Str(
-                    "ERR ACL attachment requires an installed SDK client identity",
-                ));
-            }
-            if registry
-                .subscriptions
-                .values()
-                .any(|s| s.pending_client == Some(ClientId(id)))
-            {
-                return Err(RedisError::Str(
-                    "ERR client identity attachment is already in progress",
-                ));
-            }
-            let key = registry.next()?;
-            let mut subscription = Subscription {
-                cookie: Box::new(Cookie(key)),
-                installed_client: None,
-                pending_client: Some(ClientId(id)),
-                callback: callback.0.take(),
-            };
-            let private = (&mut *subscription.cookie as *mut Cookie).cast();
-            registry.subscriptions.insert(key, subscription);
-            LIVE_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
-            (key, private)
-        };
-        let mut id = 0;
-        if attach(Some(changed), private, &mut id) != raw::REDISMODULE_OK as i32 {
-            let failed = registry().subscriptions.remove(&key);
-            contain(|| drop(failed));
-            LIVE_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
-            return Err(RedisError::Str(
-                "ERR Redis refused client identity attachment",
-            ));
-        }
-        let mut registry = registry();
-        let installed = registry.subscriptions.get_mut(&key).unwrap();
-        installed.pending_client = None;
-        installed.installed_client = Some(ClientId(id));
-        Ok(ClientId(id))
+        attach_identity(
+            client,
+            pending,
+            true,
+            AttachmentOrigin::Command,
+            |callback, private, id| unsafe {
+                attach(
+                    self.ctx,
+                    name.as_ptr().cast(),
+                    name.len(),
+                    callback,
+                    private,
+                    id,
+                )
+            },
+        )
     }
 
     /// Redacts a current command argument from MONITOR, SLOWLOG and server logs
@@ -791,10 +879,86 @@ impl Context {
     }
 }
 
+fn attach_identity(
+    client: ClientId,
+    mut callback: PendingCallback,
+    require_installed: bool,
+    origin: AttachmentOrigin,
+    attach: impl FnOnce(raw::RedisModuleUserChangedFunc, *mut c_void, *mut u64) -> i32,
+) -> Result<ClientId, RedisError> {
+    registry().active()?;
+    let id = client.0;
+    let (key, private) = {
+        let mut registry = registry();
+        registry.active()?;
+        if registry.executing != 0 || registry.closing.contains(&client) {
+            return Err(RedisError::Str(
+                "ERR identity attachment is refused during client cleanup",
+            ));
+        }
+        // None is a preallocated, not-yet-installed registration. Only
+        // native success below establishes ownership for this client ID.
+        // Detached/deferred callbacks have already left this map.
+        if require_installed {
+            if !registry
+                .subscriptions
+                .values()
+                .any(|s| s.installed_client == Some(client))
+            {
+                return Err(RedisError::Str(
+                    "ERR ACL attachment requires an installed SDK client identity",
+                ));
+            }
+            if !registry.subscriptions.values().any(|s| {
+                s.installed_client == Some(client) && s.origin == AttachmentOrigin::Command
+            }) {
+                return Err(RedisError::Str(
+                    "ERR ACL attachment requires a command-installed SDK client identity",
+                ));
+            }
+        }
+        if registry
+            .subscriptions
+            .values()
+            .any(|s| s.pending_client == Some(ClientId(id)))
+        {
+            return Err(RedisError::Str(
+                "ERR client identity attachment is already in progress",
+            ));
+        }
+        let key = registry.next()?;
+        let mut subscription = Subscription {
+            origin,
+            cookie: Box::new(Cookie(key)),
+            installed_client: None,
+            pending_client: Some(ClientId(id)),
+            callback: callback.0.take(),
+        };
+        let private = (&mut *subscription.cookie as *mut Cookie).cast();
+        registry.subscriptions.insert(key, subscription);
+        LIVE_SUBSCRIPTIONS.fetch_add(1, Ordering::Relaxed);
+        (key, private)
+    };
+    let mut id = 0;
+    if attach(Some(changed), private, &mut id) != raw::REDISMODULE_OK as i32 {
+        let failed = registry().subscriptions.remove(&key);
+        contain(|| drop(failed));
+        LIVE_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
+        return Err(RedisError::Str(
+            "ERR Redis refused client identity attachment",
+        ));
+    }
+    let mut registry = registry();
+    let installed = registry.subscriptions.get_mut(&key).unwrap();
+    installed.pending_client = None;
+    installed.installed_client = Some(ClientId(id));
+    Ok(ClientId(id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    static PROTOCOL_TEST: Mutex<()> = Mutex::new(());
+    pub(super) static PROTOCOL_TEST: Mutex<()> = Mutex::new(());
     pub(super) static COOKIE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
     #[test]
@@ -817,6 +981,7 @@ mod tests {
         let callback_calls = calls.clone();
         let state = OwnedState(drops.clone());
         let mut subscription = Subscription {
+            origin: AttachmentOrigin::Command,
             cookie: Box::new(Cookie(42)),
             installed_client: Some(ClientId(7)),
             pending_client: None,
@@ -863,6 +1028,108 @@ mod tests {
         assert!(registry.subscriptions.is_empty());
         assert!(registry.deferred.is_empty());
         assert_eq!(registry.executing, 0);
+    }
+    #[test]
+    fn omitted_native_notification_retires_only_after_conclusive_absence() {
+        let _serial = PROTOCOL_TEST.lock().unwrap();
+        static STATUS: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+        unsafe extern "C" fn lookup(info: *mut c_void, id: u64) -> i32 {
+            assert!(info.is_null());
+            assert_eq!(id, 41);
+            STATUS.load(Ordering::Relaxed)
+        }
+        let client = ClientId(41);
+        let calls = Arc::new(AtomicUsize::new(0));
+        COOKIE_DROPS.store(0, Ordering::Relaxed);
+        {
+            let mut r = registry();
+            assert!(!r.has_auth_ownership());
+            r.phase = Phase::Active;
+            r.owner = Some(Arc::new(()));
+        }
+        // Execute the real allocation/commit protocol, then model a foreign
+        // notifier erasing its saved slot. No unsafe native teardown runs.
+        let mut native_slot = None;
+        for consumer in [true, false] {
+            let calls = calls.clone();
+            let callback: Option<ClientChangeCallback> = consumer.then(|| {
+                Box::new(move |id| {
+                    assert_eq!(id, client);
+                    // Cleanup runs outside the registry lock and only once.
+                    assert!(
+                        !registry()
+                            .subscriptions
+                            .values()
+                            .any(|s| s.installed_client == Some(client))
+                    );
+                    calls.fetch_add(1, Ordering::Relaxed);
+                }) as ClientChangeCallback
+            });
+            attach_identity(
+                client,
+                PendingCallback(callback),
+                false,
+                AttachmentOrigin::NativeAuth,
+                |changed, private, id| {
+                    native_slot = Some((changed, private));
+                    unsafe {
+                        *id = client.0;
+                    }
+                    raw::REDISMODULE_OK as i32
+                },
+            )
+            .unwrap();
+        }
+        assert!(native_slot.take().is_some());
+        // Historical native-auth rows do not prove a live native callback for
+        // an incoming borrowed ACL user, even while the client remains indexed.
+        assert!(
+            attach_identity(
+                client,
+                PendingCallback(None),
+                true,
+                AttachmentOrigin::NativeAuth,
+                |_, _, _| panic!("unproven ACL attachment reached native code")
+            )
+            .is_err()
+        );
+        assert!(!retire_missing_identity(client, Some(lookup)).unwrap());
+        assert!(retire_missing_identity(client, None).is_err());
+        STATUS.store(123, Ordering::Relaxed);
+        assert!(retire_missing_identity(client, Some(lookup)).is_err());
+        STATUS.store(raw::REDISMODULE_ERR as i32, Ordering::Relaxed);
+        let operation = NativeOperation::begin();
+        assert!(retire_missing_identity(client, Some(lookup)).is_err());
+        drop(operation);
+        let key = *registry().subscriptions.keys().next().unwrap();
+        registry()
+            .subscriptions
+            .get_mut(&key)
+            .unwrap()
+            .pending_client = Some(client);
+        assert!(retire_missing_identity(client, Some(lookup)).is_err());
+        registry()
+            .subscriptions
+            .get_mut(&key)
+            .unwrap()
+            .pending_client = None;
+        registry().closing.insert(client);
+        assert!(retire_missing_identity(client, Some(lookup)).is_err());
+        registry().closing.clear();
+        registry().executing += 1;
+        assert!(retire_missing_identity(client, Some(lookup)).is_err());
+        registry().executing -= 1;
+        assert_eq!(COOKIE_DROPS.load(Ordering::Relaxed), 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert!(retire_missing_identity(client, Some(lookup)).unwrap());
+        assert!(!retire_missing_identity(client, Some(lookup)).unwrap());
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(COOKIE_DROPS.load(Ordering::Relaxed), 2);
+        assert_eq!(LIVE_SUBSCRIPTIONS.load(Ordering::Relaxed), 0);
+        let mut r = registry();
+        assert!(!r.has_auth_ownership());
+        r.phase = Phase::Unloaded;
+        r.owner = None;
     }
     #[test]
     fn last_native_user_removal_remains_owned_until_return() {
