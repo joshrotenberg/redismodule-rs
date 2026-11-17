@@ -453,10 +453,17 @@ def late_disconnect_and_drain(args):
             assert after_reload[2] in (0, before_reload[2]), "reload unexpectedly started a worker"
             # Require a new preparation/activation and real authentication on
             # the new module registration, then drain its identities again.
+            assert runtime.connection(admin=True).cmd("PING") == b"PONG"
             runtime.configure(stub.address)
             reloaded_client = runtime.connection()
             assert reloaded_client.cmd("AUTH", "alice", "fake-allow") == b"OK"
             assert reloaded_client.cmd("GET", "http:reload") is None
+            try:
+                reloaded_client.cmd("GET", "other:reload")
+            except Denied as error:
+                assert str(error).startswith("NOPERM")
+            else:
+                raise AssertionError("post-reload identity did not enforce its key pattern")
             runtime.drain()
             assert runtime.admin.cmd("MODULE", "UNLOAD", "external_auth") == b"OK"
             return {"expired_AUTH_seconds": elapsed, "stalled_provider_ping_seconds": responsiveness,
