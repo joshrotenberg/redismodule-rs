@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
+import shutil
 import socket
 import subprocess
 import threading
@@ -21,6 +23,46 @@ SECRETS = [ADMIN, b"fake-allow", b"fake-block", b"fake-deny", b"fake-late", b"fa
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def prove_module_binding(args):
+    # The SDK's admission clock must be this module's own nonpreemptible API
+    # slot. Inspect the consumer itself, separately from auth_async.so's proof.
+    # This only reads ELF data; it never patches an API slot or loads code.
+    data = args.module.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    assert data[:6] == b"\x7fELF\x02\x01" and int.from_bytes(data[18:20], "little") == 62
+    readelf = shutil.which("readelf")
+    assert readelf, "existing readelf required; no installation or fallback"
+
+    def inspect(*arguments):
+        return subprocess.check_output([readelf, *arguments], text=True, timeout=15,
+                                       env=dict(os.environ, LC_ALL="C"))
+
+    version = inspect("--version")
+    assert version.startswith("GNU readelf ")
+    symbols = inspect("--wide", "--symbols", str(args.module))
+    relocations = inspect("--wide", "--relocs", str(args.module))
+    (args.output / "module-symbols.txt").write_text(symbols)
+    (args.output / "module-relocations.txt").write_text(relocations)
+    name, table, rows = "RedisModule_MonotonicMicroseconds", None, []
+    for line in symbols.splitlines():
+        if line.startswith("Symbol table "):
+            table = line.split("'")[1]
+        match = re.match(r"^\s*\d+:\s+([0-9a-fA-F]+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)", line)
+        if match and match[7].split("@", 1)[0] == name:
+            rows.append({"table": table, "value": int(match[1], 16), "size": int(match[2]),
+                         "type": match[3], "bind": match[4], "visibility": match[5], "section": match[6]})
+    assert sum(row["table"] == ".symtab" for row in rows) == 1
+    assert all(row["type"] == "OBJECT" and row["size"] == 8 and row["section"].isdigit()
+               and row["value"] != 0 and (row["bind"] == "LOCAL" or row["visibility"] == "HIDDEN") for row in rows)
+    assert len({row["value"] for row in rows}) == 1 and name not in relocations
+    assert sha(args.module) == digest
+    proof = {"module": str(args.module), "module_sha256": digest, "clock_slot": name,
+             "definitions": rows, "named_clock_relocations": 0, "readelf": str(Path(readelf).resolve()),
+             "readelf_sha256": sha(Path(readelf).resolve()), "readelf_version": version}
+    (args.output / "module-binding-proof.json").write_text(json.dumps(proof, indent=2) + "\n")
+    return digest
 
 
 class Denied(Exception):
@@ -160,6 +202,7 @@ class Runtime:
         self.directory = args.output / label
         self.directory.mkdir()
         self.connections = []
+        self.drain_attempts = []
         self.process = None
         self.log = (self.directory / "redis.log").open("wb")
         with socket.socket() as reservation:
@@ -175,6 +218,7 @@ class Runtime:
 
     def __enter__(self):
         try:
+            assert sha(self.args.module) == self.args.proven_module, "consumer changed after pre-load binding proof"
             argv = [str(self.args.server), "--bind", "127.0.0.1", "--port", str(self.port),
                     "--save", "", "--appendonly", "no", "--dir", str(self.directory),
                     "--enable-module-command", "local", "--requirepass", ADMIN.decode(),
@@ -227,7 +271,16 @@ class Runtime:
             try:
                 return self.admin.cmd("external_auth.drain") == b"OK"
             except Denied as error:
-                assert str(error) == "ERR external auth drain pending"
+                message = str(error)
+                self.drain_attempts.append({"at": time.monotonic(), "message": message})
+                # These retain ownership and require another ordinary command.
+                # The same fixed three-second deadline still applies. An
+                # unavailable admission that never recovers remains a failure.
+                assert message in {
+                    "ERR external auth drain pending",
+                    "ERR client identity cleanup is still pending; retry drain",
+                    "ERR asynchronous authentication is unavailable",
+                }
                 return False
         wait_for("nonblocking application and SDK drain", drained)
 
@@ -239,7 +292,8 @@ class Runtime:
             self.process.kill()
             self.process.wait(timeout=3)
             assert not Path("/proc/%d" % self.process.pid).exists()
-            (self.directory / "cleanup.json").write_text(json.dumps({"pid": self.process.pid, "owned_child_waited": True}) + "\n")
+            (self.directory / "cleanup.json").write_text(json.dumps({"pid": self.process.pid,
+                "owned_child_waited": True, "drain_pending_attempts": self.drain_attempts}, indent=2) + "\n")
             self.process = None
         self.log.close()
 
@@ -290,7 +344,23 @@ def refusal(args):
     stub = Stub()
     try:
         with Runtime(args, "refusal") as runtime:
-            runtime.configure(stub.address, prepare=False)
+            version_text = next(line.split(":", 1)[1] for line in runtime.info.splitlines() if line.startswith("redis_version:"))
+            version = tuple(int(part) for part in version_text.split(".")[:2])
+            partial = version < (7, 4)
+            try:
+                runtime.configure(stub.address, prepare=False)
+            except Denied as error:
+                assert partial and str(error) == "ERR transactional ACL updates require Redis 7.4 or later"
+            else:
+                assert not partial
+            # An early ACL failure must retain the created handle and require
+            # explicit cleanup. Configuration never silently rolls ownership back.
+            try:
+                runtime.admin.cmd("MODULE", "UNLOAD", "external_auth")
+            except Denied:
+                pass
+            else:
+                raise AssertionError("configured or partial user ownership was not retained")
             for command in ["external_auth.activate", "external_auth.prepare", "external_auth.activate"]:
                 try:
                     runtime.admin.cmd(command)
@@ -305,7 +375,8 @@ def refusal(args):
             assert runtime.admin.cmd("MODULE", "UNLOAD", "external_auth") == b"OK"
     finally:
         close_stub(stub, args, "refusal")
-    return {"activation_refused_before_worker_or_network": True, "provider_requests": len(stub.events)}
+    return {"activation_refused_before_worker_or_network": True, "provider_requests": len(stub.events),
+            "partial_ACL_configuration_refused": partial, "retained_configuration_drained": True}
 
 
 def bootstrap(args):
@@ -480,6 +551,7 @@ def main():
     else:
         assert sha(args.server) != args.accepted, "refusal lane requires unsupported runtime"
     args.output.mkdir()
+    args.proven_module = prove_module_binding(args)
     environment = {"host": platform.uname()._asdict(), "source_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                    "SDK_pin": "a2943e7870e00da01093759bc468978e85e01dc7", "floor": args.floor,
                    "lock_sha256": sha(PACKAGE / "Cargo.lock"), "server_sha256": sha(args.server),
