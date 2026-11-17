@@ -111,6 +111,49 @@ jobs:
           }
           (root / 'observation-environment.json').write_text(json.dumps(report, indent=2) + '\n')
           PY
+      - name: Prove module-local clock slot before Redis execution
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, shutil, subprocess
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'auth-rc3-positive'
+          environment = json.loads((root / 'observation-environment.json').read_text())
+          module = pathlib.Path(environment['module'])
+          data = module.read_bytes()
+          digest = hashlib.sha256(data).hexdigest()
+          if digest != environment['module_sha256'] or data[:6] != b'\x7fELF\x02\x01' or int.from_bytes(data[18:20], 'little') != 62:
+              raise SystemExit('unexpected module image before clock-slot proof')
+          readelf = shutil.which('readelf')
+          if readelf is None:
+              raise SystemExit('existing readelf missing; no installation or fallback')
+          def inspect(arguments):
+              return subprocess.check_output([readelf, *arguments], text=True, timeout=15, env=dict(os.environ, LC_ALL='C'))
+          version = inspect(['--version'])
+          if not version.startswith('GNU readelf '):
+              raise SystemExit('unreviewed ELF inspector output format')
+          symbols = inspect(['--wide', '--symbols', str(module)])
+          relocations = inspect(['--wide', '--relocs', str(module)])
+          (root / 'clock-slot-symbols.txt').write_text(symbols)
+          (root / 'clock-slot-relocations.txt').write_text(relocations)
+          name = 'RedisModule_MonotonicMicroseconds'
+          table, rows = None, []
+          for line in symbols.splitlines():
+              if line.startswith('Symbol table '):
+                  table = line.split("'")[1]
+              match = re.match(r'^\s*\d+:\s+([0-9a-fA-F]+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)', line)
+              if match and match[7].split('@', 1)[0] == name:
+                  rows.append({'table': table, 'value': int(match[1], 16), 'size': int(match[2]), 'type': match[3], 'bind': match[4], 'visibility': match[5], 'section': match[6]})
+          if sum(row['table'] == '.symtab' for row in rows) != 1:
+              raise SystemExit('missing or ambiguous module clock-slot definition')
+          for row in rows:
+              if row['type'] != 'OBJECT' or row['size'] != 8 or not row['section'].isdigit() or row['value'] == 0 or not (row['bind'] == 'LOCAL' or row['visibility'] == 'HIDDEN'):
+                  raise SystemExit('module clock slot may bind to an external/global definition')
+          if len({row['value'] for row in rows}) != 1 or name in relocations:
+              raise SystemExit('unresolved, named or preemptible clock-slot relocation')
+          if hashlib.sha256(module.read_bytes()).hexdigest() != digest:
+              raise SystemExit('module changed during binding inspection')
+          proof = {'module': str(module), 'module_sha256': digest, 'readelf': str(pathlib.Path(readelf).resolve()), 'readelf_sha256': hashlib.sha256(pathlib.Path(readelf).resolve().read_bytes()).hexdigest(), 'readelf_version': version, 'clock_slot': name, 'definitions': rows, 'named_clock_relocations': 0, 'proof': 'Defined LOCAL or HIDDEN module OBJECT pointer; no named clock relocation. Reject unknown/preemptible binding before module load.'}
+          (root / 'clock-slot-proof.json').write_text(json.dumps(proof, indent=2) + '\n')
+          PY
       - name: Discover native positive cases
         run: |
           cargo test --test integration --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 auth_async:: -- --list | tee "$RUNNER_TEMP/auth-rc3-positive/discovery.txt"
@@ -149,6 +192,9 @@ jobs:
           if observations['warmup_auths'] != 20:
               raise SystemExit('missing warmup provenance')
           environment = json.loads((root / 'observation-environment.json').read_text())
+          binding = json.loads((root / 'clock-slot-proof.json').read_text())
+          if binding['module_sha256'] != environment['module_sha256']:
+              raise SystemExit('loaded module differs from pre-load clock-slot proof')
           identities = list((root / 'runtime').glob('*.txt'))
           module_count = 0
           for path in identities:
