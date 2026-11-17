@@ -9,6 +9,8 @@ use anyhow::Result;
 use redis::{RedisError, RedisResult, Value, VerbatimFormat};
 use redis_module::RedisValue;
 
+#[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+mod auth_async;
 mod auth_callbacks;
 mod auth_users;
 mod configuration_ownership;

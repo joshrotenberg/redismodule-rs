@@ -64,6 +64,11 @@ name = "auth_callbacks"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "auth_async"
+crate-type = ["cdylib"]
+required-features = ["experimental-auth-redis-8-12-rc3"]
+
+[[example]]
 name = "auth_callbacks_order"
 crate-type = ["cdylib"]
 
@@ -325,6 +330,7 @@ serde = { version = "1", features = ["derive"] }
 cfg-if = "1"
 redis-module-macros-internals = { path = "./redismodule-rs-macros-internals", version = "3.0.0" }
 log = "0.4"
+sha2 = { version = "0.10.9", optional = true }
 common = { path = "./common", package = "redis-module-common", version = "0.1.2" }
 
 [[test]]
@@ -346,6 +352,10 @@ cc = "1"
 
 [features]
 default = ["min-redis-compatibility-version-6-0"]
+
+# Explicit experiment. Verified native source/build and command preparation are
+# also required at runtime; the feature alone never authorizes an auth block.
+experimental-auth-redis-8-12-rc3 = ["dep:sha2"]
 
 # xor having minimum compatibility version
 min-redis-compatibility-version-8-0 = ["redis-module/min-redis-compatibility-version-8-0", "redis-7-2-examples"]
