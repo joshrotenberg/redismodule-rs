@@ -1,6 +1,7 @@
 use super::*;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 
+static CLOCK: AtomicU64 = AtomicU64::new(1000);
 static UNBLOCKS: AtomicUsize = AtomicUsize::new(0);
 static STOPS: AtomicUsize = AtomicUsize::new(0);
 static IN_SUBMIT: AtomicBool = AtomicBool::new(false);
@@ -28,6 +29,7 @@ fn setup() -> MutexGuard<'static, ()> {
     assert!(!state.has_auth_ownership());
     state.phase = users::Phase::Active;
     state.owner = Some(Arc::new(()));
+    CLOCK.store(1000, Ordering::Relaxed);
     UNBLOCKS.store(0, Ordering::Relaxed);
     STOPS.store(0, Ordering::Relaxed);
     OUTSIDE_DROPS.store(0, Ordering::Relaxed);
@@ -65,7 +67,7 @@ fn finish() {
     state.owner = None;
 }
 unsafe extern "C" fn clock() -> u64 {
-    1000
+    CLOCK.load(Ordering::Relaxed)
 }
 unsafe extern "C" fn predicate(_: *mut raw::RedisModuleCtx) -> i32 {
     0
@@ -296,6 +298,7 @@ fn free_before_submit_return_retains_producer_and_late_outcome() {
     record_block_result(&job, 1, true);
     let completion = AuthCompletion {
         job: Some(job.clone()),
+        unshared: std::marker::PhantomData,
     };
     let selected = target(drops.clone());
     HOLD_SUBMIT.store(true, Ordering::Release);
@@ -572,5 +575,151 @@ fn resume_role_refuses_nested_native_and_loading_scopes() {
     }
     FLAGS.store(0, Ordering::Relaxed);
     drop(callback);
+    finish();
+}
+
+#[test]
+fn expired_arbitration_and_final_attachment_edge_deny_and_retain_capture() {
+    let _serial = setup();
+    let drops = Arc::new(AtomicUsize::new(0));
+    let job = job(None, 0);
+    record_block_result(&job, 1, true);
+    CLOCK.store(job.deadline, Ordering::Relaxed);
+    choose(&job, Outcome::Accept(target(drops.clone())));
+    assert!(matches!(job.inner().outcome, Some(Outcome::Deny(_))));
+    assert_eq!(drops.load(Ordering::Relaxed), 0);
+    assert_eq!(UNBLOCKS.load(Ordering::Relaxed), 1);
+    drop(job);
+    reap();
+    assert_eq!(drops.load(Ordering::Relaxed), 1);
+    CLOCK.store(1000, Ordering::Relaxed);
+    let mut callback = users::PendingCallback::new(Some(Box::new({
+        let probe = Probe(drops.clone());
+        move |_| drop(probe)
+    })));
+    callback.ordinary_async = true;
+    let native_calls = std::cell::Cell::new(0);
+    // Run real registry admission and allocation. Expiry arrives only after
+    // the pending subscription exists, immediately before the shared FFI edge.
+    users::attach_identity(
+        users::ClientId(7),
+        callback,
+        false,
+        users::AttachmentOrigin::NativeAuth,
+        |_, _, _| {
+            assert!(
+                users::registry()
+                    .subscriptions
+                    .values()
+                    .any(|s| s.pending_client == Some(users::ClientId(7)))
+            );
+            CLOCK.store(10000, Ordering::Relaxed);
+            super::super::before_auth_attach(
+                || unsafe { clock() } < 10000,
+                || {
+                    native_calls.set(native_calls.get() + 1);
+                    raw::REDISMODULE_OK as i32
+                },
+            )
+        },
+    )
+    .expect_err("expired during attachment preparation");
+    assert_eq!(native_calls.get(), 0);
+    assert_eq!(drops.load(Ordering::Relaxed), 1);
+    reap();
+    assert_eq!(drops.load(Ordering::Relaxed), 2);
+    finish();
+}
+
+#[test]
+fn successful_unload_releases_empty_async_queue_capacity() {
+    let _serial = setup();
+    retire(42u8);
+    reap();
+    assert!(registry().cleanup.capacity() > 0);
+    unloaded();
+    assert_eq!(registry().cleanup.capacity(), 0);
+    finish();
+}
+
+static CLOCK_CALLS: AtomicUsize = AtomicUsize::new(0);
+static EXPIRE_AT: AtomicUsize = AtomicUsize::new(usize::MAX);
+static BLOCKS: AtomicUsize = AtomicUsize::new(0);
+unsafe extern "C" fn advancing_clock() -> u64 {
+    if CLOCK_CALLS.fetch_add(1, Ordering::Relaxed) >= EXPIRE_AT.load(Ordering::Relaxed) {
+        2000
+    } else {
+        1000
+    }
+}
+unsafe extern "C" fn committed_block(
+    _: *mut raw::RedisModuleCtx,
+    _: raw::RedisModuleAuthCallback,
+    _: Option<unsafe extern "C" fn(*mut raw::RedisModuleCtx, *mut c_void)>,
+) -> *mut raw::RedisModuleBlockedClient {
+    BLOCKS.fetch_add(1, Ordering::Relaxed);
+    INFO_MODE.store(1, Ordering::Relaxed);
+    std::ptr::dangling_mut()
+}
+unsafe extern "C" fn retain_private(_: *mut raw::RedisModuleBlockedClient, private: *mut c_void) {
+    TIMER_PRIVATE.store(private as usize, Ordering::Relaxed);
+}
+#[test]
+fn actual_begin_expires_before_block_and_before_starter() {
+    let _serial = setup();
+    let owner = users::registry().owner.clone().unwrap();
+    let invocation = Invocation {
+        ctx: std::ptr::dangling_mut(),
+        client: users::ClientId(7),
+    };
+    let boundary = super::super::BoundaryLease::begin();
+    let operation = users::NativeOperation::begin();
+    let starts = Arc::new(AtomicUsize::new(0));
+    let drops = Arc::new(AtomicUsize::new(0));
+    for expiry_call in [1, 2, 3, 4] {
+        BLOCKS.store(0, Ordering::Relaxed);
+        UNBLOCKS.store(0, Ordering::Relaxed);
+        CLOCK_CALLS.store(0, Ordering::Relaxed);
+        EXPIRE_AT.store(expiry_call, Ordering::Relaxed);
+        INFO_MODE.store(0, Ordering::Relaxed);
+        FLAGS.store(0, Ordering::Relaxed);
+        let mut selected = api();
+        selected.clock = advancing_clock;
+        selected.flags = flags;
+        selected.block = committed_block;
+        selected.set_private = retain_private;
+        let probe = Probe(drops.clone());
+        let invoked = starts.clone();
+        let deferred = DeferredAuth::new(Duration::from_millis(1), move |_| {
+            invoked.fetch_add(1, Ordering::Relaxed);
+            drop(probe);
+        });
+        let status = unsafe {
+            begin_with(
+                &invocation,
+                deferred,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                Some(advancing_clock),
+                || Ok((selected, owner.clone(), 1)),
+            )
+        };
+        assert_eq!(status, raw::REDISMODULE_AUTH_HANDLED as i32);
+        assert_eq!(starts.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            BLOCKS.load(Ordering::Relaxed),
+            usize::from(expiry_call >= 3)
+        );
+        assert_eq!(
+            UNBLOCKS.load(Ordering::Relaxed),
+            usize::from(expiry_call >= 3)
+        );
+        assert_eq!(drops.load(Ordering::Relaxed), expiry_call - 1);
+        reap();
+        assert_eq!(drops.load(Ordering::Relaxed), expiry_call);
+    }
+    drop(operation);
+    drop(boundary);
+    INFO_MODE.store(0, Ordering::Relaxed);
     finish();
 }

@@ -2,6 +2,8 @@ name: Experimental auth native positive checks
 
 on:
   pull_request:
+  push:
+    branches: [master]
 
 permissions:
   contents: read
@@ -17,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
-      SOURCE_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      SOURCE_PR_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
     outputs:
       artifact_id: ${{ steps.witnesses.outputs['artifact-id'] }}
       artifact_digest: ${{ steps.witnesses.outputs['artifact-digest'] }}
@@ -25,7 +27,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Reproduce the accepted native artifact
         run: python3 .github/scripts/auth-rc3-build.py "$RUNNER_TEMP/auth-rc3-builds"
@@ -45,7 +47,7 @@ jobs:
         id: witnesses
         uses: actions/upload-artifact@v4
         with:
-          name: auth-rc3-builds-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          name: auth-rc3-builds-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/auth-rc3-builds/*.stdout
             ${{ runner.temp }}/auth-rc3-builds/*.stderr
@@ -55,7 +57,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   positive:
-    name: Pinned RC3 native auth lifecycle
+    name: Pinned RC3 native auth lifecycle (floor ${{ matrix.floor }})
+    strategy:
+      fail-fast: false
+      matrix:
+        floor: ["6-0", "7-2"]
     needs: builds
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -66,7 +72,7 @@ jobs:
       - name: Checkout exact candidate
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Install repository toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -77,10 +83,10 @@ jobs:
           SDK_ASYNC_ARTIFACT_DIGEST: ${{ needs.builds.outputs.artifact_digest }}
         run: python3 .github/scripts/auth-rc3-fixture.py "$RUNNER_TEMP/auth-rc3-positive"
       - name: Build experimental fixture
-        run: cargo build --example auth_async --features experimental-auth-redis-8-12-rc3
+        run: cargo build --example auth_async --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3
       - name: Discover native positive cases
         run: |
-          cargo test --test integration --features experimental-auth-redis-8-12-rc3 auth_async:: -- --list | tee "$RUNNER_TEMP/auth-rc3-positive/discovery.txt"
+          cargo test --test integration --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 auth_async:: -- --list | tee "$RUNNER_TEMP/auth-rc3-positive/discovery.txt"
           for test_name in \
             auth_async::test_async_auth_positive_success_denial_stale_and_ordinary_cleanup \
             auth_async::test_async_auth_positive_timeout_and_late_completion_are_once_only \
@@ -90,10 +96,10 @@ jobs:
           done
       - name: Verify unprepared refusal and explicit preparation
         run: |
-          cargo test --test integration --features experimental-auth-redis-8-12-rc3 auth_async:: -- --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/auth-rc3-positive/refusal.log"
+          cargo test --test integration --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 auth_async:: -- --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/auth-rc3-positive/refusal.log"
       - name: Execute all native positive cases
         run: |
-          cargo test --test integration --features experimental-auth-redis-8-12-rc3 auth_async::test_async_auth_positive -- --ignored --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/auth-rc3-positive/positive.log"
+          cargo test --test integration --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 auth_async::test_async_auth_positive -- --ignored --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/auth-rc3-positive/positive.log"
       - name: Require all positive cases to execute
         run: |
           python3 - <<'PY'
@@ -108,7 +114,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: auth-rc3-positive-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          name: auth-rc3-positive-${{ matrix.floor }}-${{ github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/auth-rc3-positive
             target/**/integration-test/**

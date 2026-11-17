@@ -1,7 +1,7 @@
 //! Running-image admission. Filesystem work exists only in explicit preparation.
 use std::ffi::c_void;
 use std::fs::File;
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
 use std::io::Read;
 use std::ptr;
 
@@ -12,9 +12,9 @@ const REFUSED: RedisError =
 
 #[derive(Clone, Copy)]
 pub(super) struct Manifest {
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
     pub length: u64,
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
     pub sha256: [u8; 32],
     pub build_id: &'static [u8],
 }
@@ -134,10 +134,17 @@ unsafe fn metadata_with(api: ReadApi) -> Result<[Vec<u8>; 4], RedisError> {
 impl Receipt {
     // No filesystem operation belongs in this method, including on refusal.
     pub(super) unsafe fn consistent(&self, owner: &std::sync::Arc<()>) -> Result<(), RedisError> {
+        self.consistent_with(owner, || unsafe { metadata() })
+    }
+    fn consistent_with(
+        &self,
+        owner: &std::sync::Arc<()>,
+        read: impl FnOnce() -> Result<[Vec<u8>; 4], RedisError>,
+    ) -> Result<(), RedisError> {
         if self.process != std::process::id() || !std::sync::Arc::ptr_eq(&self.owner, owner) {
             return Err(REFUSED);
         }
-        let data = unsafe { metadata()? };
+        let data = read()?;
         if data[3] != self.manifest.build_id {
             return Err(REFUSED);
         }
@@ -151,9 +158,7 @@ pub(super) unsafe fn prepare(
 ) -> Result<Receipt, RedisError> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        use sha2::{Digest, Sha256};
         use std::os::fd::AsRawFd;
-        use std::os::unix::fs::MetadataExt;
         let data = unsafe { metadata()? };
         let manifest = *APPROVED
             .iter()
@@ -178,57 +183,7 @@ pub(super) unsafe fn prepare(
         }
         use std::os::fd::FromRawFd;
         let mut image = unsafe { File::from_raw_fd(descriptor) };
-        fn stamp(m: &std::fs::Metadata) -> (u64, u64, u64, i64, i64, i64, i64, u64) {
-            (
-                m.dev(),
-                m.ino(),
-                m.len(),
-                m.mtime(),
-                m.mtime_nsec(),
-                m.ctime(),
-                m.ctime_nsec(),
-                m.nlink(),
-            )
-        }
-        let before = image.metadata().map_err(|_| REFUSED)?;
-        if !before.is_file() || before.len() != manifest.length || before.len() > 256 * 1024 * 1024
-        {
-            return Err(REFUSED);
-        }
-        let mut digest = Sha256::new();
-        let mut total = 0u64;
-        let mut header = Vec::new();
-        let mut buffer = [0u8; 64 * 1024];
-        loop {
-            let length = match image.read(&mut buffer) {
-                Ok(n) => n,
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(_) => return Err(REFUSED),
-            };
-            if length == 0 {
-                break;
-            }
-            if header.len() < 64 {
-                header.extend_from_slice(&buffer[..length.min(64 - header.len())]);
-            }
-            total = total.checked_add(length as u64).ok_or(REFUSED)?;
-            if total > manifest.length {
-                return Err(REFUSED);
-            }
-            digest.update(&buffer[..length]);
-        }
-        let after = image.metadata().map_err(|_| REFUSED)?;
-        let current = std::fs::metadata("/proc/self/exe").map_err(|_| REFUSED)?;
-        if total != manifest.length
-            || stamp(&before) != stamp(&after)
-            || stamp(&after) != stamp(&current)
-            || header.len() < 64
-            || &header[..6] != b"\x7fELF\x02\x01"
-            || u16::from_le_bytes([header[18], header[19]]) != 62
-            || <[u8; 32]>::from(digest.finalize()) != manifest.sha256
-        {
-            return Err(REFUSED);
-        }
+        verify_image(&mut RunningImage(&mut image), manifest)?;
         Ok(Receipt {
             generation,
             owner,
@@ -242,6 +197,98 @@ pub(super) unsafe fn prepare(
         let _ = (owner, generation);
         Err(REFUSED)
     }
+}
+
+// Shared by the real running-file reader and fault-injected inert readers.
+// The latter replace only I/O; all length/hash/ELF/stability decisions stay here.
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ImageStamp {
+    regular: bool,
+    fields: (u64, u64, u64, i64, i64, i64, i64, u64),
+}
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
+trait ImageSource: Read {
+    fn stamp(&mut self) -> std::io::Result<ImageStamp>;
+    fn current(&mut self) -> std::io::Result<ImageStamp>;
+}
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+struct RunningImage<'a>(&'a mut File);
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+impl Read for RunningImage<'_> {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(bytes)
+    }
+}
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn stamp(metadata: std::fs::Metadata) -> ImageStamp {
+    use std::os::unix::fs::MetadataExt;
+    ImageStamp {
+        regular: metadata.is_file(),
+        fields: (
+            metadata.dev(),
+            metadata.ino(),
+            metadata.len(),
+            metadata.mtime(),
+            metadata.mtime_nsec(),
+            metadata.ctime(),
+            metadata.ctime_nsec(),
+            metadata.nlink(),
+        ),
+    }
+}
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+impl ImageSource for RunningImage<'_> {
+    fn stamp(&mut self) -> std::io::Result<ImageStamp> {
+        self.0.metadata().map(stamp)
+    }
+    fn current(&mut self) -> std::io::Result<ImageStamp> {
+        std::fs::metadata("/proc/self/exe").map(stamp)
+    }
+}
+#[cfg(any(test, all(target_os = "linux", target_arch = "x86_64")))]
+fn verify_image(image: &mut impl ImageSource, manifest: Manifest) -> Result<(), RedisError> {
+    use sha2::{Digest, Sha256};
+    let before = image.stamp().map_err(|_| REFUSED)?;
+    if !before.regular || before.fields.2 != manifest.length || manifest.length > 256 * 1024 * 1024
+    {
+        return Err(REFUSED);
+    }
+    let mut digest = Sha256::new();
+    let mut total = 0u64;
+    let mut header = Vec::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let length = match image.read(&mut buffer) {
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err(REFUSED),
+        };
+        if length == 0 {
+            break;
+        }
+        if header.len() < 64 {
+            header.extend_from_slice(&buffer[..length.min(64 - header.len())]);
+        }
+        total = total.checked_add(length as u64).ok_or(REFUSED)?;
+        if total > manifest.length {
+            return Err(REFUSED);
+        }
+        digest.update(&buffer[..length]);
+    }
+    let after = image.stamp().map_err(|_| REFUSED)?;
+    let current = image.current().map_err(|_| REFUSED)?;
+    if total != manifest.length
+        || before != after
+        || after != current
+        || header.len() < 64
+        || &header[..6] != b"\x7fELF\x02\x01"
+        || u16::from_le_bytes([header[18], header[19]]) != 62
+        || <[u8; 32]>::from(digest.finalize()) != manifest.sha256
+    {
+        return Err(REFUSED);
+    }
+    Ok(())
 }
 
 pub(super) type ClientInfo = unsafe extern "C" fn(*mut c_void, u64) -> i32;
@@ -389,5 +436,173 @@ mod tests {
             assert_eq!(STRING_FREES.load(Ordering::Relaxed), strings);
             assert!(!BAD_CONTEXT.load(Ordering::Relaxed));
         }
+    }
+    struct ImageFixture {
+        bytes: std::io::Cursor<Vec<u8>>,
+        stamp_calls: usize,
+        mode: usize,
+        interrupted: bool,
+    }
+    impl Read for ImageFixture {
+        fn read(&mut self, target: &mut [u8]) -> std::io::Result<usize> {
+            if self.mode == 1 {
+                return Err(std::io::ErrorKind::Other.into());
+            }
+            if self.mode == 2 && !self.interrupted {
+                self.interrupted = true;
+                return Err(std::io::ErrorKind::Interrupted.into());
+            }
+            // Small successful chunks exercise header accumulation as well.
+            let size = target.len().min(7);
+            self.bytes.read(&mut target[..size])
+        }
+    }
+    impl ImageSource for ImageFixture {
+        fn stamp(&mut self) -> std::io::Result<ImageStamp> {
+            self.stamp_calls += 1;
+            if (self.mode == 3 && self.stamp_calls == 1)
+                || (self.mode == 4 && self.stamp_calls == 2)
+            {
+                return Err(std::io::ErrorKind::PermissionDenied.into());
+            }
+            let mut stamp = ImageStamp {
+                regular: true,
+                fields: (1, 2, 80, 3, 4, 5, 6, 1),
+            };
+            if self.mode == 5 && self.stamp_calls == 2 {
+                stamp.fields.5 += 1;
+            }
+            if self.mode == 6 {
+                stamp.regular = false;
+            }
+            if self.mode == 7 {
+                stamp.fields.2 += 1;
+            }
+            Ok(stamp)
+        }
+        fn current(&mut self) -> std::io::Result<ImageStamp> {
+            if self.mode == 8 {
+                return Err(std::io::ErrorKind::NotFound.into());
+            }
+            let mut stamp = self.stamp()?;
+            if self.mode == 9 {
+                stamp.fields.1 += 1;
+            }
+            Ok(stamp)
+        }
+    }
+    fn elf() -> Vec<u8> {
+        let mut bytes = vec![0; 80];
+        bytes[..6].copy_from_slice(b"\x7fELF\x02\x01");
+        bytes[18] = 62;
+        bytes
+    }
+    fn fixture(bytes: Vec<u8>, mode: usize) -> ImageFixture {
+        ImageFixture {
+            bytes: std::io::Cursor::new(bytes),
+            stamp_calls: 0,
+            mode,
+            interrupted: false,
+        }
+    }
+    #[test]
+    fn image_reader_refuses_io_length_hash_elf_and_object_changes() {
+        use sha2::{Digest, Sha256};
+        let bytes = elf();
+        let manifest = Manifest {
+            length: 80,
+            sha256: Sha256::digest(&bytes).into(),
+            build_id: b"expected-build",
+        };
+        assert!(verify_image(&mut fixture(bytes.clone(), 0), manifest).is_ok());
+        assert!(verify_image(&mut fixture(bytes.clone(), 2), manifest).is_ok());
+        for mode in [1, 3, 4, 5, 6, 7, 8, 9] {
+            assert!(
+                verify_image(&mut fixture(bytes.clone(), mode), manifest).is_err(),
+                "fault {mode}"
+            );
+        }
+        for length in [0, 20, 63, 79, 81] {
+            let mut changed = bytes.clone();
+            changed.resize(length, 0);
+            assert!(
+                verify_image(&mut fixture(changed, 0), manifest).is_err(),
+                "length {length}"
+            );
+        }
+        for offset in [0, 4, 5, 18, 79] {
+            let mut changed = bytes.clone();
+            changed[offset] ^= 1;
+            // Hash matching an invalid ELF still refuses its format/machine.
+            let expected = if offset < 19 {
+                Manifest {
+                    sha256: Sha256::digest(&changed).into(),
+                    ..manifest
+                }
+            } else {
+                manifest
+            };
+            assert!(
+                verify_image(&mut fixture(changed, 0), expected).is_err(),
+                "byte {offset}"
+            );
+        }
+        let excessive = Manifest {
+            length: 256 * 1024 * 1024 + 1,
+            ..manifest
+        };
+        assert!(verify_image(&mut fixture(bytes, 0), excessive).is_err());
+    }
+    #[test]
+    fn receipt_checks_process_load_and_metadata_without_reopening_image() {
+        let owner = std::sync::Arc::new(());
+        let file = File::open(std::env::current_exe().unwrap()).unwrap();
+        let mut receipt = Receipt {
+            generation: 1,
+            owner: owner.clone(),
+            process: std::process::id(),
+            manifest: Manifest {
+                length: 80,
+                sha256: [0; 32],
+                build_id: b"expected-build",
+            },
+            _image: file,
+        };
+        let calls = std::cell::Cell::new(0);
+        let read = || {
+            calls.set(calls.get() + 1);
+            Ok([
+                b"8.11.242".to_vec(),
+                b"a93d7d19".to_vec(),
+                b"0".to_vec(),
+                b"expected-build".to_vec(),
+            ])
+        };
+        assert!(receipt.consistent_with(&owner, read).is_ok());
+        assert_eq!(calls.get(), 1);
+        assert!(
+            receipt
+                .consistent_with(&std::sync::Arc::new(()), read)
+                .is_err()
+        );
+        receipt.process = receipt.process.wrapping_add(1);
+        assert!(receipt.consistent_with(&owner, read).is_err());
+        assert_eq!(
+            calls.get(),
+            1,
+            "owner/PID refusal must precede any native reader"
+        );
+        receipt.process = std::process::id();
+        assert!(receipt.consistent_with(&owner, || Err(REFUSED)).is_err());
+        assert!(
+            receipt
+                .consistent_with(&owner, || Ok([
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    b"other".to_vec()
+                ]))
+                .is_err()
+        );
     }
 }

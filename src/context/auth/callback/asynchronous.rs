@@ -120,8 +120,13 @@ impl Drop for DeferredAuth {
 /// fn cloneable<T: Clone>() {}
 /// cloneable::<redis_module::AuthCompletion>();
 /// ```
+/// ```compile_fail,E0277
+/// fn shareable<T: Sync>() {}
+/// shareable::<redis_module::AuthCompletion>();
+/// ```
 pub struct AuthCompletion {
     job: Option<Arc<Job>>,
+    unshared: std::marker::PhantomData<std::cell::Cell<()>>,
 }
 impl AuthCompletion {
     pub fn accept(mut self, mut target: AuthTarget) {
@@ -322,14 +327,25 @@ pub(in crate::context::auth) fn retire_subscription(
         .push_back(Cleanup::Subscription(client, subscription, notify));
 }
 pub(in crate::context::auth) fn unloaded() {
-    registry().receipt = None;
+    let mut state = registry();
+    debug_assert!(state.jobs.is_empty() && state.cleanup.is_empty());
+    state.receipt = None;
+    // Rust statics are not dropped on dlclose. Empty storage has no user
+    // payload, but its allocation must still be released before unloading.
+    state.cleanup = VecDeque::new();
 }
 
 fn choose(job: &Arc<Job>, outcome: Outcome) {
     let mut outcome = Some(outcome);
+    let mut expired = None;
     let submit = {
         let mut inner = job.inner();
         if !inner.winner && inner.state == NativeState::Blocked {
+            if unsafe { (job.api.clock)() } >= job.deadline {
+                // Move an expired proposed success/fallback into ordinary
+                // retirement. Never destroy an arbitrary target on a worker.
+                expired = outcome.replace(Outcome::Deny(PublicAuthError::default()));
+            }
             inner.winner = true;
             inner.outcome = outcome.take();
             inner.state = NativeState::Queued;
@@ -340,6 +356,9 @@ fn choose(job: &Arc<Job>, outcome: Outcome) {
             None
         }
     };
+    if let Some(expired) = expired {
+        retire(expired);
+    }
     if let Some(outcome) = outcome {
         retire(outcome);
     }
@@ -484,7 +503,9 @@ unsafe extern "C" fn resumed(
                     ctx,
                     client: job.client,
                 };
-                match invocation.attach(target, &committed) {
+                match invocation.attach_before(target, &committed, || unsafe {
+                    (api.clock)() < job.deadline
+                }) {
                     Ok(()) => raw::REDISMODULE_AUTH_HANDLED as i32,
                     Err(_) => unsafe {
                         super::deny(ctx, username, err, PublicAuthError::default())
@@ -564,25 +585,50 @@ unsafe fn initial_role(invocation: &Invocation, api: Api) -> Result<(), RedisErr
 
 pub(super) unsafe fn begin(
     invocation: &Invocation,
-    mut deferred: DeferredAuth,
+    deferred: DeferredAuth,
     username: *mut raw::RedisModuleString,
     err: *mut *mut raw::RedisModuleString,
 ) -> i32 {
+    unsafe {
+        begin_with(
+            invocation,
+            deferred,
+            username,
+            err,
+            raw::RedisModule_MonotonicMicroseconds,
+            || {
+                let api = Api::resolve()?;
+                let owner = users::registry().owner.clone().ok_or(FAILED)?;
+                let receipt = registry().receipt.clone().ok_or(FAILED)?;
+                if receipt.consistent(&owner).is_err() {
+                    let old = { registry().receipt.take() };
+                    if let Some(old) = old {
+                        retire(old);
+                    }
+                    return Err(FAILED);
+                }
+                Ok((api, owner, receipt.generation))
+            },
+        )
+    }
+}
+
+// Test injection replaces only resolved native APIs and the previously checked
+// admission receipt. The production blocking/setup/deadline protocol is shared.
+unsafe fn begin_with(
+    invocation: &Invocation,
+    mut deferred: DeferredAuth,
+    username: *mut raw::RedisModuleString,
+    err: *mut *mut raw::RedisModuleString,
+    clock: Option<unsafe extern "C" fn() -> u64>,
+    admission: impl FnOnce() -> Result<(Api, Arc<()>, u64), RedisError>,
+) -> i32 {
     let committed_job = std::cell::RefCell::new(None::<Arc<Job>>);
     let result = super::catch_auth(|| -> Result<i32, RedisError> {
-        let clock = unsafe { raw::RedisModule_MonotonicMicroseconds }.ok_or(FAILED)?;
+        let clock = clock.ok_or(FAILED)?;
         let now = unsafe { clock() };
         let (expiry, _) = deadline_at(now, deferred.timeout)?;
-        let api = unsafe { Api::resolve()? };
-        let owner = users::registry().owner.clone().ok_or(FAILED)?;
-        let receipt = registry().receipt.clone().ok_or(FAILED)?;
-        if unsafe { receipt.consistent(&owner) }.is_err() {
-            let old = { registry().receipt.take() };
-            if let Some(old) = old {
-                retire(old);
-            }
-            return Err(FAILED);
-        }
+        let (api, owner, receipt_generation) = admission()?;
         let ctx = invocation.ctx;
         unsafe {
             initial_role(invocation, api)?;
@@ -597,7 +643,7 @@ pub(super) unsafe fn begin(
             let job = Arc::new(Job {
                 client: invocation.client,
                 owner,
-                receipt_generation: receipt.generation,
+                receipt_generation,
                 deadline: expiry,
                 cookie: Box::new(Cookie { key }),
                 api,
@@ -659,6 +705,7 @@ pub(super) unsafe fn begin(
             };
             let completion = AuthCompletion {
                 job: Some(job.clone()),
+                unshared: std::marker::PhantomData,
             };
             if let Some(starter) = starter {
                 if let Err(payload) = catch_unwind(AssertUnwindSafe(|| starter(completion))) {

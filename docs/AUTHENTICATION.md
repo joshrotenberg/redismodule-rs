@@ -316,7 +316,7 @@ allocator behavior remain outside that erasure guarantee.
 The starter runs once only after a proven committed native block and receives
 an owned `AuthCompletion`, never a context or native handle. It must return
 promptly and arrange its own computation. `accept`, `deny` and `not_handled`
-consume the token. Dropping it selects denial. Reblocking is not an outcome.
+consume the `Send`, non-`Sync` token. Dropping it selects denial. Reblocking is not an outcome.
 Native AUTH/HELLO serialization and explicit fallback remain Redis-owned.
 Created-user leases and command-installed previous-identity requirements for
 ACL-name handoff remain in effect.
@@ -324,7 +324,8 @@ ACL-name handoff remain in effect.
 Timeouts must be at least one whole millisecond and at most 24 hours. The
 monotonic epoch is when the initial callback returns the deferred decision,
 before admission/setup checks. Earlier handler/preparation work is outside it.
-Expiration is checked before blocking, starter invocation and identity commit;
+Expiration is checked before blocking, starter invocation, winner arbitration
+and the final native identity-attachment call;
 event-loop service can delay delivery. A timeout cannot relabel a committed
 identity. The currently firing native timer is never stopped or freed by the SDK.
 

@@ -134,6 +134,25 @@ fn test_async_auth_runtime_preparation_obeys_explicit_fixture() -> Result<()> {
         assert!(result? > 0, "reviewed positive fixture must prepare");
     } else {
         result.expect_err("unsupported/unapproved fixture must refuse preparation");
+        users(&mut server)?;
+        redis::cmd("auth_async.probe")
+            .arg("counted")
+            .query::<()>(&mut server)?;
+        let mut client = server.connection()?;
+        redis::cmd("AUTH")
+            .arg(("async", "test-password"))
+            .query::<()>(&mut client)
+            .expect_err("failed preparation cannot authorize blocking");
+        assert_eq!(
+            redis::cmd("auth_async.probe")
+                .arg("count")
+                .query::<i64>(&mut server)?,
+            0
+        );
+        redis::cmd("auth_async.probe")
+            .arg("reset")
+            .query::<()>(&mut server)?;
+        drain(&mut server)?;
     }
     assert_eq!(stats(&mut server)?[0], 0);
     unload(&mut server)?;

@@ -224,6 +224,14 @@ impl Invocation {
         Ok(Self { ctx, client })
     }
     fn attach(&self, target: AuthTarget, committed: &Cell<bool>) -> Result<(), RedisError> {
+        self.attach_before(target, committed, || true)
+    }
+    fn attach_before(
+        &self,
+        target: AuthTarget,
+        committed: &Cell<bool>,
+        permitted: impl FnOnce() -> bool,
+    ) -> Result<(), RedisError> {
         let AuthTarget { identity, callback } = target;
         match identity {
             Identity::ModuleUser(handle) => {
@@ -236,7 +244,9 @@ impl Invocation {
                     false,
                     super::AttachmentOrigin::NativeAuth,
                     |changed, private, id| {
-                        let status = unsafe { attach(self.ctx, lease.ptr, changed, private, id) };
+                        let status = before_auth_attach(permitted, || unsafe {
+                            attach(self.ctx, lease.ptr, changed, private, id)
+                        });
                         if status == raw::REDISMODULE_OK as i32 {
                             committed.set(true);
                         }
@@ -253,7 +263,7 @@ impl Invocation {
                     true,
                     super::AttachmentOrigin::NativeAuth,
                     |changed, private, id| {
-                        let status = unsafe {
+                        let status = before_auth_attach(permitted, || unsafe {
                             attach(
                                 self.ctx,
                                 name.as_ptr().cast(),
@@ -262,7 +272,7 @@ impl Invocation {
                                 private,
                                 id,
                             )
-                        };
+                        });
                         if status == raw::REDISMODULE_OK as i32 {
                             committed.set(true);
                         }
@@ -272,6 +282,15 @@ impl Invocation {
             }
         }
         Ok(())
+    }
+}
+// The predicate runs after identity admission, leases and pending-cookie
+// preparation, immediately before either native AuthenticateClient entry.
+fn before_auth_attach(permitted: impl FnOnce() -> bool, native: impl FnOnce() -> i32) -> i32 {
+    if permitted() {
+        native()
+    } else {
+        raw::REDISMODULE_ERR as i32
     }
 }
 unsafe fn connected_client(ctx: *mut raw::RedisModuleCtx) -> Result<ClientId, RedisError> {
