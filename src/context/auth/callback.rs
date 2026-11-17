@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use super::{ClientChangeCallback, ClientId, ModuleUserHandle, NativeOperation, PendingCallback};
 use crate::{RedisError, RegistrationContext, raw};
@@ -139,7 +139,9 @@ impl AuthTarget {
         }
     }
     /// Selects an existing ACL name for a connection with an already installed
-    /// SDK identity. A fresh/untracked connection is denied before native lookup.
+    /// SDK identity installed by an ordinary command. Native-auth history alone
+    /// cannot certify that Redis still owns the callback. Other connections
+    /// are denied before native lookup.
     /// This never creates or attaches an implicit bootstrap identity.
     pub fn acl_user(name: Vec<u8>) -> Self {
         Self {
@@ -222,33 +224,45 @@ impl Invocation {
                 let attach =
                     unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithUser) };
                 let lease = super::UserLease::begin(&handle)?;
-                super::attach_identity(self.client, callback, false, |changed, private, id| {
-                    let status = unsafe { attach(self.ctx, lease.ptr, changed, private, id) };
-                    if status == raw::REDISMODULE_OK as i32 {
-                        committed.set(true);
-                    }
-                    status
-                })?;
+                super::attach_identity(
+                    self.client,
+                    callback,
+                    false,
+                    super::AttachmentOrigin::NativeAuth,
+                    |changed, private, id| {
+                        let status = unsafe { attach(self.ctx, lease.ptr, changed, private, id) };
+                        if status == raw::REDISMODULE_OK as i32 {
+                            committed.set(true);
+                        }
+                        status
+                    },
+                )?;
             }
             Identity::AclUser(name) => {
                 let attach =
                     unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithACLUser) };
-                super::attach_identity(self.client, callback, true, |changed, private, id| {
-                    let status = unsafe {
-                        attach(
-                            self.ctx,
-                            name.as_ptr().cast(),
-                            name.len(),
-                            changed,
-                            private,
-                            id,
-                        )
-                    };
-                    if status == raw::REDISMODULE_OK as i32 {
-                        committed.set(true);
-                    }
-                    status
-                })?;
+                super::attach_identity(
+                    self.client,
+                    callback,
+                    true,
+                    super::AttachmentOrigin::NativeAuth,
+                    |changed, private, id| {
+                        let status = unsafe {
+                            attach(
+                                self.ctx,
+                                name.as_ptr().cast(),
+                                name.len(),
+                                changed,
+                                private,
+                                id,
+                            )
+                        };
+                        if status == raw::REDISMODULE_OK as i32 {
+                            committed.set(true);
+                        }
+                        status
+                    },
+                )?;
             }
         }
         Ok(())
@@ -343,6 +357,141 @@ fn public_error_bytes(message: &str) -> Vec<u8> {
     text
 }
 
+// RM_Call runs foreign command filters before lookup. A filter can attempt
+// nested AUTH, whose refusal must not recursively issue another CONFIG read.
+static AUDIT_READ: AtomicBool = AtomicBool::new(false);
+struct AuditRead;
+impl AuditRead {
+    fn begin() -> Option<Self> {
+        AUDIT_READ
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .ok()?;
+        Some(Self)
+    }
+}
+impl Drop for AuditRead {
+    fn drop(&mut self) {
+        AUDIT_READ.store(false, Ordering::Relaxed);
+    }
+}
+struct AuditReply {
+    ptr: *mut raw::RedisModuleCallReply,
+    free: unsafe extern "C" fn(*mut raw::RedisModuleCallReply),
+}
+impl Drop for AuditReply {
+    fn drop(&mut self) {
+        unsafe { (self.free)(self.ptr) };
+    }
+}
+fn positive_retention(key: &[u8], value: &[u8]) -> bool {
+    key == b"acllog-max-len"
+        && !value.is_empty()
+        && value
+            .iter()
+            .try_fold(0u64, |n, digit| {
+                digit.is_ascii_digit().then_some(())?;
+                n.checked_mul(10)?.checked_add((digit - b'0') as u64)
+            })
+            .is_some_and(|n| n > 0)
+}
+// Field order keeps recursion refusal active while deferred consumers drain.
+struct AuditPermit {
+    _operation: NativeOperation,
+    _read: AuditRead,
+}
+// Only fixed public configuration is read; no credential is copied into a call.
+// Unknown/disabled retention silently skips audit, while authentication denies.
+unsafe fn audit_retention_enabled(ctx: *mut raw::RedisModuleCtx) -> Option<AuditPermit> {
+    let _read = AuditRead::begin()?;
+    // Declared after the read lease: deferred consumers also run under it.
+    let operation = NativeOperation::begin();
+    let (Some(call), Some(free), Some(kind), Some(length), Some(element), Some(string)) = (unsafe {
+        (
+            raw::RedisModule_Call,
+            raw::RedisModule_FreeCallReply,
+            raw::RedisModule_CallReplyType,
+            raw::RedisModule_CallReplyLength,
+            raw::RedisModule_CallReplyArrayElement,
+            raw::RedisModule_CallReplyStringPtr,
+        )
+    }) else {
+        return None;
+    };
+    // Default RESP2, no writes, no propagation or blocking. Native filters still
+    // run. Their error/changed/malformed reply fails the strict parser below.
+    let reply = unsafe {
+        call(
+            ctx,
+            c"CONFIG".as_ptr(),
+            c"ccW".as_ptr(),
+            c"GET".as_ptr(),
+            c"acllog-max-len".as_ptr(),
+        )
+    };
+    let enabled = unsafe {
+        parse_retention_reply(
+            reply,
+            AuditReplyApis {
+                free,
+                kind,
+                length,
+                element,
+                string,
+            },
+        )
+    };
+    enabled.then_some(AuditPermit {
+        _operation: operation,
+        _read,
+    })
+}
+struct AuditReplyApis {
+    free: unsafe extern "C" fn(*mut raw::RedisModuleCallReply),
+    kind: unsafe extern "C" fn(*mut raw::RedisModuleCallReply) -> i32,
+    length: unsafe extern "C" fn(*mut raw::RedisModuleCallReply) -> usize,
+    element: unsafe extern "C" fn(
+        *mut raw::RedisModuleCallReply,
+        usize,
+    ) -> *mut raw::RedisModuleCallReply,
+    string:
+        unsafe extern "C" fn(*mut raw::RedisModuleCallReply, *mut usize) -> *const std::ffi::c_char,
+}
+// Own the root through every child access and free it once on every exit.
+unsafe fn parse_retention_reply(
+    reply: *mut raw::RedisModuleCallReply,
+    apis: AuditReplyApis,
+) -> bool {
+    if reply.is_null() {
+        return false;
+    }
+    let reply = AuditReply {
+        ptr: reply,
+        free: apis.free,
+    };
+    if unsafe { (apis.kind)(reply.ptr) } != raw::REDISMODULE_REPLY_ARRAY as i32
+        || unsafe { (apis.length)(reply.ptr) } != 2
+    {
+        return false;
+    }
+    let owned = |index| -> Option<Vec<u8>> {
+        let child = unsafe { (apis.element)(reply.ptr, index) };
+        if child.is_null() || unsafe { (apis.kind)(child) } != raw::REDISMODULE_REPLY_STRING as i32
+        {
+            return None;
+        }
+        let mut len = 0;
+        let bytes = unsafe { (apis.string)(child, &mut len) };
+        if bytes.is_null() || len > 32 {
+            return None;
+        }
+        Some(unsafe { std::slice::from_raw_parts(bytes.cast::<u8>(), len) }.to_vec())
+    };
+    let (Some(key), Some(value)) = (owned(0), owned(1)) else {
+        return false;
+    };
+    positive_retention(&key, &value)
+}
+
 // All callers have Redis's actual native-auth context and live input strings.
 // Audit is best effort and never changes a handled denial into fallback.
 unsafe fn deny(
@@ -356,9 +505,15 @@ unsafe fn deny(
         free: unsafe { raw::RedisModule_FreeString },
         audit: unsafe { raw::RedisModule_ACLAddLogEntryByUserName },
     };
-    let connected =
-        !ctx.is_null() && !username.is_null() && unsafe { connected_client(ctx) }.is_ok();
-    unsafe { denial_with_apis(ctx, username, err, public, &apis, connected) }
+    // Keep the native/read leases through audit, error transfer and reply
+    // release. No deferred consumer can change retention after verification.
+    let permit =
+        if !ctx.is_null() && !username.is_null() && unsafe { connected_client(ctx) }.is_ok() {
+            unsafe { audit_retention_enabled(ctx) }
+        } else {
+            None
+        };
+    unsafe { denial_with_apis(ctx, username, err, public, &apis, permit.is_some()) }
 }
 
 type CreateString = unsafe extern "C" fn(
@@ -387,11 +542,11 @@ unsafe fn denial_with_apis(
     err: *mut *mut raw::RedisModuleString,
     public: PublicAuthError,
     apis: &DenialApis,
-    connected: bool,
+    audit_allowed: bool,
 ) -> i32 {
     if let Some(create) = apis.create {
         if let (Some(free), Some(audit)) = (apis.free, apis.audit) {
-            if connected {
+            if audit_allowed {
                 let object = unsafe { create(ptr::null_mut(), c"module-auth".as_ptr(), 11) };
                 if !object.is_null() {
                     unsafe {
@@ -529,10 +684,153 @@ mod tests {
         assert!(!super::super::registry().has_auth_ownership());
         // Exercise the real boundary lease and unload ownership predicate,
         // without constructing a native invocation or running Redis code.
+        {
+            let mut registry = super::super::registry();
+            registry.phase = super::super::Phase::Active;
+            registry.owner = Some(std::sync::Arc::new(()));
+        }
+        unsafe extern "C" fn lookup(_: *mut std::ffi::c_void, _: u64) -> i32 {
+            panic!("reconciliation must not reach lookup while auth is in flight");
+        }
         let invocation = BoundaryLease::begin();
         assert!(super::super::registry().has_auth_ownership());
+        assert!(super::super::retire_missing_identity(ClientId(1), Some(lookup)).is_err());
         drop(invocation);
-        assert!(!super::super::registry().has_auth_ownership());
+        assert!(!super::super::retire_missing_identity(ClientId(1), Some(lookup)).unwrap());
+        let mut registry = super::super::registry();
+        assert!(!registry.has_auth_ownership());
+        registry.phase = super::super::Phase::Unloaded;
+        registry.owner = None;
+    }
+
+    #[test]
+    fn denial_audit_requires_positive_retention_and_bounds_read_reentry() {
+        for value in [b"1".as_slice(), b"128", b"0002"] {
+            assert!(positive_retention(b"acllog-max-len", value));
+        }
+        for value in [
+            b"".as_slice(),
+            b"0",
+            b"-1",
+            b"+1",
+            b" 1",
+            b"1x",
+            b"18446744073709551616",
+        ] {
+            assert!(!positive_retention(b"acllog-max-len", value));
+        }
+        assert!(!positive_retention(b"unknown", b"1"));
+        let read = AuditRead::begin().unwrap();
+        assert!(AuditRead::begin().is_none());
+        // A nested AUTH refusal under a foreign filter cannot call Redis or
+        // dereference this inert context while the outer read is in flight.
+        assert!(unsafe { audit_retention_enabled(ptr::null_mut()) }.is_none());
+        drop(read);
+        assert!(AuditRead::begin().is_some());
+    }
+
+    #[test]
+    fn retention_reply_owns_root_on_success_malformed_and_read_error() {
+        enum Reply {
+            Array(Vec<Reply>),
+            Bytes(Vec<u8>),
+            Error,
+        }
+        static FREES: AtomicUsize = AtomicUsize::new(0);
+        unsafe extern "C" fn free(reply: *mut raw::RedisModuleCallReply) {
+            FREES.fetch_add(1, Ordering::Relaxed);
+            unsafe {
+                drop(Box::from_raw(reply.cast::<Reply>()));
+            }
+        }
+        unsafe extern "C" fn kind(reply: *mut raw::RedisModuleCallReply) -> i32 {
+            match unsafe { &*reply.cast::<Reply>() } {
+                Reply::Array(_) => raw::REDISMODULE_REPLY_ARRAY as i32,
+                Reply::Bytes(_) => raw::REDISMODULE_REPLY_STRING as i32,
+                Reply::Error => raw::REDISMODULE_REPLY_ERROR as i32,
+            }
+        }
+        unsafe extern "C" fn length(reply: *mut raw::RedisModuleCallReply) -> usize {
+            match unsafe { &*reply.cast::<Reply>() } {
+                Reply::Array(v) => v.len(),
+                _ => 0,
+            }
+        }
+        unsafe extern "C" fn element(
+            reply: *mut raw::RedisModuleCallReply,
+            index: usize,
+        ) -> *mut raw::RedisModuleCallReply {
+            match unsafe { &mut *reply.cast::<Reply>() } {
+                Reply::Array(v) => v
+                    .get_mut(index)
+                    .map_or(ptr::null_mut(), |child| (child as *mut Reply).cast()),
+                _ => ptr::null_mut(),
+            }
+        }
+        unsafe extern "C" fn string(
+            reply: *mut raw::RedisModuleCallReply,
+            len: *mut usize,
+        ) -> *const std::ffi::c_char {
+            match unsafe { &*reply.cast::<Reply>() } {
+                Reply::Bytes(v) => {
+                    unsafe {
+                        *len = v.len();
+                    }
+                    v.as_ptr().cast()
+                }
+                _ => ptr::null(),
+            }
+        }
+        let apis = || AuditReplyApis {
+            free,
+            kind,
+            length,
+            element,
+            string,
+        };
+        assert!(!unsafe { parse_retention_reply(ptr::null_mut(), apis()) });
+        assert_eq!(FREES.load(Ordering::Relaxed), 0);
+        let cases = [
+            (Reply::Error, false),
+            (Reply::Array(vec![]), false),
+            (
+                Reply::Array(vec![Reply::Bytes(b"acllog-max-len".to_vec()), Reply::Error]),
+                false,
+            ),
+            (
+                Reply::Array(vec![
+                    Reply::Bytes(b"unknown".to_vec()),
+                    Reply::Bytes(b"1".to_vec()),
+                ]),
+                false,
+            ),
+            (
+                Reply::Array(vec![
+                    Reply::Bytes(b"acllog-max-len".to_vec()),
+                    Reply::Bytes(b"0".to_vec()),
+                ]),
+                false,
+            ),
+            (
+                Reply::Array(vec![
+                    Reply::Bytes(b"acllog-max-len".to_vec()),
+                    Reply::Bytes(vec![b'1'; 33]),
+                ]),
+                false,
+            ),
+            (
+                Reply::Array(vec![
+                    Reply::Bytes(b"acllog-max-len".to_vec()),
+                    Reply::Bytes(b"128".to_vec()),
+                ]),
+                true,
+            ),
+        ];
+        for (index, (reply, expected)) in cases.into_iter().enumerate() {
+            let reply = Box::into_raw(Box::new(reply)).cast();
+            assert_eq!(unsafe { parse_retention_reply(reply, apis()) }, expected);
+            assert_eq!(FREES.load(Ordering::Relaxed), index + 1);
+        }
     }
 
     static CREATED: AtomicUsize = AtomicUsize::new(0);
@@ -619,6 +917,17 @@ mod tests {
             free(ptr::null_mut(), error);
         }
         assert_eq!(FREED.load(Ordering::Relaxed), 2);
+        error = ptr::null_mut();
+        // Disabled, unknown or failed retention reads never allocate an audit
+        // object. Public error transfer remains independent of audit eligibility.
+        unsafe {
+            denial_with_apis(ctx, username, &mut error, FAILED, &apis, false);
+        }
+        assert_eq!(CREATED.load(Ordering::Relaxed), 3);
+        assert_eq!(AUDITS.load(Ordering::Relaxed), 1);
+        unsafe {
+            free(ptr::null_mut(), error);
+        }
         apis.create = Some(create_failure);
         error = ptr::null_mut();
         assert_eq!(

@@ -36,7 +36,11 @@ client. These are privileged operations: they do not verify a password.
 Authorize the caller before exposing either operation in a module command.
 Attachment requires a real client present in Redis's client-ID index. Internal
 clients, including Lua's client, are refused before transferring subscriptions.
-The ACL form requires a current, actually installed SDK-owned client identity.
+The ACL form requires a current SDK-owned client identity installed by an
+ordinary admitted command. A native-auth installation alone cannot prove that
+Redis still owns its callback: a suspended foreign notifier can overwrite that
+callback while leaving a historical SDK record. Such records never authorize
+a borrowed ACL account attachment.
 An untracked connection, foreign native callback or pending registration is
 refused before native account lookup or identity change. The caller may first
 explicitly attach a chosen created user with `authenticate_client_with_user`,
@@ -46,8 +50,10 @@ a foreign callback could otherwise delete an incoming borrowed ACL account
 before native attachment finishes. Per-client pending admission also refuses
 nested attachment from a lawful raw prior callback, including attempts with a
 different created user. Pending registrations never count as installed.
-A lawful native overwrite consumes the old
-SDK installation, so that connection must establish ownership again.
+A delivered native overwrite consumes the old SDK installation, so that
+connection must establish command-side ownership again. Every native-auth
+installation is conservatively classified as historical for ACL admission,
+including after a successful ACL handoff.
 
 The ACL form then resolves the name at attachment time and rejects missing or
 disabled accounts. It never retains a lookup-derived native user handle. A native
@@ -99,10 +105,16 @@ Creation and single-directive updates need a real runtime lock; their native
 paths do not close clients or invoke user-change callbacks.
 
 `Context::deauthenticate_and_close_client` additionally requires the target's
-actually installed current-load SDK subscription. Missing, foreign, stale,
-pending or already-closing ownership is refused without changing its identity.
+current-load SDK subscription. Missing, foreign, pending or already-closing
+ownership is refused without changing its identity. When a retained installation
+has a conclusively absent native client ID, an admitted command instead
+reconciles its notification and releases its cookie. An indexed client or an
+unknown lookup result never permits this retirement.
 Closing admission lasts through native return, including native failure.
-A client ID alone does not grant revocation of an arbitrary connection.
+A client ID alone does not grant revocation of an arbitrary connection. A
+retained historical installation grants administrative close authority for
+that connection even if a foreign module later replaced its native identity.
+It does not certify the connection's current identity or callback owner.
 
 These checks cover legal raw callbacks inside SDK-guarded calls and Yield.
 Unsafe raw FFI that bypasses those scopes or forges invocation provenance does
@@ -113,8 +125,15 @@ Unload refuses new auth work before user deinitialization. A refused deinit
 restores the active lifecycle. An unload with any created user, live or pending
 subscription, deferred consumer, executing cleanup or in-flight auth ownership
 is refused before deinit. Drain explicitly from an admitted command: revoke
-owned client IDs, then remove created handles. Retry unload after pending
-notifications have completed. No native user free runs from a Rust destructor.
+all identities with `Context::drain_client_identities`, then remove created
+handles. The drain enumerates the SDK registry, including installations without
+consumer callbacks and installations whose created user was already removed.
+Keep user handles until removal succeeds. If a foreign notifier erased an SDK
+callback, its cookie and capture remain retained while the native ID is indexed.
+Native closure can finish after drain returns a pending error; run drain again
+from a later ordinary command. Once disappearance is verified, this reconciliation
+delivers cleanup once outside registry locks. It does not promise delivery at
+the time of the lost native notification. Retry unload after cleanup completes. No native user free runs from a Rust destructor.
 Dropping the last handle while a user is still registered loses the caller's
 removal capability and keeps unload refused, so retain handles until removal.
 The example's `auth_users.drain` command demonstrates explicit cleanup.
@@ -201,7 +220,7 @@ command provenance rules. Unsafe native calls must obey their native contracts.
 `Accept` requests a target; successful native attachment establishes success.
 A removed, disabled or foreign handle, missing ACL account or other attachment
 failure produces a fixed handled denial. `AuthTarget::acl_user` retains the
-installed-SDK-identity precondition described above. It cannot authenticate a
+command-installed identity precondition described above. It cannot authenticate a
 fresh untracked client through trusted ACL-name mapping. Use a created target
 or deliberate Redis ACL password fallback for that connection. Optional
 `AuthTarget::on_changed` cleanup follows `ClientChangeCallback` ownership and
@@ -222,7 +241,13 @@ explicit static public text; CR, LF and NUL become spaces, and the error code
 remains WRONGPASS. Custom errors transfer one manual native string reference to
 Redis, which frees it after writing AUTH/HELLO's response. A handled denial adds
 one ACL auth-log attempt using the supplied username and fixed `module-auth`
-object. Passwords, provider errors, ACL text and panic payloads are never added
+object only after a private fixed `CONFIG GET acllog-max-len` read positively
+verifies retention. The read uses RESP2 and the no-writes call flag, owns its
+reply through strict parsing, and contains no credentials. Native command filters
+can intercept it; a read lease bounds nested AUTH refusal without another read.
+Zero retention, an unavailable API, a read error or an unknown reply skips audit
+silently while authentication remains denied. This avoids native implementations
+that duplicate the audit object before returning early with retention disabled. Passwords, provider errors, ACL text and panic payloads are never added
 to SDK errors, audit objects or logs. `NotHandled` adds no module-denial audit;
 the eventual handler owns its result. Native ACL log aggregation and retention
 settings still apply.

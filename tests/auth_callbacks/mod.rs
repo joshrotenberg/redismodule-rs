@@ -172,6 +172,13 @@ fn test_auth_callbacks_acl_target_needs_installed_sdk_identity() -> Result<()> {
     auth(&mut client, b"acl", b"stub-password").expect_err("no implicit bootstrap");
     assert_eq!(identity(&mut client)?, "default");
     auth(&mut client, b"stub", b"stub-password")?;
+    auth(&mut client, b"acl", b"stub-password")
+        .expect_err("native-auth history cannot prove the callback slot");
+    redis::cmd("auth_callbacks.command_identity")
+        .arg("acl")
+        .query::<()>(&mut client)
+        .expect_err("public ACL helper also rejects native-auth history");
+    redis::cmd("auth_callbacks.command_identity").query::<()>(&mut client)?;
     auth(&mut client, b"acl", b"stub-password")?;
     assert_eq!(identity(&mut client)?, "existing");
     redis::cmd("ACL")
@@ -179,7 +186,7 @@ fn test_auth_callbacks_acl_target_needs_installed_sdk_identity() -> Result<()> {
         .query::<()>(&mut server)?;
     auth(&mut client, b"acl", b"stub-password").expect_err("disabled ACL target");
     assert_eq!(identity(&mut client)?, "existing");
-    assert_eq!(&stats(&mut server)?[1..], &[1, 3, 1]);
+    assert_eq!(&stats(&mut server)?[1..], &[1, 4, 1]);
     drain(&mut server)?;
     redis::cmd("PING")
         .query::<String>(&mut client)
@@ -270,6 +277,63 @@ fn test_auth_callbacks_drain_unload_reauth_and_disconnect() -> Result<()> {
 }
 
 #[test]
+fn test_auth_callbacks_omitted_notification_reconciles_after_disappearance() -> Result<()> {
+    for no_consumer in [false, true] {
+        let mut server = TestConnection::new("auth_callbacks");
+        prepare(&mut server)?;
+        let mut client = server.connection()?;
+        let id: u64 = redis::cmd("CLIENT").arg("ID").query(&mut client)?;
+        redis::cmd("auth_callbacks.probe")
+            .arg("omit-callback")
+            .query::<()>(&mut server)?;
+        auth(
+            &mut client,
+            if no_consumer { b"no-notify" } else { b"stub" },
+            b"stub-password",
+        )?;
+        redis::cmd("auth_callbacks.probe")
+            .arg("reset")
+            .query::<()>(&mut server)?;
+        unload(&mut server, "auth_callbacks").expect_err("retained native installation");
+        if no_consumer {
+            redis::cmd("auth_callbacks.remove_active").query::<()>(&mut server)?;
+        } else {
+            // Native close is ordinary and safe. Its missing notification must
+            // leave the indexed cookie retained through this command's return.
+            let error = redis::cmd("auth_callbacks.drain")
+                .query::<()>(&mut server)
+                .unwrap_err();
+            assert!(error.to_string().contains("cleanup is still pending"));
+            assert_eq!(&stats(&mut server)?[1..], &[0, 0, 1]);
+        }
+        drop(client);
+        utils::wait_until(
+            Duration::from_secs(2),
+            "omitted callback client disappearance",
+            || {
+                let clients: String = redis::cmd("CLIENT")
+                    .arg("LIST")
+                    .arg("ID")
+                    .arg(id)
+                    .query(&mut server)?;
+                Ok(clients.is_empty())
+            },
+        )?;
+        drain(&mut server)?;
+        let expected = if no_consumer {
+            vec![0, 0, 0]
+        } else {
+            vec![1, 1, 0]
+        };
+        assert_eq!(&stats(&mut server)?[1..], expected);
+        drain(&mut server)?;
+        assert_eq!(&stats(&mut server)?[1..], expected);
+        unload(&mut server, "auth_callbacks")?;
+    }
+    Ok(())
+}
+
+#[test]
 fn test_auth_callbacks_denial_audit_panic_and_public_messages() -> Result<()> {
     let mut server = TestConnection::with_args("auth_callbacks", &["quiet-hook"]);
     prepare(&mut server)?;
@@ -310,6 +374,58 @@ fn test_auth_callbacks_denial_audit_panic_and_public_messages() -> Result<()> {
     assert!(log.contains("module authentication callback panicked"));
     assert!(!log.contains("private-provider-panic-sentinel"));
     drain(&mut server)?;
+    Ok(())
+}
+
+#[test]
+fn test_auth_callbacks_zero_retention_skips_native_audit() -> Result<()> {
+    let mut server = TestConnection::new("auth_callbacks");
+    let mut client = server.connection()?;
+    redis::cmd("auth_callbacks.probe")
+        .arg("audit-start")
+        .query::<()>(&mut server)?;
+    redis::cmd("CONFIG")
+        .arg(("SET", "acllog-max-len", "0"))
+        .query::<()>(&mut server)?;
+    for user in [b"deny".as_slice(), b"public"] {
+        auth(&mut client, user, b"private-denial").expect_err("denial survives disabled audit");
+    }
+    assert_eq!(
+        redis::cmd("auth_callbacks.probe")
+            .arg("audit-count")
+            .query::<i64>(&mut server)?,
+        0
+    );
+    redis::cmd("CONFIG")
+        .arg(("SET", "acllog-max-len", "128"))
+        .query::<()>(&mut server)?;
+    for mode in ["query-missing", "query-error"] {
+        redis::cmd("auth_callbacks.probe")
+            .arg(mode)
+            .query::<()>(&mut server)?;
+        auth(&mut client, b"public", b"private-denial")
+            .expect_err("denial survives unavailable audit read");
+        redis::cmd("auth_callbacks.probe")
+            .arg("query-reset")
+            .query::<()>(&mut server)?;
+        assert_eq!(
+            redis::cmd("auth_callbacks.probe")
+                .arg("audit-count")
+                .query::<i64>(&mut server)?,
+            0
+        );
+    }
+    auth(&mut client, b"deny", b"private-denial").expect_err("handled denial");
+    assert_eq!(
+        redis::cmd("auth_callbacks.probe")
+            .arg("audit-count")
+            .query::<i64>(&mut server)?,
+        1
+    );
+    redis::cmd("auth_callbacks.probe")
+        .arg("audit-reset")
+        .query::<()>(&mut server)?;
+    unload(&mut server, "auth_callbacks")?;
     Ok(())
 }
 

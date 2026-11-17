@@ -13,9 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function field (#216). Borrowed binary credentials and a restricted
   `AuthContext` return Accept, Deny or explicit NotHandled; Redis owns AUTH/HELLO
   replies. Attachment errors and panics deny without logging payloads. Added
-  fixed denial auditing, explicit public errors and a post-load setup/drain
+  retention-checked denial auditing, explicit public errors and a post-load setup/drain
   example. Hook registration requires runtime Redis 7.2 APIs without changing
-  the default compile-time floor. Asynchronous completion remains separate.
+  the default compile-time floor. ACL handoff requires a command-installed
+  identity; historical native-auth rows do not prove callback ownership.
+  `Context::drain_client_identities` reaches every retained installation and
+  reconciles lost notifications only after verified native ID disappearance.
+  Asynchronous completion remains separate.
 
 - Module-owned users with opaque per-load generation handles, explicit locked
   removal, transactional ACL updates and client identity attachment (#216).

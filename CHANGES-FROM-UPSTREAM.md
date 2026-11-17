@@ -20,11 +20,17 @@ response ownership and fallback. The private native-auth admission checks the
 active load, main thread, indexed client and loading/nested state without
 exposing ordinary context capabilities or weakening command mutation guards.
 Targets preserve created-user leases, pending-client admission and the existing
-installed-SDK-identity requirement for ACL handoff. Panics and attachment errors
-deny with fixed diagnostics; a handled denial adds a secret-free ACL audit
-object. Custom public errors are explicit and transfer manual native string
+command-installed identity requirement for ACL handoff. Historical native-auth
+records cannot prove live callback ownership. Panics and attachment errors deny
+with fixed diagnostics; denial audit uses a secret-free object only after a
+private fixed configuration read verifies positive retention. Unknown or disabled
+retention skips the native audit call. Custom public errors are explicit and transfer manual native string
 ownership to Redis. Explicit command-side preparation/drain and empty-registry
-unload remain required. See [authentication](docs/AUTHENTICATION.md).
+unload remain required. `drain_client_identities` reaches all retained records,
+including no-consumer and removed-user installations, and reconciles lost
+notifications only after native ID disappearance is verified. Indexed records
+remain retained through close and a later drain attempt. See
+[authentication](docs/AUTHENTICATION.md).
 
 ## Module users and client identity attachment
 

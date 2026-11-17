@@ -42,8 +42,88 @@ unsafe extern "C" fn refused_attach(
     NATIVE_CALLS.fetch_add(1, Ordering::Relaxed);
     redis_module::raw::REDISMODULE_ERR as i32
 }
+// Safe fixture: perform ordinary native attachment without installing the SDK
+// callback. This models lost delivery without suspending a native notifier.
+unsafe extern "C" fn omitted_callback_attach(
+    ctx: *mut redis_module::raw::RedisModuleCtx,
+    user: *mut redis_module::raw::RedisModuleUser,
+    _: redis_module::raw::RedisModuleUserChangedFunc,
+    _: *mut std::ffi::c_void,
+    id: *mut u64,
+) -> i32 {
+    let attach = NATIVE_APIS.lock().unwrap().as_ref().unwrap().1.unwrap();
+    NATIVE_CALLS.fetch_add(1, Ordering::Relaxed);
+    unsafe { attach(ctx, user, None, std::ptr::null_mut(), id) }
+}
+type AuditFn = unsafe extern "C" fn(
+    *mut redis_module::raw::RedisModuleCtx,
+    *mut redis_module::raw::RedisModuleString,
+    *mut redis_module::raw::RedisModuleString,
+    redis_module::raw::RedisModuleACLLogEntryReason,
+);
+static AUDIT_API: Mutex<Option<AuditFn>> = Mutex::new(None);
+static AUDIT_CALLS: AtomicI64 = AtomicI64::new(0);
+unsafe extern "C" fn counted_audit(
+    ctx: *mut redis_module::raw::RedisModuleCtx,
+    username: *mut redis_module::raw::RedisModuleString,
+    object: *mut redis_module::raw::RedisModuleString,
+    reason: redis_module::raw::RedisModuleACLLogEntryReason,
+) {
+    AUDIT_CALLS.fetch_add(1, Ordering::Relaxed);
+    let audit = AUDIT_API.lock().unwrap().unwrap();
+    unsafe { audit(ctx, username, object, reason) }
+}
+type ReplyKind = unsafe extern "C" fn(*mut redis_module::raw::RedisModuleCallReply) -> i32;
+static QUERY_KIND: Mutex<Option<Option<ReplyKind>>> = Mutex::new(None);
+unsafe extern "C" fn query_error(_: *mut redis_module::raw::RedisModuleCallReply) -> i32 {
+    redis_module::raw::REDISMODULE_REPLY_ERROR as i32
+}
 fn probe(_: &Context, args: Vec<RedisString>) -> RedisResult {
     let mode = args.get(1).ok_or(RedisError::WrongArity)?.try_as_str()?;
+    if mode == "query-reset" {
+        if let Some(kind) = QUERY_KIND.lock().unwrap().take() {
+            unsafe {
+                redis_module::raw::RedisModule_CallReplyType = kind;
+            }
+        }
+        return Ok("OK".into());
+    }
+    if mode == "query-missing" || mode == "query-error" {
+        let mut kind = QUERY_KIND.lock().unwrap();
+        if kind.is_none() {
+            *kind = Some(unsafe { redis_module::raw::RedisModule_CallReplyType });
+        }
+        unsafe {
+            redis_module::raw::RedisModule_CallReplyType = if mode == "query-error" {
+                Some(query_error)
+            } else {
+                None
+            };
+        }
+        return Ok("OK".into());
+    }
+    if mode == "audit-count" {
+        return Ok(AUDIT_CALLS.load(Ordering::Relaxed).into());
+    }
+    if mode == "audit-start" {
+        let mut api = AUDIT_API.lock().unwrap();
+        if api.is_none() {
+            *api = unsafe { redis_module::raw::RedisModule_ACLAddLogEntryByUserName };
+        }
+        AUDIT_CALLS.store(0, Ordering::Relaxed);
+        unsafe {
+            redis_module::raw::RedisModule_ACLAddLogEntryByUserName = Some(counted_audit);
+        }
+        return Ok("OK".into());
+    }
+    if mode == "audit-reset" {
+        if let Some(api) = AUDIT_API.lock().unwrap().take() {
+            unsafe {
+                redis_module::raw::RedisModule_ACLAddLogEntryByUserName = Some(api);
+            }
+        }
+        return Ok("OK".into());
+    }
     if mode == "count" {
         return Ok(NATIVE_CALLS.load(Ordering::Relaxed).into());
     }
@@ -59,7 +139,7 @@ fn probe(_: &Context, args: Vec<RedisString>) -> RedisResult {
     let flags = match mode {
         "loading" => redis_module::raw::REDISMODULE_CTX_FLAGS_LOADING as i64,
         "async" => redis_module::raw::REDISMODULE_CTX_FLAGS_ASYNC_LOADING as i64,
-        "missing" | "normal" => 0,
+        "missing" | "normal" | "omit-callback" => 0,
         _ => return Err(RedisError::Str("ERR unknown probe")),
     };
     let mut saved = NATIVE_APIS.lock().unwrap();
@@ -73,14 +153,19 @@ fn probe(_: &Context, args: Vec<RedisString>) -> RedisResult {
     }
     PROBE_FLAGS.store(flags, Ordering::Relaxed);
     NATIVE_CALLS.store(0, Ordering::Relaxed);
-    // Inert admission probe only: no hazardous native mutation is executed.
+    // Admission probes refuse attachment; omit-callback uses normal native
+    // attachment and suppresses only its notification installation.
     unsafe {
         redis_module::raw::RedisModule_GetContextFlags = if mode == "missing" {
             None
         } else {
             Some(probe_flags)
         };
-        redis_module::raw::RedisModule_AuthenticateClientWithUser = Some(refused_attach);
+        redis_module::raw::RedisModule_AuthenticateClientWithUser = if mode == "omit-callback" {
+            Some(omitted_callback_attach)
+        } else {
+            Some(refused_attach)
+        };
     }
     Ok("OK".into())
 }
@@ -186,6 +271,7 @@ fn prepare(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
             "+get",
             "+acl|whoami",
             "+client|id",
+            "+auth_callbacks.command_identity",
             "~auth:*",
         ] {
             ctx.set_module_user_acl(&handle, rule)?;
@@ -202,23 +288,43 @@ fn prepare(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
 }
 fn drain(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     ACCEPTING.store(false, Ordering::Relaxed);
-    let clients: Vec<_> = CLIENTS.lock().unwrap().keys().copied().collect();
-    for client in clients {
-        // Track retains only installed state or a pending target within this
-        // synchronous invocation; no callback is running across this command.
-        ctx.deauthenticate_and_close_client(client)?;
-    }
+    ctx.drain_client_identities()?;
     let users: Vec<_> = USERS
         .lock(ctx)
         .iter()
         .map(|(k, v)| (*k, v.clone()))
         .collect();
     for (key, handle) in users {
-        if key != "stale" {
-            ctx.remove_module_user(&handle)?;
+        match ctx.remove_module_user(&handle) {
+            Ok(()) => (),
+            Err(error) if error.to_string().contains("stale or foreign") => (),
+            Err(error) => return Err(error),
         }
         USERS.lock(ctx).remove(key);
     }
+    Ok("OK".into())
+}
+fn command_identity(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    if args.get(1).is_some_and(|a| a.as_slice() == b"acl") {
+        ctx.authenticate_client_with_acl_user(b"existing", None)?;
+        return Ok("OK".into());
+    }
+    let user = USERS
+        .lock(ctx)
+        .get("active")
+        .cloned()
+        .ok_or(RedisError::Str("ERR prepare first"))?;
+    ctx.authenticate_client_with_user(&user, None)?;
+    Ok("OK".into())
+}
+fn remove_active(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    let user = USERS
+        .lock(ctx)
+        .get("active")
+        .cloned()
+        .ok_or(RedisError::Str("ERR prepare first"))?;
+    // Keep the stale handle: drain must also reach rows after user removal.
+    ctx.remove_module_user(&user)?;
     Ok("OK".into())
 }
 fn stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
@@ -280,6 +386,8 @@ redis_module! {
         redis_command!("auth_callbacks.prepare", prepare).flags(redis_module::CommandFlags::ADMIN),
         redis_command!("auth_callbacks.drain", drain).flags(redis_module::CommandFlags::ADMIN),
         redis_command!("auth_callbacks.stats", stats).read_only(),
+        redis_command!("auth_callbacks.command_identity", command_identity).flags(redis_module::CommandFlags::ADMIN),
+        redis_command!("auth_callbacks.remove_active", remove_active).flags(redis_module::CommandFlags::ADMIN),
         redis_command!("auth_callbacks.refuse", refuse).flags(redis_module::CommandFlags::ADMIN),
         redis_command!("auth_callbacks.probe", probe).flags(redis_module::CommandFlags::ADMIN),
         redis_command!("auth_callbacks.internal", internal).flags(redis_module::CommandFlags::ADMIN),
