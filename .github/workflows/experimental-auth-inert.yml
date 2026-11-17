@@ -1,0 +1,75 @@
+name: Experimental auth inert checks
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  protocol:
+    name: Experimental auth protocol (Rust ${{ matrix.toolchain }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: ["1.94.0", "1.87.0"]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+      - name: Install repository toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          rustflags: ""
+      - name: Compile explicit experiment and run inert protocol cases
+        run: |
+          for floor in 6-0 7-2; do
+            cargo check --workspace --all-targets --no-default-features --features min-redis-compatibility-version-$floor,experimental-auth-redis-8-12-rc3
+            cargo test --lib --no-default-features --features min-redis-compatibility-version-$floor,experimental-auth-redis-8-12-rc3
+          done
+      - name: Check explicit experiment documentation
+        if: matrix.toolchain == '1.94.0'
+        env:
+          RUSTDOCFLAGS: -D warnings
+          RUSTC_BOOTSTRAP: "1"
+        run: |
+          cargo doc --no-deps --features experimental-auth-redis-8-12-rc3
+          cargo test --doc --features experimental-auth-redis-8-12-rc3
+
+  stable-refusal:
+    name: Experimental auth refusal (Redis ${{ matrix.server }}, floor ${{ matrix.floor }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        server: ["7.2.16", "8.10.2"]
+        floor: ["6-0", "7-2"]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+      - name: Build pinned stable server fixture
+        run: |
+          python3 .github/scripts/build-server.py redis-${{ matrix.server }} "$RUNNER_TEMP/sdk-server"
+          echo "TEST_REDIS_SERVER_BIN=$RUNNER_TEMP/sdk-server/redis-server" >> "$GITHUB_ENV"
+      - name: Install repository toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Lint explicit feature and build its fixture
+        run: |
+          cargo clippy --workspace --all-targets --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 -- -D warnings
+          cargo build --example auth_async --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3
+      - name: Require runtime refusal before block or starter
+        run: |
+          cargo test --test integration --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 auth_async:: -- --test-threads=1 --nocapture
+      - name: Preserve refusal logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-stable-refusal-${{ matrix.server }}-${{ matrix.floor }}
+          path: |
+            target/**/integration-test/**
+            ${{ runner.temp }}/sdk-server-build.log
+          if-no-files-found: ignore
+          retention-days: 14

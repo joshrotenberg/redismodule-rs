@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "native_source": {
+    "repository": "redis/redis",
+    "release": "8.12-rc3",
+    "commit": "a93d7d19f82dbeab1e092b072c8f93dabd8733b1",
+    "tree": "9baee9bed7e1d0cffa92d2705786511c1cf3361f"
+  },
+  "artifact": {
+    "os": "linux",
+    "architecture": "x86_64",
+    "abi": "ELF64 little-endian EM_X86_64",
+    "elf_type": "ET_DYN",
+    "elf_interpreter": "/lib64/ld-linux-x86-64.so.2",
+    "bytes": 13877504,
+    "sha256": "63f265f3b62da523a01e2dfed5f2f8f28b7f833d22dd98836360dd8a5203020d"
+  },
+  "expected_native": {
+    "redis_version": "8.11.242",
+    "version_number": "0x00080bf2",
+    "redis_git_sha1": "a93d7d19",
+    "redis_git_dirty": "0",
+    "redis_build_id": "b1d9bdfc5371d887"
+  },
+  "build_provenance": {
+    "published_harness_head": "0db8a2528a38d362f3e45c1bb3bea9eff3f14a60",
+    "harness_source_identity": "eca3a81e9c141b377ffd82a171aabc1fbb7b1a9b01ec0c9d0344a74b66e0ebb9",
+    "recipe_sha256": "cbd6ca31b0da01cc0dbacb159c4cfa55438b9aaab0c58bce01ca18f3ca1d827d",
+    "toolchain_binding_file_sha256": "f59ebdfe7e595eff864e4312931891e0b33398e7c574c47cf0d9e9d2d9e45b91",
+    "image_platform_manifest": "sha256:0a0704ac83aa7b896a68b710c24f9502bbae87d32e6c7ef6148ce6a60ce05260",
+    "image_config": "sha256:4bbf6d52fe8de40e9e20b1453e14abb40eb1c73cd1d2b22e8ed015ad0817a088",
+    "tool_files_canonical_sha256": "9acaebe93b7c90375f619ec242ffbe7960cfc0ef208278353d83c654b6127b11",
+    "packages_stdout_sha256": "ca8b1b2b20821a4b1ca7093a74a6442847bc406990a5d40a007f673d4ac3d712",
+    "source_inventory_sha256": "f40a950152c6d719feee373d23f6a550cb3a720fa0d32077f54809ebe13996c1",
+    "tracked_files": 1961,
+    "source_date_epoch": 1794475640,
+    "umask": "022",
+    "canonical_source_path": "/build/redis",
+    "make_argv_sha256": "b93afbd37122c283af5c6947807ec96c3741d8e8bfd5fb16a0bff6db6d8ec0f3",
+    "make_settings_sha256": "14043388cbdabb34622c0bd79b875d6bcc72cf4c63d6683532ffc0f55144c0c9",
+    "release_header_sha256": "9e1dee66123206062f895ab5d2b8425442b0b281c305c412b0e3c75cf55a4b97",
+    "generated_inventory_sha256": "8d3fd53f956e1f1a99b41734ebafe893b3f29a6154b135b1a96f264ed6775174",
+    "generated_files": 358,
+    "source_transport_gzip_sha256": [
+      "ce48dbce0844837f9025a6513475c17b6792b641f2a0477ecdd9756ed3614e1c",
+      "633d720bfc7792396227958ad366005d394d30ddc0142597f68f6d41017a0035"
+    ],
+    "run_id": 44003735315,
+    "job_id": 133773861917,
+    "attempt": 1,
+    "run_url": "https://github.com/joshrotenberg/redismodule-rs/actions/runs/44003735315",
+    "artifact_id": 14292563996,
+    "artifact_archive_sha256": "6c458b13d7b825c21b77da1d1971d8745a7a581bd97f7f0c54efe4854779d030"
+  },
+  "contract": {
+    "platform": "Native Linux x86_64 only",
+    "preparation": "Explicit ordinary-command measurement of actual /proc/self/exe; no filesystem measurement on AUTH.",
+    "trust": "Trusted kernel/procfs/native API table and immutable running main-image bytes. No shared-library/whole-memory attestation or unique historical source-route claim.",
+    "package_owner_limit": "15 optional canonical-path Debian-owner queries unresolved. Exact image/file hashes and complete package versions are pinned; no complete per-file ownership claim."
+  }
+}

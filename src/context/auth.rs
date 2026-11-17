@@ -10,6 +10,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use crate::{Context, RedisError, RedisString, RuntimeContext, raw};
 
 mod callback;
+#[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+pub use callback::asynchronous::{
+    AuthCompletion, DeferredAuth, OwnedAuthCredentials, PreparedAuthRuntime,
+};
 pub use callback::{
     AuthCallback, AuthContext, AuthDecision, AuthRequest, AuthTarget, Password, PublicAuthError,
 };
@@ -31,6 +35,8 @@ pub struct ClientId(pub u64);
 /// installation without notification, explicit command-side drain reconciles
 /// cleanup only after conclusive native client-ID disappearance. Panics are
 /// contained without logging their payload (the process panic hook still runs).
+/// Experimental async installations retain their consumer for explicit ordinary
+/// command reaping, including replacement through a synchronous attachment.
 ///
 /// ```compile_fail,E0277
 /// use redis_module::ClientChangeCallback;
@@ -69,10 +75,30 @@ struct NativeUser {
 unsafe impl Send for NativeUser {}
 
 // Own incoming state from method entry, including every preflight refusal.
-struct PendingCallback(Option<ClientChangeCallback>);
+struct PendingCallback {
+    value: Option<ClientChangeCallback>,
+    #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+    ordinary_async: bool,
+}
+impl PendingCallback {
+    fn new(value: Option<ClientChangeCallback>) -> Self {
+        Self {
+            value,
+            #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+            ordinary_async: false,
+        }
+    }
+}
 impl Drop for PendingCallback {
     fn drop(&mut self) {
-        contain(|| drop(self.0.take()));
+        #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+        if self.ordinary_async {
+            if let Some(value) = self.value.take() {
+                callback::asynchronous::retire(value);
+            }
+            return;
+        }
+        contain(|| drop(self.value.take()));
     }
 }
 struct Cookie(u64);
@@ -89,6 +115,8 @@ enum AttachmentOrigin {
 }
 struct Subscription {
     origin: AttachmentOrigin,
+    #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+    ordinary_async: bool,
     cookie: Box<Cookie>,
     installed_client: Option<ClientId>,
     pending_client: Option<ClientId>,
@@ -144,12 +172,14 @@ impl Registry {
     }
     fn has_auth_ownership(&self) -> bool {
         !self.users.is_empty()
+            || LIVE_SUBSCRIPTIONS.load(Ordering::Acquire) != 0
             || !self.subscriptions.is_empty()
             || !self.deferred.is_empty()
             || !self.closing.is_empty()
             || !self.removing.is_empty()
             || self.executing != 0
             || callback::in_flight()
+            || async_ownership()
     }
     fn next(&mut self) -> Result<u64, RedisError> {
         self.next = self
@@ -285,6 +315,18 @@ unsafe extern "C" fn changed(client: u64, private: *mut c_void) {
         let subscription = {
             let mut registry = registry();
             let subscription = registry.subscriptions.remove(&key);
+            #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+            if subscription.as_ref().is_some_and(|s| s.ordinary_async) {
+                drop(registry);
+                if let Some(subscription) = subscription {
+                    callback::asynchronous::retire_subscription(
+                        ClientId(client),
+                        subscription,
+                        true,
+                    );
+                }
+                return;
+            }
             if NATIVE_OPERATIONS.load(Ordering::Relaxed) != 0 {
                 if let Some(subscription) = subscription {
                     registry
@@ -299,6 +341,17 @@ unsafe extern "C" fn changed(client: u64, private: *mut c_void) {
             notify(ClientId(client), subscription);
         }
     });
+}
+
+fn async_ownership() -> bool {
+    #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+    {
+        callback::asynchronous::has_ownership()
+    }
+    #[cfg(not(feature = "experimental-auth-redis-8-12-rc3"))]
+    {
+        false
+    }
 }
 
 fn main_thread() -> Result<(), RedisError> {
@@ -437,6 +490,8 @@ impl UserUnloadGuard {
         Ok(Self { committed: false })
     }
     pub fn commit(mut self) -> Result<(), RedisError> {
+        #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+        callback::asynchronous::unloaded();
         let mut registry = registry();
         registry.owner = None;
         // Rust statics are not dropped by dlclose. Release empty queue capacity.
@@ -581,6 +636,11 @@ fn retire_missing_identity(
     };
     let changed = !retired.is_empty();
     for subscription in retired {
+        #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+        if subscription.ordinary_async {
+            callback::asynchronous::retire_subscription(client, subscription, true);
+            continue;
+        }
         notify(client, subscription);
     }
     Ok(changed)
@@ -811,7 +871,7 @@ impl Context {
         user: &ModuleUserHandle,
         on_changed: Option<ClientChangeCallback>,
     ) -> Result<ClientId, RedisError> {
-        let pending = PendingCallback(on_changed);
+        let pending = PendingCallback::new(on_changed);
         let client = command_client(self)?;
         let _operation = NativeOperation::begin();
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithUser) };
@@ -843,7 +903,7 @@ impl Context {
         name: &[u8],
         on_changed: Option<ClientChangeCallback>,
     ) -> Result<ClientId, RedisError> {
-        let pending = PendingCallback(on_changed);
+        let pending = PendingCallback::new(on_changed);
         let client = command_client(self)?;
         let _operation = NativeOperation::begin();
         let attach = unsafe { crate::__available_api!(RedisModule_AuthenticateClientWithACLUser) };
@@ -929,10 +989,12 @@ fn attach_identity(
         let key = registry.next()?;
         let mut subscription = Subscription {
             origin,
+            #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+            ordinary_async: callback.ordinary_async,
             cookie: Box::new(Cookie(key)),
             installed_client: None,
             pending_client: Some(ClientId(id)),
-            callback: callback.0.take(),
+            callback: callback.value.take(),
         };
         let private = (&mut *subscription.cookie as *mut Cookie).cast();
         registry.subscriptions.insert(key, subscription);
@@ -942,6 +1004,15 @@ fn attach_identity(
     let mut id = 0;
     if attach(Some(changed), private, &mut id) != raw::REDISMODULE_OK as i32 {
         let failed = registry().subscriptions.remove(&key);
+        #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+        if failed.as_ref().is_some_and(|s| s.ordinary_async) {
+            if let Some(failed) = failed {
+                callback::asynchronous::retire_subscription(client, failed, false);
+            }
+            return Err(RedisError::Str(
+                "ERR Redis refused client identity attachment",
+            ));
+        }
         contain(|| drop(failed));
         LIVE_SUBSCRIPTIONS.fetch_sub(1, Ordering::Relaxed);
         return Err(RedisError::Str(
@@ -982,6 +1053,8 @@ mod tests {
         let state = OwnedState(drops.clone());
         let mut subscription = Subscription {
             origin: AttachmentOrigin::Command,
+            #[cfg(feature = "experimental-auth-redis-8-12-rc3")]
+            ordinary_async: false,
             cookie: Box::new(Cookie(42)),
             installed_client: Some(ClientId(7)),
             pending_client: None,
@@ -1067,7 +1140,7 @@ mod tests {
             });
             attach_identity(
                 client,
-                PendingCallback(callback),
+                PendingCallback::new(callback),
                 false,
                 AttachmentOrigin::NativeAuth,
                 |changed, private, id| {
@@ -1086,7 +1159,7 @@ mod tests {
         assert!(
             attach_identity(
                 client,
-                PendingCallback(None),
+                PendingCallback::new(None),
                 true,
                 AttachmentOrigin::NativeAuth,
                 |_, _, _| panic!("unproven ACL attachment reached native code")
