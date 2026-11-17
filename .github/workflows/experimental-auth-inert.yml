@@ -39,6 +39,35 @@ jobs:
           cargo doc --no-deps --features experimental-auth-redis-8-12-rc3
           cargo test --doc --features experimental-auth-redis-8-12-rc3
 
+      - name: Check the isolated HTTP consumer at both floors
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/external-auth-target
+          CARGO_BUILD_JOBS: "2"
+          CARGO_INCREMENTAL: "0"
+        run: |
+          for floor in 6-0 7-2; do
+            cargo check --locked --manifest-path examples/external-auth/Cargo.toml --all-targets --no-default-features --features floor-$floor
+            cargo test --locked --manifest-path examples/external-auth/Cargo.toml --tests --no-default-features --features floor-$floor
+          done
+
+      - name: Lint and document the isolated HTTP consumer
+        if: matrix.toolchain == '1.94.0'
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/external-auth-target
+          CARGO_BUILD_JOBS: "2"
+          CARGO_INCREMENTAL: "0"
+          RUSTDOCFLAGS: -D warnings
+        run: |
+          cargo fmt --manifest-path examples/external-auth/Cargo.toml --all -- --check
+          for floor in 6-0 7-2; do
+            cargo clippy --locked --manifest-path examples/external-auth/Cargo.toml --all-targets --no-default-features --features floor-$floor -- -D warnings
+            cargo doc --locked --manifest-path examples/external-auth/Cargo.toml --no-deps --no-default-features --features floor-$floor
+          done
+          python3 - <<'PY'
+          import ast, pathlib
+          ast.parse(pathlib.Path('examples/external-auth/native.py').read_text())
+          PY
+
   stable-refusal:
     name: Experimental auth refusal (Redis ${{ matrix.server }}, floor ${{ matrix.floor }})
     runs-on: ubuntu-24.04
@@ -63,6 +92,16 @@ jobs:
       - name: Require runtime refusal before block or starter
         run: |
           cargo test --test integration --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 auth_async:: -- --test-threads=1 --nocapture
+      - name: Require HTTP consumer activation refusal before workers or requests
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/external-auth-target
+          CARGO_BUILD_JOBS: "2"
+          CARGO_INCREMENTAL: "0"
+        run: |
+          cargo build --locked --manifest-path examples/external-auth/Cargo.toml --example external_auth --no-default-features --features floor-${{ matrix.floor }}
+          python3 examples/external-auth/native.py --mode refusal --floor ${{ matrix.floor }} \
+            --server "$TEST_REDIS_SERVER_BIN" --module "$CARGO_TARGET_DIR/debug/examples/libexternal_auth.so" \
+            --output "$RUNNER_TEMP/external-auth-refusal"
       - name: Preserve refusal logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -71,5 +110,6 @@ jobs:
           path: |
             target/**/integration-test/**
             ${{ runner.temp }}/sdk-server-build.log
+            ${{ runner.temp }}/external-auth-refusal
           if-no-files-found: ignore
           retention-days: 14
