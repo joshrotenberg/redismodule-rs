@@ -379,11 +379,28 @@ fn test_async_auth_positive_preparation_and_prepared_admission_observations() ->
     );
     let mut client = server.connection()?;
     client.set_read_timeout(Some(Duration::from_secs(3)))?;
+    fn reap_when_quiescent(server: &mut TestConnection) -> Result<()> {
+        utils::wait_until(
+            Duration::from_secs(3),
+            "observation ordinary reaper",
+            || match redis::cmd("auth_async.reap").query::<i64>(server) {
+                Ok(_) => Ok(true),
+                Err(error)
+                    if error
+                        .to_string()
+                        .contains("asynchronous authentication is unavailable") =>
+                {
+                    Ok(false)
+                }
+                Err(error) => Err(error.into()),
+            },
+        )
+    }
     for _ in 0..20 {
         redis::cmd("AUTH")
             .arg(("observe", "test-password"))
             .query::<()>(&mut client)?;
-        redis::cmd("auth_async.reap").query::<i64>(&mut server)?;
+        reap_when_quiescent(&mut server)?;
     }
     assert_eq!(
         redis::cmd("auth_async.observe")
@@ -395,7 +412,7 @@ fn test_async_auth_positive_preparation_and_prepared_admission_observations() ->
         redis::cmd("AUTH")
             .arg(("observe", "test-password"))
             .query::<()>(&mut client)?;
-        redis::cmd("auth_async.reap").query::<i64>(&mut server)?;
+        reap_when_quiescent(&mut server)?;
     }
     let admission_ns: Vec<i64> = redis::cmd("auth_async.observe")
         .arg("samples")
