@@ -506,7 +506,11 @@ unsafe fn resume_role(ctx: *mut raw::RedisModuleCtx, api: Api) -> Result<(), Red
         || unsafe { (api.timeout)(ctx) } != 0
         || unsafe { (api.disconnected)(ctx) } != 0
         || unsafe { (api.flags)(ctx) }
-            & (raw::REDISMODULE_CTX_FLAGS_LOADING | raw::REDISMODULE_CTX_FLAGS_ASYNC_LOADING) as i32
+            & (raw::REDISMODULE_CTX_FLAGS_LUA
+                | raw::REDISMODULE_CTX_FLAGS_MULTI
+                | raw::REDISMODULE_CTX_FLAGS_DENY_BLOCKING
+                | raw::REDISMODULE_CTX_FLAGS_LOADING
+                | raw::REDISMODULE_CTX_FLAGS_ASYNC_LOADING) as i32
             != 0
         || users::NATIVE_OPERATIONS.load(Ordering::Relaxed) != 0
         || super::INVOCATIONS.load(Ordering::Relaxed) != 0

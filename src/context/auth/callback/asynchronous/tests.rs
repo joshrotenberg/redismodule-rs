@@ -561,6 +561,9 @@ fn resume_role_refuses_nested_native_and_loading_scopes() {
     assert!(unsafe { resume_role(ctx, selected) }.is_err());
     drop(boundary);
     for flag in [
+        raw::REDISMODULE_CTX_FLAGS_LUA,
+        raw::REDISMODULE_CTX_FLAGS_MULTI,
+        raw::REDISMODULE_CTX_FLAGS_DENY_BLOCKING,
         raw::REDISMODULE_CTX_FLAGS_LOADING,
         raw::REDISMODULE_CTX_FLAGS_ASYNC_LOADING,
     ] {
