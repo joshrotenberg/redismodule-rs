@@ -20,6 +20,7 @@ const FAILED: RedisError = RedisError::Str("ERR asynchronous authentication is u
 static OWNED: AtomicUsize = AtomicUsize::new(0);
 static SUBMISSIONS: AtomicUsize = AtomicUsize::new(0);
 static CALLBACKS: AtomicUsize = AtomicUsize::new(0);
+static REAPERS: AtomicUsize = AtomicUsize::new(0);
 
 /// An explicit credential copy for owned worker input. Formatting is unavailable.
 /// Dropping it overwrites its password storage before releasing that allocation.
@@ -297,7 +298,10 @@ fn registry() -> MutexGuard<'static, Registry> {
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
 }
 pub(in crate::context::auth) fn has_ownership() -> bool {
-    OWNED.load(Ordering::Relaxed) != 0
+    OWNED.load(Ordering::Acquire) != 0
+        || CALLBACKS.load(Ordering::Acquire) != 0
+        || SUBMISSIONS.load(Ordering::Acquire) != 0
+        || REAPERS.load(Ordering::Acquire) != 0
 }
 pub(in crate::context::auth) fn retire<T: Any + Send>(value: T) {
     OWNED.fetch_add(1, Ordering::Relaxed);
@@ -394,7 +398,12 @@ unsafe extern "C" fn disconnected(
             registry()
                 .jobs
                 .values()
-                .find(|j| j.inner().handle == handle as usize)
+                .find(|j| {
+                    let inner = j.inner();
+                    inner.handle == handle as usize
+                        && inner.native_live
+                        && inner.state == NativeState::Blocked
+                })
                 .cloned()
         };
         if let Some(job) = job {
@@ -424,6 +433,11 @@ unsafe extern "C" fn resumed(
     err: *mut *mut raw::RedisModuleString,
 ) -> i32 {
     let _lease = CallbackLease::begin();
+    if !err.is_null() {
+        unsafe {
+            *err = ptr::null_mut();
+        }
+    }
     let committed = std::cell::Cell::new(false);
     let result = super::catch_auth(|| -> Result<i32, RedisError> {
         users::main_thread()?;
@@ -659,9 +673,17 @@ fn ordinary(ctx: &Context) -> Result<(), RedisError> {
     Ok(())
 }
 struct Reaping;
+impl Reaping {
+    fn begin() -> Self {
+        registry().executing = true;
+        REAPERS.fetch_add(1, Ordering::Release);
+        Self
+    }
+}
 impl Drop for Reaping {
     fn drop(&mut self) {
         registry().executing = false;
+        REAPERS.fetch_sub(1, Ordering::Release);
     }
 }
 impl Context {
@@ -723,8 +745,7 @@ impl Context {
     /// ownership refuse unload even if the client ID disappeared.
     pub fn reap_async_auth(&self, limit: usize) -> Result<usize, RedisError> {
         ordinary(self)?;
-        registry().executing = true;
-        let _reaping = Reaping;
+        let _reaping = Reaping::begin();
         collect_ready(self.ctx);
         Ok(drain_cleanup(limit))
     }

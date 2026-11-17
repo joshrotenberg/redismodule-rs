@@ -1,0 +1,117 @@
+name: Experimental auth native positive checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  builds:
+    name: Two pinned RC3 build witnesses
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      SOURCE_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+    outputs:
+      artifact_id: ${{ steps.witnesses.outputs['artifact-id'] }}
+      artifact_digest: ${{ steps.witnesses.outputs['artifact-digest'] }}
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Reproduce the accepted native artifact
+        run: python3 .github/scripts/auth-rc3-build.py "$RUNNER_TEMP/auth-rc3-builds"
+      - name: Compare both binaries with the reviewed manifest
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib, json, os, pathlib
+          manifest = json.loads(pathlib.Path('.github/experimental-auth/accepted-runtime.json').read_text())
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'auth-rc3-builds'
+          for number in (1, 2):
+              data = (root / f'build-{number}/redis-server').read_bytes()
+              assert len(data) == manifest['artifact']['bytes']
+              assert hashlib.sha256(data).hexdigest() == manifest['artifact']['sha256']
+          PYCODE
+      - name: Preserve both artifacts and complete provenance
+        if: always()
+        id: witnesses
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-rc3-builds-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/auth-rc3-builds/*.stdout
+            ${{ runner.temp }}/auth-rc3-builds/*.stderr
+            ${{ runner.temp }}/auth-rc3-builds/report.json
+            ${{ runner.temp }}/auth-rc3-builds/*.tar.gz
+            ${{ runner.temp }}/auth-rc3-builds/build-*/**
+          if-no-files-found: error
+          retention-days: 14
+  positive:
+    name: Pinned RC3 native auth lifecycle
+    needs: builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RUST_TEST_THREADS: "1"
+      TEST_REDIS_REQUIRE_ASYNC_AUTH: "1"
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Install repository toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Verify reviewed exact runtime witness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_ASYNC_ARTIFACT_ID: ${{ needs.builds.outputs.artifact_id }}
+          SDK_ASYNC_ARTIFACT_DIGEST: ${{ needs.builds.outputs.artifact_digest }}
+        run: python3 .github/scripts/auth-rc3-fixture.py "$RUNNER_TEMP/auth-rc3-positive"
+      - name: Build experimental fixture
+        run: cargo build --example auth_async --features experimental-auth-redis-8-12-rc3
+      - name: Discover native positive cases
+        run: |
+          cargo test --test integration --features experimental-auth-redis-8-12-rc3 auth_async:: -- --list | tee "$RUNNER_TEMP/auth-rc3-positive/discovery.txt"
+          for test_name in \
+            auth_async::test_async_auth_positive_success_denial_stale_and_ordinary_cleanup \
+            auth_async::test_async_auth_positive_timeout_and_late_completion_are_once_only \
+            auth_async::test_async_auth_positive_disconnect_retains_producer_until_release
+          do
+            grep -Fx -- "$test_name: test" "$RUNNER_TEMP/auth-rc3-positive/discovery.txt"
+          done
+      - name: Verify unprepared refusal and explicit preparation
+        run: |
+          cargo test --test integration --features experimental-auth-redis-8-12-rc3 auth_async:: -- --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/auth-rc3-positive/refusal.log"
+      - name: Execute all native positive cases
+        run: |
+          cargo test --test integration --features experimental-auth-redis-8-12-rc3 auth_async::test_async_auth_positive -- --ignored --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/auth-rc3-positive/positive.log"
+      - name: Require all positive cases to execute
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re
+          data = (pathlib.Path(os.environ['RUNNER_TEMP']) / 'auth-rc3-positive/positive.log').read_text()
+          if not re.search(r'test result: ok\. 3 passed; 0 failed; 0 ignored;', data):
+              raise SystemExit('all three native positive cases must execute')
+          if data.count('ASYNC_POSITIVE_EXECUTED:') != 3:
+              raise SystemExit('native identity/cleanup evidence marker missing')
+          PY
+      - name: Preserve native identities and lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-rc3-positive-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/auth-rc3-positive
+            target/**/integration-test/**
+            Cargo.lock
+          if-no-files-found: error
+          retention-days: 14

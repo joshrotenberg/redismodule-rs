@@ -1,9 +1,9 @@
 //! Experimental auth fixture. Administrative commands require application ACLs.
 //! Fixed credentials and std threads are test behavior, not a provider adapter.
 use redis_module::{
-    AuthCompletion, AuthContext, AuthDecision, AuthRequest, AuthTarget, Context, ModuleUserHandle,
-    PublicAuthError, RedisError, RedisGILGuard, RedisResult, RedisString, redis_command,
-    redis_module,
+    AuthCompletion, AuthContext, AuthDecision, AuthRequest, AuthTarget, Context, EventContext,
+    ModuleUserHandle, PublicAuthError, RedisError, RedisGILGuard, RedisResult, RedisString, Status,
+    redis_command, redis_module,
 };
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -191,10 +191,19 @@ fn drain(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
     }
     Ok("OK".into())
 }
+fn deinit(_: &EventContext) -> Status {
+    // Application worker stacks are separate from SDK completion ownership.
+    // Command-side drain must join them before native module unload.
+    if !WORKERS.lock().unwrap().is_empty() || !HELD.lock().unwrap().is_empty() {
+        Status::Err
+    } else {
+        Status::Ok
+    }
+}
 redis_module! {
     name: "auth_async", version: 1,
     allocator: (redis_module::alloc::RedisAlloc, redis_module::alloc::RedisAlloc),
-    data_types: [], auth: authenticate,
+    data_types: [], deinit: deinit, auth: authenticate,
     commands: [
         redis_command!("auth_async.users", users).flags(redis_module::CommandFlags::ADMIN),
         redis_command!("auth_async.prepare", prepare).flags(redis_module::CommandFlags::ADMIN),

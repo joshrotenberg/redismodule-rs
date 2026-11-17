@@ -22,7 +22,15 @@ pub(super) struct Manifest {
 // Enrollment is an explicit reviewed source change after matching native builds.
 // Neither a runtime report nor preparation may add a manifest entry.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-const APPROVED: &[Manifest] = &[];
+const APPROVED: &[Manifest] = &[Manifest {
+    length: 13877504,
+    sha256: [
+        0x63, 0xf2, 0x65, 0xf3, 0xb6, 0x2d, 0xa5, 0x23, 0xa0, 0x1e, 0x2d, 0xfe, 0xd5, 0xf2, 0xf8,
+        0xf2, 0x8b, 0x7f, 0x83, 0x3d, 0x22, 0xdd, 0x98, 0x83, 0x63, 0x60, 0xdd, 0x8a, 0x52, 0x03,
+        0x02, 0x0d,
+    ],
+    build_id: b"b1d9bdfc5371d887",
+}];
 
 pub(super) struct Receipt {
     pub generation: u64,

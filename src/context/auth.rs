@@ -172,6 +172,7 @@ impl Registry {
     }
     fn has_auth_ownership(&self) -> bool {
         !self.users.is_empty()
+            || LIVE_SUBSCRIPTIONS.load(Ordering::Acquire) != 0
             || !self.subscriptions.is_empty()
             || !self.deferred.is_empty()
             || !self.closing.is_empty()

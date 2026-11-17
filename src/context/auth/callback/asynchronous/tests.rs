@@ -38,10 +38,20 @@ fn setup() -> MutexGuard<'static, ()> {
     serial
 }
 fn reap() {
-    registry().executing = true;
-    let _lease = Reaping;
+    let _lease = Reaping::begin();
     collect_ready(ptr::null_mut());
     drain_cleanup(1000);
+}
+#[test]
+fn empty_reaper_execution_lease_still_refuses_unload() {
+    let _serial = setup();
+    assert!(!has_ownership());
+    let lease = Reaping::begin();
+    assert!(has_ownership());
+    assert!(users::registry().has_auth_ownership());
+    drop(lease);
+    assert!(!has_ownership());
+    finish();
 }
 fn finish() {
     reap();
@@ -339,6 +349,24 @@ fn timer_zero_key_and_firing_timer_have_native_ownership() {
 }
 
 #[test]
+fn disconnect_ignores_retained_freed_rows_with_reused_native_addresses() {
+    let _serial = setup();
+    let handle = std::ptr::dangling_mut::<raw::RedisModuleBlockedClient>();
+    let old = job(None, 0);
+    record_block_result(&old, handle as usize, true);
+    choose(&old, Outcome::Deny(PublicAuthError::default()));
+    assert_eq!(old.inner().state, NativeState::Freed);
+    let current = job(None, 0);
+    record_block_result(&current, handle as usize, true);
+    unsafe { disconnected(ptr::null_mut(), handle) };
+    assert_eq!(current.inner().state, NativeState::Freed);
+    assert_eq!(UNBLOCKS.load(Ordering::Relaxed), 2);
+    drop(old);
+    drop(current);
+    finish();
+}
+
+#[test]
 fn synchronous_replacement_preserves_async_delivery_policy() {
     let _serial = setup();
     let drops = Arc::new(AtomicUsize::new(0));
@@ -416,6 +444,26 @@ fn deadline_validation_uses_checked_monotonic_arithmetic() {
         deadline_at(1000, Duration::from_millis(2)).unwrap(),
         (3000, 2)
     );
+}
+
+#[test]
+fn explicit_secret_copy_owns_binary_bytes_after_borrowed_storage_changes() {
+    let mut username = vec![0, b'u', 255];
+    let mut password = vec![b'p', 0, 255];
+    let owned = {
+        let request = AuthRequest {
+            username: &username,
+            password: super::super::Password {
+                bytes: &password,
+                invocation: std::marker::PhantomData,
+            },
+        };
+        request.copy_for_async()
+    };
+    username.fill(1);
+    password.fill(2);
+    assert_eq!(owned.username(), &[0, b'u', 255]);
+    assert_eq!(owned.password(), &[b'p', 0, 255]);
 }
 
 static INFO_MODE: AtomicUsize = AtomicUsize::new(0);
