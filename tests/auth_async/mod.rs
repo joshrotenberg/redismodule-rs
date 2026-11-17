@@ -386,9 +386,8 @@ fn test_async_auth_positive_preparation_and_prepared_admission_observations() ->
             || match redis::cmd("auth_async.reap").query::<i64>(server) {
                 Ok(_) => Ok(true),
                 Err(error)
-                    if error
-                        .to_string()
-                        .contains("asynchronous authentication is unavailable") =>
+                    if error.code() == Some("ERR")
+                        && error.detail() == Some("asynchronous authentication is unavailable") =>
                 {
                     Ok(false)
                 }
