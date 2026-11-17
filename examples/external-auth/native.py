@@ -443,12 +443,24 @@ def late_disconnect_and_drain(args):
             assert sha(args.module) == args.expected_module_sha256, "consumer changed before reload"
             assert runtime.admin.cmd("MODULE", "LOAD", str(args.module)) == b"OK"
             after_reload = runtime.admin.cmd("external_auth.status")
+            reload_modules = runtime.admin.cmd("MODULE", "LIST")
+            reload_info = runtime.admin.cmd("INFO", "server").decode()
+            reload_module_sha256 = sha(args.module)
             # Logical unload does not promise that the native loader unmaps
             # every image/global. Record actual telemetry rather than treating
             # a cumulative counter as worker or token ownership.
             reload_state = {"before": [os.fsdecode(v) if isinstance(v, bytes) else v for v in before_reload],
-                            "after": [os.fsdecode(v) if isinstance(v, bytes) else v for v in after_reload]}
+                            "after": [os.fsdecode(v) if isinstance(v, bytes) else v for v in after_reload],
+                            "pid": runtime.process.pid, "info": reload_info,
+                            "module_list": repr(reload_modules), "module_sha256": reload_module_sha256,
+                            "native_process_sha256": sha(Path("/proc/%d/exe" % runtime.process.pid))}
             (runtime.directory / "reload-state.json").write_text(json.dumps(reload_state, indent=2) + "\n")
+            assert ("process_id:%d\r\n" % runtime.process.pid) in reload_info
+            reload_entries = [dict(zip(row[::2], row[1::2])) for row in reload_modules]
+            assert len(reload_entries) == 1 and reload_entries[0][b"name"] == b"external_auth"
+            assert Path(os.fsdecode(reload_entries[0][b"path"])).resolve() == args.module
+            assert reload_module_sha256 == args.expected_module_sha256
+            assert reload_state["native_process_sha256"] == args.accepted
             assert after_reload[0:2] == [b"inactive", 0]
             assert after_reload[2] in (0, before_reload[2]), "reload unexpectedly started a worker"
             # Require a new preparation/activation and real authentication on
