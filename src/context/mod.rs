@@ -26,7 +26,10 @@ use self::call_reply::{CallResult, ErrorReply, PromiseCallReply, create_promise_
 use self::thread_safe::RedisLockIndicator;
 
 pub(crate) mod auth;
-pub use auth::{ClientChangeCallback, ClientId, ModuleUserHandle};
+pub use auth::{
+    AuthCallback, AuthContext, AuthDecision, AuthRequest, AuthTarget, ClientChangeCallback,
+    ClientId, ModuleUserHandle, Password, PublicAuthError,
+};
 mod call_user;
 pub(crate) mod command_reply;
 pub use call_user::CallUserScope;

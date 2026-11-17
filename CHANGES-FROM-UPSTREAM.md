@@ -11,6 +11,27 @@ is one commit.
 For what a module has to change, see [docs/MIGRATING-3.0.md](docs/MIGRATING-3.0.md).
 For the same changes by version, see [CHANGELOG.md](CHANGELOG.md).
 
+## Synchronous authentication callbacks
+
+`redis_module!` accepts an `auth` function path (#216). Its callback receives
+borrowed binary credentials and a restricted `AuthContext`, then returns a
+typed Accept, Deny or explicit NotHandled. Redis retains AUTH/HELLO parsing,
+response ownership and fallback. The private native-auth admission checks the
+active load, main thread, indexed client and loading/nested state without
+exposing ordinary context capabilities or weakening command mutation guards.
+Targets preserve created-user leases, pending-client admission and the existing
+command-installed identity requirement for ACL handoff. Historical native-auth
+records cannot prove live callback ownership. Panics and attachment errors deny
+with fixed diagnostics; denial audit uses a secret-free object only after a
+private fixed configuration read verifies positive retention. Unknown or disabled
+retention skips the native audit call. Custom public errors are explicit and transfer manual native string
+ownership to Redis. Explicit command-side preparation/drain and empty-registry
+unload remain required. `drain_client_identities` reaches all retained records,
+including no-consumer and removed-user installations, and reconciles lost
+notifications only after native ID disappearance is verified. Indexed records
+remain retained through close and a later drain attempt. See
+[authentication](docs/AUTHENTICATION.md).
+
 ## Module users and client identity attachment
 
 Created Redis module users are held in an SDK registry with opaque module/load
@@ -34,8 +55,8 @@ admission through native return.
 Full ACL strings require verified Redis 7.4+, validate native quoting and use
 Redis's transactional setter and omit secret-bearing parser diagnostics. Peer certificates are copied
 to owned bytes and command arguments can be redacted. See
-[the API guide](docs/AUTHENTICATION.md). Authentication callback registration and
-asynchronous completion remain outside this delivery.
+[the API guide](docs/AUTHENTICATION.md). Asynchronous authentication completion
+remains separate.
 
 ## Adapted handler tests
 

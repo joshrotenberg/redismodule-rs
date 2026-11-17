@@ -80,7 +80,10 @@ pub use crate::context::InfoContext;
 pub mod __private {
     pub use crate::configuration::lifecycle::{ConfigurationLoad, ConfigurationUnload};
     pub use crate::context::CommandArgcScope;
-    pub use crate::context::auth::{UserLoadGuard, UserUnloadGuard};
+    pub use crate::context::auth::{
+        UserLoadGuard, UserUnloadGuard, auth_callback_available, register_auth_callback,
+        run_auth_callback,
+    };
     pub use crate::context::blocked::__command_reply_after_release as command_reply_after_release;
     pub use crate::context::call_reply::{BlockingCallLoadGuard, BlockingCallUnloadGuard};
     pub use crate::context::commands::acl_rules::{
@@ -147,7 +150,8 @@ pub use crate::context::keys_cursor::KeysCursor;
 pub use crate::context::keyspace_events::KeyspaceEventHandler;
 pub use crate::context::server_events;
 pub use crate::context::{
-    CallUserScope, ClientChangeCallback, ClientId, EventContext, ModuleUserHandle,
+    AuthCallback, AuthContext, AuthDecision, AuthRequest, AuthTarget, CallUserScope,
+    ClientChangeCallback, ClientId, EventContext, ModuleUserHandle, Password, PublicAuthError,
     RegistrationContext, RuntimeContext, WorkerContext,
 };
 pub use common::AclCategory;

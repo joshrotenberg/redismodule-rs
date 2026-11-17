@@ -60,6 +60,14 @@ name = "auth_users"
 crate-type = ["cdylib"]
 
 [[example]]
+name = "auth_callbacks"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "auth_callbacks_order"
+crate-type = ["cdylib"]
+
+[[example]]
 name = "context_acl"
 crate-type = ["cdylib"]
 

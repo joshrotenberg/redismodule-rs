@@ -569,10 +569,7 @@ fn worker(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
 // Explicit command-side cleanup. Keep handles until native removal succeeds;
 // aliases and disconnected/replaced client IDs may already be stale.
 fn drain(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
-    let clients: Vec<_> = CLIENTS.lock().unwrap().iter().copied().collect();
-    for client in clients {
-        let _ = ctx.deauthenticate_and_close_client(client);
-    }
+    ctx.drain_client_identities()?;
     CLIENTS.lock().unwrap().clear();
     let handles: Vec<_> = USERS.lock(ctx).values().cloned().collect();
     for handle in handles {
