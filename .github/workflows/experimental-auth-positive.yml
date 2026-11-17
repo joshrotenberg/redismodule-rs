@@ -220,8 +220,8 @@ jobs:
           CARGO_INCREMENTAL: "0"
         run: |
           cargo build --locked --manifest-path examples/external-auth/Cargo.toml --example external_auth --no-default-features --features floor-${{ matrix.floor }}
-          cargo tree --locked --manifest-path examples/external-auth/Cargo.toml -e features > "$RUNNER_TEMP/auth-rc3-positive/external-auth-dependencies.txt"
-          cargo metadata --locked --manifest-path examples/external-auth/Cargo.toml --format-version 1 > "$RUNNER_TEMP/auth-rc3-positive/external-auth-metadata.json"
+          cargo tree --locked --manifest-path examples/external-auth/Cargo.toml --no-default-features --features floor-${{ matrix.floor }} -e features > "$RUNNER_TEMP/auth-rc3-positive/external-auth-dependencies.txt"
+          cargo metadata --locked --manifest-path examples/external-auth/Cargo.toml --no-default-features --features floor-${{ matrix.floor }} --format-version 1 > "$RUNNER_TEMP/auth-rc3-positive/external-auth-metadata.json"
       - name: Execute HTTP consumer native cases on the same accepted fixture
         env:
           EXTERNAL_AUTH_POSITIVE: "1"
