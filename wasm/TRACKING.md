@@ -139,6 +139,11 @@ changed.
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
 
+- 2026-11-16: merged SDK master `5e99ee2`, including synchronous typed
+  authentication callbacks from PR 250, the second stage of issue 216. The
+  host and guests need no source adaptation, and all four Rust lock snapshots
+  remain unchanged. Experiment push CI remains pending publication.
+
 - 2026-11-16: merged SDK master `c008be7`, including the module-user and
   client-identity helpers from PR 248, the first stage of issue 216. The host
   and guests need no source adaptation. The pinned workspace lock adds only
