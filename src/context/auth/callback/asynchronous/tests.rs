@@ -310,6 +310,10 @@ fn free_before_submit_return_retains_producer_and_late_outcome() {
     let before = drops.load(Ordering::Relaxed);
     HOLD_SUBMIT.store(false, Ordering::Release);
     worker.join().unwrap();
+    assert!(
+        registry().cleanup.is_empty(),
+        "consuming the token must not retire a second denial from Drop"
+    );
     assert!(entered && retained && SUBMIT_OWNED.load(Ordering::Acquire));
     assert_eq!(before, 0);
     // A losing worker outcome is also retained, rather than dropped on submit.

@@ -151,7 +151,9 @@ impl AuthCompletion {
 }
 impl Drop for AuthCompletion {
     fn drop(&mut self) {
-        self.finish(Outcome::Deny(PublicAuthError::default()));
+        if self.job.is_some() {
+            self.finish(Outcome::Deny(PublicAuthError::default()));
+        }
     }
 }
 
