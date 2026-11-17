@@ -51,12 +51,53 @@ fn record_identity(server: &mut TestConnection, label: &str) -> Result<()> {
         "63f265f3b62da523a01e2dfed5f2f8f28b7f833d22dd98836360dd8a5203020d"
     );
     let module = std::path::PathBuf::from(utils::module_path("auth_async")?);
-    let module_sha = format!("{:x}", Sha256::digest(std::fs::read(&module)?));
+    let module_bytes = std::fs::read(&module)?;
+    let module_sha = format!("{:x}", Sha256::digest(&module_bytes));
     let modules: redis::Value = redis::cmd("MODULE").arg("LIST").query(server)?;
+    let redis::Value::Array(rows) = &modules else {
+        anyhow::bail!("expected MODULE LIST array");
+    };
+    let loaded_path = rows
+        .iter()
+        .find_map(|row| {
+            let redis::Value::Array(fields) = row else {
+                return None;
+            };
+            let field = |name: &str| {
+                fields.chunks_exact(2).find_map(|pair| {
+                    (redis::from_redis_value::<String>(pair[0].clone())
+                        .ok()
+                        .as_deref()
+                        == Some(name))
+                    .then(|| redis::from_redis_value::<String>(pair[1].clone()).ok())
+                    .flatten()
+                })
+            };
+            (field("name").as_deref() == Some("auth_async"))
+                .then(|| field("path"))
+                .flatten()
+        })
+        .expect("loaded auth_async path");
+    assert_eq!(
+        std::fs::canonicalize(loaded_path)?,
+        std::fs::canonicalize(&module)?
+    );
+    let module_archive = format!("module-{module_sha}.so");
+    let retained = dir.join(&module_archive);
+    if retained.exists() {
+        assert_eq!(std::fs::read(&retained)?, module_bytes);
+    } else {
+        use std::io::Write;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&retained)?
+            .write_all(&module_bytes)?;
+    }
     std::fs::write(
         dir.join(format!("{label}-{}.txt", server.port())),
         format!(
-            "port:{}\npid:{pid}\nactual_process_image_sha256:{binary_sha}\nmodule:{}\nmodule_sha256:{module_sha}\nmodule_list:{modules:?}\n{info}",
+            "port:{}\npid:{pid}\nactual_process_image_sha256:{binary_sha}\nmodule:{}\nmodule_sha256:{module_sha}\nmodule_archive:{module_archive}\nmodule_list:{modules:?}\n{info}",
             server.port(),
             module.display()
         ),
@@ -306,4 +347,106 @@ fn test_async_auth_positive_disconnect_retains_producer_until_release() -> Resul
         },
     )?;
     record_cleanup(server, "disconnect")
+}
+
+#[test]
+#[ignore = "requires the reviewed exact native Linux amd64 positive fixture"]
+fn test_async_auth_positive_preparation_and_prepared_admission_observations() -> Result<()> {
+    let mut server = positive("cost")?;
+    server.set_read_timeout(Some(Duration::from_secs(30)))?;
+    users(&mut server)?;
+    let mut preparation_ns = Vec::new();
+    for _ in 0..10 {
+        let measured: Vec<i64> = redis::cmd("auth_async.observe")
+            .arg("prepare")
+            .query(&mut server)?;
+        assert_eq!(measured.len(), 2);
+        assert!(measured[0] > 0 && measured[1] >= 0);
+        preparation_ns.push(measured[1]);
+    }
+    redis::cmd("auth_async.observe")
+        .arg("start")
+        .query::<()>(&mut server)?;
+    let baseline_ns: Vec<i64> = redis::cmd("auth_async.observe")
+        .arg("baseline")
+        .query(&mut server)?;
+    assert_eq!(baseline_ns.len(), 200);
+    assert_eq!(
+        redis::cmd("auth_async.observe")
+            .arg("reset")
+            .query::<i64>(&mut server)?,
+        200
+    );
+    let mut client = server.connection()?;
+    client.set_read_timeout(Some(Duration::from_secs(3)))?;
+    for _ in 0..20 {
+        redis::cmd("AUTH")
+            .arg(("observe", "test-password"))
+            .query::<()>(&mut client)?;
+        redis::cmd("auth_async.reap").query::<i64>(&mut server)?;
+    }
+    assert_eq!(
+        redis::cmd("auth_async.observe")
+            .arg("reset")
+            .query::<i64>(&mut server)?,
+        20
+    );
+    for _ in 0..200 {
+        redis::cmd("AUTH")
+            .arg(("observe", "test-password"))
+            .query::<()>(&mut client)?;
+        redis::cmd("auth_async.reap").query::<i64>(&mut server)?;
+    }
+    let admission_ns: Vec<i64> = redis::cmd("auth_async.observe")
+        .arg("samples")
+        .query(&mut server)?;
+    assert_eq!(admission_ns.len(), 200);
+    assert!(admission_ns.iter().chain(&baseline_ns).all(|n| *n >= 0));
+    assert_eq!(
+        stats(&mut server)?[0],
+        220,
+        "each observed AUTH ran its real starter"
+    );
+    assert_eq!(
+        redis::cmd("ACL")
+            .arg("WHOAMI")
+            .query::<String>(&mut client)?,
+        "async-active"
+    );
+    let dir = std::path::PathBuf::from(std::env::var("TEST_ASYNC_AUTH_EVIDENCE_DIR")?);
+    std::fs::write(
+        dir.join("cost-observations.json"),
+        format!(
+            "{{\n\"schema\":1,\n\"preparation_scope\":\"Context::prepare_async_auth_runtime in ordinary command; no network time\",\n\"admission_scope\":\"begin_with initial clock return to next clock return after prepared admission and initial role checks; before job allocation/block/starter\",\n\"caveats\":\"Instrumented observations include clock/TLS hook overhead, not pure receipt cost or total AUTH. No timing threshold, baseline subtraction or latency guarantee. Executable loading and identity hashing precede preparation; no cache flush or cold-cache claim. Scheduling and CPU frequency uncontrolled.\",\n\"warmup_auths\":20,\n\"debug_assertions\":{},\n\"preparation_ns\":{preparation_ns:?},\n\"clock_bracket_baseline_ns\":{baseline_ns:?},\n\"prepared_admission_ns\":{admission_ns:?}\n}}\n",
+            cfg!(debug_assertions)
+        ),
+    )?;
+    redis::cmd("auth_async.observe")
+        .arg("stop")
+        .query::<()>(&mut server)?;
+    assert_eq!(
+        redis::cmd("auth_async.observe")
+            .arg("status")
+            .query::<Vec<i64>>(&mut server)?,
+        vec![0, 1, 0]
+    );
+    drop(client);
+    utils::wait_until(Duration::from_secs(3), "observation finalization", || {
+        drain(&mut server)?;
+        Ok(unload(&mut server).is_ok())
+    })?;
+    redis::cmd("MODULE")
+        .arg("LOAD")
+        .arg(utils::module_path("auth_async")?)
+        .query::<()>(&mut server)?;
+    record_identity(&mut server, "cost-reload")?;
+    assert_eq!(
+        redis::cmd("auth_async.observe")
+            .arg("status")
+            .query::<Vec<i64>>(&mut server)?,
+        vec![0, 0, 0],
+        "empty unload restores the slot; reload starts without observer storage"
+    );
+    unload(&mut server)?;
+    record_cleanup(server, "cost")
 }

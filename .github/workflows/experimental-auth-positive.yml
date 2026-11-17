@@ -84,13 +84,41 @@ jobs:
         run: python3 .github/scripts/auth-rc3-fixture.py "$RUNNER_TEMP/auth-rc3-positive"
       - name: Build experimental fixture
         run: cargo build --example auth_async --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3
+      - name: Record observation environment
+        env:
+          OBSERVATION_FLOOR: ${{ matrix.floor }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, platform, subprocess
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'auth-rc3-positive'
+          module = pathlib.Path('target/debug/examples/libauth_async.so').resolve()
+          governor = pathlib.Path('/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor')
+          report = {
+              'floor': os.environ['OBSERVATION_FLOOR'],
+              'host': platform.uname()._asdict(),
+              'cpuinfo': pathlib.Path('/proc/cpuinfo').read_text(),
+              'cpu_affinity': sorted(os.sched_getaffinity(0)),
+              'cpu0_governor': governor.read_text().strip() if governor.exists() else None,
+              'rustc': subprocess.check_output(['rustc', '-Vv'], text=True, timeout=10),
+              'cargo': subprocess.check_output(['cargo', '-V'], text=True, timeout=10),
+              'sdk_head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True, timeout=10).strip(),
+              'sdk_build': 'cargo build --example auth_async; default dev profile',
+              'rust_environment': {key: os.environ.get(key) for key in ['RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS', 'CARGO_PROFILE_DEV_OPT_LEVEL', 'CARGO_PROFILE_DEV_DEBUG']},
+              'module': str(module),
+              'module_sha256': hashlib.sha256(module.read_bytes()).hexdigest(),
+              'fixture': json.loads((root / 'fixture.json').read_text()),
+              'caveat': 'Hosted-runner observations; cache state, scheduling and CPU frequency uncontrolled. No absolute latency or pure receipt-cost claim.'
+          }
+          (root / 'observation-environment.json').write_text(json.dumps(report, indent=2) + '\n')
+          PY
       - name: Discover native positive cases
         run: |
           cargo test --test integration --no-default-features --features min-redis-compatibility-version-${{ matrix.floor }},experimental-auth-redis-8-12-rc3 auth_async:: -- --list | tee "$RUNNER_TEMP/auth-rc3-positive/discovery.txt"
           for test_name in \
             auth_async::test_async_auth_positive_success_denial_stale_and_ordinary_cleanup \
             auth_async::test_async_auth_positive_timeout_and_late_completion_are_once_only \
-            auth_async::test_async_auth_positive_disconnect_retains_producer_until_release
+            auth_async::test_async_auth_positive_disconnect_retains_producer_until_release \
+            auth_async::test_async_auth_positive_preparation_and_prepared_admission_observations
           do
             grep -Fx -- "$test_name: test" "$RUNNER_TEMP/auth-rc3-positive/discovery.txt"
           done
@@ -103,12 +131,41 @@ jobs:
       - name: Require all positive cases to execute
         run: |
           python3 - <<'PY'
-          import os, pathlib, re
-          data = (pathlib.Path(os.environ['RUNNER_TEMP']) / 'auth-rc3-positive/positive.log').read_text()
-          if not re.search(r'test result: ok\. 3 passed; 0 failed; 0 ignored;', data):
-              raise SystemExit('all three native positive cases must execute')
-          if data.count('ASYNC_POSITIVE_EXECUTED:') != 3:
+          import hashlib, json, math, os, pathlib, re, statistics
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'auth-rc3-positive'
+          data = (root / 'positive.log').read_text()
+          if not re.search(r'test result: ok\. 4 passed; 0 failed; 0 ignored;', data):
+              raise SystemExit('all four native positive cases must execute')
+          if data.count('ASYNC_POSITIVE_EXECUTED:') != 4:
               raise SystemExit('native identity/cleanup evidence marker missing')
+          observations = json.loads((root / 'runtime/cost-observations.json').read_text())
+          summary = {'units': 'nanoseconds', 'scope': observations['admission_scope'], 'caveats': observations['caveats']}
+          for name, count in [('preparation_ns', 10), ('clock_bracket_baseline_ns', 200), ('prepared_admission_ns', 200)]:
+              values = observations[name]
+              if len(values) != count or not all(type(n) is int and n >= 0 for n in values):
+                  raise SystemExit('missing or invalid observation samples: ' + name)
+              ordered = sorted(values)
+              summary[name] = {'n': count, 'min': ordered[0], 'median': statistics.median(values), 'p95_nearest_rank': ordered[math.ceil(count * .95) - 1], 'max': ordered[-1]}
+          if observations['warmup_auths'] != 20:
+              raise SystemExit('missing warmup provenance')
+          environment = json.loads((root / 'observation-environment.json').read_text())
+          identities = list((root / 'runtime').glob('*.txt'))
+          module_count = 0
+          for path in identities:
+              fields = dict(line.split(':', 1) for line in path.read_text().splitlines() if ':' in line)
+              if 'module_sha256' not in fields:
+                  continue
+              name = fields['module_archive']
+              if pathlib.PurePosixPath(name).name != name or not name.endswith('.so'):
+                  raise SystemExit('invalid retained module path')
+              digest = hashlib.sha256((root / 'runtime' / name).read_bytes()).hexdigest()
+              if digest != fields['module_sha256'] or digest != environment['module_sha256']:
+                  raise SystemExit('retained loaded module digest mismatch')
+              module_count += 1
+          if module_count != 6:
+              raise SystemExit('all six module identity records must retain their loaded bytes')
+          (root / 'cost-summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
           PY
       - name: Preserve native identities and lifecycle evidence
         if: always()

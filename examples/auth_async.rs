@@ -5,11 +5,12 @@ use redis_module::{
     ModuleUserHandle, PublicAuthError, RedisError, RedisGILGuard, RedisResult, RedisString, Status,
     redis_command, redis_module,
 };
+use std::cell::Cell;
 use std::collections::BTreeMap;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 static USERS: RedisGILGuard<BTreeMap<&'static str, ModuleUserHandle>> =
     RedisGILGuard::new(BTreeMap::new());
@@ -19,6 +20,137 @@ static STARTED: AtomicUsize = AtomicUsize::new(0);
 static CHANGED: AtomicUsize = AtomicUsize::new(0);
 static DROPPED: AtomicUsize = AtomicUsize::new(0);
 static BLOCK_CALLS: AtomicUsize = AtomicUsize::new(0);
+type ClockFn = unsafe extern "C" fn() -> u64;
+static ORIGINAL_CLOCK: OnceLock<ClockFn> = OnceLock::new();
+static OBSERVING: AtomicBool = AtomicBool::new(false);
+static OBSERVATION_ERROR: AtomicBool = AtomicBool::new(false);
+static OBSERVATIONS: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+const OBSERVATION_LIMIT: usize = 256;
+#[derive(Clone, Copy)]
+enum ClockSpan {
+    Idle,
+    Armed,
+    Running(Instant),
+    Done,
+}
+thread_local! { static CLOCK_SPAN: Cell<ClockSpan> = const { Cell::new(ClockSpan::Idle) }; }
+
+// Fixture-only observation of the real SDK begin_with clock0 -> clock1 span.
+// It includes prepared admission/role checks, not just Receipt::consistent.
+// Captured job clocks keep this forwarding function until verified empty unload.
+unsafe extern "C" fn observed_clock() -> u64 {
+    let Some(original) = ORIGINAL_CLOCK.get() else {
+        return 0;
+    };
+    let value = unsafe { original() };
+    let elapsed = CLOCK_SPAN
+        .try_with(|span| match span.get() {
+            ClockSpan::Armed => {
+                span.set(ClockSpan::Running(Instant::now()));
+                None
+            }
+            ClockSpan::Running(start) => {
+                span.set(ClockSpan::Done);
+                Some(start.elapsed())
+            }
+            _ => None,
+        })
+        .ok()
+        .flatten();
+    if let Some(elapsed) = elapsed {
+        let mut samples = OBSERVATIONS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Ok(nanos) = i64::try_from(elapsed.as_nanos()) {
+            if samples.len() < OBSERVATION_LIMIT {
+                samples.push(nanos);
+            } else {
+                OBSERVATION_ERROR.store(true, Ordering::Relaxed);
+            }
+        } else {
+            OBSERVATION_ERROR.store(true, Ordering::Relaxed);
+        }
+    }
+    value
+}
+fn observe(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
+    // Require the same quiescent ordinary-command boundary as async cleanup.
+    ctx.reap_async_auth(0)?;
+    match args.get(1).ok_or(RedisError::WrongArity)?.try_as_str()? {
+        "prepare" => {
+            let start = Instant::now();
+            let receipt = ctx.prepare_async_auth_runtime()?;
+            let nanos = i64::try_from(start.elapsed().as_nanos())
+                .map_err(|_| RedisError::Str("ERR observation overflow"))?;
+            Ok(vec![receipt.generation as i64, nanos].into())
+        }
+        "start" => {
+            let current = unsafe { redis_module::raw::RedisModule_MonotonicMicroseconds }
+                .ok_or(RedisError::Str("ERR clock unavailable"))?;
+            if let Some(original) = ORIGINAL_CLOCK.get() {
+                if !std::ptr::fn_addr_eq(current, *original)
+                    && !std::ptr::fn_addr_eq(current, observed_clock as ClockFn)
+                {
+                    return Err(RedisError::Str("ERR clock slot changed"));
+                }
+            } else {
+                ORIGINAL_CLOCK
+                    .set(current)
+                    .map_err(|_| RedisError::Str("ERR clock already installed"))?;
+            }
+            *OBSERVATIONS.lock().unwrap() = Vec::with_capacity(OBSERVATION_LIMIT);
+            OBSERVATION_ERROR.store(false, Ordering::Relaxed);
+            CLOCK_SPAN.with(|span| span.set(ClockSpan::Idle));
+            unsafe {
+                redis_module::raw::RedisModule_MonotonicMicroseconds = Some(observed_clock);
+            }
+            OBSERVING.store(true, Ordering::Relaxed);
+            Ok("OK".into())
+        }
+        "baseline" => {
+            if !OBSERVING.load(Ordering::Relaxed) {
+                return Err(RedisError::Str("ERR observer inactive"));
+            }
+            OBSERVATIONS.lock().unwrap().clear();
+            for _ in 0..200 {
+                CLOCK_SPAN.with(|span| span.set(ClockSpan::Armed));
+                unsafe {
+                    observed_clock();
+                    observed_clock();
+                }
+            }
+            CLOCK_SPAN.with(|span| span.set(ClockSpan::Idle));
+            Ok(OBSERVATIONS.lock().unwrap().clone().into())
+        }
+        "reset" => {
+            let mut samples = OBSERVATIONS.lock().unwrap();
+            let count = samples.len();
+            samples.clear();
+            Ok((count as i64).into())
+        }
+        "samples" => {
+            if OBSERVATION_ERROR.load(Ordering::Relaxed) {
+                return Err(RedisError::Str("ERR observation overflow"));
+            }
+            Ok(OBSERVATIONS.lock().unwrap().clone().into())
+        }
+        "status" => Ok(vec![
+            i64::from(OBSERVING.load(Ordering::Relaxed)),
+            i64::from(
+                unsafe { redis_module::raw::RedisModule_MonotonicMicroseconds }
+                    .is_some_and(|clock| std::ptr::fn_addr_eq(clock, observed_clock as ClockFn)),
+            ),
+            OBSERVATIONS.lock().unwrap().len() as i64,
+        ]
+        .into()),
+        "stop" => {
+            OBSERVING.store(false, Ordering::Relaxed);
+            CLOCK_SPAN.with(|span| span.set(ClockSpan::Idle));
+            *OBSERVATIONS.lock().unwrap() = Vec::new();
+            // Jobs may retain observed_clock. Restore only at empty deinit.
+            Ok("OK".into())
+        }
+        _ => Err(RedisError::Str("ERR unknown observation")),
+    }
+}
 type BlockFn = unsafe extern "C" fn(
     *mut redis_module::raw::RedisModuleCtx,
     redis_module::raw::RedisModuleAuthCallback,
@@ -72,7 +204,7 @@ impl Drop for Track {
 
 fn authenticate(ctx: &AuthContext<'_>, request: AuthRequest<'_>) -> AuthDecision {
     let mode = match request.username() {
-        b"async" => 0,
+        b"async" | b"observe" => 0,
         b"deny" => 1,
         b"fallback" => 2,
         b"hold" => 3,
@@ -90,6 +222,14 @@ fn authenticate(ctx: &AuthContext<'_>, request: AuthRequest<'_>) -> AuthDecision
     let Some(user) = USERS.lock(ctx).get(key).cloned() else {
         return AuthDecision::Deny(PublicAuthError::default());
     };
+    if request.username() == b"observe"
+        && (!OBSERVING.load(Ordering::Relaxed)
+            || CLOCK_SPAN
+                .try_with(|span| span.set(ClockSpan::Armed))
+                .is_err())
+    {
+        return AuthDecision::Deny(PublicAuthError::default());
+    }
     let secret = request.copy_for_async();
     let state = Track;
     ctx.defer(Duration::from_secs(1), move |completion| {
@@ -197,6 +337,23 @@ fn deinit(_: &EventContext) -> Status {
     if !WORKERS.lock().unwrap().is_empty() || !HELD.lock().unwrap().is_empty() {
         Status::Err
     } else {
+        if let Some(original) = ORIGINAL_CLOCK.get() {
+            let Some(current) = (unsafe { redis_module::raw::RedisModule_MonotonicMicroseconds })
+            else {
+                return Status::Err;
+            };
+            if !std::ptr::fn_addr_eq(current, *original)
+                && !std::ptr::fn_addr_eq(current, observed_clock as ClockFn)
+            {
+                return Status::Err;
+            }
+            unsafe {
+                redis_module::raw::RedisModule_MonotonicMicroseconds = Some(*original);
+            }
+        }
+        OBSERVING.store(false, Ordering::Relaxed);
+        let _ = CLOCK_SPAN.try_with(|span| span.set(ClockSpan::Idle));
+        *OBSERVATIONS.lock().unwrap() = Vec::new();
         Status::Ok
     }
 }
@@ -212,5 +369,6 @@ redis_module! {
         redis_command!("auth_async.drain", drain).flags(redis_module::CommandFlags::ADMIN),
         redis_command!("auth_async.stats", stats).read_only(),
         redis_command!("auth_async.probe", probe).flags(redis_module::CommandFlags::ADMIN),
+        redis_command!("auth_async.observe", observe).flags(redis_module::CommandFlags::ADMIN),
     ],
 }
