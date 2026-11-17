@@ -7,7 +7,7 @@ scope and readiness. Historical H/S/G IDs remain useful for the evidence below.
 
 Status: `done`, `next` (being worked on or first in line), `todo`, `blocked`.
 
-Last updated 2026-11-16.
+Last updated 2026-11-17.
 
 ## Where it stands
 
@@ -138,6 +138,14 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-11-17: merged SDK master `a2943e7`, including opt-in asynchronous
+  authentication from PR 251, the third stage of issue 216. The host and
+  guests need no source adaptation. The workspace lock snapshot adds `sha2`
+  to the SDK dependency list without changing any package version; the three
+  guest snapshots remain unchanged. Validation uses the full
+  `wasm/ci/check.sh` with Rust and JavaScript guests required. Experiment push
+  CI remains pending publication.
 
 - 2026-11-16: merged SDK master `5e99ee2`, including synchronous typed
   authentication callbacks from PR 250, the second stage of issue 216. The

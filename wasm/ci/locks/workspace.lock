@@ -917,6 +917,7 @@ dependencies = [
  "redis-module-macros-internals",
  "scoped-tls",
  "serde",
+ "sha2",
 ]
 
 [[package]]
