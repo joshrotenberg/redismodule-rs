@@ -101,7 +101,8 @@ which keeps its published history and any open PR's ancestry intact:
 
 ```bash
 git fetch fork
-git switch experiment/wasm-host
+git worktree add --detach /path/to/wasm-sync fork/experiment/wasm-host
+cd /path/to/wasm-sync
 git merge --no-ff fork/master
 ```
 
@@ -112,20 +113,26 @@ checkout or worktree as the
 describes, rather than replacing a developer's own lockfiles. If a `--locked`
 step fails because the sync changed dependencies, regenerate the affected
 lockfile with the pinned toolchain, review its diff, update its snapshot and
-rerun `check.sh`. Record the sync in
-`wasm/TRACKING.md`, push, and confirm the experiment push CI passes.
-
-With [clajent](https://github.com/joshrotenberg/clajent)'s `cj`,
-`cj run wasm-sync /abs/path --message "chore: sync wasm host with ..."` does
-the merge, the lockfiles and `check.sh` in a new worktree and prints the
-results; the `wasm/TRACKING.md` entry and the push stay manual.
+rerun `check.sh`. Record the sync in `wasm/TRACKING.md`, then run
+`git push fork HEAD:experiment/wasm-host` and confirm the experiment push CI
+passes.
 
 ## Syncing the QuickJS experiment
 
-After each SDK merge, merge `master` into `experiment/quickjs` the same way,
-with `git merge --no-ff fork/master` and no rebase. Run `cj run gates` there:
-on a checkout with `js/Cargo.toml` it also builds and tests `redis-module-js`
-at both floors. Push, and confirm the push CI passes.
+After each SDK merge, fetch `fork`, create a fresh worktree at
+`fork/experiment/quickjs` and run `git merge --no-ff fork/master` there. Run the
+validation below in that worktree. Before each workspace test command, build the
+native QuickJS module with the matching API floor so its integration tests can
+load it:
+
+```bash
+cargo build --package redis-module-js
+cargo build --package redis-module-js --no-default-features --features min-redis-compatibility-version-7-2
+```
+
+The [QuickJS README](js/README.md) also lists the standalone test commands.
+
+Run `git push fork HEAD:experiment/quickjs` and confirm the push CI passes.
 
 ## Tracking upstream
 
@@ -210,26 +217,23 @@ cargo build --examples
 RUST_TEST_THREADS=4 cargo test --workspace --no-fail-fast
 cargo test --features system-allocator-fallback --test system_allocator_fallback
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --features all-features-but-xor
+RUSTC_BOOTSTRAP=1 cargo test --doc
 ```
 
-`cj run gates` runs this list, the 7.2-floor repeats below and the
-`RUSTC_BOOTSTRAP=1` doctests, and prints each step's result, test counts and
-log path. The project recipes and their shared code are in `.cj/`;
-`cj doc gates` lists the options.
+Repeat the example, test and documentation checks at the 7.2 API floor using
+Redis 7.2 or later. The `call_blocking` and `BlockingCallOptions` APIs and the
+`call` and `keyspace_to_stream` examples compile at this floor or later.
 
-On a checkout with `js/Cargo.toml`, build `redis-module-js` with the same profile
-and compatibility features before running its native tests. `cj run gates`
-includes these builds at both floors; [js/README.md](js/README.md) lists the
-standalone commands.
+```bash
+cargo build --examples --no-default-features --features min-redis-compatibility-version-7-2
+RUST_TEST_THREADS=4 cargo test --workspace --no-fail-fast --no-default-features --features min-redis-compatibility-version-7-2
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --no-default-features --features "all-features-but-xor min-redis-compatibility-version-7-2"
+```
 
-- `call_blocking`, `BlockingCallOptions` and the `call` and
-  `keyspace_to_stream` examples compile only at the Redis 7.2 or later API
-  floors. Repeat the example build and tests with `--no-default-features
-  --features min-redis-compatibility-version-7-2` against Redis 7.2 or later.
 - Build the examples before filtered integration tests, which load modules from
   the build profile's directory.
-- On `experiment/wasm-host`, alternate-floor checks add
-  `--exclude redis-module-wasm`.
+- On `experiment/wasm-host`, add `--exclude redis-module-wasm` to
+  alternate-floor commands that use `--workspace`.
 - Stable rustdoc does not check `compile_fail` error codes;
   `RUSTC_BOOTSTRAP=1 cargo test --doc` does.
 - The [CI workflow](.github/workflows/ci.yml) is the authority for the server,
