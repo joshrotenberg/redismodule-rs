@@ -9315,6 +9315,223 @@ fn key_blocking_live(con: &mut TestConnection, live: i64, drops: i64) -> Result<
 }
 
 #[test]
+fn test_key_blocking_context_whole_reply_keeps_connection_aligned() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let mut drops = 0;
+    for protocol in [2, 3] {
+        for ready in [true, false] {
+            let key = format!("keyblock:whole:{protocol}:{ready}");
+            let mut client = KeyBlockingWire::connect(&con)?;
+            client.send(redis::cmd("HELLO").arg(protocol))?;
+            client.read()?;
+            client.send(redis::cmd("keyblock.wait").arg((
+                if ready { 0 } else { 100 },
+                1,
+                "whole",
+                &key,
+            )))?;
+            client.send(redis::cmd("PING").arg("after-whole"))?;
+            if ready {
+                key_blocking_live(&mut con, 1, drops)?;
+                redis::cmd("RPUSH")
+                    .arg((&key, "one"))
+                    .query::<i64>(&mut con)?;
+            }
+            assert_eq!(client.read()?, Value::SimpleString("first".into()));
+            assert_eq!(client.read()?, Value::BulkString(b"after-whole".to_vec()));
+            client.ping()?;
+            drops += 1;
+            key_blocking_live(&mut con, 0, drops)?;
+        }
+    }
+    Ok(())
+}
+
+fn key_blocking_whole_case(
+    con: &mut TestConnection,
+    drops: &mut i64,
+    protocol: i64,
+    ready: bool,
+    case: &str,
+    expected: Value,
+) -> Result<()> {
+    let key = format!("keyblock:whole:{protocol}:{ready}:{case}:{drops}");
+    let mut client = KeyBlockingWire::connect(con)?;
+    client.send(redis::cmd("HELLO").arg(protocol))?;
+    client.read()?;
+    client.send(redis::cmd("keyblock.wait").arg((
+        if ready { 0 } else { 50 },
+        1,
+        format!("whole-{case}"),
+        &key,
+    )))?;
+    client.send(redis::cmd("PING").arg("after-whole-case"))?;
+    if ready {
+        key_blocking_live(con, 1, *drops)?;
+        redis::cmd("RPUSH").arg((&key, "one")).query::<i64>(con)?;
+    }
+    let actual = client
+        .read_value()
+        .with_context(|| format!("whole reply RESP{protocol} ready={ready} {case}"))?;
+    if case == "message" {
+        assert_eq!(error_element(&actual).as_deref(), Some("ERR first"));
+    } else if matches!(
+        case,
+        "unblock-before" | "refuse-unblock-none" | "refuse-unblock-panic"
+    ) {
+        // The nested timeout owns completion, but mutable waiter data is still
+        // lent to readiness. Its existing nonreentrant-data error is the reply.
+        assert_eq!(
+            error_element(&actual).as_deref(),
+            Some("ERR key blocking callback is already running")
+        );
+    } else {
+        assert_eq!(actual, expected, "RESP{protocol} ready={ready} {case}");
+    }
+    assert_eq!(
+        client.read()?,
+        Value::BulkString(b"after-whole-case".to_vec()),
+        "{case}"
+    );
+    client.ping()?;
+    *drops += 1;
+    key_blocking_live(con, 0, *drops)?;
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_context_whole_roots_arbitrate_with_return_and_writer() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let mut drops = 0;
+    for protocol in [2, 3] {
+        for ready in [true, false] {
+            for case in [
+                "return",
+                "error",
+                "panic",
+                "twice",
+                "none",
+                "key",
+                "preflight",
+                "complete-mix",
+                "typed-after",
+                "nested",
+                "unblock-after",
+            ] {
+                key_blocking_whole_case(
+                    &mut con,
+                    &mut drops,
+                    protocol,
+                    ready,
+                    case,
+                    Value::Int(17),
+                )?;
+            }
+            key_blocking_whole_case(
+                &mut con,
+                &mut drops,
+                protocol,
+                ready,
+                "partial-mix",
+                Value::Array(vec![Value::Int(1), Value::Int(2)]),
+            )?;
+            key_blocking_whole_case(
+                &mut con,
+                &mut drops,
+                protocol,
+                ready,
+                "array",
+                Value::Array(vec![Value::Int(17), Value::Nil, Value::Array(vec![])]),
+            )?;
+            key_blocking_whole_case(
+                &mut con,
+                &mut drops,
+                protocol,
+                ready,
+                "forward",
+                Value::BulkString(b"first".to_vec()),
+            )?;
+            key_blocking_whole_case(&mut con, &mut drops, protocol, ready, "message", Value::Nil)?;
+        }
+        key_blocking_whole_case(
+            &mut con,
+            &mut drops,
+            protocol,
+            true,
+            "unblock-before",
+            Value::Int(23),
+        )?;
+    }
+    assert_eq!(
+        key_blocking_stats(&mut con)?[6],
+        1,
+        "mixed/repeated write refused"
+    );
+    Ok(())
+}
+
+#[test]
+fn test_key_blocking_context_native_forward_refusal_rearms_and_preserves_timeout() -> Result<()> {
+    let mut con = TestConnection::new("key_blocking");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    if info.contains("redis_version:6.") {
+        // Redis 6 forwarding always returns OK; the native refusal was added
+        // later. Preflight failures are exercised separately at every floor.
+        return Ok(());
+    }
+    let mut drops = 0;
+    for ready in [true, false] {
+        for case in ["refuse-direct", "refuse-typed", "refuse-return"] {
+            key_blocking_whole_case(&mut con, &mut drops, 2, ready, case, Value::Int(17))?;
+        }
+    }
+    for case in ["refuse-unblock-none", "refuse-unblock-panic"] {
+        key_blocking_whole_case(&mut con, &mut drops, 2, true, case, Value::Int(23))?;
+    }
+    let mut client = KeyBlockingWire::connect(&con)?;
+    let key = "keyblock:whole:rearm";
+    client.send(redis::cmd("keyblock.wait").arg((0, 1, "whole-refuse-rearm", key)))?;
+    client.send(redis::cmd("PING").arg("after-rearm"))?;
+    key_blocking_live(&mut con, 1, drops)?;
+    let before = key_blocking_stats(&mut con)?[7];
+    redis::cmd("RPUSH")
+        .arg((key, "one"))
+        .query::<i64>(&mut con)?;
+    utils::wait_until(
+        Duration::from_secs(5),
+        "native no-write refusal and rearm",
+        || {
+            let stats = key_blocking_stats(&mut con)?;
+            Ok(stats[0] == 1 && stats[7] == before + 1)
+        },
+    )?;
+    redis::cmd("RPUSH")
+        .arg((key, "two"))
+        .query::<i64>(&mut con)?;
+    // Further pushes to a nonempty list do not wake module waiters.
+    redis::cmd("keyblock.signal")
+        .arg(key)
+        .query::<String>(&mut con)?;
+    let after_second = key_blocking_stats(&mut con)?;
+    assert_eq!(
+        after_second[7],
+        before + 2,
+        "second native refusal: {after_second:?}"
+    );
+    assert_eq!(
+        client
+            .read()
+            .context("rearmed whole reply after second wake")?,
+        Value::Int(17)
+    );
+    assert_eq!(client.read()?, Value::BulkString(b"after-rearm".to_vec()));
+    client.ping()?;
+    key_blocking_live(&mut con, 0, drops + 1)?;
+    assert_eq!(key_blocking_stats(&mut con)?[7], before + 2);
+    Ok(())
+}
+
+#[test]
 fn test_key_blocking_readiness_rechecks_and_copies_binary_ready_keys() -> Result<()> {
     let mut con = TestConnection::new("key_blocking");
     assert!(!redis::cmd("keyblock.ready_outside").query::<bool>(&mut con)?);
@@ -9494,6 +9711,8 @@ fn error_element(value: &Value) -> Option<String> {
 #[test]
 fn test_key_blocking_reply_writer_streams_ready_and_timeout_replies() -> Result<()> {
     let mut con = TestConnection::new("key_blocking");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let native_maps = !info.contains("redis_version:6.");
     let key: &[u8] = b"keyblock:writer\0\xff";
     let mut client = KeyBlockingWire::connect(&con)?;
     client.send(redis::cmd("keyblock.wait").arg((0, 2, "writer")).arg(key))?;
@@ -9527,7 +9746,7 @@ fn test_key_blocking_reply_writer_streams_ready_and_timeout_replies() -> Result<
     client.ping()?;
     key_blocking_live(&mut con, 0, 1)?;
 
-    // The timeout writes a map: a flat array for RESP2, a map for RESP3.
+    // Redis before 7 has no module map API, so it uses an array for RESP3 too.
     let mut drops = 1;
     for resp3 in [false, true] {
         let mut client = KeyBlockingWire::connect(&con)?;
@@ -9542,9 +9761,9 @@ fn test_key_blocking_reply_writer_streams_ready_and_timeout_replies() -> Result<
             "keyblock:writer-timeout",
         )))?;
         let timeouts = match client.read()? {
-            Value::Array(pairs) if !resp3 => match pairs.as_slice() {
+            Value::Array(pairs) if !resp3 || !native_maps => match pairs.as_slice() {
                 [Value::BulkString(name), Value::Int(timeouts)] if name == b"timeouts" => *timeouts,
-                reply => anyhow::bail!("unexpected RESP2 timeout reply {reply:?}"),
+                reply => anyhow::bail!("unexpected flat timeout reply {reply:?}"),
             },
             Value::Map(pairs) if resp3 => match pairs.as_slice() {
                 [(Value::BulkString(name), Value::Int(timeouts))] if name == b"timeouts" => {
