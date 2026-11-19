@@ -1689,7 +1689,7 @@ mod key_blocking_tests {
     #[test]
     fn admission_context_matching_restores_key_owner_after_unwind() {
         use super::super::command_reply::{self, Owner};
-        let ctx = ptr::dangling_mut();
+        let ctx = ptr::dangling_mut::<raw::RedisModuleCtx>();
         let other = ctx.wrapping_byte_add(8);
         let frame = ReplyFrame::new(ctx, None);
         let _link = frame.link();
