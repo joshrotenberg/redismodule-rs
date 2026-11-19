@@ -7,7 +7,7 @@ scope and readiness. Historical H/S/G IDs remain useful for the evidence below.
 
 Status: `done`, `next` (being worked on or first in line), `todo`, `blocked`.
 
-Last updated 2026-11-17.
+Last updated 2026-11-18.
 
 ## Where it stands
 
@@ -138,6 +138,11 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-11-18: merged SDK master `556d155`, which removes the Clajent
+  recipes and documents direct validation commands. The four lock snapshots
+  and the host and guest code are unchanged. The validation command is
+  `bash wasm/ci/check.sh`.
 
 - 2026-11-17: merged SDK master `ba53d98`, including the isolated HTTP
   authentication consumer from PR 252 for issue 217. The host and guests
