@@ -11,6 +11,3 @@ QuickJS projection experiment on `experiment/quickjs`.
   pre-releases.
 - Upstream RedisLabsModules/redismodule-rs is read-only: no pushes, pull
   requests, issues or comments there.
-- `.cj/` holds project recipes for [clajent](https://github.com/joshrotenberg/clajent)'s
-  `cj`: `cj run gates` runs the validation list and `cj run wasm-sync` does the
-  wasm sync. `.cj/skills/fork-workflow/SKILL.md` describes them.
