@@ -9711,6 +9711,8 @@ fn error_element(value: &Value) -> Option<String> {
 #[test]
 fn test_key_blocking_reply_writer_streams_ready_and_timeout_replies() -> Result<()> {
     let mut con = TestConnection::new("key_blocking");
+    let info: String = redis::cmd("INFO").arg("server").query(&mut con)?;
+    let native_maps = !info.contains("redis_version:6.");
     let key: &[u8] = b"keyblock:writer\0\xff";
     let mut client = KeyBlockingWire::connect(&con)?;
     client.send(redis::cmd("keyblock.wait").arg((0, 2, "writer")).arg(key))?;
@@ -9744,7 +9746,7 @@ fn test_key_blocking_reply_writer_streams_ready_and_timeout_replies() -> Result<
     client.ping()?;
     key_blocking_live(&mut con, 0, 1)?;
 
-    // The timeout writes a map: a flat array for RESP2, a map for RESP3.
+    // Redis before 7 has no module map API, so it uses an array for RESP3 too.
     let mut drops = 1;
     for resp3 in [false, true] {
         let mut client = KeyBlockingWire::connect(&con)?;
@@ -9759,9 +9761,9 @@ fn test_key_blocking_reply_writer_streams_ready_and_timeout_replies() -> Result<
             "keyblock:writer-timeout",
         )))?;
         let timeouts = match client.read()? {
-            Value::Array(pairs) if !resp3 => match pairs.as_slice() {
+            Value::Array(pairs) if !resp3 || !native_maps => match pairs.as_slice() {
                 [Value::BulkString(name), Value::Int(timeouts)] if name == b"timeouts" => *timeouts,
-                reply => anyhow::bail!("unexpected RESP2 timeout reply {reply:?}"),
+                reply => anyhow::bail!("unexpected flat timeout reply {reply:?}"),
             },
             Value::Map(pairs) if resp3 => match pairs.as_slice() {
                 [(Value::BulkString(name), Value::Int(timeouts))] if name == b"timeouts" => {
