@@ -143,7 +143,7 @@ approval or its workflow being unmerged predate its completed merge above.
   accounting for key-block callbacks from PR 255. The host and guests need no
   source adaptation, and all four Rust lock snapshots remain unchanged.
   Validation uses the full `bash wasm/ci/check.sh` with Rust and JavaScript
-  guests required. Experiment push CI remains pending publication.
+  guests required.
 
 - 2026-11-18: merged SDK master `556d155`, which removes the Clajent
   recipes and documents direct validation commands. The four lock snapshots
