@@ -339,9 +339,21 @@ than putting a key-blocked native handle in a `BlockedClient`. Redis owns this
 waiter and frees it after readiness, timeout or disconnect; no worker unblock
 handle is returned. Supply owned `Send + 'static` data, a `KeyBlockingTimeout`,
 a ready callback returning `Result<Option<RedisValue>, RedisError>` and a
-timeout callback returning `RedisResult`. `Ok(None)` means keep waiting;
+timeout callback returning `RedisResult`. With no direct reply, `Ok(None)` means keep waiting;
 `Ok(Some(value))` or an error replies and unblocks. Callback `NoReply` becomes
-an error because a completed wait must send one reply. To write a large reply
+an error when no reply was sent. A safe whole `Context::reply*` call now claims
+the callback's reply: return `NoReply` afterward. Another returned value/error
+is dropped, a later safe write is refused, and a panic adds no second reply.
+A completed direct root ends the wait even if readiness returns `Ok(None)`.
+These combinations formerly bypassed the callback writer's accounting.
+
+Do not use Context reply methods as elements of a `KeyBlockingReply` aggregate;
+they are now refused after the writer starts. Use its existing `value()` or
+scalar methods. A whole Context root similarly refuses subsequent writer
+writes. Unknown internal serialization progress remains outside wire repair,
+including a panic inside `writer.value()`.
+
+To write a large reply
 without building a value tree, a callback writes it through
 `ctx.key_blocking_reply()` and returns `NoReply`. The writer counts the reply,
 so the client still gets exactly one.
