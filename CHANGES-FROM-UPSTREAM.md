@@ -129,6 +129,15 @@ and failed call-reply forwarding does not consume the reply. Dropping a
 blocked handle, replying directly and returning `NoReply` keeps the direct
 reply. Worker-owned blocked replies keep their existing contract.
 
+Key-blocking callbacks also route safe whole Context replies through their
+existing owner. A complete direct root ends the wait, preserves returned
+`NoReply`, and suppresses extra returned or panic bytes. Context emissions
+cannot be typed-writer elements; use the existing writer methods. Only the
+fixed native no-byte forwarding refusal releases its own readiness reservation
+immediately. Timeout/preexisting claims remain owned. Unknown serializer
+progress gets at most one private error attempt, without a wire-repair promise;
+internal partial progress in `writer.value()` remains untracked.
+
 Raw native calls and partial serialization remain outside the prototype;
 the full issue remains open. docs/COMMAND-REPLIES.md records the boundary and
 measurement procedure. No new streaming API is introduced.

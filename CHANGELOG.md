@@ -76,6 +76,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Key-blocking callbacks count complete safe Context replies with their
+  existing reply owner (#224 prototype). Extra direct/returned replies and
+  panic errors after completion are suppressed. Proven no-write forwarding
+  failures preserve fallback/rearm; typed writer elements keep their existing
+  accounting. Raw replies and unknown serializer progress remain excluded.
+
 - Timer creation refuses worker-origin events before looking up native APIs or
   retaining timer state (#244). The Redis lock does not protect native timer
   registration from the main event loop. Main-thread creation, cancellation

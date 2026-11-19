@@ -7,9 +7,9 @@
 //! paths.
 
 use redis_module::{
-    CommandFlags, Context, EventContext, KeyBlockingResult, KeyBlockingTimeout, KeyRange, NextArg,
-    RedisError, RedisResult, RedisString, RedisValue, RegistrationContext, Status, YieldMode, raw,
-    redis_command, redis_module,
+    CallOptionResp, CallOptionsBuilder, CallReply, CommandFlags, Context, ErrorReply, EventContext,
+    KeyBlockingResult, KeyBlockingTimeout, KeyRange, NextArg, RedisError, RedisResult, RedisString,
+    RedisValue, RegistrationContext, Status, YieldMode, raw, redis_command, redis_module,
 };
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
@@ -23,6 +23,61 @@ static UNLOAD_TEST: AtomicBool = AtomicBool::new(false);
 static LOAD_ATTEMPT: AtomicBool = AtomicBool::new(false);
 static SECOND_REJECTED: AtomicBool = AtomicBool::new(false);
 static WRITE_REFUSED: AtomicBool = AtomicBool::new(false);
+static FORWARD_REFUSALS: AtomicI64 = AtomicI64::new(0);
+
+#[derive(Clone, Copy)]
+enum WholeCase {
+    Return,
+    Error,
+    Panic,
+    Twice,
+    None,
+    Array,
+    Key,
+    Forward,
+    Message,
+    Preflight,
+    RefuseDirect,
+    RefuseTyped,
+    RefuseReturn,
+    RefuseRearm,
+    RefuseUnblockNone,
+    RefuseUnblockPanic,
+    PartialMix,
+    CompleteMix,
+    TypedAfter,
+    Nested,
+    UnblockBefore,
+    UnblockAfter,
+}
+
+fn whole_case(name: &str) -> Result<WholeCase, RedisError> {
+    Ok(match name {
+        "return" => WholeCase::Return,
+        "error" => WholeCase::Error,
+        "panic" => WholeCase::Panic,
+        "twice" => WholeCase::Twice,
+        "none" => WholeCase::None,
+        "array" => WholeCase::Array,
+        "key" => WholeCase::Key,
+        "forward" => WholeCase::Forward,
+        "message" => WholeCase::Message,
+        "preflight" => WholeCase::Preflight,
+        "refuse-direct" => WholeCase::RefuseDirect,
+        "refuse-typed" => WholeCase::RefuseTyped,
+        "refuse-return" => WholeCase::RefuseReturn,
+        "refuse-rearm" => WholeCase::RefuseRearm,
+        "refuse-unblock-none" => WholeCase::RefuseUnblockNone,
+        "refuse-unblock-panic" => WholeCase::RefuseUnblockPanic,
+        "partial-mix" => WholeCase::PartialMix,
+        "complete-mix" => WholeCase::CompleteMix,
+        "typed-after" => WholeCase::TypedAfter,
+        "nested" => WholeCase::Nested,
+        "unblock-before" => WholeCase::UnblockBefore,
+        "unblock-after" => WholeCase::UnblockAfter,
+        _ => return Err(RedisError::Str("ERR unknown whole reply case")),
+    })
+}
 
 #[derive(Clone, Copy)]
 enum Mode {
@@ -45,6 +100,10 @@ enum Mode {
     WriterUnblockAfter,
     WriterUnblockBefore,
     UnblockError,
+    Whole,
+    WholeReturned,
+    WholeTyped,
+    WholeProbe(WholeCase),
 }
 
 struct Waiter {
@@ -103,6 +162,17 @@ fn on_ready(ctx: &Context, waiter: &mut Waiter) -> Result<Option<RedisValue>, Re
         return Err(RedisError::Str("ERR unexpected ready key"));
     }
     match waiter.mode {
+        Mode::WholeReturned => return Ok(Some(RedisValue::SimpleStringStatic("first"))),
+        Mode::WholeTyped => {
+            ctx.key_blocking_reply()?
+                .value(RedisValue::SimpleStringStatic("first"))?;
+            return Ok(Some(RedisValue::NoReply));
+        }
+        Mode::WholeProbe(case) => return whole_probe(ctx, waiter, case, true),
+        Mode::Whole => {
+            ctx.reply_simple_string("first");
+            return Ok(Some(RedisValue::NoReply));
+        }
         Mode::PanicReady => std::panic::panic_any(BadPanicPayload),
         Mode::NoReplyReady => return Ok(Some(RedisValue::NoReply)),
         Mode::WriterIncomplete
@@ -124,6 +194,152 @@ fn on_ready(ctx: &Context, waiter: &mut Waiter) -> Result<Option<RedisValue>, Re
         return write_ready(ctx, waiter);
     }
     read_ready(ctx, waiter)
+}
+
+fn whole_probe(
+    ctx: &Context,
+    waiter: &mut Waiter,
+    case: WholeCase,
+    ready: bool,
+) -> Result<Option<RedisValue>, RedisError> {
+    if !ready
+        && matches!(
+            case,
+            WholeCase::UnblockBefore | WholeCase::RefuseUnblockNone | WholeCase::RefuseUnblockPanic
+        )
+    {
+        return Ok(Some(RedisValue::Integer(23)));
+    }
+    match case {
+        WholeCase::PartialMix | WholeCase::CompleteMix => {
+            let mut writer = ctx.key_blocking_reply()?;
+            if matches!(case, WholeCase::PartialMix) {
+                writer.array(2)?;
+                writer.integer(1)?;
+            } else {
+                writer.integer(17)?;
+            }
+            WRITE_REFUSED.store(
+                ctx.reply(Ok(RedisValue::Integer(99))) == Status::Err,
+                Ordering::SeqCst,
+            );
+            if matches!(case, WholeCase::PartialMix) {
+                writer.integer(2)?;
+            }
+            return Ok(Some(RedisValue::NoReply));
+        }
+        WholeCase::Preflight => {
+            ctx.reply_with_call_reply(&Ok(CallReply::Unknown))
+                .expect_err("no native reply");
+            return Ok(Some(RedisValue::Integer(17)));
+        }
+        WholeCase::RefuseDirect
+        | WholeCase::RefuseTyped
+        | WholeCase::RefuseReturn
+        | WholeCase::RefuseRearm
+        | WholeCase::RefuseUnblockNone
+        | WholeCase::RefuseUnblockPanic => {
+            ctx.call("SADD", &["keyblock:whole:set", "a"])?;
+            let reply = ctx.call_ext(
+                "SMEMBERS",
+                &CallOptionsBuilder::new()
+                    .resp(CallOptionResp::Resp3)
+                    .build(),
+                &["keyblock:whole:set"],
+            );
+            ctx.reply_with_call_reply(&reply)
+                .expect_err("native RESP3-to-RESP2 refusal");
+            FORWARD_REFUSALS.fetch_add(1, Ordering::SeqCst);
+            match case {
+                WholeCase::RefuseTyped => {
+                    ctx.key_blocking_reply()?.integer(17)?;
+                    return Ok(Some(RedisValue::NoReply));
+                }
+                WholeCase::RefuseReturn => return Ok(Some(RedisValue::Integer(17))),
+                WholeCase::RefuseRearm if waiter.minimum == 1 => {
+                    waiter.minimum += 1;
+                    return Ok(None);
+                }
+                WholeCase::RefuseUnblockNone | WholeCase::RefuseUnblockPanic => {
+                    unblock_self(ctx, "TIMEOUT")?;
+                    if matches!(case, WholeCase::RefuseUnblockPanic) {
+                        panic!("after rolled-back refusal");
+                    }
+                    return Ok(None);
+                }
+                _ => {}
+            }
+        }
+        WholeCase::UnblockBefore => {
+            unblock_self(ctx, "TIMEOUT")?;
+            WRITE_REFUSED.store(
+                ctx.reply(Ok(RedisValue::Integer(17))) == Status::Err,
+                Ordering::SeqCst,
+            );
+            return Ok(Some(RedisValue::NoReply));
+        }
+        WholeCase::Forward => {
+            let reply = ctx.call_ext("ECHO", &CallOptionsBuilder::new().build(), &["first"]);
+            ctx.reply_with_call_reply(&reply)?;
+            ctx.reply_with_call_reply(&reply)
+                .expect_err("second forwarding refused");
+            return Ok(Some(RedisValue::Integer(99)));
+        }
+        WholeCase::Message => {
+            ctx.reply_with_call_reply(&Err(ErrorReply::Message("ERR first".into())))?;
+            return Ok(Some(RedisValue::Integer(99)));
+        }
+        WholeCase::Array => {
+            ctx.reply(Ok(RedisValue::Array(vec![
+                RedisValue::Integer(17),
+                RedisValue::NoReply,
+                RedisValue::Array(vec![]),
+            ])));
+            return Ok(Some(RedisValue::Integer(99)));
+        }
+        WholeCase::Key => {
+            ctx.reply_with_key(redis_module::redisvalue::RedisValueKey::Integer(17));
+            return Ok(Some(RedisValue::Integer(99)));
+        }
+        WholeCase::Nested => {
+            if !matches!(
+                ctx.call("keyblock.inner", &[] as &[&str])?,
+                RedisValue::Integer(31)
+            ) {
+                return Err(RedisError::Str("ERR wrong nested reply"));
+            }
+        }
+        _ => {}
+    }
+    ctx.reply(Ok(RedisValue::Integer(17)));
+    match case {
+        WholeCase::Error => Err(RedisError::Str("ERR second")),
+        WholeCase::Panic => panic!("after complete whole reply"),
+        WholeCase::None => Ok(None),
+        WholeCase::Twice => {
+            WRITE_REFUSED.store(
+                ctx.reply(Ok(RedisValue::Integer(99))) == Status::Err,
+                Ordering::SeqCst,
+            );
+            Ok(Some(RedisValue::Integer(99)))
+        }
+        WholeCase::TypedAfter => {
+            WRITE_REFUSED.store(
+                ctx.key_blocking_reply()?.integer(99).is_err(),
+                Ordering::SeqCst,
+            );
+            Ok(Some(RedisValue::NoReply))
+        }
+        WholeCase::UnblockAfter => {
+            // Exercise nested cancellation from readiness only. Redis itself
+            // is already finalizing a native timeout in the timeout role.
+            if ready {
+                unblock_self(ctx, "TIMEOUT")?;
+            }
+            Ok(Some(RedisValue::NoReply))
+        }
+        _ => Ok(Some(RedisValue::Integer(99))),
+    }
 }
 
 /// Writes the reply `read_ready` would return through the reply writer, one
@@ -239,6 +455,19 @@ fn unblock_self(ctx: &Context, how: &str) -> Result<(), RedisError> {
 fn on_timeout(ctx: &Context, waiter: &mut Waiter) -> RedisResult {
     TIMEOUTS.fetch_add(1, Ordering::SeqCst);
     match waiter.mode {
+        Mode::WholeReturned => Ok(RedisValue::SimpleStringStatic("first")),
+        Mode::WholeTyped => {
+            ctx.key_blocking_reply()?
+                .value(RedisValue::SimpleStringStatic("first"))?;
+            Ok(RedisValue::NoReply)
+        }
+        Mode::WholeProbe(case) => {
+            whole_probe(ctx, waiter, case, false).map(|reply| reply.unwrap_or(RedisValue::NoReply))
+        }
+        Mode::Whole => {
+            ctx.reply_simple_string("first");
+            Ok(RedisValue::NoReply)
+        }
         Mode::PanicTimeout => std::panic::panic_any(BadPanicPayload),
         Mode::NoReplyTimeout => Ok(RedisValue::NoReply),
         Mode::WriterTimeoutError => {
@@ -286,6 +515,10 @@ fn wait(ctx: &Context, args: Vec<RedisString>) -> RedisResult {
         "writer-unblock-after" => Mode::WriterUnblockAfter,
         "writer-unblock-before" => Mode::WriterUnblockBefore,
         "unblock-error" => Mode::UnblockError,
+        "whole" => Mode::Whole,
+        "return-whole" => Mode::WholeReturned,
+        "writer-whole" => Mode::WholeTyped,
+        mode if mode.starts_with("whole-") => Mode::WholeProbe(whole_case(&mode[6..])?),
         _ => return Err(RedisError::Str("ERR unknown waiter mode")),
     };
     let keys: Vec<_> = args.collect();
@@ -526,8 +759,14 @@ fn stats(_: &Context, _: Vec<RedisString>) -> RedisResult {
         i64::from(DELETE_FLAG.load(Ordering::SeqCst)),
         i64::from(SECOND_REJECTED.load(Ordering::SeqCst)),
         i64::from(WRITE_REFUSED.load(Ordering::SeqCst)),
+        FORWARD_REFUSALS.load(Ordering::SeqCst),
     ]
     .into())
+}
+
+fn inner(ctx: &Context, _: Vec<RedisString>) -> RedisResult {
+    ctx.reply(Ok(RedisValue::Integer(31)));
+    Ok(RedisValue::NoReply)
 }
 
 redis_module! {
@@ -560,5 +799,6 @@ redis_module! {
         ["keyblock.ready_outside", ready_outside, "readonly", 0, 0, 0, ""],
         ["keyblock.writer_outside", writer_outside, "readonly", 0, 0, 0, ""],
         ["keyblock.stats", stats, "readonly", 0, 0, 0, ""],
+        ["keyblock.inner", inner, "readonly", 0, 0, 0, ""],
     ],
 }

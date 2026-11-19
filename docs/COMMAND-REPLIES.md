@@ -28,11 +28,39 @@ Handler signatures are unchanged. There is no new command streaming writer.
   returning `NoReply` after successful blocking. The command frame does not
   coordinate with a later worker reply.
 - Key-blocking callbacks retain their existing `KeyBlockingReply` writer and
-  its partial-aggregate accounting.
+  its accounting for explicitly opened aggregate headers. Whole safe Context
+  replies share that callback owner; see below.
 
 If a handler drops a blocked handle without replying and then writes a
 complete safe reply itself, returning `NoReply` keeps that reply instead of
 adding the released-without-a-reply error.
+
+## Key-blocking callbacks
+
+A readiness or timeout callback can send one whole reply through a safe
+`Context::reply*` method and then return `NoReply`. Another direct or returned
+reply is refused or dropped. A panic after completion logs without appending
+an error. A complete direct root ends the wait even if readiness returns
+`Ok(None)`. With nothing written, `Ok(None)` still rearms and `NoReply` still
+becomes the existing missing-reply error.
+
+The first whole reply and `KeyBlockingReply` use the same callback owner.
+An emitting Context call during a partial or complete writer reply is refused
+before emission. Use `writer.value()` for an element. A writer cannot append
+another root after a whole Context reply. Nested callbacks and commands choose
+the innermost owner for the exact native context, with ordinary command
+completion bookkeeping kept separate.
+
+Missing-API and no-reply forwarding checks reserve nothing. The native
+RESP3-to-RESP2 forwarding refusal writes no bytes; only that fixed operation
+can immediately release its own newly acquired readiness reservation before
+handler code resumes. Timeout and preexisting claims are never released.
+Other native errors and serialization panics do not establish zero progress.
+Unknown progress refuses further safe writes and permits at most one private
+fallback-error attempt before ending the callback. This cannot repair unknown
+partial output or promise connection alignment. Likewise, a panic inside
+`writer.value()` can leave uncounted internal serializer progress; the writer's
+header-debt recovery does not track that progress.
 
 ## Accounting
 

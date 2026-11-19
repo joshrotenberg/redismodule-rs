@@ -516,12 +516,13 @@ impl Context {
     /// key is available through [`Self::blocked_client_ready_key`]. The timeout
     /// callback also runs for `CLIENT UNBLOCK ... TIMEOUT`. Both callbacks are
     /// guarded against panics, as is destruction of the private data. Returning
-    /// `NoReply` from either callback becomes an error so the client cannot be
-    /// unblocked without a reply. A callback either returns its reply, or
-    /// writes it through [`Self::key_blocking_reply`], which streams a large
-    /// reply without building a [`RedisValue`] for it first. A reply written
-    /// any other way, such as through [`Self::reply`], is not counted, so
-    /// returning `NoReply` after it sends a second reply.
+    /// `NoReply` without a completed reply becomes an error. A callback may
+    /// return its reply, send one whole value through a safe `Context::reply*`
+    /// method, or use [`Self::key_blocking_reply`] for an incremental reply.
+    /// After a whole direct reply, return `NoReply`; another returned value or
+    /// error is dropped. A completed direct reply also ends a ready callback
+    /// that returns `Ok(None)`. A panic after completion logs without adding
+    /// another reply. Raw native replies remain outside this accounting.
     ///
     /// Only indexed network clients may wait. Module calls, including calls
     /// using the `K` flag, return [`KeyBlockingResult::Denied`] and must use the
@@ -736,8 +737,12 @@ impl Context {
 ///   not from a client's `COUNT`, so a callback that stops early does not leave
 ///   the SDK millions of error replies to write.
 ///
-/// Replies written another way, through [`Context::reply`] or the raw
-/// `RedisModule_ReplyWith*` functions, are not counted. Neither is the error
+/// Safe `Context::reply*` whole replies share this owner. An emitting Context
+/// call after this writer starts is refused; use [`Self::value`] for an
+/// element. A whole Context reply likewise refuses later writer writes.
+/// Internal partial serialization inside `value()` is not represented by the
+/// header debt: a serializer panic can still leave a malformed reply.
+/// Raw `RedisModule_ReplyWith*` calls are not counted. Neither is the error
 /// Redis writes for `CLIENT UNBLOCK ... ERROR` of the client from inside its
 /// own callback, which lands inside a reply already started.
 pub struct KeyBlockingReply<'ctx> {
@@ -849,17 +854,15 @@ impl KeyBlockingReply<'_> {
                         "ERR the key blocking reply is already complete",
                     ));
                 }
-                // SAFETY: a readiness frame's flag lives in the waiter state
-                // that the running callback keeps alive.
-                Written::Nothing
-                    if unsafe { frame.claim.as_ref() }
-                        .is_some_and(|claim| claim.swap(true, Ordering::AcqRel)) =>
-                {
+                Written::WritingWhole | Written::Unknown => {
                     return Err(RedisError::Str(
-                        "ERR the blocked client already has its reply",
+                        "ERR the key blocking reply already has its owner",
                     ));
                 }
-                _ => {}
+                Written::Nothing => {
+                    frame.claim()?;
+                }
+                Written::Partial => {}
             }
             // The reply is claimed now. If the write panics, the panic path
             // still owes the client a reply and sends an error.
@@ -889,8 +892,10 @@ fn aggregate_len(len: usize, per: u64) -> Result<(c_long, u64), RedisError> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Written {
     Nothing,
+    WritingWhole,
     Partial,
     Complete,
+    Unknown,
 }
 
 thread_local! {
@@ -902,7 +907,7 @@ thread_local! {
 
 /// What the reply writer of one running key-blocking callback has written. It
 /// lives on the callback's stack, linked from [`REPLY_FRAMES`] while it runs.
-struct ReplyFrame {
+pub(crate) struct ReplyFrame {
     ctx: *mut raw::RedisModuleCtx,
     /// The waiter's completion flag, which the first write claims. Null for a
     /// timeout callback, which claims the reply before it runs.
@@ -911,6 +916,8 @@ struct ReplyFrame {
     /// open aggregate counts as one of the elements its parent still needs.
     owed: RefCell<Vec<u64>>,
     written: Cell<Written>,
+    owned: Cell<bool>,
+    fallback_attempted: Cell<bool>,
     outer: Cell<*const ReplyFrame>,
 }
 
@@ -933,6 +940,11 @@ fn with_frame<R>(
     // callback's stack frame ends.
     while let Some(current) = unsafe { frame.as_ref() } {
         if current.ctx == ctx {
+            if !super::command_reply::typed_owner_allowed(ctx, current) {
+                return Err(RedisError::Str(
+                    "ERR the key blocking reply is shadowed by another owner",
+                ));
+            }
             return Ok(f(current));
         }
         frame = current.outer.get();
@@ -949,6 +961,8 @@ impl ReplyFrame {
             claim: claim.map_or(ptr::null(), ptr::from_ref),
             owed: RefCell::new(Vec::new()),
             written: Cell::new(Written::Nothing),
+            owned: Cell::new(claim.is_none()),
+            fallback_attempted: Cell::new(false),
             outer: Cell::new(ptr::null()),
         }
     }
@@ -962,6 +976,91 @@ impl ReplyFrame {
 
     fn started(&self) -> bool {
         self.written.get() != Written::Nothing
+    }
+
+    fn claim(&self) -> Result<bool, RedisError> {
+        if self.owned.get() {
+            return Ok(false);
+        }
+        // SAFETY: the callback snapshot retains the state containing the flag.
+        if unsafe { self.claim.as_ref() }.is_some_and(|claim| claim.swap(true, Ordering::AcqRel)) {
+            return Err(RedisError::Str(
+                "ERR the blocked client already has its reply",
+            ));
+        }
+        self.owned.set(true);
+        Ok(true)
+    }
+
+    fn reserve_whole(&self) -> Result<WholeWrite<'_>, RedisError> {
+        if self.written.get() != Written::Nothing {
+            log_warning(c"key blocking callback attempted another whole reply; the SDK refused it");
+            return Err(RedisError::Str(
+                "ERR the key blocking reply already has its owner",
+            ));
+        }
+        let acquired = self.claim()?;
+        self.written.set(Written::WritingWhole);
+        Ok(WholeWrite {
+            frame: self,
+            acquired,
+            active: true,
+        })
+    }
+
+    pub(super) fn write_whole(&self, send: impl FnOnce() -> raw::Status) -> raw::Status {
+        let Ok(write) = self.reserve_whole() else {
+            return raw::Status::Err;
+        };
+        write.finish(send(), false)
+    }
+
+    pub(super) fn forward_whole(
+        &self,
+        reply: *mut raw::RedisModuleCallReply,
+        native: unsafe extern "C" fn(
+            *mut raw::RedisModuleCtx,
+            *mut raw::RedisModuleCallReply,
+        ) -> i32,
+    ) -> Result<raw::Status, RedisError> {
+        let write = self.reserve_whole()?;
+        // The RESP mismatch ERR returns before output or callback dispatch.
+        // Settle here, before logging, owned-value drops or handler reentry.
+        let status = unsafe { native(self.ctx, reply) }.into();
+        Ok(write.finish(status, true))
+    }
+
+    fn unknown_fallback(&self, response: RedisResult) {
+        self.attempt_fallback(|| {
+            let error = match response {
+                Err(error) => error,
+                Ok(_) => RedisError::Str("ERR key blocking callback reply progress is unknown"),
+            };
+            super::ReplyContext { ctx: self.ctx }.reply_error_string(&error.to_string());
+        });
+    }
+
+    fn attempt_fallback(&self, send: impl FnOnce()) {
+        if !self.owned.get() || self.fallback_attempted.replace(true) {
+            return;
+        }
+        self.written.set(Written::Unknown);
+        // This bypass is only the owning finalizer. Mark the attempt before
+        // formatting/emission so even a preparation panic cannot retry it.
+        let attempted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(send));
+        if let Err(payload) = attempted {
+            std::mem::forget(payload);
+            log_warning(c"key blocking callback fallback panicked; the SDK will not retry it");
+        }
+    }
+
+    fn finalize_returned_root(&self, send: impl FnOnce(), fallback: impl FnOnce()) {
+        send();
+        // The first write may start here, after the callback's earlier
+        // started() check. Generic ERR must still terminalize Unknown.
+        if matches!(self.written.get(), Written::Unknown | Written::WritingWhole) {
+            self.attempt_fallback(fallback);
+        }
     }
 
     /// Counts one written element, or an aggregate header that needs `opens`
@@ -992,6 +1091,10 @@ impl ReplyFrame {
     /// Finishes a reply the writer started. `response` is what the callback
     /// returned after writing.
     fn finish(&self, response: RedisResult) {
+        if matches!(self.written.get(), Written::Unknown | Written::WritingWhole) {
+            self.unknown_fallback(response);
+            return;
+        }
         let partial = self.written.get() == Written::Partial;
         if partial {
             let message = match &response {
@@ -1023,8 +1126,58 @@ impl ReplyFrame {
 
     /// Finishes a reply the writer started before its callback panicked.
     fn complete_after_panic(&self) {
-        if self.written.get() == Written::Partial {
-            self.complete("ERR key blocking callback panicked");
+        match self.written.get() {
+            Written::Partial => self.complete("ERR key blocking callback panicked"),
+            Written::Unknown | Written::WritingWhole => {
+                self.unknown_fallback(Err(RedisError::Str("ERR key blocking callback panicked")))
+            }
+            Written::Complete => {
+                log_warning(c"key blocking callback panicked after its reply completed")
+            }
+            Written::Nothing => {}
+        }
+    }
+}
+
+struct WholeWrite<'a> {
+    frame: &'a ReplyFrame,
+    acquired: bool,
+    active: bool,
+}
+
+impl WholeWrite<'_> {
+    fn finish(mut self, status: raw::Status, proven_no_write: bool) -> raw::Status {
+        if self.frame.written.get() != Written::WritingWhole || !self.frame.owned.get() {
+            self.frame.written.set(Written::Unknown);
+        } else if status == raw::Status::Ok {
+            self.frame.written.set(Written::Complete);
+        } else if proven_no_write {
+            let released = !self.acquired
+                || unsafe { self.frame.claim.as_ref() }.is_some_and(|claim| {
+                    claim
+                        .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)
+                        .is_ok()
+                });
+            if released {
+                if self.acquired {
+                    self.frame.owned.set(false);
+                }
+                self.frame.written.set(Written::Nothing);
+            } else {
+                self.frame.written.set(Written::Unknown);
+            }
+        } else {
+            self.frame.written.set(Written::Unknown);
+        }
+        self.active = false;
+        status
+    }
+}
+
+impl Drop for WholeWrite<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.frame.written.set(Written::Unknown);
         }
     }
 }
@@ -1118,14 +1271,22 @@ unsafe fn keys_payload<T>(ctx: *mut raw::RedisModuleCtx) -> Option<KeysPayload<T
     })
 }
 
-fn keys_reply(ctx: &Context, response: RedisResult) -> c_int {
+fn keys_reply(ctx: &Context, frame: &ReplyFrame, response: RedisResult) -> c_int {
     let response = match response {
         Ok(RedisValue::NoReply) => Err(RedisError::Str(
             "ERR key blocking callback returned NoReply",
         )),
         response => response,
     };
-    ctx.reply(response);
+    frame.finalize_returned_root(
+        || {
+            ctx.reply(response);
+        },
+        || {
+            super::ReplyContext { ctx: ctx.ctx }
+                .reply_error_string("ERR key blocking callback reply progress is unknown");
+        },
+    );
     raw::REDISMODULE_OK as c_int
 }
 
@@ -1146,28 +1307,26 @@ fn keys_panic(ctx: *mut raw::RedisModuleCtx, completed: Option<&AtomicBool>) -> 
 /// in the callback, such as `CLIENT UNBLOCK` of the same client, can make Redis
 /// unblock it already; reporting it served again would free the native waiter
 /// twice, so the callback reports it not served instead.
-fn served(ctx: *mut raw::RedisModuleCtx) -> c_int {
-    if still_blocked(ctx) {
+fn served(client_id: Option<u64>) -> c_int {
+    if still_blocked(client_id) {
         raw::REDISMODULE_OK as c_int
     } else {
         raw::REDISMODULE_ERR as c_int
     }
 }
 
-/// Whether Redis still holds the client of this callback context blocked. If
-/// the client cannot be looked up, it is taken as still blocked, as before
-/// this check existed.
-fn still_blocked(ctx: *mut raw::RedisModuleCtx) -> bool {
-    // SAFETY: plain calls on the live callback context, whose client is the
-    // blocked client, and a version 1 info struct Redis fills in.
+/// Return-status evidence only. Missing/unblocked clients and unknown lookup
+/// results do not authorize another serve or any ownership rollback.
+fn still_blocked(client_id: Option<u64>) -> bool {
+    // This is a return-status check, never proof of waiter ownership. The ID
+    // was copied before user code; no potentially stale ctx is read here.
     unsafe {
-        let (Some(client_id), Some(client_info)) = (
-            raw::RedisModule_GetClientId,
+        let (Some(id), Some(client_info)) = (
+            client_id.filter(|id| *id != 0),
             raw::RedisModule_GetClientInfoById,
         ) else {
-            return true;
+            return false;
         };
-        let id = client_id(ctx);
         let mut info = raw::RedisModuleClientInfoV1 {
             version: 1,
             flags: 0,
@@ -1176,10 +1335,9 @@ fn still_blocked(ctx: *mut raw::RedisModuleCtx) -> bool {
             port: 0,
             db: 0,
         };
-        id == 0
-            || client_info((&mut info as *mut raw::RedisModuleClientInfoV1).cast(), id)
-                != raw::REDISMODULE_OK as c_int
-            || info.flags & u64::from(raw::REDISMODULE_CLIENTINFO_FLAG_BLOCKED) != 0
+        client_info((&mut info as *mut raw::RedisModuleClientInfoV1).cast(), id)
+            == raw::REDISMODULE_OK as c_int
+            && info.flags & u64::from(raw::REDISMODULE_CLIENTINFO_FLAG_BLOCKED) != 0
     }
 }
 
@@ -1195,57 +1353,64 @@ extern "C" fn keys_ready<T: Send + 'static>(
     };
     let frame = ReplyFrame::new(ctx, Some(&payload.state.completed));
     let _link = frame.link();
-    let status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if payload.state.completed.load(Ordering::Acquire) {
-            return raw::REDISMODULE_ERR as c_int;
-        }
-        let mut data = match payload.state.data.try_lock() {
-            Ok(data) => data,
-            Err(TryLockError::Poisoned(poison)) => poison.into_inner(),
-            Err(TryLockError::WouldBlock) => return raw::REDISMODULE_ERR as c_int,
-        };
-        let context = unsafe { Context::new(ctx) };
-        let response = (payload.on_ready)(&context, &mut data);
-        if frame.started() {
-            // The writer claimed the reply, so the wait is over.
-            frame.finish(response.map(|value| value.unwrap_or(RedisValue::NoReply)));
-            return served(ctx);
-        }
-        match response {
-            Ok(None) => raw::REDISMODULE_ERR as c_int,
-            response => {
-                if payload.state.completed.load(Ordering::Acquire) {
-                    return raw::REDISMODULE_ERR as c_int;
-                }
-                if !still_blocked(ctx) {
-                    // A nested command unblocked the client, and Redis sent
-                    // its reply.
-                    payload.state.completed.store(true, Ordering::Release);
-                    return raw::REDISMODULE_ERR as c_int;
-                }
-                let status = keys_reply(&context, response.map(|value| value.expect("Some reply")));
-                payload.state.completed.store(true, Ordering::Release);
-                status
+    let client_id = unsafe { raw::RedisModule_GetClientId }.map(|get| unsafe { get(ctx) });
+    super::command_reply::with_owner(ctx, super::command_reply::Owner::Key(&frame), || {
+        let status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if payload.state.completed.load(Ordering::Acquire) {
+                return raw::REDISMODULE_ERR as c_int;
             }
-        }
-    }));
-    match status {
-        Ok(status) => status,
-        Err(panic) => {
-            // Panic payload destructors can panic too; never drop one at the
-            // FFI boundary. This also handles panic_any payloads safely.
-            std::mem::forget(panic);
+            let mut data = match payload.state.data.try_lock() {
+                Ok(data) => data,
+                Err(TryLockError::Poisoned(poison)) => poison.into_inner(),
+                Err(TryLockError::WouldBlock) => return raw::REDISMODULE_ERR as c_int,
+            };
+            let context = unsafe { Context::new(ctx) };
+            let response = (payload.on_ready)(&context, &mut data);
             if frame.started() {
-                frame.complete_after_panic();
-                served(ctx)
-            } else if still_blocked(ctx) {
-                keys_panic(ctx, Some(&payload.state.completed))
-            } else {
-                payload.state.completed.store(true, Ordering::Release);
-                raw::REDISMODULE_ERR as c_int
+                // The writer claimed the reply, so the wait is over.
+                frame.finish(response.map(|value| value.unwrap_or(RedisValue::NoReply)));
+                return served(client_id);
+            }
+            match response {
+                Ok(None) => raw::REDISMODULE_ERR as c_int,
+                response => {
+                    if payload.state.completed.load(Ordering::Acquire) {
+                        return raw::REDISMODULE_ERR as c_int;
+                    }
+                    if !still_blocked(client_id) {
+                        // A nested command unblocked the client, and Redis sent
+                        // its reply.
+                        payload.state.completed.store(true, Ordering::Release);
+                        return raw::REDISMODULE_ERR as c_int;
+                    }
+                    let status = keys_reply(
+                        &context,
+                        &frame,
+                        response.map(|value| value.expect("Some reply")),
+                    );
+                    payload.state.completed.store(true, Ordering::Release);
+                    status
+                }
+            }
+        }));
+        match status {
+            Ok(status) => status,
+            Err(panic) => {
+                // Panic payload destructors can panic too; never drop one at the
+                // FFI boundary. This also handles panic_any payloads safely.
+                std::mem::forget(panic);
+                if frame.started() {
+                    frame.complete_after_panic();
+                    served(client_id)
+                } else if still_blocked(client_id) {
+                    keys_panic(ctx, Some(&payload.state.completed))
+                } else {
+                    payload.state.completed.store(true, Ordering::Release);
+                    raw::REDISMODULE_ERR as c_int
+                }
             }
         }
-    }
+    })
 }
 
 extern "C" fn keys_timeout<T: Send + 'static>(
@@ -1259,39 +1424,41 @@ extern "C" fn keys_timeout<T: Send + 'static>(
     // The timeout claims the reply before its callback runs.
     let frame = ReplyFrame::new(ctx, None);
     let _link = frame.link();
-    let status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if payload.state.completed.swap(true, Ordering::AcqRel) {
-            return raw::REDISMODULE_OK as c_int;
-        }
-        let context = unsafe { Context::new(ctx) };
-        let response = match payload.state.data.try_lock() {
-            Ok(mut data) => (payload.on_timeout)(&context, &mut data),
-            Err(TryLockError::Poisoned(poison)) => {
-                (payload.on_timeout)(&context, &mut poison.into_inner())
+    super::command_reply::with_owner(ctx, super::command_reply::Owner::Key(&frame), || {
+        let status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if payload.state.completed.swap(true, Ordering::AcqRel) {
+                return raw::REDISMODULE_OK as c_int;
             }
-            Err(TryLockError::WouldBlock) => Err(RedisError::Str(
-                "ERR key blocking callback is already running",
-            )),
-        };
-        if frame.started() {
-            frame.finish(response);
-            return raw::REDISMODULE_OK as c_int;
-        }
-        keys_reply(&context, response)
-    }));
-    match status {
-        Ok(status) => status,
-        Err(panic) => {
-            std::mem::forget(panic);
+            let context = unsafe { Context::new(ctx) };
+            let response = match payload.state.data.try_lock() {
+                Ok(mut data) => (payload.on_timeout)(&context, &mut data),
+                Err(TryLockError::Poisoned(poison)) => {
+                    (payload.on_timeout)(&context, &mut poison.into_inner())
+                }
+                Err(TryLockError::WouldBlock) => Err(RedisError::Str(
+                    "ERR key blocking callback is already running",
+                )),
+            };
             if frame.started() {
-                frame.complete_after_panic();
-                raw::REDISMODULE_OK as c_int
-            } else {
-                // The timeout already claimed completion, but still owes a reply.
-                keys_panic(ctx, None)
+                frame.finish(response);
+                return raw::REDISMODULE_OK as c_int;
+            }
+            keys_reply(&context, &frame, response)
+        }));
+        match status {
+            Ok(status) => status,
+            Err(panic) => {
+                std::mem::forget(panic);
+                if frame.started() {
+                    frame.complete_after_panic();
+                    raw::REDISMODULE_OK as c_int
+                } else {
+                    // The timeout already claimed completion, but still owes a reply.
+                    keys_panic(ctx, None)
+                }
             }
         }
-    }
+    })
 }
 
 fn drop_keys_payload<T>(payload: T) {
@@ -1371,6 +1538,182 @@ mod key_blocking_tests {
 
     fn wrote() -> raw::Status {
         raw::Status::Ok
+    }
+
+    unsafe extern "C" fn refuse_forward(
+        _: *mut raw::RedisModuleCtx,
+        _: *mut raw::RedisModuleCallReply,
+    ) -> i32 {
+        raw::Status::Err as i32
+    }
+
+    #[test]
+    fn whole_forward_refusal_releases_only_its_own_readiness_claim() {
+        let ctx = ptr::dangling_mut();
+        let claim = AtomicBool::new(false);
+        let frame = ReplyFrame::new(ctx, Some(&claim));
+        assert_eq!(
+            frame
+                .forward_whole(ptr::null_mut(), refuse_forward)
+                .unwrap(),
+            raw::Status::Err
+        );
+        assert!(!claim.load(Ordering::Acquire));
+        assert!(!frame.owned.get());
+        assert_eq!(frame.written.get(), Written::Nothing);
+        assert_eq!(frame.write_whole(wrote), raw::Status::Ok);
+        assert!(claim.load(Ordering::Acquire));
+        assert_eq!(frame.written.get(), Written::Complete);
+
+        let other = AtomicBool::new(true);
+        let frame = ReplyFrame::new(ctx, Some(&other));
+        assert!(
+            frame
+                .forward_whole(ptr::null_mut(), refuse_forward)
+                .is_err()
+        );
+        assert!(other.load(Ordering::Acquire));
+        assert!(!frame.started());
+
+        let timeout = ReplyFrame::new(ctx, None);
+        assert_eq!(
+            timeout
+                .forward_whole(ptr::null_mut(), refuse_forward)
+                .unwrap(),
+            raw::Status::Err
+        );
+        assert!(timeout.owned.get());
+        assert_eq!(timeout.written.get(), Written::Nothing);
+        assert_eq!(timeout.write_whole(wrote), raw::Status::Ok);
+    }
+
+    #[test]
+    fn whole_unknown_progress_refuses_writes_and_attempts_one_fallback() {
+        for panics in [false, true] {
+            let ctx = ptr::dangling_mut();
+            let claim = AtomicBool::new(false);
+            let frame = ReplyFrame::new(ctx, Some(&claim));
+            let _link = frame.link();
+            if panics {
+                assert!(
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        frame.write_whole(|| panic!("serializer stopped"));
+                    }))
+                    .is_err()
+                );
+            } else {
+                assert_eq!(frame.write_whole(|| raw::Status::Err), raw::Status::Err);
+            }
+            assert_eq!(frame.written.get(), Written::Unknown);
+            assert!(claim.load(Ordering::Acquire));
+            assert_eq!(
+                frame.write_whole(|| panic!("must refuse")),
+                raw::Status::Err
+            );
+            let context = unsafe { Context::new(ctx) };
+            assert!(
+                context
+                    .key_blocking_reply()
+                    .unwrap()
+                    .write(0, || panic!("must refuse typed"))
+                    .is_err()
+            );
+            let attempts = Cell::new(0);
+            frame.attempt_fallback(|| {
+                attempts.set(attempts.get() + 1);
+                panic!("fallback preparation");
+            });
+            frame.attempt_fallback(|| attempts.set(attempts.get() + 1));
+            assert_eq!(attempts.get(), 1);
+        }
+    }
+
+    #[test]
+    fn returned_first_root_unknown_progress_also_finalizes_once() {
+        for ready in [true, false] {
+            let flag = AtomicBool::new(false);
+            let frame = ReplyFrame::new(ptr::dangling_mut(), ready.then_some(&flag));
+            let attempts = Cell::new(0);
+            frame.finalize_returned_root(
+                || {
+                    assert_eq!(frame.write_whole(|| raw::Status::Err), raw::Status::Err);
+                },
+                || attempts.set(attempts.get() + 1),
+            );
+            assert_eq!(frame.written.get(), Written::Unknown);
+            assert!(frame.owned.get());
+            assert_eq!(attempts.get(), 1);
+            frame.finalize_returned_root(|| {}, || attempts.set(attempts.get() + 1));
+            assert_eq!(attempts.get(), 1);
+        }
+    }
+
+    #[test]
+    fn admission_order_preserves_ordinary_release_and_shadowing() {
+        use super::super::command_reply::{self, Owner};
+        let ctx = ptr::dangling_mut();
+        unsafe {
+            crate::panic::run_command(ctx, || {
+                let command = crate::panic::current_command();
+                replace_released_unreplied(command);
+                let frame = ReplyFrame::new(ctx, None);
+                let _link = frame.link();
+                command_reply::with_owner(ctx, Owner::Key(&frame), || {
+                    assert_eq!(command_reply::write(ctx, wrote), raw::Status::Ok);
+                    assert!(!command_reply::current_complete());
+                    assert!(matches!(
+                        __command_reply_after_release(Ok(RedisValue::NoReply)),
+                        Err(RedisError::Str(RELEASED_WITHOUT_REPLY))
+                    ));
+                    let ordinary = command_reply::Frame::new(ctx);
+                    let _ordinary = ordinary.link();
+                    command_reply::with_owner(ctx, Owner::Command(&ordinary), || {
+                        let context = Context::new(ctx);
+                        assert!(context.key_blocking_reply().is_err());
+                        assert_eq!(command_reply::write(ctx, wrote), raw::Status::Ok);
+                        assert!(ordinary.complete());
+                        assert_eq!(
+                            command_reply::write(ctx, || panic!("no fallthrough")),
+                            raw::Status::Err
+                        );
+                    });
+                    assert!(frame.started());
+                });
+                assert_eq!(crate::panic::current_command(), command);
+                raw::REDISMODULE_OK as i32
+            });
+        }
+        assert_eq!(crate::panic::current_command(), 0);
+    }
+
+    #[test]
+    fn admission_context_matching_restores_key_owner_after_unwind() {
+        use super::super::command_reply::{self, Owner};
+        let ctx = ptr::dangling_mut::<raw::RedisModuleCtx>();
+        let other = ctx.wrapping_byte_add(8);
+        let frame = ReplyFrame::new(ctx, None);
+        let _link = frame.link();
+        command_reply::with_owner(ctx, Owner::Key(&frame), || {
+            let nested = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let command = command_reply::Frame::new(other);
+                let _command = command.link();
+                command_reply::with_owner(other, Owner::Command(&command), || {
+                    assert_eq!(command_reply::write(ctx, wrote), raw::Status::Ok);
+                    assert!(!command.complete());
+                    assert_eq!(command_reply::write(other, wrote), raw::Status::Ok);
+                    assert!(command.complete());
+                    panic!("restore the outer admission entry");
+                });
+            }));
+            assert!(nested.is_err());
+            let context = unsafe { Context::new(ctx) };
+            assert!(context.key_blocking_reply().unwrap().is_complete());
+            assert_eq!(
+                command_reply::write(ctx, || panic!("outer complete")),
+                raw::Status::Err
+            );
+        });
+        assert!(!std::mem::needs_drop::<Cell<*const ()>>());
     }
 
     #[test]

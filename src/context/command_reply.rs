@@ -1,4 +1,4 @@
-//! Counts complete replies through the command context's safe entry points.
+//! Routes safe whole replies to an ordinary-command or key-blocking owner.
 //!
 //! Serialization remains one operation: recursive aggregate elements do not
 //! acquire another root. Raw native replies and partial raw aggregates are
@@ -8,6 +8,90 @@ use std::cell::Cell;
 use std::ptr;
 
 use crate::{RedisError, raw};
+
+/// Admission order is separate from ordinary-command bookkeeping. In
+/// particular, a key callback must not satisfy current_complete().
+pub(crate) enum Owner<'a> {
+    Command(&'a Frame),
+    Key(&'a super::blocked::ReplyFrame),
+}
+
+struct Admission<'a> {
+    ctx: *mut raw::RedisModuleCtx,
+    owner: Owner<'a>,
+    outer: *const (),
+}
+
+thread_local! {
+    static ADMISSION: Cell<*const ()> = const { Cell::new(ptr::null()) };
+}
+
+pub(crate) fn with_owner<R>(
+    ctx: *mut raw::RedisModuleCtx,
+    owner: Owner<'_>,
+    f: impl FnOnce() -> R,
+) -> R {
+    let entry = Admission {
+        ctx,
+        owner,
+        outer: ADMISSION.get(),
+    };
+    struct Link<'a, 'b>(&'a Admission<'b>);
+    impl Drop for Link<'_, '_> {
+        fn drop(&mut self) {
+            ADMISSION.set(self.0.outer);
+        }
+    }
+    // The link borrows the entry, and the entry borrows its owner. Neither
+    // can move or drop until this synchronous scope unlinks, including unwind.
+    ADMISSION.set(ptr::from_ref(&entry).cast());
+    let _link = Link(&entry);
+    f()
+}
+
+fn with_selected<R>(ctx: *mut raw::RedisModuleCtx, f: impl FnOnce(Option<&Owner<'_>>) -> R) -> R {
+    let mut entry = ADMISSION.get();
+    // SAFETY: with_owner keeps every linked node and its borrowed owner alive
+    // and stationary. No node or reservation is exposed to native code.
+    while let Some(current) = unsafe { entry.cast::<Admission<'_>>().as_ref() } {
+        if current.ctx == ctx {
+            return f(Some(&current.owner));
+        }
+        entry = current.outer;
+    }
+    f(None)
+}
+
+pub(super) fn typed_owner_allowed(
+    ctx: *mut raw::RedisModuleCtx,
+    frame: &super::blocked::ReplyFrame,
+) -> bool {
+    with_selected(ctx, |owner| match owner {
+        Some(Owner::Command(_)) => false,
+        Some(Owner::Key(selected)) => ptr::eq(*selected, frame),
+        None => true,
+    })
+}
+
+/// Only this fixed native operation has an operation-specific no-write ERR
+/// contract. Its borrowed arguments cannot dispatch consumer destructors.
+pub(crate) fn forward(
+    ctx: *mut raw::RedisModuleCtx,
+    reply: *mut raw::RedisModuleCallReply,
+    native: unsafe extern "C" fn(*mut raw::RedisModuleCtx, *mut raw::RedisModuleCallReply) -> i32,
+) -> Result<raw::Status, RedisError> {
+    with_selected(ctx, |owner| match owner {
+        Some(Owner::Key(frame)) => frame.forward_whole(reply, native),
+        Some(Owner::Command(frame)) => {
+            let write = begin_frame(frame)?;
+            Ok(write.finish(unsafe { native(ctx, reply) }.into()))
+        }
+        None => {
+            let write = begin(ctx)?;
+            Ok(write.finish(unsafe { native(ctx, reply) }.into()))
+        }
+    })
+}
 
 pub(crate) const ALREADY_REPLIED: &str = "ERR the command already has its reply";
 
@@ -71,17 +155,21 @@ pub(crate) fn begin(ctx: *mut raw::RedisModuleCtx) -> Result<Write, RedisError> 
     // keeps it borrowed until the frame unlinks, including during unwinding.
     while let Some(current) = unsafe { frame.as_ref() } {
         if current.ctx == ctx {
-            if current.state.get() != State::Empty {
-                log_duplicate();
-                return Err(RedisError::Str(ALREADY_REPLIED));
-            }
-            current.state.set(State::Writing);
-            return Ok(Write(frame));
+            return begin_frame(current);
         }
         frame = current.outer.get();
     }
     // Reply/timeout callbacks outside a command retain their existing writer.
     Ok(Write(ptr::null()))
+}
+
+fn begin_frame(frame: &Frame) -> Result<Write, RedisError> {
+    if frame.state.get() != State::Empty {
+        log_duplicate();
+        return Err(RedisError::Str(ALREADY_REPLIED));
+    }
+    frame.state.set(State::Writing);
+    Ok(Write(ptr::from_ref(frame)))
 }
 
 pub(crate) struct Write(*const Frame);
@@ -117,10 +205,22 @@ pub(crate) fn write(
     ctx: *mut raw::RedisModuleCtx,
     send: impl FnOnce() -> raw::Status,
 ) -> raw::Status {
-    let Ok(write) = begin(ctx) else {
-        return raw::Status::Err;
-    };
-    write.finish(send())
+    with_selected(ctx, |owner| match owner {
+        Some(Owner::Key(frame)) => frame.write_whole(send),
+        Some(Owner::Command(frame)) => {
+            debug_assert_eq!(frame.ctx, ctx);
+            let Ok(write) = begin_frame(frame) else {
+                return raw::Status::Err;
+            };
+            write.finish(send())
+        }
+        None => {
+            let Ok(write) = begin(ctx) else {
+                return raw::Status::Err;
+            };
+            write.finish(send())
+        }
+    })
 }
 
 fn log_duplicate() {
@@ -195,7 +295,9 @@ mod tests {
                 let ctx = black_box(ptr::null_mut());
                 let frame = Frame::new(ctx);
                 let _link = frame.link();
-                black_box(write(ctx, || black_box(raw::Status::Ok)));
+                with_owner(ctx, Owner::Command(&frame), || {
+                    black_box(write(ctx, || black_box(raw::Status::Ok)));
+                });
             }
             let guarded = start.elapsed().as_nanos() as f64 / f64::from(ITERATIONS);
             println!("sample={sample} baseline_ns={baseline:.3} guarded_ns={guarded:.3}");

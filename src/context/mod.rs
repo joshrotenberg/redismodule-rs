@@ -908,9 +908,7 @@ impl Context {
             }
         };
         let reply = reply.ok_or(RedisError::Str("ERR the call result holds no reply"))?;
-        let write = command_reply::begin(self.ctx)?;
-        let status = unsafe { reply_with_call_reply(self.ctx, reply) }.into();
-        write.finish(status);
+        let status = command_reply::forward(self.ctx, reply, reply_with_call_reply)?;
         if status != raw::Status::Ok {
             return Err(RedisError::Str(
                 "ERR Redis cannot send this reply to the client, for example RESP3 types to a RESP2 client",
@@ -1024,7 +1022,7 @@ impl Context {
 
     /// Sends a reply to this invocation's client.
     ///
-    /// Inside an SDK command callback, a second complete reply through a safe
+    /// Inside an SDK command or key-blocking callback, a second complete reply through a safe
     /// `Context::reply*` method is refused with [`Status::Err`] and logged. This
     /// also drops a handler's returned value or error after a direct reply.
     /// Top-level [`RedisValue::NoReply`] sends nothing and consumes no reply.
@@ -1034,7 +1032,8 @@ impl Context {
     /// with safe element writes: each safe call is treated as a whole reply.
     /// After successfully blocking a client, keep returning `NoReply`; this
     /// check does not coordinate with a later worker's reply. Key-blocking
-    /// callbacks retain their separate [`Self::key_blocking_reply`] writer.
+    /// callbacks share whole-reply ownership with [`Self::key_blocking_reply`];
+    /// emitting Context calls cannot be used as that writer's elements.
     pub fn reply(&self, result: RedisResult) -> raw::Status {
         if matches!(&result, Ok(RedisValue::NoReply)) {
             return raw::Status::Ok;
