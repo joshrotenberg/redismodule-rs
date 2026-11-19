@@ -111,20 +111,26 @@ pub unsafe fn run_command(ctx: *mut raw::RedisModuleCtx, command: impl FnOnce() 
     // stack has unwound. Linking borrows it so its address remains stable.
     let replies = crate::context::command_reply::Frame::new(ctx);
     let _replies = replies.link();
-    let status = catch_panic(command).unwrap_or_else(|message| {
-        if replies.complete() {
-            log_panic("command", &message);
-            return raw::REDISMODULE_OK as c_int;
-        }
-        let reply = to_c_string(&format!("ERR command panicked: {message}"));
-        // SAFETY: ctx is the context Redis passed to this command.
-        unsafe {
-            match raw::RedisModule_ReplyWithError {
-                Some(reply_with_error) => reply_with_error(ctx, reply.as_ptr()),
-                None => raw::Status::Err as c_int,
-            }
-        }
-    });
+    let status = crate::context::command_reply::with_owner(
+        ctx,
+        crate::context::command_reply::Owner::Command(&replies),
+        || {
+            catch_panic(command).unwrap_or_else(|message| {
+                if replies.complete() {
+                    log_panic("command", &message);
+                    return raw::REDISMODULE_OK as c_int;
+                }
+                let reply = to_c_string(&format!("ERR command panicked: {message}"));
+                // SAFETY: ctx is the context Redis passed to this command.
+                unsafe {
+                    match raw::RedisModule_ReplyWithError {
+                        Some(reply_with_error) => reply_with_error(ctx, reply.as_ptr()),
+                        None => raw::Status::Err as c_int,
+                    }
+                }
+            })
+        },
+    );
     crate::context::blocked::replace_released_unreplied(released);
     CURRENT_COMMAND.set(previous);
     status
