@@ -32,7 +32,8 @@ item, or emitted by a macro, is reached through it. Without type information,
 a method call matches the methods of that name on types its file names, and a
 bare call matches free functions in scope. The result is approximate: a name
 collision can add a path, and `cfg` attributes other than `test` are ignored,
-so an API reached only at some compatibility floors counts at all of them.
+so an API reached only at some compatibility floors or behind an opt-in feature
+counts at all of them. Coverage does not establish runtime availability.
 Tests do not count. The script's `OVERRIDES` table holds the classifications
 checked by hand, each with its reason; the generated section lists them.
 
@@ -71,8 +72,8 @@ operations are also available as commands through `RuntimeContext::call`.
   checked or expected by hand.
 - **reached through**: for safe and unsafe APIs, the nearest public entry
   points; for internal ones, the referencing items, except that a
-  hand-classified row keeps the automatic analysis's nearest public entry
-  points. At most two are shown.
+  hand-classified row keeps the automatic analysis's references or entry points.
+  At most two are shown.
 - **fit**: for an API that is not safe, the context view a wrapper would extend
   in the SDK's capability model (see
   [MIGRATING-3.0.md](MIGRATING-3.0.md#events-and-locked-workers-have-separate-context-views)),
@@ -137,13 +138,12 @@ PRs 442 and 444 build on the command filters of upstream PR 437.
 | 2 | `SetLRU`, `GetLRU`, `SetLFU`, `GetLFU` | key | upstream issue 443; upstream PR 444, opened from FalkorDB's fork. |
 | 3 | `RandomKey` | runtime | upstream issue 445; upstream PR 446, opened from FalkorDB's fork. |
 | 4 | Cluster messages and topology | registration, runtime and context-free | upstream issue 236; upstream issue 438, by the author of the FalkorDB pull requests. |
-| 5 | Module users and authentication | registration, command and context-free | upstream PR 354 (users and authentication); upstream issue 381 (`RegisterAuthCallback`). |
+| 5 | `GetModuleUserACLString` | context-free | upstream PR 354; its user creation, ACL setters and client authentication are covered. |
 | 6 | `GetKeyNameFromModuleKey` | key | upstream PR 469 and the closed upstream PR 436, which state no consumer. Their author also opened upstream PR 459, which says RediSearch needs its flag. |
 | 7 | `GetExpire`, `GetAbsExpire` | key | upstream PR 391. |
 | 8 | `RdbLoad`, `RdbSave` and the RDB streams | runtime | upstream issue 382. Its reply points to data-type RDB callbacks, which this SDK supports, not to these APIs. |
 | 9 | Sorted sets | key | upstream issue 235. |
 | 10 | Dictionaries | context-free | upstream PRs 169 and 228, both drafts by one author. With `RedisAlloc` as the global allocator, Rust maps already count toward Redis's memory. |
-| 11 | `EmitAOF` | callback (I/O) | upstream issue 74. |
 
 Ranks 1 to 3 are tier 2 and the rest are tier 3.
 The concrete-consumer canonical-name gap is covered by
@@ -205,7 +205,7 @@ adds that call, so it is not a request for the API. Upstream also reaches
 `AutoMemory`, `SaveString` and `LogIOError` through safe items that this fork
 made `unsafe`.
 
-The upstream issues and pull requests that ask for a gap:
+Upstream requests and their SDK coverage:
 
 | request | state | asks for | in this SDK |
 |---|---|---|---|
@@ -214,16 +214,16 @@ The upstream issues and pull requests that ask for a gap:
 | upstream PR 444, upstream issue 443 | open; the pull request is from FalkorDB's fork | `SetLRU`, `GetLRU`, `SetLFU`, `GetLFU`, on top of upstream PR 437 | none |
 | upstream PR 446, upstream issue 445 | open; the pull request is from FalkorDB's fork | `RandomKey` | none |
 | upstream issue 438 | open | `SendClusterMessage` | none |
-| upstream PR 469 | open | `GetKeyNameFromModuleKey` as `RedisKey::name` | none |
+| upstream PR 469 | open | `GetKeyNameFromModuleKey` as `RedisKey::name` | internal name retention; no public key-name accessor |
 | upstream PR 391 | open | `GetExpire`, `GetAbsExpire` | none |
 | upstream issue 382 | open | `RdbLoad`, `RdbSave` | none |
-| upstream issue 381 | open | `RegisterAuthCallback` | none |
-| upstream PR 354 | open | `CreateModuleUser`, `SetModuleUserACLString`, `GetModuleUserACLString`, `AuthenticateClientWithUser` | none; its `FreeModuleUser`, `GetModuleUserFromUserName` and `ACLCheckKeyPermissions` are safe here |
+| upstream issue 381 | open | `RegisterAuthCallback` | safe through `redis_module!`'s `auth` declaration |
+| upstream PR 354 | open | `CreateModuleUser`, `SetModuleUserACLString`, `GetModuleUserACLString`, `AuthenticateClientWithUser` | only `GetModuleUserACLString` remains missing; user creation, ACL setters, client authentication, `FreeModuleUser`, `GetModuleUserFromUserName` and `ACLCheckKeyPermissions` are safe here |
 | upstream issue 236 | open | the cluster API | none |
 | upstream issue 235 | open | `ZsetAdd`, `ZsetFirstInScoreRange` and four range iterator functions | none |
 | upstream PR 228, upstream PR 169 | open drafts | dictionaries | none |
 | upstream PR 168 | open | six command filter APIs | none |
-| upstream issue 74 | open | `EmitAOF` | none |
+| upstream issue 74 | open | `EmitAOF` | safe: `AofRewriter::emit` |
 
 Other upstream API pull requests touch APIs this SDK already wraps, or no API
 pointer:
@@ -256,9 +256,10 @@ the values above.
 
 ### Memory
 
-`RedisAlloc` allocates with `Alloc` and frees with `Free`. `Realloc`, `Calloc`,
-`Strdup` and the `Try*` variants are unused: Rust's default reallocation and
-zeroing go through those two. A wrapper would not add a capability.
+`RedisAlloc` prefers `TryAlloc` when available, falls back to `Alloc` on older
+servers and frees with `Free`. `Realloc`, `Calloc`, `Strdup`, `TryRealloc` and
+`TryCalloc` are unused: Rust's default reallocation and zeroing go through the
+allocator's allocation path. A wrapper would not add a capability.
 `PoolAlloc` returns memory Redis frees when the command returns, which needs a
 lifetime tied to the command's `Context`. `MallocSize` and `MallocUsableSize`
 are `unsafe` helpers in `alloc`, since they take raw pointers;
@@ -269,9 +270,10 @@ are `unsafe` helpers in `alloc`, since they take raw pointers;
 `CommandBuilder::container` and `CommandBuilder::subcommand` register command
 containers and their subcommands through `CreateSubcommand`, and
 `CommandBuilder::summary` and `CommandBuilder::arity` set command info.
+`Context::redact_client_command_argument` wraps command argument redaction.
 Missing: the flag-carrying key and channel position APIs (`KeyAtPosWithFlags`,
-`IsChannelsPositionRequest`, `ChannelAtPosWithFlags`) and
-`RedactClientCommandArgument`, which fit command, next to `Context::key_at_pos`.
+`IsChannelsPositionRequest`, `ChannelAtPosWithFlags`), which fit command, next to
+`Context::key_at_pos`.
 
 Replies cover the RESP2 and RESP3 types through `RedisValue`. Missing are RESP3
 attributes (`ReplyWithAttribute`, `ReplySetAttributeLength`), postponed
@@ -311,6 +313,10 @@ its deadline, and retains a checked relative fallback on Redis 6.0.
 module has no safe way to signal a change. `RedisKey::as_ptr` and
 `RedisKeyWritable::as_ptr` borrow the open handle for unsafe native calls while
 keeping SDK cleanup; `to_raw_parts` is for an ownership transfer.
+`GetKeyNameFromModuleKey` is used internally to retain a key's name across native
+close and reopen, but no public name accessor is exposed. `GetOpenKeyModesAll`
+checks `NOEXPIRE` support internally when guarding keyspace scans; no public
+supported-modes query is exposed.
 
 ### Lists, hashes, sorted sets and streams
 
@@ -346,18 +352,23 @@ fits runtime.
 
 ### Clients, Pub/Sub and diagnostics
 
-No wrapper returns a client's id, name, information or TLS certificate, or the
-user name of a client other than the caller. `GetClientId` and
-`GetClientInfoById` serve internal checks, and on Redis 6.2 `GetClientId` with
+`AuthContext::client_id` and successful identity attachment return `ClientId`;
+an ID does not keep a client alive. `RuntimeContext::client_certificate` copies
+the peer certificate to owned PEM bytes; `None` can mean a missing client,
+non-TLS transport or no peer certificate. Client names and information, and the
+user name of a client other than the caller, remain unwrapped. `GetClientInfoById`
+serves internal admission checks. On Redis 6.2 `GetClientId` with
 `GetClientUserNameById` gives `Context::get_current_user` the caller's user.
-The client's own id fits command; lookups by id fit runtime. `PublishMessage`
+General lookups by id fit runtime. `PublishMessage`
 and `PublishMessageShard` fit runtime; `PUBLISH` through `call` is the current
 path. `LatencyAddSample` is context-free.
 
 ### Time and randomness
 
-`milliseconds` is the only clock. `std::time` covers `Microseconds` and
-`MonotonicMicroseconds`. `CachedMicroseconds` returns the time Redis caches
+`milliseconds` is the public native clock wrapper. Experimental auth uses
+`MonotonicMicroseconds` internally for deadlines; no public native monotonic
+clock is exposed. `std::time` covers `Microseconds` and monotonic elapsed time.
+`CachedMicroseconds` returns the time Redis caches
 before each command and in its cron job, so that nested callbacks see one
 clock; it has no Rust equivalent. `RuntimeContext::fill_random_bytes` and
 `fill_random_hex` safely wrap `GetRandomBytes` and `GetRandomHexChars` (#144).
@@ -404,9 +415,11 @@ signaling, and `Context::blocked_client_ready_key` returns an independent copy
 of Redis's borrowed ready-key name. Deletion wakeups fall back to ordinary
 readiness on older servers.
 
-Missing: `GetBlockedClientHandle`, `BlockedClientDisconnected`,
-`SetDisconnectCallback`, `AbortBlock`, `BlockClientGetPrivateData` and the time
-measurement functions. The handle functions fit `BlockedClient`.
+Experimental auth uses `GetBlockedClientHandle` and `BlockedClientDisconnected`
+for internal role checks, and `SetDisconnectCallback` for SDK-owned cleanup.
+These do not expose general blocked-client inspection or callback registration.
+Missing: `AbortBlock`, `BlockClientGetPrivateData` and the time measurement
+functions. The handle functions fit `BlockedClient`.
 
 ### Thread-safe contexts
 
@@ -421,8 +434,10 @@ the main thread and own the descriptor. `add_one_shot` is safe.
 
 ### Cluster
 
-Nothing is wrapped. `cluster::key_slot` computes `ClusterKeySlot` in Rust on
-every version. Message receivers and `SetClusterFlags` fit registration;
+Cluster messages and topology are unwrapped. `cluster::key_slot` computes
+`ClusterKeySlot` in Rust on every version, and
+`RuntimeContext::canonical_key_for_slot` wraps native canonical names (#146).
+Message receivers and `SetClusterFlags` fit registration;
 sending messages, node information, the slot functions added in 8.4 and
 `GetClusterNodeSlotRanges` (8.10) fit runtime; `GetMyClusterID`,
 `GetClusterSize` and `ClusterCanAccessKeysInSlot` are context-free.
@@ -440,10 +455,27 @@ functions have no request.
 ### ACL, users and authentication
 
 `scoped_call_user`, the ACL checks for commands, keys and channels, and
-`acl_add_log_entry` by user name are safe. Missing: creating module users and
-setting their ACLs (context-free), authenticating or deauthenticating a
-client (command and runtime), `RegisterAuthCallback` (registration) with
-`BlockClientOnAuth` (callback), `ACLCheckKeyPrefixPermissions` (8.0),
+`acl_add_log_entry` by user name are safe. `RuntimeContext` creates module users
+and applies single ACL directives. `Context` applies full ACL strings, attaches
+created users or existing ACL accounts, revokes SDK-owned client identities and
+explicitly drains ownership before user removal and unload. Full ACL-string
+updates require verified Redis 7.4 or later, beyond the native API's 7.0 floor.
+
+`redis_module!`'s `auth` declaration registers a synchronous typed auth callback
+on Redis 7.2 with its companion APIs. Redis owns the AUTH/HELLO response, and only
+explicit `AuthDecision::NotHandled` permits fallback. The default build provides
+synchronous callbacks. `BlockClientOnAuth` is covered only through the opt-in
+`experimental-auth-redis-8-12-rc3` feature. Deferred admission requires ordinary
+command preparation of the exact reviewed Linux x86_64 executable from official
+Redis 8.12-rc3, commit `a93d7d19f82dbeab1e092b072c8f93dabd8733b1`, whose native
+version is `8.11.242` (`0x00080bf2`). The feature, API presence, a version label or
+a caller-supplied hash alone cannot enable blocking. Other or unverifiable
+runtimes refuse deferred admission before native block or worker start and
+retain synchronous support. The aggregate table includes this opt-in code.
+See [AUTHENTICATION.md](AUTHENTICATION.md) for runtime admission, command
+provenance, secret handling and application-owned worker and unload obligations.
+
+Missing: `GetModuleUserACLString`, `ACLCheckKeyPrefixPermissions` (8.0),
 `ACLAddLogEntry` with a user object, `GetUserUsername` (8.8) and
 `GetInternalSecret` (8.0).
 
@@ -472,8 +504,8 @@ Redis OSS implementation to test against.
 <!-- api-coverage:begin -->
 <!-- Generated by .github/scripts/api-coverage.py; edit the script instead. -->
 
-`src/include/redismodule.h` declares 404 API pointers: 175 safe, 6 unsafe, 8
-internal, 215 none.
+`src/include/redismodule.h` declares 404 API pointers: 185 safe, 6 unsafe, 13
+internal, 200 none.
 
 It also has 5 declarations commented out, which have no binding and are not in
 the table: `CreateStringFromLongDouble`, `ReplyWithLongDouble`,
@@ -490,12 +522,12 @@ floor, or not in the Redis OSS sources.
 
 | floor | APIs | safe | unsafe | internal | none |
 |---|---|---|---|---|---|
-| 6.0 | 233 | 121 | 3 | 6 | 103 |
-| 6.2 | 258 | 135 | 4 | 6 | 113 |
-| 7.0 | 328 | 165 | 6 | 7 | 150 |
-| 7.2 | 348 | 172 | 6 | 7 | 163 |
-| 7.4 | 353 | 174 | 6 | 7 | 166 |
-| 8.0 | 362 | 175 | 6 | 7 | 174 |
+| 6.0 | 233 | 127 | 3 | 9 | 94 |
+| 6.2 | 258 | 141 | 4 | 9 | 104 |
+| 7.0 | 328 | 173 | 6 | 11 | 138 |
+| 7.2 | 348 | 182 | 6 | 12 | 148 |
+| 7.4 | 353 | 184 | 6 | 12 | 151 |
+| 8.0 | 362 | 185 | 6 | 12 | 159 |
 | no floor | 42 | 0 | 0 | 1 | 41 |
 
 ### Required above the lowest floor
@@ -541,7 +573,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `SetModuleOptions` | 6.0 | 6.0 | required | safe | `RegistrationContext::set_module_options` |  |  |
 | `GetContextFlagsAll` | 6.0 | 6.0 |  | none |  | context-free |  |
 | `GetModuleOptionsAll` | 7.2 | 7.2 |  | none |  | context-free |  |
-| `GetServerVersion` | 6.0 | 6.0 | direct | safe | `Context::block_client_on_keys`, `RuntimeContext::get_redis_version` and 1 more |  |  |
+| `GetServerVersion` | 6.0 | 6.0 | available, direct | safe | `Context::set_module_user_acl_string` |  |  |
 | `GetTypeMethodVersion` | 6.2 | 6.2 |  | none |  | context-free |  |
 
 #### Commands
@@ -560,7 +592,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `KeyAtPosWithFlags` | 7.0 | 7.0 |  | none |  | command |  |
 | `IsChannelsPositionRequest` | 7.0 | 7.0 |  | none |  | command |  |
 | `ChannelAtPosWithFlags` | 7.0 | 7.0 |  | none |  | command |  |
-| `RedactClientCommandArgument` | 7.0 | 7.0 |  | none |  | command |  |
+| `RedactClientCommandArgument` | 7.0 | 7.0 | available | safe | `Context::redact_client_command_argument` |  |  |
 | `GetCommandKeys` | 6.0 | 6.0 |  | none |  | runtime; `GetCommandKeysWithFlags`, through `get_command_keys` |  |
 | `GetCommandKeysWithFlags` | 7.0 | 7.0 | available | safe | `RuntimeContext::get_command_keys` |  |  |
 | `GetCurrentCommandName` | 6.2 | 6.2 | direct | safe | `Context::current_command_name` |  |  |
@@ -600,10 +632,10 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
-| `Call` | 6.0 | 6.0 | required | safe | `EventContext::call_blocking`, `RuntimeContext::call` and 2 more |  |  |
+| `Call` | 6.0 | 6.0 | required, direct | safe | `EventContext::call_blocking`, `RuntimeContext::call` and 2 more |  |  |
 | `CallReplyProto` | 6.0 | 6.0 | required | safe | `StringCallReply::is_simple_string` |  |  |
-| `FreeCallReply` | 6.0 | 6.0 | required | safe | `ArrayCallReply::drop (Drop)`, `BigNumberCallReply::drop (Drop)` and 11 more |  |  |
-| `CallReplyType` | 6.0 | 6.0 | required | safe | `ArrayCallReply::get`, `EventContext::call_blocking` and 5 more |  |  |
+| `FreeCallReply` | 6.0 | 6.0 | required, direct | safe | `ArrayCallReply::drop (Drop)`, `BigNumberCallReply::drop (Drop)` and 11 more |  |  |
+| `CallReplyType` | 6.0 | 6.0 | required, direct | safe | `ArrayCallReply::get`, `EventContext::call_blocking` and 5 more |  |  |
 | `CallReplyInteger` | 6.0 | 6.0 | required | safe | `I64CallReply::to_i64` |  |  |
 | `CallReplyDouble` | 7.0 | 7.0 | required | safe | `DoubleCallReply::to_double` |  |  |
 | `CallReplyBool` | 7.0 | 7.0 | required | safe | `BoolCallReply::to_bool` |  |  |
@@ -615,23 +647,23 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `CallReplyPromiseSetUnblockHandler` | 7.2 | 7.2 | direct | safe | `FutureCallReply::set_unblock_handler` |  |  |
 | `CallReplyPromiseAbort` | 7.2 | 7.2 | direct | safe | `FutureHandler::abort_and_dispose` |  |  |
 | `CallReplyAttribute` | 7.0 | 7.0 |  | none |  | runtime |  |
-| `CallReplyLength` | 6.0 | 6.0 | required | safe | `ArrayCallReply::len`, `MapCallReply::len` and 1 more |  |  |
-| `CallReplyArrayElement` | 6.0 | 6.0 | required | safe | `ArrayCallReply::get` |  |  |
-| `CallReplyStringPtr` | 6.0 | 6.0 | required | safe | `ErrorCallReply::as_bytes`, `StringCallReply::as_bytes` |  |  |
+| `CallReplyLength` | 6.0 | 6.0 | required, direct | safe | `ArrayCallReply::len`, `MapCallReply::len` and 1 more |  |  |
+| `CallReplyArrayElement` | 6.0 | 6.0 | required, direct | safe | `ArrayCallReply::get` |  |  |
+| `CallReplyStringPtr` | 6.0 | 6.0 | required, direct | safe | `ErrorCallReply::as_bytes`, `StringCallReply::as_bytes` |  |  |
 | `CreateStringFromCallReply` | 6.0 | 6.0 |  | none |  | runtime; reply bytes, then `RedisString::create` |  |
 
 #### Strings
 
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
-| `CreateString` | 6.0 | 6.0 | required, direct | safe | `RedisString::from_bytes` |  |  |
+| `CreateString` | 6.0 | 6.0 | required, available, direct | safe | `RedisString::from_bytes` |  |  |
 | `CreateStringFromLongLong` | 6.0 | 6.0 |  | none |  | context-free; format, then `RedisString::create` |  |
 | `CreateStringFromULongLong` | 7.0 | 7.0 |  | none |  | context-free; format, then `RedisString::create` |  |
 | `CreateStringFromDouble` | 6.0 | 6.0 |  | none |  | context-free; format, then `RedisString::create` |  |
 | `CreateStringFromString` | 6.0 | 6.0 | required, available | safe | `Context::blocked_client_ready_key`, `RedisString::clone (Clone)` |  |  |
 | `CreateStringPrintf` | 6.0 | 6.0 |  | none |  | context-free; format, then `RedisString::create` |  |
-| `FreeString` | 6.0 | 6.0 | required, available | safe | `RedisString::drop (Drop)`, `StrCallArgs::drop (Drop)` |  |  |
-| `StringPtrLen` | 6.0 | 6.0 | required | safe | `RedisString::as_cstr_ptr_and_len`, `RedisString::as_slice` and 2 more |  |  |
+| `FreeString` | 6.0 | 6.0 | required, available, direct | safe | `RedisString::drop (Drop)`, `StrCallArgs::drop (Drop)` |  |  |
+| `StringPtrLen` | 6.0 | 6.0 | required, available, direct | safe | `RedisString::as_cstr_ptr_and_len`, `RedisString::as_slice` and 2 more |  |  |
 | `StringToLongLong` | 6.0 | 6.0 | required | safe | `RedisString::parse_integer` |  |  |
 | `StringToULongLong` | 7.0 | 7.0 |  | none |  | context-free; `RedisString::parse_unsigned_integer` parses in Rust instead |  |
 | `StringToDouble` | 6.0 | 6.0 | required | safe | `RedisString::parse_float` |  |  |
@@ -649,7 +681,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `SelectDb` | 6.0 | 6.0 | required | safe | `RuntimeContext::select_db` |  |  |
 | `KeyExists` | 7.0 | 7.0 |  | none |  | runtime |  |
 | `OpenKey` | 6.0 | 6.0 | required | safe | `RedisKey::as_ptr`, `RedisKey::hash_get` and 14 more |  |  |
-| `GetOpenKeyModesAll` | 7.2 | 7.2 |  | none |  | context-free |  |
+| `GetOpenKeyModesAll` | 7.2 | 7.2 | direct | internal (hand) | `RedisKey::as_ptr`, `RedisKey::hash_get` and 14 more | context-free |  |
 | `CloseKey` | 6.0 | 6.0 | required | safe | `EventContext::yield_now`, `RuntimeContext::notify_keyspace_event_bytes` and 5 more |  |  |
 | `KeyType` | 6.0 | 6.0 | required, available | safe | `RedisKey::key_type`, `RedisKeyWritable::key_type` |  |  |
 | `ValueLength` | 6.0 | 6.0 |  | none |  | key |  |
@@ -663,7 +695,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `DbSize` | 6.0 | 6.0 | required | safe | `RuntimeContext::dbsize` |  |  |
 | `RandomKey` | 6.0 | 6.0 |  | none |  | runtime | upstream issue 445, upstream PR 446 |
 | `SignalModifiedKey` | 6.0 | 6.0 |  | none |  | runtime |  |
-| `GetKeyNameFromModuleKey` | 6.0 | 6.0 | required | safe | `EventContext::yield_now`, `RuntimeContext::notify_keyspace_event_bytes` and 1 more |  | upstream PR 469 |
+| `GetKeyNameFromModuleKey` | 6.0 | 6.0 | required | internal (hand) | `EventContext::yield_now`, `RuntimeContext::notify_keyspace_event_bytes` and 1 more | key | upstream PR 469 |
 | `GetDbIdFromModuleKey` | 7.0 | 7.0 |  | none |  | key |  |
 | `SetLRU` | 6.0 | 6.0 |  | none |  | key | upstream issue 443, upstream PR 444 |
 | `GetLRU` | 6.0 | 6.0 |  | none |  | key | upstream issue 443, upstream PR 444 |
@@ -794,12 +826,12 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
-| `GetClientId` | 6.0 | 6.0 | available, direct | internal (hand) | `Context::acl_add_log_entry`, `Context::get_current_user` and 1 more | command |  |
+| `GetClientId` | 6.0 | 6.0 | available, direct | safe | `Context::acl_add_log_entry`, `Context::get_current_user` and 1 more |  |  |
 | `GetClientUserNameById` | 6.2 | 6.2 | direct | safe | `Context::get_current_user` |  |  |
-| `GetClientInfoById` | 6.0 | 6.0 | available, direct | internal (hand) | `Context::block_client_on_keys` | runtime |  |
+| `GetClientInfoById` | 6.0 | 6.0 | available, direct | internal (hand) | `Context::deauthenticate_and_close_client` | runtime |  |
 | `GetClientNameById` | 7.0 | 7.0 |  | none |  | runtime |  |
 | `SetClientNameById` | 7.0 | 7.0 |  | none |  | context-free |  |
-| `GetClientCertificate` | 6.0 | 6.0 |  | none |  | runtime |  |
+| `GetClientCertificate` | 6.0 | 6.0 | available | safe | `RuntimeContext::client_certificate` |  |  |
 
 #### Context state and replication
 
@@ -808,7 +840,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `AutoMemory` | 6.0 | 6.0 | required | unsafe | `RuntimeContext::auto_memory` | command |  |
 | `Replicate` | 6.0 | 6.0 | required | safe | `RuntimeContext::replicate` |  |  |
 | `ReplicateVerbatim` | 6.0 | 6.0 | required | safe | `Context::replicate_verbatim` |  |  |
-| `GetContextFlags` | 6.0 | 6.0 | required, available | safe | `RuntimeContext::get_flags` |  |  |
+| `GetContextFlags` | 6.0 | 6.0 | required, available, direct | safe | `RuntimeContext::get_flags` |  |  |
 | `AvoidReplicaTraffic` | 6.0 | 6.0 | api! | safe | `RuntimeContext::avoid_replication_traffic` |  |  |
 | `Yield` | 7.0 | 7.0 | available | safe | `EventContext::yield_now` |  |  |
 
@@ -832,7 +864,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
 | `Milliseconds` | 6.0 | 6.0 | required | safe | `milliseconds` |  |  |
-| `MonotonicMicroseconds` | 7.0 | 7.0 |  | none |  | context-free; `std::time::Instant` |  |
+| `MonotonicMicroseconds` | 7.0 | 7.0 | direct | internal | `Api::resolve`, `asynchronous::begin` | context-free; `std::time::Instant` |  |
 | `Microseconds` | 7.2 | 7.2 |  | none |  | context-free; `std::time::SystemTime` |  |
 | `CachedMicroseconds` | 7.2 | 7.2 |  | none |  | context-free |  |
 | `GetRandomBytes` | 6.0 | 6.0 | available | safe | `RuntimeContext::fill_random_bytes` |  | #144 |
@@ -878,9 +910,9 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `InfoAddFieldDouble` | 6.0 | 6.0 | required | safe | `InfoContextBuilder::build_info` |  |  |
 | `InfoAddFieldLongLong` | 6.0 | 6.0 | required | safe | `InfoContext::add_info_field_long_long` |  |  |
 | `InfoAddFieldULongLong` | 6.0 | 6.0 | required | safe | `InfoContextBuilder::build_info` |  |  |
-| `GetServerInfo` | 6.0 | 6.0 | required | safe | `RuntimeContext::server_info` |  |  |
-| `FreeServerInfo` | 6.0 | 6.0 | required | safe | `ServerInfo::drop (Drop)` |  |  |
-| `ServerInfoGetField` | 6.0 | 6.0 | required | safe | `ServerInfo::field` |  |  |
+| `GetServerInfo` | 6.0 | 6.0 | required, direct | safe | `RuntimeContext::server_info` |  |  |
+| `FreeServerInfo` | 6.0 | 6.0 | required, direct | safe | `ServerInfo::drop (Drop)` |  |  |
+| `ServerInfoGetField` | 6.0 | 6.0 | required, direct | safe | `ServerInfo::field` |  |  |
 | `ServerInfoGetFieldC` | 6.0 | 6.0 |  | none |  | runtime |  |
 | `ServerInfoGetFieldSigned` | 6.0 | 6.0 |  | none |  | runtime |  |
 | `ServerInfoGetFieldUnsigned` | 6.0 | 6.0 |  | none |  | runtime |  |
@@ -918,17 +950,17 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `GetBlockedClientReadyKey` | 6.0 | 6.0 | available | safe | `Context::block_client_on_keys`, `Context::blocked_client_ready_key` |  |  |
 | `BlockClient` | 6.0 | 6.0 | available | safe | `Context::block_client`, `Context::block_client_on_reply` |  |  |
 | `BlockClientGetPrivateData` | 7.2 | 7.2 |  | none |  | blocked client |  |
-| `BlockClientSetPrivateData` | 7.2 | 7.2 | available | safe | `Context::block_client_on_reply` |  |  |
-| `UnblockClient` | 6.0 | 6.0 | required, available | safe | `BlockedClient::drop (Drop)`, `Context::block_client` and 1 more |  |  |
-| `IsBlockedReplyRequest` | 6.0 | 6.0 | available | safe | `Context::blocked_client_ready_key` |  |  |
-| `IsBlockedTimeoutRequest` | 6.0 | 6.0 | available | safe | `Context::block_client_on_keys` |  |  |
-| `GetBlockedClientPrivateData` | 6.0 | 6.0 | required, available | safe | `Context::block_client_on_keys`, `Context::block_client_on_reply` |  |  |
-| `GetBlockedClientHandle` | 6.0 | 6.0 |  | none |  | command |  |
+| `BlockClientSetPrivateData` | 7.2 | 7.2 | available, direct | safe | `Context::block_client_on_reply` |  |  |
+| `UnblockClient` | 6.0 | 6.0 | required, available, direct | safe | `BlockedClient::drop (Drop)`, `Context::block_client` and 1 more |  |  |
+| `IsBlockedReplyRequest` | 6.0 | 6.0 | available, direct | safe | `Context::blocked_client_ready_key` |  |  |
+| `IsBlockedTimeoutRequest` | 6.0 | 6.0 | available, direct | safe | `Context::block_client_on_keys` |  |  |
+| `GetBlockedClientPrivateData` | 6.0 | 6.0 | required, available, direct | safe | `Context::block_client_on_keys`, `Context::block_client_on_reply` |  |  |
+| `GetBlockedClientHandle` | 6.0 | 6.0 | direct | internal | `Api::resolve` | command |  |
 | `AbortBlock` | 6.0 | 6.0 |  | none |  | blocked client |  |
 | `BlockedClientMeasureTimeStart` | 6.2 | 6.2 |  | none |  | blocked client |  |
 | `BlockedClientMeasureTimeEnd` | 6.2 | 6.2 |  | none |  | blocked client |  |
-| `BlockedClientDisconnected` | 6.0 | 6.0 |  | none |  | command |  |
-| `SetDisconnectCallback` | 6.0 | 6.0 |  | none |  | blocked client |  |
+| `BlockedClientDisconnected` | 6.0 | 6.0 | direct | internal | `Api::resolve` | command |  |
+| `SetDisconnectCallback` | 6.0 | 6.0 | direct | internal | `Api::resolve` | blocked client |  |
 
 #### Thread-safe contexts
 
@@ -946,7 +978,7 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
 | `CreateTimer` | 6.0 | 6.0 | available, direct | safe | `EventContext::create_timer` |  |  |
-| `StopTimer` | 6.0 | 6.0 | available | safe | `EventContext::cancel_timer`, `EventContext::create_timer` |  |  |
+| `StopTimer` | 6.0 | 6.0 | available, direct | safe | `EventContext::cancel_timer`, `EventContext::create_timer` |  |  |
 | `GetTimerInfo` | 6.0 | 6.0 | available | safe | `EventContext::create_timer`, `EventContext::timer_remaining` |  |  |
 
 #### Event loop
@@ -1013,15 +1045,15 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 
 | API | introduced | floor | access | status | reached through | fit | requests |
 |---|---|---|---|---|---|---|---|
-| `RegisterAuthCallback` | 7.2 | 7.2 |  | none |  | registration | upstream issue 381 |
-| `BlockClientOnAuth` | 7.2 | 7.2 |  | none |  | callback (auth) |  |
-| `CreateModuleUser` | 6.0 | 6.0 |  | none |  | context-free | upstream PR 354 |
-| `FreeModuleUser` | 6.0 | 6.0 | available | safe | `RuntimeContext::scoped_call_user` |  |  |
+| `RegisterAuthCallback` | 7.2 | 7.2 | available, direct | safe (hand) | `callback::auth_callback_available`, `callback::register_auth_callback` |  | upstream issue 381 |
+| `BlockClientOnAuth` | 7.2 | 7.2 | direct | safe (hand) | `Api::resolve` |  |  |
+| `CreateModuleUser` | 6.0 | 6.0 | available | safe | `RuntimeContext::create_module_user` |  | upstream PR 354 |
+| `FreeModuleUser` | 6.0 | 6.0 | available | safe | `RuntimeContext::create_module_user`, `RuntimeContext::scoped_call_user` |  |  |
 | `SetContextUser` | 7.0 | 7.0 | available | safe | `RuntimeContext::scoped_call_user` |  |  |
 | `GetContextUser` | 8.8 | none | direct | internal (hand) | `RuntimeContext::scoped_call_user` | runtime |  |
 | `GetUserUsername` | 8.8 | none |  | none |  | runtime |  |
-| `SetModuleUserACL` | 6.0 | 6.0 |  | none |  | context-free |  |
-| `SetModuleUserACLString` | 7.0 | 7.0 |  | none |  | runtime | upstream PR 354 |
+| `SetModuleUserACL` | 6.0 | 6.0 | available | safe | `RuntimeContext::set_module_user_acl` |  |  |
+| `SetModuleUserACLString` | 7.0 | 7.0 | available | safe | `Context::set_module_user_acl_string` |  | upstream PR 354 |
 | `GetModuleUserACLString` | 7.0 | 7.0 |  | none |  | context-free | upstream PR 354 |
 | `GetCurrentUserName` | 7.0 | 7.0 | direct | safe | `Context::get_current_user` |  |  |
 | `GetModuleUserFromUserName` | 7.0 | 7.0 | available | safe | `RuntimeContext::scoped_call_user` |  |  |
@@ -1030,10 +1062,10 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
 | `ACLCheckKeyPrefixPermissions` | 8.0 | 8.0 |  | none |  | context-free |  |
 | `ACLCheckChannelPermissions` | 7.0 | 7.0 | available | safe | `RuntimeContext::acl_check_channel_permission` |  |  |
 | `ACLAddLogEntry` | 7.0 | 7.0 |  | none |  | command |  |
-| `ACLAddLogEntryByUserName` | 7.2 | 7.2 | available | safe | `Context::acl_add_log_entry` |  |  |
-| `AuthenticateClientWithACLUser` | 6.0 | 6.0 |  | none |  | command |  |
-| `AuthenticateClientWithUser` | 6.0 | 6.0 |  | none |  | command | upstream PR 354 |
-| `DeauthenticateAndCloseClient` | 6.0 | 6.0 |  | none |  | runtime |  |
+| `ACLAddLogEntryByUserName` | 7.2 | 7.2 | available, direct | safe | `Context::acl_add_log_entry` |  |  |
+| `AuthenticateClientWithACLUser` | 6.0 | 6.0 | available | safe | `Context::authenticate_client_with_acl_user` |  |  |
+| `AuthenticateClientWithUser` | 6.0 | 6.0 | available | safe | `Context::authenticate_client_with_user` |  | upstream PR 354 |
+| `DeauthenticateAndCloseClient` | 6.0 | 6.0 | available | safe | `Context::deauthenticate_and_close_client` |  |  |
 | `GetInternalSecret` | 8.0 | 8.0 |  | none |  | runtime |  |
 
 #### Defragmentation
@@ -1119,12 +1151,19 @@ code uses it for these APIs, which the 6.0 floor does not guarantee:
   `redis_module!` calls through `src/redismodule.c`, calls it.
 - `IsModuleNameBusy`, internal: the header's inline `RedisModule_Init`, which
   `redis_module!` calls through `src/redismodule.c`, calls it.
-- `GetClientId`, internal: SDK blocking checks, the current-user fallback and
-  ACL logging use the id internally; no wrapper returns it.
+- `GetOpenKeyModesAll`, internal: Native key ownership checks NOEXPIRE support
+  while guarding keyspace scans; no wrapper returns the supported modes.
+- `GetKeyNameFromModuleKey`, internal: Native key ownership keeps the name when
+  closing a key for later reopening; no public key-name accessor exists.
 - `GetClientInfoById`, internal: The blocking APIs use the client index, an
   available strict username-index probe and private V1 flags to prove network
   identity and reject an already-blocked client; no wrapper returns client
   metadata.
+- `RegisterAuthCallback`, safe: `redis_module!`'s `auth` declaration registers
+  the typed callback through a hidden adapter the call graph does not resolve.
+- `BlockClientOnAuth`, safe: `AuthContext::defer` and `redis_module!` drive
+  auth-only blocking through a hidden adapter the call graph does not resolve;
+  the experimental feature requires exact runtime admission.
 - `GetContextUser`, internal: `RuntimeContext::scoped_call_user` reads it to
   restore the outer user later; no wrapper returns the context user.
 
