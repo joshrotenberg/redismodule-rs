@@ -41,6 +41,10 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v5
 
+      - name: Check API coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.floor == '6-0'
+        run: python3 .github/scripts/api-coverage.py --check
+
       - name: Read runner image
         id: runner-image
         run: echo "image=${ImageOS:?}-${ImageVersion:?}" >> "$GITHUB_OUTPUT"

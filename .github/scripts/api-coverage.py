@@ -45,14 +45,21 @@ OVERRIDES = {
                          "`redis_module!` calls through `src/redismodule.c`, calls it."),
     "IsModuleNameBusy": ("internal", "the header's inline `RedisModule_Init`, which "
                          "`redis_module!` calls through `src/redismodule.c`, calls it."),
-    "GetClientId": ("internal", "SDK blocking checks, the current-user fallback and ACL logging "
-                    "use the id internally; no wrapper returns it."),
     "GetClientInfoById": ("internal", "The blocking APIs use the client index, an available "
                           "strict username-index probe and private V1 flags to prove network "
                           "identity and reject an already-blocked client; no wrapper returns "
                           "client metadata."),
     "GetContextUser": ("internal", "`RuntimeContext::scoped_call_user` reads it to restore the "
                        "outer user later; no wrapper returns the context user."),
+    "GetKeyNameFromModuleKey": ("internal", "Native key ownership keeps the name when closing "
+                               "a key for later reopening; no public key-name accessor exists."),
+    "GetOpenKeyModesAll": ("internal", "Native key ownership checks NOEXPIRE support while "
+                          "guarding keyspace scans; no wrapper returns the supported modes."),
+    "RegisterAuthCallback": ("safe", "`redis_module!`'s `auth` declaration registers the typed "
+                             "callback through a hidden adapter the call graph does not resolve."),
+    "BlockClientOnAuth": ("safe", "`AuthContext::defer` and `redis_module!` drive auth-only "
+                          "blocking through a hidden adapter the call graph does not resolve; "
+                          "the experimental feature requires exact runtime admission."),
 }
 
 # Areas in document order: (area, [(name pattern, fit)]). The fit is the
