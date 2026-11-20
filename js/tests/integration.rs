@@ -343,6 +343,7 @@ fn nested_get_and_hset_obey_the_callers_acl() -> Result<()> {
 fn declares_both_keys_and_survives_unload_reload() -> Result<()> {
     let _serial = support::serial_native_test();
     let mut con = server()?;
+    let getkeys_started = Instant::now();
     let keys: Vec<String> = redis::cmd("COMMAND")
         .arg("GETKEYS")
         .arg("JS.PROJECT")
@@ -350,27 +351,47 @@ fn declares_both_keys_and_survives_unload_reload() -> Result<()> {
         .arg("destination")
         .arg("value => ({x: 'y'})")
         .query(&mut con)?;
+    let getkeys_elapsed = getkeys_started.elapsed();
     assert_eq!(keys, ["source", "destination"]);
 
+    let unload_started = Instant::now();
     redis::cmd("MODULE")
         .arg(&["UNLOAD", "redis_module_js"])
         .query::<()>(&mut con)?;
+    let unload_elapsed = unload_started.elapsed();
+    let load_started = Instant::now();
     redis::cmd("MODULE")
         .arg("LOAD")
         .arg(module_path()?)
         .query::<()>(&mut con)?;
+    let load_elapsed = load_started.elapsed();
+    let set_started = Instant::now();
     redis::cmd("SET")
         .arg("source")
         .arg("{}")
         .query::<()>(&mut con)?;
+    let set_elapsed = set_started.elapsed();
+    let projection_started = Instant::now();
+    let projected = project(
+        &mut con,
+        "source",
+        "destination",
+        "value => ({reloaded: 'yes'})",
+    );
+    let projection_elapsed = projection_started.elapsed();
     assert_eq!(
-        project(
-            &mut con,
-            "source",
-            "destination",
-            "value => ({reloaded: 'yes'})"
-        )?,
+        projected.with_context(|| {
+            let server_log = con
+                .server_log()
+                .unwrap_or_else(|error| format!("<server log unavailable: {error:#}>"));
+            format!(
+                "JS.PROJECT after reload failed; client elapsed: COMMAND GETKEYS {getkeys_elapsed:?}; MODULE UNLOAD {unload_elapsed:?}; MODULE LOAD {load_elapsed:?}; SET {set_elapsed:?}; JS.PROJECT {projection_elapsed:?}; server log:\n{server_log}"
+            )
+        })?,
         1
+    );
+    eprintln!(
+        "reload client elapsed: COMMAND GETKEYS {getkeys_elapsed:?}; MODULE UNLOAD {unload_elapsed:?}; MODULE LOAD {load_elapsed:?}; SET {set_elapsed:?}; JS.PROJECT {projection_elapsed:?}"
     );
     Ok(())
 }
