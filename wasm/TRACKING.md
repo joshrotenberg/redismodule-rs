@@ -141,9 +141,9 @@ approval or its workflow being unmerged predate its completed merge above.
 
 - 2026-11-20: merged SDK master `cb145d9`, which refreshes authentication API
   coverage and adds its generated-report check to SDK CI in PR 257. The host,
-  compiler, guests and all four Rust lock snapshots remain unchanged. Local
-  validation with the full `bash wasm/ci/check.sh`, including required
-  JavaScript guests, is pending. Experiment push CI remains pending publication.
+  compiler, guests and all four Rust lock snapshots remain unchanged. The sync
+  procedure requires the full `bash wasm/ci/check.sh`, including JavaScript
+  guests, followed by experiment push CI.
 
 - 2026-11-18: merged SDK master `163f6d4`, including whole-Context reply
   accounting for key-block callbacks from PR 255. The host and guests need no
