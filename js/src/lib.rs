@@ -1,4 +1,6 @@
 mod json_size;
+#[cfg(feature = "internal-phase-diagnostics")]
+mod phase_diagnostics;
 mod watch_limits;
 
 use json_size::serialized_json_bytes;
@@ -109,6 +111,7 @@ fn writable_primary(ctx: &RuntimeContext) -> bool {
         )
 }
 
+#[cfg(not(feature = "internal-phase-diagnostics"))]
 fn build_runtime(deadline: Instant) -> Result<(Runtime, JsContext), RedisError> {
     let runtime =
         Runtime::new().map_err(|_| RedisError::Str("ERR could not create JavaScript runtime"))?;
@@ -129,18 +132,67 @@ fn build_runtime(deadline: Instant) -> Result<(Runtime, JsContext), RedisError> 
     Ok((runtime, context))
 }
 
+#[cfg(feature = "internal-phase-diagnostics")]
+fn build_runtime(
+    deadline: Instant,
+    trace: &mut phase_diagnostics::Trace,
+) -> Result<(Runtime, JsContext), RedisError> {
+    trace.stamp(1);
+    let runtime =
+        Runtime::new().map_err(|_| RedisError::Str("ERR could not create JavaScript runtime"))?;
+    trace.stamp(2);
+    runtime.set_memory_limit(JS_HEAP_BYTES);
+    runtime.set_max_stack_size(JS_STACK_BYTES);
+    let observation = std::sync::Arc::clone(&trace.observation);
+    runtime.set_interrupt_handler(Some(Box::new(move || {
+        let timed_out = Instant::now() >= deadline;
+        observation.observe(timed_out)
+    })));
+    let context = JsContext::builder()
+        .with::<intrinsic::Date>()
+        .with::<intrinsic::Eval>()
+        .with::<intrinsic::RegExpCompiler>()
+        .with::<intrinsic::RegExp>()
+        .with::<intrinsic::Json>()
+        .with::<intrinsic::Proxy>()
+        .with::<intrinsic::MapSet>()
+        .with::<intrinsic::TypedArrays>()
+        .build(&runtime)
+        .map_err(|_| RedisError::Str("ERR could not create JavaScript context"))?;
+    trace.stamp(3);
+    Ok((runtime, context))
+}
+
 fn validate_function(source: &str) -> Result<(), RedisError> {
     let deadline = Instant::now() + JS_DEADLINE;
+    #[cfg(feature = "internal-phase-diagnostics")]
+    let mut trace = phase_diagnostics::Trace::new(deadline, 1);
+    #[cfg(not(feature = "internal-phase-diagnostics"))]
     let (runtime, context) = build_runtime(deadline)?;
+    #[cfg(feature = "internal-phase-diagnostics")]
+    let (runtime, context) = build_runtime(deadline, &mut trace)?;
     let wrapped_source = format!("({source})");
     let result = context.with(|js| {
         js.eval::<Function<'_>, _>(wrapped_source.as_bytes())
             .map(|_| ())
             .map_err(|_| RedisError::Str("ERR invalid JavaScript function expression"))
     });
+    #[cfg(feature = "internal-phase-diagnostics")]
+    trace.result(result.is_err());
     drop(context);
+    #[cfg(feature = "internal-phase-diagnostics")]
+    trace.stamp(6);
     drop(runtime);
+    #[cfg(feature = "internal-phase-diagnostics")]
+    trace.stamp(7);
     if Instant::now() >= deadline {
+        #[cfg(feature = "internal-phase-diagnostics")]
+        {
+            trace.stamp(8);
+            if let Ok(body) = phase_diagnostics::format_record(&trace.record()) {
+                redis_module::logging::log_warning(body.as_str());
+            }
+        }
         Err(RedisError::Str("ERR JavaScript projection timed out"))
     } else {
         result
@@ -157,7 +209,12 @@ fn project_until(
     outer_deadline: Instant,
 ) -> Result<BTreeMap<String, String>, RedisError> {
     let deadline = std::cmp::min(Instant::now() + JS_DEADLINE, outer_deadline);
+    #[cfg(feature = "internal-phase-diagnostics")]
+    let mut trace = phase_diagnostics::Trace::new(deadline, 2);
+    #[cfg(not(feature = "internal-phase-diagnostics"))]
     let (runtime, context) = build_runtime(deadline)?;
+    #[cfg(feature = "internal-phase-diagnostics")]
+    let (runtime, context) = build_runtime(deadline, &mut trace)?;
 
     // Promise is intentionally absent: this command is synchronous and never runs jobs.
     // No loader is installed, and the crate does not enable rquickjs's loader or futures features.
@@ -176,6 +233,8 @@ fn project_until(
         let output: Value<'_> = function
             .call((input,))
             .map_err(|_| RedisError::Str("ERR JavaScript projection failed"))?;
+        #[cfg(feature = "internal-phase-diagnostics")]
+        trace.stamp(4);
         if !output.is_object() || output.is_array() {
             return Err(RedisError::Str("ERR projection must return a flat object"));
         }
@@ -237,9 +296,22 @@ fn project_until(
     });
 
     // All context-owned JavaScript values are gone before the context and runtime.
+    #[cfg(feature = "internal-phase-diagnostics")]
+    trace.result(projection.is_err());
     drop(context);
+    #[cfg(feature = "internal-phase-diagnostics")]
+    trace.stamp(6);
     drop(runtime);
+    #[cfg(feature = "internal-phase-diagnostics")]
+    trace.stamp(7);
     if Instant::now() >= deadline {
+        #[cfg(feature = "internal-phase-diagnostics")]
+        {
+            trace.stamp(8);
+            if let Ok(body) = phase_diagnostics::format_record(&trace.record()) {
+                redis_module::logging::log_warning(body.as_str());
+            }
+        }
         return Err(RedisError::Str("ERR JavaScript projection timed out"));
     }
     projection
