@@ -584,16 +584,24 @@ fn watch_count_limit_rejects_without_touching_keys() -> Result<()> {
     let _serial = support::serial_native_test();
     let mut con = server()?;
     for index in 0..64 {
-        assert_eq!(
-            watch(
-                &mut con,
-                format!("watch-{index}"),
-                format!("source-{index}"),
-                format!("destination-{index}"),
-                "() => ({value: 'ok'})",
-            )?,
-            "OK"
+        #[cfg(feature = "internal-phase-diagnostics")]
+        let started = Instant::now();
+        let registration = watch(
+            &mut con,
+            format!("watch-{index}"),
+            format!("source-{index}"),
+            format!("destination-{index}"),
+            "() => ({value: 'ok'})",
         );
+        #[cfg(feature = "internal-phase-diagnostics")]
+        let registration = registration.with_context(|| {
+            format!(
+                "registration index={index} client_elapsed_us={} latest/op1={}",
+                started.elapsed().as_micros().min(u128::from(u32::MAX)),
+                con.latest_phase_record(1),
+            )
+        });
+        assert_eq!(registration?, "OK");
     }
     watch(
         &mut con,
