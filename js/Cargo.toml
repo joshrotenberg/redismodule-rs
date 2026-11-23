@@ -19,6 +19,7 @@ redis-module = { path = "..", default-features = false }
 rquickjs = { version = "=0.14.0", default-features = false, features = ["std"] }
 
 [features]
+internal-phase-diagnostics = []
 default = ["min-redis-compatibility-version-6-0"]
 min-redis-compatibility-version-8-0 = ["redis-module/min-redis-compatibility-version-8-0"]
 min-redis-compatibility-version-7-4 = ["redis-module/min-redis-compatibility-version-7-4"]

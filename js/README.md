@@ -83,6 +83,69 @@ module artifact. The native functional cases serialize their Redis instances
 because concurrent process startup can consume the unchanged 25 ms projection
 budget on shared CI runners. The host-only accounting tests run separately.
 
+## Opt-in deadline diagnostics
+
+The private `internal-phase-diagnostics` Cargo feature adds timeout observations
+for [issue #246](https://github.com/joshrotenberg/redismodule-rs/issues/246).
+It is off by default and has no runtime switch. Build the module and tests with
+the same feature, profile and API floor:
+
+```sh
+cargo build -p redis-module-js --features internal-phase-diagnostics
+cargo test -p redis-module-js --features internal-phase-diagnostics --test phase_diagnostics -- --test-threads=1
+```
+
+Only the existing final timeout decision emits a `js_phase` warning, after
+context and runtime cleanup. The original 25 ms deadline, errors and writes
+remain unchanged. Clocks, an allocation and interrupt counters consume that
+same deadline; formatting and logging delay the reply afterward. Enabled
+measurements can affect timing and allocation failures.
+
+The body contains these 18 canonical decimal `name=value` fields in order:
+
+```text
+v op mask avail_us diag_us rt_us ctx_us vm_us run_us result_us cdrop_us rdrop_us guard_us total_us vm_err polls hit flags
+```
+
+`v=1`; `op=1` means function validation and `op=2` means projection. `mask`
+marks nine timestamps: trace start, setup complete, runtime created, context
+created, successful function call, VM result ready, context dropped, runtime
+dropped and final timeout guard selected. Validation and failed calls omit
+timestamp 4. `vm_err` records whether the VM result was an error; `polls` is a
+saturating interrupt observation count and `hit` records an observed true
+deadline comparison. Neither is a threshold or a cause attribution.
+
+Durations are wall microseconds, calculated independently before truncation:
+
+| Field | Timestamp endpoints |
+| --- | --- |
+| `avail_us` | trace start to original effective deadline, saturating at zero |
+| `diag_us` | 0 to 1 |
+| `rt_us` | 1 to 2 |
+| `ctx_us` | 2 to 3, including runtime configuration |
+| `vm_us` | 3 to 5, including wrapped-source formatting and `context.with` entry |
+| `run_us` | 3 to 4 |
+| `result_us` | 4 to 5 |
+| `cdrop_us` | 5 to 6 |
+| `rdrop_us` | 6 to 7 |
+| `guard_us` | 7 to 8 |
+| `total_us` | 0 to 8, before formatting and logging |
+
+A missing endpoint renders zero; use `mask` to distinguish it from an actual
+zero duration. `vm_us` remains available without timestamp 4. `flags` bits 0,
+1 and 2 mean duration saturation, a nonmonotonic timestamp pair and counter
+overflow. Durations and counters fit `u32`; the ASCII body is bounded to 384
+bytes, excluding newline, NUL and Redis's prefix. It contains no keys, owner,
+source, credentials or error text. These observations cannot distinguish CPU
+execution from descheduling or establish the cause of earlier timeouts.
+
+With the feature enabled, a failed watch-count registration adds its index,
+capped client elapsed time and the latest validated `op=1` record to its test
+error. The reader takes at most the last 8192 bytes of the owned server log and
+returns only reserialized numeric fields or `unavailable`. The latest record
+may belong to another invocation, and an older record may fall outside the
+window. Existing reload and watch-count assertions remain in force.
+
 ## Order summary example
 
 The runnable function is in [`examples/order-summary.js`](examples/order-summary.js):

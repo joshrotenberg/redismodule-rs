@@ -277,6 +277,135 @@ impl TestConnection {
     pub fn server_log(&self) -> Result<String> {
         Ok(fs::read_to_string(&self.log_file)?)
     }
+
+    #[cfg(feature = "internal-phase-diagnostics")]
+    pub fn latest_phase_record(&self, op: u32) -> String {
+        self.phase_records(op)
+            .ok()
+            .and_then(|records| records.into_iter().next_back())
+            .unwrap_or_else(|| phase_tail::UNAVAILABLE.to_owned())
+    }
+
+    #[cfg(feature = "internal-phase-diagnostics")]
+    pub fn phase_records(&self, op: u32) -> Result<Vec<String>, &'static str> {
+        phase_tail::read(&self.log_file, op).map(|(records, _)| records)
+    }
+}
+
+/// Test failure context must never echo unvalidated log bytes or I/O errors.
+#[cfg(feature = "internal-phase-diagnostics")]
+#[allow(dead_code)] // Shared by the native integration and diagnostic binaries.
+pub mod phase_tail {
+    use std::fmt::Write;
+    use std::fs::File;
+    use std::io::{Read, Seek, SeekFrom};
+    use std::path::Path;
+
+    pub const WINDOW: usize = 8192;
+    pub const UNAVAILABLE: &str = "unavailable";
+    const FIELDS: [&str; 18] = [
+        "v",
+        "op",
+        "mask",
+        "avail_us",
+        "diag_us",
+        "rt_us",
+        "ctx_us",
+        "vm_us",
+        "run_us",
+        "result_us",
+        "cdrop_us",
+        "rdrop_us",
+        "guard_us",
+        "total_us",
+        "vm_err",
+        "polls",
+        "hit",
+        "flags",
+    ];
+
+    pub fn parse(body: &[u8], expected_op: u32) -> Option<String> {
+        if body.len() > 384 || !body.iter().all(|byte| (32..=126).contains(byte)) {
+            return None;
+        }
+        let body = std::str::from_utf8(body).ok()?;
+        let mut parts = body.split(' ');
+        if parts.next()? != "js_phase" {
+            return None;
+        }
+        let mut values = [0u32; 18];
+        for (i, field) in FIELDS.iter().enumerate() {
+            let (name, decimal) = parts.next()?.split_once('=')?;
+            if name != *field
+                || decimal.is_empty()
+                || (decimal.len() > 1 && decimal.starts_with('0'))
+                || !decimal.bytes().all(|b| b.is_ascii_digit())
+            {
+                return None;
+            }
+            values[i] = decimal.parse().ok()?;
+        }
+        if parts.next().is_some()
+            || values[0] != 1
+            || !matches!(values[1], 1 | 2)
+            || values[1] != expected_op
+            || values[2] > 511
+            || values[14] > 1
+            || values[16] > 1
+            || values[17] > 7
+        {
+            return None;
+        }
+        let mut result = String::from("js_phase");
+        for (field, value) in FIELDS.iter().zip(values) {
+            write!(result, " {field}={value}").ok()?;
+        }
+        Some(result)
+    }
+
+    pub fn records(bytes: &[u8], cut_start: bool, op: u32) -> Vec<String> {
+        let mut lines = bytes.split(|b| *b == b'\n');
+        // The last piece is always an unterminated fragment (possibly empty).
+        lines.next_back();
+        if cut_start {
+            lines.next();
+        }
+        let mut records: Vec<_> = lines
+            .rev()
+            .filter_map(|line| {
+                let position = line
+                    .windows(b"js_phase ".len())
+                    .position(|s| s == b"js_phase ")?;
+                parse(&line[position..], op)
+            })
+            .collect();
+        records.reverse();
+        records
+    }
+
+    pub fn read(path: &Path, op: u32) -> Result<(Vec<String>, usize), &'static str> {
+        let mut file = File::open(path).map_err(|_| UNAVAILABLE)?;
+        let length = file.metadata().map_err(|_| UNAVAILABLE)?.len();
+        let start = length.saturating_sub(WINDOW as u64);
+        file.seek(SeekFrom::Start(start)).map_err(|_| UNAVAILABLE)?;
+        let mut bytes = [0u8; WINDOW];
+        let mut count = 0;
+        while count < bytes.len() {
+            let read = file.read(&mut bytes[count..]).map_err(|_| UNAVAILABLE)?;
+            if read == 0 {
+                break;
+            }
+            count += read;
+        }
+        Ok((records(&bytes[..count], start != 0, op), count))
+    }
+
+    pub fn latest(path: &Path, op: u32) -> String {
+        read(path, op)
+            .ok()
+            .and_then(|(records, _)| records.into_iter().next_back())
+            .unwrap_or_else(|| UNAVAILABLE.to_owned())
+    }
 }
 
 fn probe_connection(port: u16, expected_pid: u32) -> Result<Option<Connection>> {

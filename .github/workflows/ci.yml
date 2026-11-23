@@ -138,6 +138,111 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  quickjs-phase-diagnostics:
+    name: QuickJS phase diagnostics (Redis ${{ matrix.version }}, floor ${{ matrix.floor }}, macOS)
+    if: github.base_ref == 'experiment/quickjs' || github.ref == 'refs/heads/experiment/quickjs'
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {version: "7.2.16", floor: "6-0"}
+          - {version: "8.10.2", floor: "8-0"}
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_BUILD_JOBS: "2"
+      RUST_TEST_THREADS: "1"
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Build or verify server
+        run: |
+          python3 .github/scripts/build-server.py "redis-${{ matrix.version }}" "$RUNNER_TEMP/sdk-server"
+          echo "TEST_REDIS_SERVER_BIN=$RUNNER_TEMP/sdk-server/redis-server" >> "$GITHUB_ENV"
+
+      - name: Install toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Check enabled diagnostics and run finite cases
+        env:
+          DIAGNOSTIC_FLOOR: ${{ matrix.floor }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, shutil, subprocess
+          evidence = pathlib.Path('target/phase-diagnostics')
+          evidence.mkdir(parents=True, exist_ok=True)
+          features = 'internal-phase-diagnostics,min-redis-compatibility-version-' + os.environ['DIAGNOSTIC_FLOOR']
+          common = ['--package', 'redis-module-js', '--no-default-features', '--features', features]
+          module = pathlib.Path('target/debug/libredis_module_js.dylib')
+          def sha(path):
+              return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+          provenance = {'head': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+                        'floor': os.environ['DIAGNOSTIC_FLOOR'], 'commands': [],
+                        'server': os.environ['TEST_REDIS_SERVER_BIN'],
+                        'server_sha256': sha(os.environ['TEST_REDIS_SERVER_BIN'])}
+          for tool in ['cargo', 'rustc']:
+              executable = pathlib.Path(shutil.which(tool)).resolve()
+              provenance[tool] = {'path': str(executable), 'sha256': sha(executable),
+                                  'version': subprocess.check_output([tool, '--version'], text=True).strip()}
+          def run(name, command, tests=None, discovery=None):
+              entry = {'name': name, 'argv': command}
+              provenance['commands'].append(entry)
+              try:
+                  with (evidence / (name + '.log')).open('w') as log:
+                      entry['exit'] = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT).returncode
+                  output = (evidence / (name + '.log')).read_text()
+                  print(output, end='')
+                  assert entry['exit'] == 0, name
+                  if discovery is not None:
+                      found = re.findall(r'^(.+): test$', output, re.M)
+                      entry['discovered'] = found
+                      assert len(found) == len(discovery) and set(found) == set(discovery), name
+                  if tests is not None:
+                      counts = re.findall(r'test result: ok\. (\d+) passed; (\d+) failed; (\d+) ignored;', output)
+                      entry['counts'] = counts
+                      assert len(counts) == 1 and counts[0] == (str(tests), '0', '0'), name
+              finally:
+                  (evidence / 'provenance.json').write_text(json.dumps(provenance, indent=2) + '\n')
+          run('clippy', ['cargo', 'clippy', *common, '--all-targets', '--', '-D', 'warnings'])
+          run('build', ['cargo', 'build', *common])
+          provenance['module_sha256'] = sha(module)
+          provenance['lock_sha256'] = sha('Cargo.lock')
+          phase_cases = [
+              'phase_diagnostics::tests::formatter_max_width_and_terminators',
+              'phase_diagnostics::tests::counter_wrap_is_sticky_and_preserves_boolean',
+              'phase_diagnostics::tests::synthetic_masks_and_direct_vm_interval',
+              'phase_diagnostics::tests::missing_zero_saturated_and_nonmonotonic_intervals',
+              'parser_accepts_only_canonical_numeric_schema',
+              'tail_parser_discards_cut_edges_noise_and_wrong_operations',
+              'file_reader_caps_bytes_and_never_echoes_raw_data',
+              'native_timeout_preserves_error_destination_and_single_bounded_record',
+          ]
+          phase = ['cargo', 'test', *common, '--test', 'phase_diagnostics']
+          run('phase-list', [*phase, '--', '--list'], discovery=phase_cases)
+          run('phase', [*phase, '--', '--test-threads=1'], tests=len(phase_cases))
+          for name in ['watch_names_databases_collisions_cancellation_and_reload_are_isolated',
+                       'watch_count_limit_rejects_without_touching_keys']:
+              command = ['cargo', 'test', *common, '--test', 'integration', name]
+              run(name + '-list', [*command, '--', '--exact', '--list'], discovery=[name])
+              run(name, [*command, '--', '--exact', '--test-threads=1'], tests=1)
+          assert sha(module) == provenance['module_sha256']
+          assert sha('Cargo.lock') == provenance['lock_sha256']
+          PY
+
+      - name: Preserve diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickjs-phase-${{ matrix.version }}-${{ matrix.floor }}
+          path: |
+            target/phase-diagnostics/**
+            target/debug/libredis_module_js.dylib
+            target/**/redis-module-js-integration/**
+            ${{ runner.temp }}/sdk-server-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
   legacy-blocking:
     # The full integration suite needs newer APIs. This focused regression
     # exercises client decoding, blocking and timer protection on the oldest runtime.
@@ -610,6 +715,12 @@ jobs:
             cargo check --workspace --all-targets --no-default-features --features min-redis-compatibility-version-$floor
           done
           cargo test -p redis-module-macros -p redis-module-macros-internals
+
+      - name: Check enabled QuickJS phase diagnostics
+        if: github.base_ref == 'experiment/quickjs' || github.ref == 'refs/heads/experiment/quickjs'
+        run: |
+          cargo check -p redis-module-js --all-targets --no-default-features --features internal-phase-diagnostics,min-redis-compatibility-version-6-0
+          cargo check -p redis-module-js --all-targets --no-default-features --features internal-phase-diagnostics,min-redis-compatibility-version-8-0
 
       - name: Unit tests
         run: |
