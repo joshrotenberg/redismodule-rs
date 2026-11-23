@@ -1033,11 +1033,23 @@ metadata still fails compilation; diagnostic wording may differ.
     bindings by #150, alongside the persistence-event payload, version and syncer
     flag. This additive declaration changes no API pointer, struct layout,
     dispatch or compatibility floor.
+  - [019f2a0](https://github.com/RedisLabsModules/redismodule-rs/commit/019f2a0bb240cab7fd41f8735f242202225e0d9c)
+    (2026-11-22, [upstream PR 492][p492]): rejects numeric configuration defaults
+    outside their declared inclusive bounds at module load. Already covered by
+    [5bf61ff]: `register_i64_configuration` checks the resolved default before
+    native registration, and `redis_module!` propagates its error. This also
+    covers manual registration and memory defaults after unit conversion.
+    Existing integration tests cover numeric boundaries and out-of-range module
+    arguments, memory-unit bounds and `MODULE LOADEX` precedence.
 - The #148 review checked upstream master at `a383429` and all 42 open pull
   requests on 2026-11-02 at 16:19:39 UTC. No open pull request had been updated
   since the recorded cutoff of 2026-10-30T03:42:01Z. The earlier pull request
   assessments remain unchanged. That review identified only the standard-RDB
   constant for a new port; #150 now includes its declaration and binding.
+- The #259 review checked upstream master at `019f2a0` and all 42 open pull
+  requests on 2026-11-23 at 18:42:16 UTC. No open pull request had been updated
+  since the recorded cutoff of 2026-11-02T16:19:39Z. The earlier pull request
+  assessments remain unchanged; no new port is needed.
 
 ## Upstream issues this fork fixes
 
@@ -1562,3 +1574,4 @@ These compile unchanged but behave differently:
 [p484]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/484
 
 [p491]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/491
+[p492]: https://redirect.github.com/RedisLabsModules/redismodule-rs/pull/492

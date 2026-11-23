@@ -7,7 +7,7 @@ scope and readiness. Historical H/S/G IDs remain useful for the evidence below.
 
 Status: `done`, `next` (being worked on or first in line), `todo`, `blocked`.
 
-Last updated 2026-11-20.
+Last updated 2026-11-23.
 
 ## Where it stands
 
@@ -138,6 +138,12 @@ changed.
 
 These entries describe the state at each sync. References to PR 79 awaiting
 approval or its workflow being unmerged predate its completed merge above.
+
+- 2026-11-23: merged SDK master `a9e637c`, which records the upstream numeric
+  configuration review and refreshes the upstream review checkpoint in PR 260.
+  The host, compiler, guests, CI scripts and all four Rust lock snapshots remain
+  unchanged. The sync procedure requires the full `bash wasm/ci/check.sh`,
+  including JavaScript guests, followed by experiment push CI.
 
 - 2026-11-20: merged SDK master `cb145d9`, which refreshes authentication API
   coverage and adds its generated-report check to SDK CI in PR 257. The host,
